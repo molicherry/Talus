@@ -1,0 +1,212 @@
+{
+  "app": {
+    "name": "Talus"
+  },
+  "common": {
+    "cancel": "取消",
+    "confirm": "删除",
+    "delete": "删除",
+    "retry": "重试",
+    "loading": "加载中...",
+    "creating": "创建中...",
+    "updating": "更新中...",
+    "deleting": "删除中...",
+    "refreshing": "刷新中...",
+    "actions": "操作",
+    "unexpectedError": "发生未知错误",
+    "apiError": "请求失败，状态码 {{status}}",
+    "closeDialog": "关闭对话框",
+    "copied": "已复制！",
+    "created": "创建时间",
+    "deleted": "已删除",
+    "error": "错误",
+    "loadError": "加载失败",
+    "close": "关闭",
+    "save": "保存"
+  },
+  "nav": {
+    "dashboard": "仪表盘",
+    "servers": "服务器",
+    "credentials": "凭证管理",
+    "apiKeys": "API 密钥"
+  },
+  "header": {
+    "logout": "退出登录"
+  },
+  "auth": {
+    "signIn": "登录",
+    "signingIn": "登录中...",
+    "signInSubtitle": "登录到你的账号",
+    "username": "用户名",
+    "usernamePlaceholder": "输入用户名",
+    "password": "密码",
+    "passwordPlaceholder": "输入密码",
+    "changePassword": "修改密码",
+    "currentPassword": "当前密码",
+    "newPassword": "新密码",
+    "wrongPassword": "当前密码错误",
+    "passwordChanged": "密码修改成功"
+  },
+  "dashboard": {
+    "title": "仪表盘",
+    "welcome": "欢迎",
+    "getStarted": "从侧边栏选择一个功能开始使用。",
+    "emptyTitle": "暂无服务器",
+    "emptyDescription": "添加你的第一台服务器，开始监控其健康状态和性能。",
+    "addServer": "添加服务器"
+  },
+  "notFound": {
+    "title": "404",
+    "message": "你访问的页面不存在。",
+    "goHome": "返回首页"
+  },
+  "server": {
+    "add": "添加服务器",
+    "edit": "编辑服务器",
+    "details": "服务器详情",
+    "create": "创建服务器",
+    "update": "更新服务器",
+    "name": "名称",
+    "noCredential": "无凭据",
+    "host": "主机地址",
+    "port": "端口",
+    "credential": "凭据",
+    "description": "描述",
+    "namePlaceholder": "例如：生产环境 Web 服务器",
+    "hostPlaceholder": "例如：192.168.1.10 或 server.example.com",
+    "portPlaceholder": "22",
+    "descriptionPlaceholder": "可选描述",
+    "notFound": "服务器未找到",
+    "emptyState": "暂无服务器",
+    "loadError": "加载服务器列表失败",
+    "executeCommand": "执行命令",
+    "terminal": "终端",
+    "monitoring": "监控",
+    "exec": "执行",
+    "status": {
+      "column": "状态",
+      "online": "在线",
+      "offline": "离线",
+      "checking": "检测中",
+      "unknown": "未知"
+    },
+    "deleteTitle": "删除服务器",
+    "deleteMessage": "确定要删除此服务器吗？此操作不可撤销。",
+    "deleteMessageNamed": "确定要删除 \"{{name}}\" 吗？此操作不可撤销。",
+    "ariaEdit": "编辑 {{name}}",
+    "ariaDelete": "删除 {{name}}",
+    "toast": {
+      "created": "服务器创建成功",
+      "createFailed": "创建服务器失败",
+      "updated": "服务器更新成功",
+      "updateFailed": "更新服务器失败",
+      "deleted": "服务器已删除",
+      "deleteFailed": "删除服务器失败"
+    }
+  },
+  "credential": {
+    "add": "添加凭证",
+    "create": "创建凭证",
+    "edit": "编辑凭证",
+    "update": "更新凭证",
+    "name": "名称",
+    "namePlaceholder": "例如：生产服务器",
+    "server": "服务器",
+    "selectServer": "选择服务器",
+    "authType": "认证方式",
+    "passwordAuth": "密码",
+    "privateKeyAuth": "私钥",
+    "username": "用户名",
+    "usernamePlaceholder": "例如：root",
+    "password": "密码",
+    "passwordPlaceholder": "输入密码",
+    "passwordPlaceholderNew": "输入新密码（留空则不修改）",
+    "showPassword": "显示密码",
+    "hidePassword": "隐藏密码",
+    "privateKey": "私钥",
+    "privateKeyPlaceholder": "在此粘贴你的私钥",
+    "privateKeyPlaceholderNew": "输入新私钥（留空则不修改）",
+    "fingerprint": "指纹",
+    "emptyState": "暂无凭证",
+    "loadError": "加载凭证列表失败",
+    "notFound": "凭证不存在",
+    "deleteTitle": "删除凭证",
+    "deleteMessage": "确定要删除此凭证吗？此操作不可撤销。",
+    "ariaEdit": "编辑凭证",
+    "ariaDelete": "删除凭证",
+    "toast": {
+      "created": "凭证创建成功",
+      "createFailed": "创建凭证失败",
+      "deleted": "凭证已删除",
+      "deleteFailed": "删除凭证失败",
+      "updated": "凭证更新成功",
+      "updateFailed": "更新凭证失败"
+    }
+  },
+  "exec": {
+    "execute": "执行",
+    "placeholder": "输入要执行的命令...",
+    "failed": "命令执行失败",
+    "stdout": "标准输出",
+    "stderr": "标准错误",
+    "exitCode": "退出码：",
+    "duration": "耗时：",
+    "noOutput": "（无输出）",
+    "server": "服务器："
+  },
+  "terminal": {
+    "backToServer": "返回服务器",
+    "connected": "已连接",
+    "connecting": "连接中...",
+    "disconnected": "已断开",
+    "reconnect": "重新连接",
+    "disconnect": "断开连接",
+    "title": "终端 — {{name}}"
+  },
+  "monitoring": {
+    "title": "监控",
+    "titleNamed": "监控 — {{name}}",
+    "backTo": "返回 {{name}}",
+    "loadError": "加载监控数据失败",
+    "emptyState": "暂无监控数据，每 60 秒采集一次。",
+    "cpuUsage": "CPU 使用率",
+    "memoryUsage": "内存使用率",
+    "diskUsage": "磁盘使用率",
+    "noCpuData": "暂无 CPU 数据",
+    "noMemoryData": "暂无内存数据",
+    "noDiskData": "暂无磁盘数据"
+  },
+  "timeRange": {
+    "1h": "1 小时",
+    "6h": "6 小时",
+    "24h": "24 小时",
+    "7d": "7 天"
+  },
+  "validation": {
+    "nameRequired": "名称为必填项",
+    "hostRequired": "主机地址为必填项",
+    "portRequired": "端口为必填项",
+    "serverRequired": "服务器为必选项",
+    "authTypeRequired": "认证方式为必选项",
+    "usernameRequired": "用户名为必填项",
+    "passwordRequired": "密码为必填项",
+    "credentialRequired": "需要填写密码或私钥"
+  },
+  "language": {
+    "switch": "EN"
+  },
+  "theme": {
+    "light": "浅色",
+    "dark": "深色",
+    "system": "跟随系统"
+  },
+  "apiKeys": {
+    "title": "API 密钥",
+    "create": "创建密钥",
+    "name": "名称",
+    "namePlaceholder": "例如：AI 助手",
+    "generate": "生成",
+    "created": "密钥已创建 — 请立即复制，之后无法再次查看",
+    "empty": "暂无 API 密钥"
+  }
+}
