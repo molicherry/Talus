@@ -1,0 +1,212 @@
+{
+  "app": {
+    "name": "Talus"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "confirm": "Delete",
+    "delete": "Delete",
+    "retry": "Retry",
+    "loading": "Loading...",
+    "creating": "Creating...",
+    "updating": "Updating...",
+    "deleting": "Deleting...",
+    "refreshing": "Refreshing...",
+    "actions": "Actions",
+    "unexpectedError": "An unexpected error occurred",
+    "apiError": "Request failed with status {{status}}",
+    "closeDialog": "Close dialog",
+    "copied": "Copied!",
+    "created": "Created",
+    "deleted": "Deleted",
+    "error": "Error",
+    "loadError": "Failed to load data",
+    "close": "Close",
+    "save": "Save"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "servers": "Servers",
+    "credentials": "Credentials",
+    "apiKeys": "API Keys"
+  },
+  "header": {
+    "logout": "Logout"
+  },
+  "auth": {
+    "signIn": "Sign in",
+    "signingIn": "Signing in...",
+    "signInSubtitle": "Sign in to your account",
+    "username": "Username",
+    "usernamePlaceholder": "Enter your username",
+    "password": "Password",
+    "passwordPlaceholder": "Enter your password",
+    "changePassword": "Change Password",
+    "currentPassword": "Current Password",
+    "newPassword": "New Password",
+    "wrongPassword": "Current password is incorrect",
+    "passwordChanged": "Password changed successfully"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcome": "Welcome",
+    "getStarted": "Select a section from the sidebar to get started.",
+    "emptyTitle": "No servers yet",
+    "emptyDescription": "Add your first server to start monitoring its health and performance.",
+    "addServer": "Add Server"
+  },
+  "notFound": {
+    "title": "404",
+    "message": "The page you are looking for does not exist.",
+    "goHome": "Go back home"
+  },
+  "server": {
+    "add": "Add Server",
+    "edit": "Edit Server",
+    "details": "Server Details",
+    "create": "Create Server",
+    "update": "Update Server",
+    "name": "Name",
+    "noCredential": "No credential",
+    "host": "Host",
+    "port": "Port",
+    "credential": "Credential",
+    "description": "Description",
+    "namePlaceholder": "e.g. Production Web Server",
+    "hostPlaceholder": "e.g. 192.168.1.10 or server.example.com",
+    "portPlaceholder": "22",
+    "descriptionPlaceholder": "Optional description",
+    "notFound": "Server not found",
+    "emptyState": "No servers yet",
+    "loadError": "Failed to load servers",
+    "executeCommand": "Execute Command",
+    "terminal": "Terminal",
+    "monitoring": "Monitoring",
+    "exec": "Execute",
+    "status": {
+      "column": "Status",
+      "online": "Online",
+      "offline": "Offline",
+      "checking": "Checking",
+      "unknown": "Unknown"
+    },
+    "deleteTitle": "Delete Server",
+    "deleteMessage": "Are you sure you want to delete this server? This action cannot be undone.",
+    "deleteMessageNamed": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
+    "ariaEdit": "Edit {{name}}",
+    "ariaDelete": "Delete {{name}}",
+    "toast": {
+      "created": "Server created",
+      "createFailed": "Failed to create server",
+      "updated": "Server updated",
+      "updateFailed": "Failed to update server",
+      "deleted": "Server deleted",
+      "deleteFailed": "Failed to delete server"
+    }
+  },
+  "credential": {
+    "add": "Add Credential",
+    "create": "Create Credential",
+    "edit": "Edit Credential",
+    "update": "Update Credential",
+    "name": "Name",
+    "namePlaceholder": "e.g. production-server",
+    "server": "Server",
+    "selectServer": "Select a server",
+    "authType": "Auth Type",
+    "passwordAuth": "Password",
+    "privateKeyAuth": "Private Key",
+    "username": "Username",
+    "usernamePlaceholder": "e.g. root",
+    "password": "Password",
+    "passwordPlaceholder": "Enter password",
+    "passwordPlaceholderNew": "Enter new password (leave blank to keep current)",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "privateKey": "Private Key",
+    "privateKeyPlaceholder": "Paste your private key here",
+    "privateKeyPlaceholderNew": "Paste new private key (leave blank to keep current)",
+    "fingerprint": "Fingerprint",
+    "emptyState": "No credentials configured",
+    "loadError": "Failed to load credentials",
+    "notFound": "Credential not found",
+    "deleteTitle": "Delete Credential",
+    "deleteMessage": "Are you sure you want to delete this credential? This action cannot be undone.",
+    "ariaEdit": "Edit credential",
+    "ariaDelete": "Delete credential",
+    "toast": {
+      "created": "Credential created",
+      "createFailed": "Failed to create credential",
+      "deleted": "Credential deleted",
+      "deleteFailed": "Failed to delete credential",
+      "updated": "Credential updated",
+      "updateFailed": "Failed to update credential"
+    }
+  },
+  "exec": {
+    "execute": "Execute",
+    "placeholder": "Enter command to execute...",
+    "failed": "Command execution failed",
+    "stdout": "stdout",
+    "stderr": "stderr",
+    "exitCode": "Exit:",
+    "duration": "Duration:",
+    "noOutput": "(no output)",
+    "server": "Server:"
+  },
+  "terminal": {
+    "backToServer": "Back to server",
+    "connected": "Connected",
+    "connecting": "Connecting...",
+    "disconnected": "Disconnected",
+    "reconnect": "Reconnect",
+    "disconnect": "Disconnect",
+    "title": "Terminal — {{name}}"
+  },
+  "monitoring": {
+    "title": "Monitoring",
+    "titleNamed": "Monitoring — {{name}}",
+    "backTo": "Back to {{name}}",
+    "loadError": "Failed to load metrics",
+    "emptyState": "No metrics data yet. Monitoring data collects every 60 seconds.",
+    "cpuUsage": "CPU Usage",
+    "memoryUsage": "Memory Usage",
+    "diskUsage": "Disk Usage",
+    "noCpuData": "No CPU data yet",
+    "noMemoryData": "No memory data yet",
+    "noDiskData": "No disk data yet"
+  },
+  "timeRange": {
+    "1h": "1 Hour",
+    "6h": "6 Hours",
+    "24h": "24 Hours",
+    "7d": "7 Days"
+  },
+  "validation": {
+    "nameRequired": "Name is required",
+    "hostRequired": "Host is required",
+    "portRequired": "Port is required",
+    "serverRequired": "Server is required",
+    "authTypeRequired": "Auth type is required",
+    "usernameRequired": "Username is required",
+    "passwordRequired": "Password is required",
+    "credentialRequired": "Either password or private key is required"
+  },
+  "language": {
+    "switch": "中文"
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "apiKeys": {
+    "title": "API Keys",
+    "create": "Create Key",
+    "name": "Name",
+    "namePlaceholder": "e.g. AI Assistant",
+    "generate": "Generate",
+    "created": "Key created — copy it now, it won't be shown again.",
+    "empty": "No API keys yet"
+  }
+}

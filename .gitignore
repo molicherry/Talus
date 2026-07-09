@@ -1,0 +1,44 @@
+# Project tooling (local only)
+.omo/
+.opencode/
+.trellis/
+.agents/
+AGENTS.md
+
+# Dependencies
+frontend/node_modules/
+
+# Build output
+backend/bin/
+frontend/dist/
+frontend/dist-ssr/
+
+# Environment
+.env
+*.local
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Docker volumes
+pgdata/
+
+# Logs
+*.log
