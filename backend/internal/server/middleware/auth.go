@@ -16,13 +16,13 @@ const userKey contextUserKey = "user"
 
 // APIKeyValidator validates raw API key strings.
 type APIKeyValidator interface {
-	Validate(ctx context.Context, rawKey string) (userID uint, username string, role string, err error)
+	Validate(ctx context.Context, rawKey string) (userID uint, username string, role string, scopes []string, err error)
 }
 
 // APIKeyValidatorFunc wraps a function as an APIKeyValidator.
-type APIKeyValidatorFunc func(ctx context.Context, rawKey string) (uint, string, string, error)
+type APIKeyValidatorFunc func(ctx context.Context, rawKey string) (uint, string, string, []string, error)
 
-func (f APIKeyValidatorFunc) Validate(ctx context.Context, rawKey string) (uint, string, string, error) {
+func (f APIKeyValidatorFunc) Validate(ctx context.Context, rawKey string) (uint, string, string, []string, error) {
 	return f(ctx, rawKey)
 }
 
@@ -32,11 +32,22 @@ func Auth(jwtSvc *token.JWTService, keyValidator APIKeyValidator) func(http.Hand
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Try API key first
 			if apiKey := r.Header.Get("X-API-Key"); apiKey != "" {
-				uid, username, role, err := keyValidator.Validate(r.Context(), apiKey)
+				uid, username, role, scopes, err := keyValidator.Validate(r.Context(), apiKey)
 				if err != nil {
 					writeAuthError(w, http.StatusUnauthorized, "invalid api key")
 					return
 				}
+
+				allowed, required := hasScope(r.Method, r.URL.Path, scopes)
+				if !allowed {
+					msg := "api key not permitted on this endpoint"
+					if required != "" {
+						msg = "insufficient scope: requires " + required
+					}
+					writeAuthError(w, http.StatusForbidden, msg)
+					return
+				}
+
 				claims := &token.Claims{
 					UserID:   uid,
 					Username: username,

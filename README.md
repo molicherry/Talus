@@ -132,6 +132,17 @@ docker compose up -d
 | Monitoring Agent | Go + [gopsutil](https://github.com/shirou/gopsutil) |
 | Deployment | Docker Compose |
 
+## AI Integration
+
+An [OpenCode skill](skills/talus/SKILL.md) is included in the repository. AI assistants that load this skill can manage servers, execute commands, query metrics, and create scoped API keys through Talus's REST API — no manual endpoint lookup needed.
+
+```bash
+# In any AI session with the Talus repository open:
+"List all servers via Talus API"
+"Check CPU metrics on server web-01"
+"Create a read-only API key for monitoring"
+```
+
 ## Configuration
 
 | Variable | Default | Description |

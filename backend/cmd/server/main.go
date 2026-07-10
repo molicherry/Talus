@@ -152,12 +152,12 @@ func main() {
 
 	go monitorSvc.Start(context.Background())
 
-	apiKeyAuth := mw.APIKeyValidatorFunc(func(ctx context.Context, rawKey string) (uint, string, string, error) {
+	apiKeyAuth := mw.APIKeyValidatorFunc(func(ctx context.Context, rawKey string) (uint, string, string, []string, error) {
 		k, err := apiKeySvc.Validate(ctx, rawKey)
 		if err != nil {
-			return 0, "", "", err
+			return 0, "", "", nil, err
 		}
-		return k.ID, k.Name, "admin", nil
+		return k.ID, k.Name, "admin", k.Scopes, nil
 	})
 
 	router := server.NewRouter(server.RouteConfig{
