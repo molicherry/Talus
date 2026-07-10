@@ -87,6 +87,17 @@ docker compose up -d
 | 监控 Agent | Go + [gopsutil](https://github.com/shirou/gopsutil) |
 | 部署 | Docker Compose |
 
+## AI 集成
+
+仓库中包含 [OpenCode skill](../skills/talus/SKILL.md)。加载此 skill 的 AI 助手可通过 Talus REST API 管理服务器、执行命令、查询指标和创建带作用域的 API 密钥——无需手动查阅 API 文档。
+
+```bash
+# 在任意 AI 会话中（已打开 Talus 仓库）：
+"通过 Talus 列出所有服务器"
+"查看 web-01 的 CPU 指标"
+"创建一个只读的监控 API Key"
+```
+
 ## 配置项
 
 | 变量 | 默认值 | 描述 |

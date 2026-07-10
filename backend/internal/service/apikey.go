@@ -6,9 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/repository"
+	"github.com/vpsmanager/backend/internal/server"
+	mw "github.com/vpsmanager/backend/internal/server/middleware"
 )
 
 type APIKeyService struct {
@@ -24,7 +27,16 @@ type CreateAPIKeyResult struct {
 	APIKey *model.APIKey `json:"api_key"`
 }
 
-func (s *APIKeyService) Create(ctx context.Context, name string) (*CreateAPIKeyResult, error) {
+func (s *APIKeyService) Create(ctx context.Context, name string, scopes []string) (*CreateAPIKeyResult, error) {
+	if len(scopes) == 0 {
+		scopes = model.AllScopeGatedScopes
+	}
+
+	if invalid := mw.ValidateScopes(scopes); len(invalid) > 0 {
+		return nil, server.NewAppError(http.StatusBadRequest,
+			fmt.Sprintf("invalid scopes: %v", invalid))
+	}
+
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return nil, fmt.Errorf("generate key: %w", err)
@@ -39,6 +51,7 @@ func (s *APIKeyService) Create(ctx context.Context, name string) (*CreateAPIKeyR
 		Name:      name,
 		KeyHash:   hashStr,
 		KeyPrefix: prefix,
+		Scopes:    scopes,
 	}
 	if err := s.repo.Create(ctx, k); err != nil {
 		return nil, fmt.Errorf("save key: %w", err)
