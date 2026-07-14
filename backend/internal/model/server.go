@@ -7,6 +7,7 @@ type Server struct {
 	Host         string  `gorm:"size:256;not null" json:"host"`
 	Port         int     `gorm:"not null;default:22" json:"port"`
 	Description  *string `gorm:"type:text" json:"description,omitempty"`
+	Notes        *string `gorm:"type:text" json:"notes,omitempty"`
 	OwnerID      uint    `gorm:"not null;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"owner_id"`
 	CredentialID *uint   `gorm:"index;constraint:OnUpdate:CASCADE,OnDelete:SET NULL" json:"credential_id,omitempty"`
 	HostKey      *[]byte `gorm:"type:bytea" json:"-"`

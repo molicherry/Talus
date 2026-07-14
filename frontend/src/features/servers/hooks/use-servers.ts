@@ -42,6 +42,7 @@ export function useUpdateServer() {
         host: string;
         port: number;
         description: string;
+        notes: string;
       }>;
     }) => updateServer(id, data),
     onSuccess: (_data, variables) => {

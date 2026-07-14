@@ -7,6 +7,7 @@ export const ServerSchema = z.object({
   host: z.string(),
   port: z.number().min(1).max(65535),
   description: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
   owner_id: z.number(),
   created_at: z.string(),
   updated_at: z.string().optional(),
@@ -44,6 +45,7 @@ export const ServerFormSchema = z.object({
     .min(1)
     .max(65535),
   description: z.string().max(500).optional(),
+  notes: z.string().max(2000).optional(),
   credential_id: z.number().nullable().optional(),
 });
 export type ServerFormValues = z.infer<typeof ServerFormSchema>;

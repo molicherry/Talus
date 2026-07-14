@@ -176,6 +176,9 @@ func (s *ServerService) Update(ctx context.Context, id uint, input *model.Server
 	if input.Description != nil {
 		existing.Description = input.Description
 	}
+	if input.Notes != nil {
+		existing.Notes = input.Notes
+	}
 	if input.CredentialID != nil {
 		existing.CredentialID = input.CredentialID
 	}
