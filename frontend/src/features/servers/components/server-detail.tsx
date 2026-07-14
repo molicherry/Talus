@@ -62,6 +62,13 @@ export function ServerDetail({ server }: ServerDetailProps) {
 
         {server.description && <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">{server.description}</p>}
 
+        {server.notes && (
+          <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50/50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
+            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-blue-500 dark:text-blue-400">{t("server.notes")}</p>
+            <p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{server.notes}</p>
+          </div>
+        )}
+
         <div className="mt-6 grid grid-cols-2 gap-4">
           <div className="rounded-lg border border-gray-200 bg-gray-100/50 p-4 dark:border-gray-800 dark:bg-gray-900/50">
             <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">{t("server.host")}</p>

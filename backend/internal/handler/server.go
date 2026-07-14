@@ -18,6 +18,7 @@ type CreateServerRequest struct {
 	Host         string  `json:"host"`
 	Port         int     `json:"port"`
 	Description  *string `json:"description,omitempty"`
+	Notes        *string `json:"notes,omitempty"`
 	CredentialID *uint   `json:"credential_id,omitempty"`
 }
 
@@ -27,6 +28,7 @@ type UpdateServerRequest struct {
 	Host         *string `json:"host,omitempty"`
 	Port         *int    `json:"port,omitempty"`
 	Description  *string `json:"description,omitempty"`
+	Notes        *string `json:"notes,omitempty"`
 	CredentialID *uint   `json:"credential_id,omitempty"`
 }
 
@@ -91,6 +93,7 @@ func (h *ServerHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Host:         req.Host,
 		Port:         req.Port,
 		Description:  req.Description,
+		Notes:        req.Notes,
 		CredentialID: req.CredentialID,
 	}
 
@@ -133,6 +136,9 @@ func (h *ServerHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Description != nil {
 		input.Description = req.Description
+	}
+	if req.Notes != nil {
+		input.Notes = req.Notes
 	}
 	if req.CredentialID != nil {
 		input.CredentialID = req.CredentialID
