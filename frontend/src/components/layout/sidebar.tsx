@@ -2,6 +2,8 @@ import { Fingerprint, Key, LayoutDashboard, Link2, Server } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
+const VERSION = "0.5.0";
+
 const navItems = [
   { to: "/", label: "nav.dashboard", icon: LayoutDashboard },
   { to: "/servers", label: "nav.servers", icon: Server },
@@ -39,6 +41,9 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
+      <div className="border-t border-gray-200 px-4 py-3 dark:border-gray-800">
+        <p className="text-xs text-gray-400 dark:text-gray-500">v{VERSION}</p>
+      </div>
     </aside>
   );
 }

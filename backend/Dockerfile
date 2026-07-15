@@ -1,11 +1,12 @@
 # Multi-stage build for Hub + Agent + Frontend
 
 FROM golang:1.25-alpine AS go-builder
+ARG VERSION=dev
 WORKDIR /app
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /hub ./cmd/server
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/vpsmanager/backend/internal/server.Version=${VERSION}" -o /hub ./cmd/server
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /agent ./cmd/agent
 
 FROM node:22-alpine AS ui-builder

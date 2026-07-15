@@ -78,6 +78,7 @@ func NewRouter(cfg RouteConfig) chi.Router {
 	// Public API routes (no authentication required)
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/", versionHandler)
+		r.Get("/version", versionHandler)
 		r.Post("/auth/login", cfg.LoginHandler)
 		r.Get("/auth/setup", cfg.SetupHandler)
 	})
@@ -157,6 +158,8 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+var Version = "dev"
+
 func versionHandler(w http.ResponseWriter, r *http.Request) {
-	WriteJSON(w, http.StatusOK, map[string]string{"version": "0.1.0"})
+	WriteJSON(w, http.StatusOK, map[string]string{"version": Version})
 }
