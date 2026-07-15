@@ -21,9 +21,7 @@ function toPairs(record: Record<string, string>): KeyValuePair[] {
 function fromPairs(pairs: KeyValuePair[]): Record<string, string> {
   const result: Record<string, string> = {};
   for (const pair of pairs) {
-    if (pair.key.trim()) {
-      result[pair.key.trim()] = pair.value;
-    }
+    result[pair.key] = pair.value;
   }
   return result;
 }
