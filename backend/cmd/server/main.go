@@ -90,6 +90,7 @@ func main() {
 			&model.Server{},
 			&model.APIKey{},
 			&model.Metric{},
+			&model.Service{},
 		)
 		if autoMigrateErr == nil {
 			break
@@ -130,6 +131,11 @@ func main() {
 	credRepo := repository.NewCredentialRepo(db)
 	credSvc := service.NewCredentialService(credRepo, masterKey)
 	credHandler := handler.NewCredentialHandler(credSvc)
+
+	// Dependency chain — Services
+	serviceRepo := repository.NewServiceRepo(db)
+	serviceSvc := service.NewServiceRelayService(serviceRepo, masterKey)
+	serviceHandler := handler.NewServiceHandler(serviceSvc)
 
 	// Dependency chain — SSH
 	sshPool := sshpool.NewPool(
@@ -189,6 +195,10 @@ func main() {
 		CreateAPIKeyHandler: apiKeyHandler.Create,
 		ListAPIKeysHandler:  apiKeyHandler.List,
 		DeleteAPIKeyHandler: apiKeyHandler.Delete,
+		// Services
+		CreateServiceHandler: serviceHandler.Create,
+		ListServicesHandler:  serviceHandler.List,
+		RelayServiceHandler:  serviceHandler.Relay,
 		// Static files
 		StaticDir: os.Getenv("STATIC_DIR"),
 	})

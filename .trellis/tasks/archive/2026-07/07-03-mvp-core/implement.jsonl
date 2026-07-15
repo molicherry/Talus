@@ -1,0 +1,17 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Go backend tech stack overview, layer rules, package structure"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Exact Go module layout: cmd/, internal/{handler,service,model,repository,pkg/}, naming conventions"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "GORM model conventions, all table schemas (users, servers, credentials, audit_logs, metrics), migration rules"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "AppError types, sentinel errors, handler-service-repo error chain, JSON error envelope format"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "slog structured logging rules, required attributes per event, sensitive data redaction"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "golangci-lint config, forbidden patterns (panic, global state, cgo), dependency injection pattern, testing requirements"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "React 19 + TypeScript 5.7 tech stack summary, library versions"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Feature-based layout, page-to-feature mapping, route table, naming conventions"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn/ui patterns, cva variants, Tailwind v4, a11y rules, forbidden patterns"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "TanStack Query patterns, query key convention, mutation invalidation, WebSocket hook design, staleTime defaults"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "No-global-store decision tree, TanStack Query vs useState vs URL state boundaries"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Zod schemas for API response validation, forbidden any/as/@ts-ignore, discriminated unions"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Biome config, Vitest + Playwright test strategy, code review checklist, error boundaries"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer data flow rules, handler→service→repository boundaries"}
+{"file": ".trellis/tasks/07-03-mvp-core/prd.md", "reason": "MVP scope, functional requirements, acceptance criteria"}
+{"file": ".trellis/tasks/07-03-mvp-core/design.md", "reason": "Architecture overview, API contracts, SSH pool design, encryption flow, monitoring pipeline, tradeoffs"}
+{"file": ".trellis/tasks/07-03-mvp-core/implement.md", "reason": "Phased execution plan, task checklists, validation commands, test scenarios"}

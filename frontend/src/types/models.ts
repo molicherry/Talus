@@ -75,3 +75,29 @@ export const CredentialFormSchema = z
     path: ["password"],
   });
 export type CredentialFormValues = z.infer<typeof CredentialFormSchema>;
+
+export const ServiceSchema = z.object({
+  id: z.number(),
+  server_id: z.number().nullable().optional(),
+  name: z.string(),
+  display_name: z.string(),
+  base_url: z.string(),
+  credential_hints: z.record(z.string(), z.string()).optional(),
+  description: z.string().nullable().optional(),
+  created_at: z.string(),
+  updated_at: z.string().optional(),
+});
+export type Service = z.infer<typeof ServiceSchema>;
+
+export const ServiceFormSchema = z.object({
+  name: z.string().min(1).max(128),
+  display_name: z.string().max(128).optional(),
+  base_url: z.string().min(1).max(512),
+  credentials: z
+    .record(z.string(), z.string().min(1))
+    .refine((v) => Object.keys(v).length > 0, { message: i18n.t("validation.credentialRequired") }),
+  credential_hints: z.record(z.string(), z.string()).optional(),
+  description: z.string().max(500).optional(),
+  server_id: z.number().nullable().optional(),
+});
+export type ServiceFormValues = z.infer<typeof ServiceFormSchema>;

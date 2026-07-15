@@ -1,0 +1,12 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "golangci-lint rules, forbidden patterns, test coverage targets, code review checklist"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify all errors wrapped correctly, no bare returns, correct status codes"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Verify no sensitive data leaked in logs (credentials, passwords, JWT, command output)"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify GORM conventions followed, no SQL injection, migrations idempotent"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Biome lint check, tsc --noEmit, code review checklist (no any/as/@ts-ignore)"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Verify all API responses parsed with Zod, no type assertions, discriminated unions correct"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify named exports, no default exports, a11y labels on icon buttons, no inline styles"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "Verify TanStack Query keys follow convention, mutations invalidate queries, staleTime defaults"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify handler→service→repository boundaries respected, no cross-layer violations"}
+{"file": ".trellis/tasks/07-03-mvp-core/prd.md", "reason": "Verify all acceptance criteria are met, features implemented match PRD scope"}
+{"file": ".trellis/tasks/07-03-mvp-core/design.md", "reason": "Verify architecture decisions followed (encryption flow, SSH pool design, WebSocket protocol, agent design)"}
+{"file": ".trellis/tasks/07-03-mvp-core/implement.md", "reason": "Verify all test scenarios pass, validation commands succeed, completion criteria met"}

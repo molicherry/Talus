@@ -1,10 +1,11 @@
-import { Activity, Pencil, Terminal, Trash2, Zap } from "lucide-react";
+import { Activity, ExternalLink, Pencil, Terminal, Trash2, Zap } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
 import type { Server } from "../../../types/models";
+import { useServices } from "../../services/hooks/use-services";
 import { useDeleteServer } from "../hooks/use-servers";
 
 interface ServerDetailProps {
@@ -16,6 +17,7 @@ export function ServerDetail({ server }: ServerDetailProps) {
   const deleteMutation = useDeleteServer();
   const [showDelete, setShowDelete] = useState(false);
   const { t } = useTranslation();
+  const { data: services } = useServices(server.id);
 
   const handleDelete = () => {
     deleteMutation.mutate(server.id, {
@@ -35,7 +37,9 @@ export function ServerDetail({ server }: ServerDetailProps) {
       <div className="rounded-lg border border-gray-200 bg-gray-50 p-6 dark:border-gray-800 dark:bg-gray-900">
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">{server.name}</h2>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+              {server.name}
+            </h2>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               {server.host}:{server.port}
             </p>
@@ -60,26 +64,72 @@ export function ServerDetail({ server }: ServerDetailProps) {
           </div>
         </div>
 
-        {server.description && <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">{server.description}</p>}
+        {server.description && (
+          <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">{server.description}</p>
+        )}
 
         {server.notes && (
           <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50/50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
-            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-blue-500 dark:text-blue-400">{t("server.notes")}</p>
-            <p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{server.notes}</p>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-blue-500 dark:text-blue-400">
+              {t("server.notes")}
+            </p>
+            <p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">
+              {server.notes}
+            </p>
           </div>
         )}
 
         <div className="mt-6 grid grid-cols-2 gap-4">
           <div className="rounded-lg border border-gray-200 bg-gray-100/50 p-4 dark:border-gray-800 dark:bg-gray-900/50">
-            <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">{t("server.host")}</p>
+            <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
+              {t("server.host")}
+            </p>
             <p className="mt-1 text-sm text-gray-800 dark:text-gray-200">{server.host}</p>
           </div>
           <div className="rounded-lg border border-gray-200 bg-gray-100/50 p-4 dark:border-gray-800 dark:bg-gray-900/50">
-            <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">{t("server.port")}</p>
+            <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
+              {t("server.port")}
+            </p>
             <p className="mt-1 text-sm text-gray-800 dark:text-gray-200">{server.port}</p>
           </div>
         </div>
       </div>
+
+      {services && services.length > 0 && (
+        <div className="mt-6">
+          <h3 className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300">
+            {t("service.title")}
+          </h3>
+          <div className="space-y-2">
+            {services.map((service) => (
+              <div
+                key={service.id}
+                className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900"
+              >
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {service.display_name || service.name}
+                  </p>
+                  <p className="mt-0.5 text-xs text-gray-500">{service.base_url}</p>
+                  {service.credential_hints && Object.keys(service.credential_hints).length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {Object.keys(service.credential_hints).map((key) => (
+                        <span
+                          key={key}
+                          className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                        >
+                          {key}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <ExternalLink className="h-4 w-4 text-gray-400" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <button

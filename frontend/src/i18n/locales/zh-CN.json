@@ -28,6 +28,7 @@
     "dashboard": "仪表盘",
     "servers": "服务器",
     "credentials": "凭证管理",
+    "services": "服务",
     "apiKeys": "API 密钥"
   },
   "header": {
@@ -201,6 +202,27 @@
     "light": "浅色",
     "dark": "深色",
     "system": "跟随系统"
+  },
+  "service": {
+    "title": "服务",
+    "add": "添加服务",
+    "create": "创建服务",
+    "name": "标识",
+    "displayName": "显示名称",
+    "baseUrl": "基础 URL",
+    "credentials": "凭据",
+    "addKey": "+ 添加密钥",
+    "removeKey": "移除",
+    "hint": "提示",
+    "description": "描述",
+    "server": "关联服务器",
+    "noServer": "无（独立服务）",
+    "emptyState": "暂无服务",
+    "loadError": "加载服务列表失败",
+    "toast": {
+      "created": "服务创建成功",
+      "createFailed": "创建服务失败"
+    }
   },
   "apiKeys": {
     "title": "API 密钥",

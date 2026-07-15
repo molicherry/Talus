@@ -28,6 +28,7 @@
     "dashboard": "Dashboard",
     "servers": "Servers",
     "credentials": "Credentials",
+    "services": "Services",
     "apiKeys": "API Keys"
   },
   "header": {
@@ -201,6 +202,27 @@
     "light": "Light",
     "dark": "Dark",
     "system": "System"
+  },
+  "service": {
+    "title": "Services",
+    "add": "Add Service",
+    "create": "Create Service",
+    "name": "Name",
+    "displayName": "Display Name",
+    "baseUrl": "Base URL",
+    "credentials": "Credentials",
+    "addKey": "+ Add Key",
+    "removeKey": "Remove",
+    "hint": "Hint",
+    "description": "Description",
+    "server": "Server",
+    "noServer": "None (standalone)",
+    "emptyState": "No services yet",
+    "loadError": "Failed to load services",
+    "toast": {
+      "created": "Service created",
+      "createFailed": "Failed to create service"
+    }
   },
   "apiKeys": {
     "title": "API Keys",
