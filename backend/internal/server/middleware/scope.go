@@ -14,6 +14,7 @@ var routeScopes = map[string]string{
 	"GET /api/v1/servers/{id}/terminal": "servers:terminal",
 	"GET /api/v1/servers/{id}/metrics":  "metrics:read",
 	"GET /api/v1/credentials":           "credentials:read",
+	"POST /api/v1/services/{id}/relay":  "services:relay",
 }
 
 // jwtOnlyRoutes defines routes where API keys are always rejected.
@@ -27,6 +28,7 @@ var jwtOnlyRoutes = map[string]bool{
 	"DELETE /api/v1/api-keys/{id}":      true,
 	"GET /api/v1/auth/profile":          true,
 	"PUT /api/v1/auth/password":         true,
+	"POST /api/v1/services":             true,
 }
 
 // hasScope checks whether an API key with the given userScopes is permitted
@@ -94,6 +96,7 @@ var validScopes = map[string]bool{
 	"servers:terminal":   true,
 	"metrics:read":       true,
 	"credentials:read":   true,
+	"services:relay":     true,
 }
 
 // ValidateScopes checks that every scope in scopes is a known valid scope.

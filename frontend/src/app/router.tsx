@@ -1,18 +1,19 @@
 import { useTranslation } from "react-i18next";
 import { Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
 import { MainLayout } from "../components/layout/main-layout";
+import { ApiKeysPage } from "../features/auth/components/api-keys-page";
 import { LoginPage } from "../features/auth/components/login-form";
 import { SetupPage } from "../features/auth/components/setup-page";
 import { CredentialCreatePage } from "../features/credentials/components/credential-create-page";
 import { CredentialEditPage } from "../features/credentials/components/credential-edit-page";
 import { CredentialListPage } from "../features/credentials/components/credential-list-page";
 import { DashboardPage } from "../features/dashboard/components/dashboard-page";
-import { ApiKeysPage } from "../features/auth/components/api-keys-page";
 import { ExecPage } from "../features/servers/components/exec-page";
 import { ServerCreatePage } from "../features/servers/components/server-create-page";
 import { ServerDetailPage } from "../features/servers/components/server-detail-page";
 import { ServerEditPage } from "../features/servers/components/server-edit-page";
 import { ServerListPage } from "../features/servers/components/server-list-page";
+import { ServiceListPage } from "../features/services/components/service-list-page";
 import { TerminalPage } from "../features/terminal/components/terminal-page";
 import { useAuth } from "../hooks/use-auth";
 
@@ -70,6 +71,7 @@ export function AppRouter() {
           <Route path="/credentials" element={<CredentialListPage />} />
           <Route path="/credentials/new" element={<CredentialCreatePage />} />
           <Route path="/credentials/:id/edit" element={<CredentialEditPage />} />
+          <Route path="/services" element={<ServiceListPage />} />
           <Route path="/api-keys" element={<ApiKeysPage />} />
         </Route>
       </Route>
