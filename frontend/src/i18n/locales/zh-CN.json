@@ -211,7 +211,7 @@
     "displayName": "显示名称",
     "baseUrl": "基础 URL",
     "credentials": "凭据",
-    "addKey": "+ 添加密钥",
+    "addKey": "添加密钥",
     "key": "键",
     "value": "值",
     "hintPlaceholder": "例如：Portainer API token",
