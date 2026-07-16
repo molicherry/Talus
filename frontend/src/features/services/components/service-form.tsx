@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ export function ServiceForm() {
     register,
     handleSubmit,
     control,
+    setValue,
     formState: { errors },
   } = useForm<ServiceFormValues>({
     resolver: zodResolver(ServiceFormSchema),
@@ -28,6 +29,8 @@ export function ServiceForm() {
       credential_hints: {},
     },
   });
+
+  const hints = useWatch({ control, name: "credential_hints" }) ?? {};
 
   const onSubmit = (data: ServiceFormValues) => {
     createMutation.mutate(data, {
@@ -173,8 +176,14 @@ export function ServiceForm() {
           control={control}
           render={({ field }) => (
             <ServiceKeyInput
-              value={field.value as Record<string, string>}
-              onChange={field.onChange}
+              value={{
+                credentials: (field.value ?? {}) as Record<string, string>,
+                hints: hints as Record<string, string>,
+              }}
+              onChange={(v) => {
+                field.onChange(v.credentials);
+                setValue("credential_hints", v.hints as Record<string, string>);
+              }}
             />
           )}
         />
@@ -184,22 +193,6 @@ export function ServiceForm() {
               ""}
           </p>
         )}
-      </div>
-
-      <div>
-        <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t("service.hint")}
-        </span>
-        <Controller
-          name="credential_hints"
-          control={control}
-          render={({ field }) => (
-            <ServiceKeyInput
-              value={(field.value ?? {}) as Record<string, string>}
-              onChange={field.onChange}
-            />
-          )}
-        />
       </div>
 
       <div className="flex gap-3">
