@@ -123,3 +123,91 @@ func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, relayErr)
 	}
 }
+
+// Get handles GET /api/v1/services/{id}.
+func (h *ServiceHandler) Get(w http.ResponseWriter, r *http.Request) {
+	id, err := parseServiceID(r)
+	if err != nil {
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid service id"))
+		return
+	}
+
+	svc, err := h.svc.Get(r.Context(), id)
+	if err != nil {
+		server.WriteError(w, r, err)
+		return
+	}
+	server.WriteJSON(w, http.StatusOK, svc)
+}
+
+// Update handles PUT /api/v1/services/{id}.
+func (h *ServiceHandler) Update(w http.ResponseWriter, r *http.Request) {
+	id, err := parseServiceID(r)
+	if err != nil {
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid service id"))
+		return
+	}
+
+	var req createServiceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
+		return
+	}
+
+	var details []server.ErrorDetail
+	if req.Name == "" {
+		details = append(details, server.ErrorDetail{Field: "name", Message: "name is required"})
+	}
+	if req.BaseURL == "" {
+		details = append(details, server.ErrorDetail{Field: "base_url", Message: "base_url is required"})
+	}
+	if len(req.Credentials) == 0 {
+		details = append(details, server.ErrorDetail{Field: "credentials", Message: "at least one credential is required"})
+	}
+	if len(details) > 0 {
+		server.WriteError(w, r, server.NewValidationError(details))
+		return
+	}
+
+	input := service.CreateServiceInput{
+		Name:            req.Name,
+		DisplayName:     req.DisplayName,
+		BaseURL:         req.BaseURL,
+		Credentials:     req.Credentials,
+		CredentialHints: req.CredentialHints,
+		Description:     req.Description,
+		ServerID:        req.ServerID,
+	}
+
+	updated, err := h.svc.Update(r.Context(), id, input)
+	if err != nil {
+		server.WriteError(w, r, err)
+		return
+	}
+	server.WriteJSON(w, http.StatusOK, updated)
+}
+
+// Delete handles DELETE /api/v1/services/{id}.
+func (h *ServiceHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id, err := parseServiceID(r)
+	if err != nil {
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid service id"))
+		return
+	}
+
+	if err := h.svc.Delete(r.Context(), id); err != nil {
+		server.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// parseServiceID extracts a uint path parameter named "id" from the request URL.
+func parseServiceID(r *http.Request) (uint, error) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return uint(id), nil
+}

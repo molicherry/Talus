@@ -41,9 +41,13 @@ var routeScopes = map[string]string{
 var jwtOnlyRoutes = map[string]bool{
     "DELETE /api/v1/servers/{id}":       true,
     "POST /api/v1/services":             true,
+    "PUT /api/v1/services/{id}":         true,
+    "DELETE /api/v1/services/{id}":      true,
     // ...
 }
 ```
+
+> Service management (create/update/delete) is JWT-only; `GET /api/v1/services` and `GET /api/v1/services/{id}` are intentionally registered in neither map, so any authenticated principal (JWT or any API key) can read them — responses never include credential material (`json:"-"`). Only `services:relay` is a scope-gated service route.
 
 ---
 

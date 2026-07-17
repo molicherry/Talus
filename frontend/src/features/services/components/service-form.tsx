@@ -5,14 +5,22 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ApiClientError } from "../../../lib/api-client";
-import { ServiceFormSchema, type ServiceFormValues } from "../../../types/models";
+import { type Service, ServiceFormSchema, type ServiceFormValues } from "../../../types/models";
 import { useServers } from "../../servers/hooks/use-servers";
-import { useCreateService } from "../hooks/use-services";
+import { useCreateService, useUpdateService } from "../hooks/use-services";
 import { ServiceKeyInput } from "./service-key-input";
 
-export function ServiceForm() {
+interface ServiceFormProps {
+  service?: Service;
+}
+
+export function ServiceForm({ service }: ServiceFormProps) {
   const navigate = useNavigate();
   const createMutation = useCreateService();
+  const updateMutation = useUpdateService();
+
+  const isEdit = !!service;
+  const activeMutation = isEdit ? updateMutation : createMutation;
   const { data: servers } = useServers();
   const { t } = useTranslation();
 
@@ -24,41 +32,62 @@ export function ServiceForm() {
     formState: { errors },
   } = useForm<ServiceFormValues>({
     resolver: zodResolver(ServiceFormSchema),
-    defaultValues: {
-      credentials: {},
-      credential_hints: {},
-    },
+    defaultValues: service
+      ? {
+          name: service.name,
+          display_name: service.display_name,
+          base_url: service.base_url,
+          description: service.description ?? "",
+          server_id: service.server_id ?? undefined,
+          credentials: {},
+          credential_hints: {},
+        }
+      : {
+          credentials: {},
+          credential_hints: {},
+        },
   });
 
   const hints = useWatch({ control, name: "credential_hints" }) ?? {};
 
   const onSubmit = (data: ServiceFormValues) => {
-    createMutation.mutate(data, {
-      onSuccess: () => {
-        toast.success(t("service.toast.created"));
-        navigate("/services");
-      },
-      onError: () => {
-        toast.error(t("service.toast.createFailed"));
-      },
-    });
+    if (isEdit && service) {
+      updateMutation.mutate(
+        { id: service.id, data },
+        {
+          onSuccess: () => {
+            toast.success(t("service.toast.updated"));
+            navigate("/services");
+          },
+          onError: () => {
+            toast.error(t("service.toast.updateFailed"));
+          },
+        },
+      );
+    } else {
+      createMutation.mutate(data, {
+        onSuccess: () => {
+          toast.success(t("service.toast.created"));
+          navigate("/services");
+        },
+        onError: () => {
+          toast.error(t("service.toast.createFailed"));
+        },
+      });
+    }
   };
 
   const errorMessage =
-    createMutation.error instanceof ApiClientError
-      ? createMutation.error.message
-      : createMutation.error
+    activeMutation.error instanceof ApiClientError
+      ? activeMutation.error.message
+      : activeMutation.error
         ? t("common.unexpectedError")
         : null;
 
-  const isPending = createMutation.isPending;
+  const isPending = activeMutation.isPending;
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="max-w-lg space-y-4">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-        {t("service.create")}
-      </h3>
-
       {errorMessage && (
         <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/50 dark:text-red-300">
           {errorMessage}
@@ -187,6 +216,11 @@ export function ServiceForm() {
             />
           )}
         />
+        {isEdit && (
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {t("service.credentialsEditNote")}
+          </p>
+        )}
         {errors.credentials && (
           <p className="mt-1 text-xs text-red-600 dark:text-red-400">
             {(errors.credentials as { message?: string; root?: { message?: string } }).message ||
@@ -202,7 +236,13 @@ export function ServiceForm() {
           className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-          {isPending ? t("common.creating") : t("service.create")}
+          {isPending
+            ? isEdit
+              ? t("common.updating")
+              : t("common.creating")
+            : isEdit
+              ? t("service.update")
+              : t("service.create")}
         </button>
         <button
           type="button"

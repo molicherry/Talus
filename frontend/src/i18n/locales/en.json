@@ -207,10 +207,13 @@
     "title": "Services",
     "add": "Add Service",
     "create": "Create Service",
+    "edit": "Edit Service",
+    "update": "Update Service",
     "name": "Name",
     "displayName": "Display Name",
     "baseUrl": "Base URL",
     "credentials": "Credentials",
+    "credentialsEditNote": "Credentials cannot be read back. Re-enter all keys and values; saving replaces them entirely.",
     "addKey": "Add Key",
     "key": "Key",
     "value": "Value",
@@ -220,11 +223,20 @@
     "description": "Description",
     "server": "Server",
     "noServer": "None (standalone)",
+    "notFound": "Service not found",
     "emptyState": "No services yet",
     "loadError": "Failed to load services",
+    "deleteTitle": "Delete Service",
+    "deleteMessage": "Are you sure you want to delete this service? This action cannot be undone.",
+    "ariaEdit": "Edit {{name}}",
+    "ariaDelete": "Delete {{name}}",
     "toast": {
       "created": "Service created",
-      "createFailed": "Failed to create service"
+      "createFailed": "Failed to create service",
+      "updated": "Service updated",
+      "updateFailed": "Failed to update service",
+      "deleted": "Service deleted",
+      "deleteFailed": "Failed to delete service"
     }
   },
   "apiKeys": {

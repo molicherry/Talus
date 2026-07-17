@@ -51,3 +51,13 @@ func (r *ServiceRepo) FindByID(ctx context.Context, id uint) (*model.Service, er
 func (r *ServiceRepo) Create(ctx context.Context, svc *model.Service) error {
 	return r.db.WithContext(ctx).Create(svc).Error
 }
+
+// Update saves all fields of an existing service record.
+func (r *ServiceRepo) Update(ctx context.Context, svc *model.Service) error {
+	return r.db.WithContext(ctx).Save(svc).Error
+}
+
+// Delete performs a soft delete of the service with the given id.
+func (r *ServiceRepo) Delete(ctx context.Context, id uint) error {
+	return r.db.WithContext(ctx).Delete(&model.Service{}, id).Error
+}
