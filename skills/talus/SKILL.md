@@ -1,6 +1,6 @@
----
+--- 
 name: talus
-description: Interact with a running Talus instance via its REST API to manage Linux servers, execute remote commands over SSH, open interactive terminals (WebSocket), query live monitoring metrics, manage SSH credentials, and create API keys. Talus is a self-hosted VPS management platform (Go backend + React frontend + PostgreSQL). Use when user wants to manage servers via Talus API, execute commands on remote hosts, check server metrics, manage SSH credentials programmatically, or automate VPS operations through Talus. Triggers: "Talus API", "manage server via Talus", "execute command on server", "check server metrics Talus", "add SSH credential", "create API key", "Talus 管理", "通过Talus执行命令".
+description: Interact with a running Talus instance via its REST API to manage Linux servers, execute remote commands over SSH, open interactive terminals (WebSocket), query live monitoring metrics, manage SSH credentials, create API keys, register external services with encrypted credentials, and proxy authenticated requests through the relay endpoint. Talus is a self-hosted VPS management platform (Go backend + React frontend + PostgreSQL). Use when user wants to manage servers via Talus API, execute commands on remote hosts, check server metrics, manage SSH credentials programmatically, automate VPS operations through Talus, register proxied services, or relay API calls to external services. Triggers: "Talus API", "manage server via Talus", "execute command on server", "check server metrics Talus", "add SSH credential", "create API key", "relay request", "register service", "Talus 管理", "通过Talus执行命令".
 ---
 
 # Talus API Usage
@@ -25,7 +25,7 @@ Two auth methods with different privilege levels:
 | JWT (Bearer) | `Authorization: Bearer <token>` | `POST /api/v1/auth/login` | Full access — all endpoints |
 | API Key | `X-API-Key: <key>` | `POST /api/v1/api-keys` (JWT only) | Scoped — limited by assigned scopes; JWT-only endpoints return 403 |
 
-**JWT-only endpoints** (API key always rejected): `DELETE /servers/{id}`, all credential mutations (`POST/PUT/DELETE`), all API key management (`GET/POST/DELETE`), auth endpoints (`GET/PUT /auth/*`).
+**JWT-only endpoints** (API key always rejected): `DELETE /servers/{id}`, all credential mutations (`POST/PUT/DELETE`), all API key management (`GET/POST/DELETE`), service mutations (`POST/PUT/DELETE /api/v1/services`), auth endpoints (`GET/PUT /auth/*`).
 
 ### First-Time Setup (no users exist yet)
 
@@ -89,6 +89,23 @@ All protected endpoints require `Authorization: Bearer <token>` or `X-API-Key: <
 
 `auth_type` is `"password"` or `"private_key"`. Provide exactly one of `password` or `private_key` matching the type.
 
+### Services
+
+| Method | Path | Description | Body |
+|--------|------|-------------|------|
+| `GET` | `/api/v1/services` | List all services (credential hints only, no secrets) | Query: `?server_id=<id>` (optional filter) |
+| `POST` | `/api/v1/services` | Register a service — **JWT only** | `{name, base_url, credentials, credential_hints?, display_name?, description?, server_id?}` |
+| `GET` | `/api/v1/services/{id}` | Get a single service | — |
+| `PUT` | `/api/v1/services/{id}` | Update service (full replacement) — **JWT only** | Same body as POST |
+| `DELETE` | `/api/v1/services/{id}` | Remove service — **JWT only** | — |
+| `POST` | `/api/v1/services/{id}/relay` | Proxy a request through the service | `{method, path, headers?, body?}` |
+
+Service credentials are encrypted with AES-256-GCM and **never returned** in API responses (`credentials` map is masked in all GET responses). The `credential_hints` map provides human-readable labels for each credential key (e.g. `"token": "Portainer API token"`).
+
+On update (PUT), credentials are **fully replaced** — re-enter all key-value pairs (existing values cannot be read back).
+
+Relay supports `{{key}}` placeholder substitution in path, headers, and body — placeholders are replaced with decrypted credential values before the request is proxied.
+
 ### API Keys — **JWT only** (API key rejected with 403)
 
 | Method | Path | Description | Body |
@@ -97,9 +114,9 @@ All protected endpoints require `Authorization: Bearer <token>` or `X-API-Key: <
 | `POST` | `/api/v1/api-keys` | Create scoped API key (full key returned ONCE) | `{name, scopes?}` |
 | `DELETE` | `/api/v1/api-keys/{id}` | Revoke API key | — |
 
-`scopes` field: optional array of `resource:action` strings. Valid values: `servers:read`, `servers:write`, `servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`. Defaults to all six if omitted.
+`scopes` field: optional array of `resource:action` strings. Valid values: `servers:read`, `servers:write`, `servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`, `services:relay`. Defaults to all seven if omitted.
 
-API keys can never access: credential mutation, API key management, auth endpoints, or `DELETE /servers/{id}`.
+API keys can never access: credential mutation, API key management, auth endpoints, service management (`POST/PUT/DELETE /api/v1/services`), or `DELETE /servers/{id}`.
 
 ### Health
 
@@ -160,6 +177,20 @@ Secrets (password / private_key) are **never returned** in API responses.
 // Create response (full key shown ONCE):
 { "id": 1, "name": "ci-pipeline", "key": "tv1-abc123def456...", "scopes": ["servers:read","servers:exec"], "created_at": "2026-07-10T..." }
 ```
+
+### Service (from `GET /api/v1/services`)
+```json
+{
+  "id": 1, "name": "grafana", "display_name": "Grafana Dashboard",
+  "base_url": "http://localhost:3000",
+  "credential_hints": { "token": "API token for Portainer" },
+  "description": "Monitoring dashboards",
+  "server_id": null,
+  "created_at": "2026-07-17T..."
+}
+```
+
+Credentials (keys/values) and encryption salt are **never returned** in API responses — only `credential_hints` is visible for labeling.
 
 ## Common Workflows
 
@@ -231,12 +262,61 @@ curl -s -X POST $TALUS_URL/api/v1/servers \
 # → {"error":{"code":403,"message":"insufficient scope: requires servers:write"}}
 ```
 
+### Register a service and relay a request
+
+```bash
+# 1. Register a Grafana service with an API token credential
+curl -s -X POST $TALUS_URL/api/v1/services \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "grafana",
+    "display_name": "Grafana Dashboard",
+    "base_url": "http://localhost:3000",
+    "credentials": {"token": "glsa_abc123..."},
+    "credential_hints": {"token": "Service account token"},
+    "description": "Monitoring dashboards"
+  }'
+
+# 2. Relay a GET request through the service (token injected from credentials)
+curl -s -X POST $TALUS_URL/api/v1/services/1/relay \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"method": "GET", "path": "/api/dashboards/home"}'
+
+# 3. Relay with placeholder substitution — {{token}} is replaced with the credential value
+curl -s -X POST $TALUS_URL/api/v1/services/1/relay \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "GET",
+    "path": "/api/search?query=health",
+    "headers": {"Authorization": "Bearer {{token}}"}
+  }'
+
+# 4. Update service credentials (full replacement — re-enter all keys)
+curl -s -X PUT $TALUS_URL/api/v1/services/1 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "grafana",
+    "base_url": "http://localhost:3000",
+    "credentials": {"token": "glsa_newtoken456..."},
+    "credential_hints": {"token": "Rotated service account token"}
+  }'
+
+# 5. Delete a service
+curl -s -X DELETE $TALUS_URL/api/v1/services/1 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## Security Notes
 
 - SSH credentials (passwords, private keys) are encrypted with AES-256-GCM at rest
-- Secrets are **never** returned in API responses (credential GET lists show only metadata)
+- Service credentials are encrypted with AES-256-GCM at rest, same encryption scheme
+- Secrets are **never** returned in API responses (credential GET lists show only metadata; service GET shows only credential_hints)
 - First login to an empty instance creates the admin account automatically
 - API keys are scoped — assign only the minimum permissions needed (see scope list above)
 - API keys are shown in full only once at creation — save immediately
-- JWT-only endpoints (credential mutations, API key management, server deletion, auth) reject API keys with 403 regardless of scope
+- JWT-only endpoints (credential mutations, API key management, service management, server deletion, auth) reject API keys with 403 regardless of scope
 - SSH host keys use TOFU (Trust On First Use) verification
