@@ -2,7 +2,7 @@ import { Fingerprint, Key, LayoutDashboard, Link2, Server } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
-const VERSION = "0.5.1";
+const VERSION = "0.6.2";
 
 const navItems = [
   { to: "/", label: "nav.dashboard", icon: LayoutDashboard },
