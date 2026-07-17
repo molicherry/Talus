@@ -2,7 +2,6 @@ import { Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 interface KeyValueHint {
-  id: number;
   key: string;
   value: string;
   hint: string;
@@ -13,12 +12,10 @@ interface ServiceKeyInputProps {
   onChange: (value: { credentials: Record<string, string>; hints: Record<string, string> }) => void;
 }
 
-let nextId = 0;
-
 function toRows(value: { credentials: Record<string, string>; hints: Record<string, string> }): KeyValueHint[] {
   const rows: KeyValueHint[] = [];
   for (const key of Object.keys(value.credentials)) {
-    rows.push({ id: nextId++, key, value: value.credentials[key] || "", hint: value.hints[key] || "" });
+    rows.push({ key, value: value.credentials[key] || "", hint: value.hints[key] || "" });
   }
   return rows;
 }
@@ -43,7 +40,7 @@ export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
   };
 
   const addRow = () => {
-    onChange(fromRows([...rows, { id: nextId++, key: "", value: "", hint: "" }]));
+    onChange(fromRows([...rows, { key: "", value: "", hint: "" }]));
   };
 
   const removeRow = (index: number) => {
@@ -61,7 +58,7 @@ export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
         </div>
       )}
       {rows.map((row, index) => (
-        <div key={row.id} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
+        <div key={index} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
           <input
             type="text"
             value={row.key}
