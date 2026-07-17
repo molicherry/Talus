@@ -114,7 +114,7 @@ Relay supports `{{key}}` placeholder substitution in path, headers, and body —
 | `POST` | `/api/v1/api-keys` | Create scoped API key (full key returned ONCE) | `{name, scopes?}` |
 | `DELETE` | `/api/v1/api-keys/{id}` | Revoke API key | — |
 
-`scopes` field: optional array of `resource:action` strings. Valid values: `servers:read`, `servers:write`, `servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`, `services:relay`. Defaults to the first six if omitted; `services:relay` must be explicitly requested (opt-in) because it grants proxy/forwarding access to external systems.
+`scopes` field: optional array of `resource:action` strings. Valid values: `servers:read`, `servers:write`, `servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`, `services:relay`. Defaults to the first five (`servers:read`, `servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`) if omitted; `servers:write` and `services:relay` must be explicitly requested (opt-in).
 
 API keys can never access: credential mutation, API key management, auth endpoints, service management (`POST/PUT/DELETE /api/v1/services`), or `DELETE /servers/{id}`.
 

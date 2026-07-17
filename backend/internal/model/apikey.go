@@ -5,7 +5,6 @@ import "time"
 // AllScopeGatedScopes is the list of all scope-gated scopes used as default for new API keys.
 var AllScopeGatedScopes = []string{
 	"servers:read",
-	"servers:write",
 	"servers:exec",
 	"servers:terminal",
 	"metrics:read",
@@ -18,7 +17,7 @@ type APIKey struct {
 	Name      string    `gorm:"size:128;not null" json:"name"`
 	KeyHash   string    `gorm:"uniqueIndex;not null" json:"-"`
 	KeyPrefix string    `gorm:"size:16;not null" json:"key_prefix"`
-	Scopes    []string  `gorm:"type:jsonb;serializer:json;default:'[\"servers:read\",\"servers:write\",\"servers:exec\",\"servers:terminal\",\"metrics:read\",\"credentials:read\"]'" json:"scopes"`
+	Scopes    []string  `gorm:"type:jsonb;serializer:json;default:'[\"servers:read\",\"servers:exec\",\"servers:terminal\",\"metrics:read\",\"credentials:read\"]'" json:"scopes"`
 	CreatedAt time.Time `gorm:"not null" json:"created_at"`
 }
 
