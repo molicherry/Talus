@@ -12,6 +12,7 @@
 - **交互式终端** — 在浏览器中打开完整的 PTY 会话（xterm.js，支持窗口缩放，基于 WebSocket）。
 - **实时监控** — CPU、内存、磁盘、负载、Swap、网络和磁盘 I/O 图表，支持 1 小时 / 6 小时 / 24 小时 / 7 天时间范围。临时 Agent 通过 SSH 按需部署。
 - **API 密钥** — 创建和管理 API 密钥，支持程序化访问。
+- **服务代理** — 注册外部服务（Grafana、Portainer 等），加密存储凭据。通过 Talus 代理 API 请求，支持凭据注入和占位符替换。
 - **国际化** — 英文和中文界面，支持亮色/暗色/跟随系统主题。
 - **Docker Compose** — 一条命令启动：`docker compose up`。
 
@@ -77,6 +78,13 @@ docker compose up -d
 3. 进入 **Credentials**（凭证）→ **Add Credential**（添加凭证），关联密码或私钥
 4. 服务器上线——可以执行命令、打开终端或查看监控指标。
 
+### 5. 代理外部服务
+
+1. 进入 **Services**（服务）→ **Add Service**（添加服务）
+2. 填写名称、显示名称、基础 URL（如 `http://localhost:3000`）和凭据（键值对）
+3. 可选：将服务关联到某台服务器，通过 SSH 隧道访问
+4. 使用 relay API 通过 Talus 代理请求——凭据自动注入，`{{key}}` 占位符自动替换
+
 ## 技术栈
 
 | 层级 | 技术 |
@@ -89,12 +97,13 @@ docker compose up -d
 
 ## AI 集成
 
-仓库中包含 [OpenCode skill](../skills/talus/SKILL.md)。加载此 skill 的 AI 助手可通过 Talus REST API 管理服务器、执行命令、查询指标和创建带作用域的 API 密钥——无需手动查阅 API 文档。
+仓库中包含 [OpenCode skill](../skills/talus/SKILL.md)。加载此 skill 的 AI 助手可通过 Talus REST API 管理服务器、执行命令、查询指标、代理请求到已注册的外部服务以及创建带作用域的 API 密钥——无需手动查阅 API 文档。
 
 ```bash
 # 在任意 AI 会话中（已打开 Talus 仓库）：
 "通过 Talus 列出所有服务器"
 "查看 web-01 的 CPU 指标"
+"向 Grafana 服务转发请求"
 "创建一个只读的监控 API Key"
 ```
 
