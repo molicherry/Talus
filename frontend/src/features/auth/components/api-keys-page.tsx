@@ -1,14 +1,33 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, Key, Plus, Trash2, X } from "lucide-react";
+import { Copy, Key, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 const API_BASE = "";
+
+const ALL_SCOPES = [
+  "servers:read",
+  "servers:write",
+  "servers:exec",
+  "servers:terminal",
+  "metrics:read",
+  "credentials:read",
+  "services:relay",
+];
+
+const DEFAULT_SCOPES = [
+  "servers:read",
+  "servers:exec",
+  "servers:terminal",
+  "metrics:read",
+  "credentials:read",
+];
 
 interface APIKeyItem {
   id: number;
   name: string;
   key_prefix: string;
+  scopes: string[];
   created_at: string;
 }
 
@@ -18,6 +37,7 @@ export function ApiKeysPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newScopes, setNewScopes] = useState<string[]>([...DEFAULT_SCOPES]);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -39,18 +59,27 @@ export function ApiKeysPage() {
 
   useState(() => { fetchKeys(); });
 
+  const toggleScope = (scope: string) => {
+    setNewScopes((prev) =>
+      prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope],
+    );
+  };
+
   const handleCreate = async () => {
     setCreating(true);
     try {
+      const body: Record<string, unknown> = { name: newName };
+      if (newScopes.length > 0) body.scopes = newScopes;
       const res = await fetch(`${API_BASE}/api/v1/api-keys`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("Failed");
       const json = await res.json();
       setNewKey(json.data.key);
       setNewName("");
+      setNewScopes([...DEFAULT_SCOPES]);
       fetchKeys();
     } catch {
       toast.error(t("common.error"));
@@ -86,6 +115,8 @@ export function ApiKeysPage() {
       toast.success(t("common.copied"));
     }
   };
+
+  const scopeLabel = (scope: string) => t(`apiKeys.scopes.${scope.replace(":", "_")}`, scope);
 
   return (
     <div>
@@ -132,8 +163,8 @@ export function ApiKeysPage() {
               </button>
             </div>
           ) : (
-            <div className="flex items-end gap-3">
-              <div className="flex-1">
+            <div className="space-y-4">
+              <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   {t("apiKeys.name")}
                 </label>
@@ -144,21 +175,48 @@ export function ApiKeysPage() {
                   placeholder={t("apiKeys.namePlaceholder")}
                 />
               </div>
-              <button
-                type="button"
-                onClick={handleCreate}
-                disabled={creating}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-              >
-                {creating ? t("common.creating") : t("apiKeys.generate")}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowCreate(false)}
-                className="rounded-lg p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div>
+                <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t("apiKeys.scopesLabel")}
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {ALL_SCOPES.map((scope) => (
+                    <label
+                      key={scope}
+                      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                        newScopes.includes(scope)
+                          ? "border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
+                          : "border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:border-gray-600"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={newScopes.includes(scope)}
+                        onChange={() => toggleScope(scope)}
+                        className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      {scopeLabel(scope)}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={handleCreate}
+                  disabled={creating}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {creating ? t("common.creating") : t("apiKeys.generate")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCreate(false)}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                >
+                  {t("common.cancel")}
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -179,16 +237,19 @@ export function ApiKeysPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/50">
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   {t("apiKeys.name")}
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                  {t("apiKeys.scopesLabel")}
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   Prefix
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   {t("common.created")}
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   {t("common.actions")}
                 </th>
               </tr>
@@ -198,6 +259,18 @@ export function ApiKeysPage() {
                 <tr key={k.id} className="hover:bg-gray-100/50 dark:hover:bg-gray-800/50">
                   <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                     {k.name || `#${k.id}`}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {(k.scopes ?? []).map((scope) => (
+                        <span
+                          key={scope}
+                          className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                        >
+                          {scopeLabel(scope)}
+                        </span>
+                      ))}
+                    </div>
                   </td>
                   <td className="px-4 py-3 font-mono text-sm text-gray-500 dark:text-gray-400">
                     {k.key_prefix}...
