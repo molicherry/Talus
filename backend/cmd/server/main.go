@@ -198,6 +198,9 @@ func main() {
 		// Services
 		CreateServiceHandler: serviceHandler.Create,
 		ListServicesHandler:  serviceHandler.List,
+		GetServiceHandler:    serviceHandler.Get,
+		UpdateServiceHandler: serviceHandler.Update,
+		DeleteServiceHandler: serviceHandler.Delete,
 		RelayServiceHandler:  serviceHandler.Relay,
 		// Static files
 		StaticDir: os.Getenv("STATIC_DIR"),

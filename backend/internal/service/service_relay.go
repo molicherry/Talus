@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/vpsmanager/backend/internal/pkg/crypto"
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
+	"gorm.io/gorm"
 )
 
 // hopByHopHeaders are headers that must not be forwarded by proxies (RFC 2616 §13.5.1).
@@ -71,45 +73,58 @@ type RelayInput struct {
 	Body    json.RawMessage   `json:"body"`
 }
 
-// Create validates, encrypts, and stores a new service.
-func (s *ServiceRelayService) Create(ctx context.Context, input CreateServiceInput) (*model.Service, error) {
+// validateAndEncryptCredentials validates the input fields and encrypts the credential map
+// with a freshly generated salt. Create and Update share this helper to prevent rule drift.
+func (s *ServiceRelayService) validateAndEncryptCredentials(input CreateServiceInput) (encryptedCreds map[string]string, hints map[string]string, salt []byte, err error) {
 	if input.Name == "" {
-		return nil, fmt.Errorf("create service: name is required")
+		return nil, nil, nil, fmt.Errorf("name is required")
 	}
 	if input.BaseURL == "" {
-		return nil, fmt.Errorf("create service: base_url is required")
+		return nil, nil, nil, fmt.Errorf("base_url is required")
 	}
 	if !strings.HasPrefix(input.BaseURL, "http://") && !strings.HasPrefix(input.BaseURL, "https://") {
-		return nil, fmt.Errorf("create service: base_url must start with http:// or https://")
+		return nil, nil, nil, fmt.Errorf("base_url must start with http:// or https://")
 	}
 	if len(input.Credentials) == 0 {
-		return nil, fmt.Errorf("create service: at least one credential is required")
+		return nil, nil, nil, fmt.Errorf("at least one credential is required")
 	}
-	if input.CredentialHints == nil {
-		input.CredentialHints = map[string]string{}
+
+	hints = input.CredentialHints
+	if hints == nil {
+		hints = map[string]string{}
 	}
-	for k := range input.CredentialHints {
+	for k := range hints {
 		if _, ok := input.Credentials[k]; !ok {
-			return nil, fmt.Errorf("create service: credential_hints key '%s' does not match any credential", k)
+			return nil, nil, nil, fmt.Errorf("credential_hints key '%s' does not match any credential", k)
 		}
 	}
 
-	salt, err := crypto.GenerateSalt()
+	salt, err = crypto.GenerateSalt()
 	if err != nil {
-		return nil, fmt.Errorf("create service: generate salt: %w", err)
+		return nil, nil, nil, fmt.Errorf("generate salt: %w", err)
 	}
 
 	key := s.masterKey.DeriveKey(salt)
-	encryptedCreds := make(map[string]string, len(input.Credentials))
+	encryptedCreds = make(map[string]string, len(input.Credentials))
 	for k, v := range input.Credentials {
 		if v == "" {
-			return nil, fmt.Errorf("create service: credential '%s' value is required", k)
+			return nil, nil, nil, fmt.Errorf("credential '%s' value is required", k)
 		}
-		encrypted, err := crypto.Encrypt([]byte(v), key)
-		if err != nil {
-			return nil, fmt.Errorf("create service: encrypt '%s': %w", k, err)
+		encrypted, encErr := crypto.Encrypt([]byte(v), key)
+		if encErr != nil {
+			return nil, nil, nil, fmt.Errorf("encrypt '%s': %w", k, encErr)
 		}
 		encryptedCreds[k] = encrypted
+	}
+
+	return encryptedCreds, hints, salt, nil
+}
+
+// Create validates, encrypts, and stores a new service.
+func (s *ServiceRelayService) Create(ctx context.Context, input CreateServiceInput) (*model.Service, error) {
+	encryptedCreds, hints, salt, err := s.validateAndEncryptCredentials(input)
+	if err != nil {
+		return nil, fmt.Errorf("create service: %w", err)
 	}
 
 	svc := &model.Service{
@@ -117,7 +132,7 @@ func (s *ServiceRelayService) Create(ctx context.Context, input CreateServiceInp
 		DisplayName:          input.DisplayName,
 		BaseURL:              input.BaseURL,
 		EncryptedCredentials: encryptedCreds,
-		CredentialHints:      input.CredentialHints,
+		CredentialHints:      hints,
 		Description:          input.Description,
 		Salt:                 salt,
 		ServerID:             input.ServerID,
@@ -127,6 +142,62 @@ func (s *ServiceRelayService) Create(ctx context.Context, input CreateServiceInp
 		return nil, fmt.Errorf("create service: %w", err)
 	}
 	return svc, nil
+}
+
+// Get returns a single service by id.
+func (s *ServiceRelayService) Get(ctx context.Context, id uint) (*model.Service, error) {
+	svc, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, server.NewAppError(http.StatusNotFound, "service not found")
+		}
+		return nil, fmt.Errorf("get service %d: %w", id, err)
+	}
+	return svc, nil
+}
+
+// Update fully replaces an existing service's fields and credentials with a new salt.
+func (s *ServiceRelayService) Update(ctx context.Context, id uint, input CreateServiceInput) (*model.Service, error) {
+	existing, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, server.NewAppError(http.StatusNotFound, "service not found")
+		}
+		return nil, fmt.Errorf("update service %d: %w", id, err)
+	}
+
+	encryptedCreds, hints, salt, err := s.validateAndEncryptCredentials(input)
+	if err != nil {
+		return nil, fmt.Errorf("update service %d: %w", id, err)
+	}
+
+	existing.Name = input.Name
+	existing.DisplayName = input.DisplayName
+	existing.BaseURL = input.BaseURL
+	existing.EncryptedCredentials = encryptedCreds
+	existing.CredentialHints = hints
+	existing.Description = input.Description
+	existing.Salt = salt
+	existing.ServerID = input.ServerID
+
+	if err := s.repo.Update(ctx, existing); err != nil {
+		return nil, fmt.Errorf("update service %d: %w", id, err)
+	}
+	return existing, nil
+}
+
+// Delete soft-deletes a service by id.
+func (s *ServiceRelayService) Delete(ctx context.Context, id uint) error {
+	if _, err := s.repo.FindByID(ctx, id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return server.NewAppError(http.StatusNotFound, "service not found")
+		}
+		return fmt.Errorf("delete service %d: %w", id, err)
+	}
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete service %d: %w", id, err)
+	}
+	return nil
 }
 
 // List returns all services, optionally filtered by server ID.

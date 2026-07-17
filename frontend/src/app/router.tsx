@@ -13,6 +13,8 @@ import { ServerCreatePage } from "../features/servers/components/server-create-p
 import { ServerDetailPage } from "../features/servers/components/server-detail-page";
 import { ServerEditPage } from "../features/servers/components/server-edit-page";
 import { ServerListPage } from "../features/servers/components/server-list-page";
+import { ServiceCreatePage } from "../features/services/components/service-create-page";
+import { ServiceEditPage } from "../features/services/components/service-edit-page";
 import { ServiceListPage } from "../features/services/components/service-list-page";
 import { TerminalPage } from "../features/terminal/components/terminal-page";
 import { useAuth } from "../hooks/use-auth";
@@ -72,6 +74,8 @@ export function AppRouter() {
           <Route path="/credentials/new" element={<CredentialCreatePage />} />
           <Route path="/credentials/:id/edit" element={<CredentialEditPage />} />
           <Route path="/services" element={<ServiceListPage />} />
+          <Route path="/services/new" element={<ServiceCreatePage />} />
+          <Route path="/services/:id/edit" element={<ServiceEditPage />} />
           <Route path="/api-keys" element={<ApiKeysPage />} />
         </Route>
       </Route>
