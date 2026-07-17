@@ -10,6 +10,8 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/vpsmanager/backend/inte
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /agent ./cmd/agent
 
 FROM node:22-alpine AS ui-builder
+ARG VERSION=dev
+ENV VITE_APP_VERSION=${VERSION}
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
