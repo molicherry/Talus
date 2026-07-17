@@ -14,6 +14,7 @@
 - **Interactive Terminal** — Open a full PTY session in your browser (xterm.js, resize-aware, WebSocket-backed).
 - **Live Monitoring** — CPU, memory, disk, load, swap, network, and disk I/O charts with 1h / 6h / 24h / 7d time ranges. Ephemeral agent deployed on-demand over SSH.
 - **API Keys** — Create and manage API keys for programmatic access.
+- **Service Proxy** — Register external services (Grafana, Portainer, etc.) with encrypted credentials. Proxy API requests through Talus with credential injection and placeholder substitution.
 - **i18n** — English and 中文 interface with light/dark/system theme.
 - **Docker Compose** — One command to start: `docker compose up`.
 
@@ -79,6 +80,13 @@ On first login, enter any username and password — the first login automaticall
 3. Go to **Credentials** → **Add Credential** and attach a password or private key
 4. Your server is now live — execute commands, open a terminal, or view metrics.
 
+### 5. Proxy a Service
+
+1. Go to **Services** → **Add Service**
+2. Fill in name, display name, base URL (e.g. `http://localhost:3000`), and credentials (key-value pairs)
+3. Optionally assign the service to a server for SSH-tunneled access
+4. Use the relay API to proxy requests through Talus — credentials are injected automatically, `{{key}}` placeholders are substituted
+
 ## Production Deployment
 
 Pre-built images are published to [GHCR](https://github.com/molicherry/Talus/pkgs/container/talus) on every version tag (`v*`).
@@ -134,12 +142,13 @@ docker compose up -d
 
 ## AI Integration
 
-An [OpenCode skill](skills/talus/SKILL.md) is included in the repository. AI assistants that load this skill can manage servers, execute commands, query metrics, and create scoped API keys through Talus's REST API — no manual endpoint lookup needed.
+An [OpenCode skill](skills/talus/SKILL.md) is included in the repository. AI assistants that load this skill can manage servers, execute commands, query metrics, relay requests to registered services, and create scoped API keys through Talus's REST API — no manual endpoint lookup needed.
 
 ```bash
 # In any AI session with the Talus repository open:
 "List all servers via Talus API"
 "Check CPU metrics on server web-01"
+"Relay a request to the Grafana service"
 "Create a read-only API key for monitoring"
 ```
 
