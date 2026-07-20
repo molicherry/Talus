@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/gorilla/websocket"
-	"github.com/vpsmanager/backend/internal/pkg/token"
 	"github.com/vpsmanager/backend/internal/server"
+	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
 )
 
@@ -18,35 +18,31 @@ var upgrader = websocket.Upgrader{
 // TerminalHandler exposes the WebSocket terminal endpoint.
 type TerminalHandler struct {
 	terminalSvc *service.TerminalService
-	jwtSvc      *token.JWTService
 }
 
 // NewTerminalHandler creates a TerminalHandler with the given dependencies.
-func NewTerminalHandler(terminalSvc *service.TerminalService, jwtSvc *token.JWTService) *TerminalHandler {
+func NewTerminalHandler(terminalSvc *service.TerminalService) *TerminalHandler {
 	return &TerminalHandler{
 		terminalSvc: terminalSvc,
-		jwtSvc:      jwtSvc,
 	}
 }
 
 // Handle handles GET /api/v1/servers/{id}/terminal.
 func (h *TerminalHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	// Validate JWT from query parameter before upgrade.
-	tokenStr := r.URL.Query().Get("token")
-	if tokenStr == "" {
+	claims := mw.GetUserClaims(r.Context())
+	if claims == nil {
 		server.WriteError(w, r, server.ErrUnauthorized)
 		return
 	}
 
-	if _, err := h.jwtSvc.ValidateToken(tokenStr); err != nil {
-		server.WriteError(w, r, server.ErrUnauthorized)
-		return
-	}
-
-	// Parse server ID from URL path.
 	id, err := parseIDParam(r)
 	if err != nil {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid server id"))
+		return
+	}
+
+	if !mw.CheckServerAccess(claims, id) {
+		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to this server"))
 		return
 	}
 

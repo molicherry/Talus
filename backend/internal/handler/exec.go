@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/vpsmanager/backend/internal/server"
+	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
 )
 
@@ -30,6 +31,12 @@ func (h *ExecHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid server id"))
+		return
+	}
+
+	claims := mw.GetUserClaims(r.Context())
+	if !mw.CheckServerAccess(claims, id) {
+		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to this server"))
 		return
 	}
 

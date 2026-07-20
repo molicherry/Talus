@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Copy, Key, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,7 +28,13 @@ interface APIKeyItem {
   name: string;
   key_prefix: string;
   scopes: string[];
+  server_ids?: number[];
   created_at: string;
+}
+
+interface ServerItem {
+  id: number;
+  name: string;
 }
 
 export function ApiKeysPage() {
@@ -38,6 +44,8 @@ export function ApiKeysPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newScopes, setNewScopes] = useState<string[]>([...DEFAULT_SCOPES]);
+  const [servers, setServers] = useState<ServerItem[]>([]);
+  const [newServerIDs, setNewServerIDs] = useState<number[]>([]);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -59,9 +67,28 @@ export function ApiKeysPage() {
 
   useState(() => { fetchKeys(); });
 
+  useEffect(() => {
+    const fetchServers = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/servers`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = await res.json();
+        setServers(json.data ?? []);
+      } catch { /* ignore */ }
+    };
+    fetchServers();
+  }, [token]);
+
   const toggleScope = (scope: string) => {
     setNewScopes((prev) =>
       prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope],
+    );
+  };
+
+  const toggleServer = (id: number) => {
+    setNewServerIDs((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id],
     );
   };
 
@@ -70,6 +97,7 @@ export function ApiKeysPage() {
     try {
       const body: Record<string, unknown> = { name: newName };
       if (newScopes.length > 0) body.scopes = newScopes;
+      if (newServerIDs.length > 0) body.server_ids = newServerIDs;
       const res = await fetch(`${API_BASE}/api/v1/api-keys`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -80,6 +108,7 @@ export function ApiKeysPage() {
       setNewKey(json.data.key);
       setNewName("");
       setNewScopes([...DEFAULT_SCOPES]);
+      setNewServerIDs([]);
       fetchKeys();
     } catch {
       toast.error(t("common.error"));
@@ -200,6 +229,38 @@ export function ApiKeysPage() {
                   ))}
                 </div>
               </div>
+              {servers.length > 0 && (
+                <div>
+                  <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {t("apiKeys.serversLabel")}
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {servers.map((srv) => (
+                      <label
+                        key={srv.id}
+                        className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                          newServerIDs.includes(srv.id)
+                            ? "border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
+                            : "border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:border-gray-600"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={newServerIDs.includes(srv.id)}
+                          onChange={() => toggleServer(srv.id)}
+                          className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        {srv.name}
+                      </label>
+                    ))}
+                  </div>
+                  {newServerIDs.length === 0 && (
+                    <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                      {t("apiKeys.serversAll")}
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="flex gap-3">
                 <button
                   type="button"
@@ -244,6 +305,9 @@ export function ApiKeysPage() {
                   {t("apiKeys.scopesLabel")}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                  {t("apiKeys.serversLabel")}
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   Prefix
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
@@ -271,6 +335,11 @@ export function ApiKeysPage() {
                         </span>
                       ))}
                     </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+                    {k.server_ids && k.server_ids.length > 0
+                      ? t("apiKeys.serversCount", { count: k.server_ids.length })
+                      : t("apiKeys.serversAll")}
                   </td>
                   <td className="px-4 py-3 font-mono text-sm text-gray-500 dark:text-gray-400">
                     {k.key_prefix}...

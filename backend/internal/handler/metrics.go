@@ -7,6 +7,7 @@ import (
 
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
+	mw "github.com/vpsmanager/backend/internal/server/middleware"
 )
 
 // MetricsHandler exposes the metrics query endpoint.
@@ -24,6 +25,12 @@ func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	serverID, err := parseIDParam(r)
 	if err != nil {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid server id"))
+		return
+	}
+
+	claims := mw.GetUserClaims(r.Context())
+	if !mw.CheckServerAccess(claims, serverID) {
+		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to this server"))
 		return
 	}
 

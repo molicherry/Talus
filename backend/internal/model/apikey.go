@@ -18,6 +18,7 @@ type APIKey struct {
 	KeyHash   string    `gorm:"uniqueIndex;not null" json:"-"`
 	KeyPrefix string    `gorm:"size:16;not null" json:"key_prefix"`
 	Scopes    []string  `gorm:"type:jsonb;serializer:json;default:'[\"servers:read\",\"servers:exec\",\"servers:terminal\",\"metrics:read\",\"credentials:read\"]'" json:"scopes"`
+	ServerIDs []uint    `gorm:"type:jsonb;serializer:json" json:"server_ids,omitempty"`
 	CreatedAt time.Time `gorm:"not null" json:"created_at"`
 }
 

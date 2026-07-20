@@ -51,3 +51,10 @@ func (r *ServerRepo) Update(ctx context.Context, server *model.Server) error {
 func (r *ServerRepo) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&model.Server{}, id).Error
 }
+
+// FindByIDs returns servers whose IDs are in the given slice, ordered by name.
+func (r *ServerRepo) FindByIDs(ctx context.Context, ids []uint) ([]model.Server, error) {
+	var servers []model.Server
+	result := r.db.WithContext(ctx).Where("id IN ?", ids).Order("name ASC").Preload("Credential").Find(&servers)
+	return servers, result.Error
+}

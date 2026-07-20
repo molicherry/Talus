@@ -160,3 +160,132 @@ Handler executes
 - ❌ Adding `services:relay` to `AllScopeGatedScopes` → every existing API key silently gains proxy access.
 - ❌ Using a real numeric value in `routeScopes` instead of `{id}` → normalization won't match.
 - ❌ Forgetting to add a DELETE endpoint to `jwtOnlyRoutes` → API keys can delete resources.
+
+---
+
+## Server-Level Access Control (Two-Dimensional Scoping)
+
+> **Added**: 2026-07. API keys now have a second dimension: `ServerIDs []uint` controls **which servers** the key can access, independent of scopes which control **what actions**.
+
+### Data Model
+
+```go
+// model/apikey.go
+type APIKey struct {
+    Scopes    []string `gorm:"type:jsonb;serializer:json" json:"scopes"`
+    ServerIDs []uint   `gorm:"type:jsonb;serializer:json" json:"server_ids,omitempty"`
+}
+
+// pkg/token/jwt.go
+type Claims struct {
+    ServerIDs []uint `json:"server_ids,omitempty"`  // nil/empty = full access
+}
+```
+
+- `ServerIDs = nil` or `[]` → full access (JWT users, unrestricted keys)
+- `ServerIDs = [1, 3]` → restricted to those server IDs
+- Scopes × ServerIDs intersect: both dimensions must grant access
+
+### CheckServerAccess Helper
+
+```go
+// middleware/scope.go
+func CheckServerAccess(claims *token.Claims, serverID uint) bool {
+    if claims == nil || len(claims.ServerIDs) == 0 {
+        return true  // nil/empty = full access (JWT user or unrestricted key)
+    }
+    for _, id := range claims.ServerIDs {
+        if id == serverID {
+            return true
+        }
+    }
+    return false
+}
+```
+
+### Enforcement Patterns
+
+**Pattern 1: List endpoints** — filter results by ServerIDs
+
+```go
+// handler/server.go — List()
+func (h *ServerHandler) List(w http.ResponseWriter, r *http.Request) {
+    claims := mw.GetUserClaims(r.Context())
+    var servers []model.Server
+    var err error
+    if claims != nil && len(claims.ServerIDs) > 0 {
+        servers, err = h.svc.ListFiltered(r.Context(), claims.ServerIDs)
+    } else {
+        servers, err = h.svc.List(r.Context())
+    }
+    // ...
+}
+```
+
+**Pattern 2: Single-server endpoints** — 403 on denied server
+
+```go
+// handler/server.go — Get(), Update(); handler/exec.go — Execute(); handler/metrics.go — Get()
+id, _ := parseIDParam(r)
+claims := mw.GetUserClaims(r.Context())
+if !mw.CheckServerAccess(claims, id) {
+    server.WriteError(w, r, server.NewAppError(http.StatusForbidden,
+        "access denied: api key does not have access to this server"))
+    return
+}
+```
+
+**Pattern 3: Service relay** — check Service.ServerID against Claims
+
+```go
+// handler/service.go — Relay()
+claims := mw.GetUserClaims(r.Context())
+svc, getErr := h.svc.Get(r.Context(), uint(id))
+if getErr == nil && svc.ServerID != nil {
+    if !mw.CheckServerAccess(claims, *svc.ServerID) {
+        server.WriteError(w, r, server.NewAppError(http.StatusForbidden,
+            "access denied: api key does not have access to the server this service is bound to"))
+        return
+    }
+}
+```
+
+### Server ID Validation on API Key Creation
+
+```go
+// service/apikey.go — Create()
+if len(serverIDs) > 0 {
+    existing, err := s.serverRepo.FindByIDs(ctx, serverIDs)
+    if len(existing) != len(serverIDs) {
+        return nil, server.NewAppError(http.StatusBadRequest,
+            fmt.Sprintf("invalid server_ids: servers not found: %v", missing))
+    }
+}
+```
+
+### Auth Middleware — ServerIDs Propagation
+
+```go
+// middleware/auth.go — APIKeyValidator interface
+type APIKeyValidator interface {
+    Validate(ctx context.Context, rawKey string) (userID uint, username string, role string, scopes []string, serverIDs []uint, err error)
+}
+
+// main.go — adapter
+apiKeyAuth := mw.APIKeyValidatorFunc(func(ctx context.Context, rawKey string) (uint, string, string, []string, []uint, error) {
+    k, err := apiKeySvc.Validate(ctx, rawKey)
+    return k.ID, k.Name, "admin", k.Scopes, k.ServerIDs, nil
+})
+```
+
+### Terminal WebSocket — Auth Middleware Integration
+
+The terminal WebSocket endpoint was moved **inside** the auth middleware group. The handler replaced query-param token validation with `mw.GetUserClaims(r.Context())`.
+
+### Common Mistakes — Server-Level
+
+- ❌ Forgetting to add `CheckServerAccess` to a new single-server endpoint → unauthorized server access.
+- ❌ Using `List()` instead of `ListFiltered()` for server-scoped keys → leaking servers.
+- ❌ Not checking `claims == nil` before accessing `claims.ServerIDs` → nil pointer panic.
+- ❌ Not validating server IDs on API key creation → keys with non-existent server IDs stored.
+- ❌ Adding `server_ids` to request body but not passing to `service.Create()` → silently ignored.

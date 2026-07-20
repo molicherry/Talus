@@ -255,7 +255,10 @@
    "servers_terminal": "终端",
    "metrics_read": "读取指标",
    "credentials_read": "读取凭证",
-   "services_relay": "转发服务"
-  }
+    "services_relay": "转发服务"
+   },
+   "serversLabel": "服务器",
+   "serversAll": "全部服务器",
+   "serversCount": "{{count}} 台服务器"
  }
 }

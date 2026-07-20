@@ -118,11 +118,14 @@ CREATE TABLE api_keys (
     key_hash    VARCHAR(128) NOT NULL UNIQUE,
     key_prefix  VARCHAR(16)  NOT NULL,
     scopes      JSONB        NOT NULL DEFAULT '["servers:read","servers:write","servers:exec","servers:terminal","metrics:read","credentials:read"]',
+    server_ids  JSONB,                           -- NULL = all servers; [1,3] = restricted to servers 1 and 3
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 ```
 
 **scopes column**: JSONB array of `resource:action` strings controlling what the API key can access. Valid values: `servers:read`, `servers:write`, `servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`. Migration must backfill existing rows with `UPDATE ... SET scopes = DEFAULT WHERE scopes IS NULL`. API keys never have access to JWT-only endpoints regardless of scope.
+
+**server_ids column**: JSONB array of `uint` server IDs. `NULL` or empty `[]` = full access to all servers (JWT users and unrestricted keys). Non-empty = restricted to those server IDs. Enforced at handler level via `CheckServerAccess()`. Validated on API key creation — all IDs must exist in the `servers` table.
 
 ### audit_logs
 ```sql

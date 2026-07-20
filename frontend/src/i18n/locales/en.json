@@ -255,7 +255,10 @@
    "servers_terminal": "Terminal",
    "metrics_read": "Read metrics",
    "credentials_read": "Read credentials",
-   "services_relay": "Relay services"
-  }
+    "services_relay": "Relay services"
+   },
+   "serversLabel": "Servers",
+   "serversAll": "All servers",
+   "serversCount": "{{count}} servers"
  }
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vpsmanager/backend/internal/server"
+	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
 )
 
@@ -105,6 +106,15 @@ func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid service id"))
 		return
+	}
+
+	claims := mw.GetUserClaims(r.Context())
+	svc, getErr := h.svc.Get(r.Context(), uint(id))
+	if getErr == nil && svc.ServerID != nil {
+		if !mw.CheckServerAccess(claims, *svc.ServerID) {
+			server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to the server this service is bound to"))
+			return
+		}
 	}
 
 	var req relayRequest
