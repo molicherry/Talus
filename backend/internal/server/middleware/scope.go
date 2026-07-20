@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"strings"
+
+	"github.com/vpsmanager/backend/internal/pkg/token"
 )
 
 // routeScopes maps normalized "METHOD /api/v1/..." patterns to required scopes.
@@ -99,6 +101,20 @@ var validScopes = map[string]bool{
 	"metrics:read":       true,
 	"credentials:read":   true,
 	"services:relay":     true,
+}
+
+// CheckServerAccess returns true if the claims have full access (nil or empty ServerIDs)
+// or if the target serverID is present in the claims' ServerIDs list.
+func CheckServerAccess(claims *token.Claims, serverID uint) bool {
+	if claims == nil || len(claims.ServerIDs) == 0 {
+		return true
+	}
+	for _, id := range claims.ServerIDs {
+		if id == serverID {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateScopes checks that every scope in scopes is a known valid scope.

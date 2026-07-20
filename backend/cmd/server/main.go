@@ -57,7 +57,7 @@ func main() {
 	slog.Info("timescaledb extension ready")
 
 	// 2. Clean up orphan columns from old migration
-	if err := db.Exec("ALTER TABLE metrics DROP COLUMN IF EXISTS net_rx, DROP COLUMN IF EXISTS net_tx").Error; err != nil {
+	if err := db.Exec("DO $$ BEGIN IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'metrics') THEN ALTER TABLE metrics DROP COLUMN IF EXISTS net_rx, DROP COLUMN IF EXISTS net_tx; END IF; END $$").Error; err != nil {
 		slog.Error("failed to drop orphan columns", "error", err)
 		os.Exit(1)
 	}
@@ -116,15 +116,15 @@ func main() {
 	authSvc := service.NewAuthService(userRepo, jwtSvc, db)
 	authHandler := handler.NewAuthHandler(authSvc)
 
-	// Dependency chain — API Keys
-	apiKeyRepo := repository.NewAPIKeyRepo(db)
-	apiKeySvc := service.NewAPIKeyService(apiKeyRepo)
-	apiKeyHandler := handler.NewAPIKeyHandler(apiKeySvc)
-
-	// Dependency chain — Servers
+	// Dependency chain — Servers (needed before API Keys for server ID validation)
 	serverRepo := repository.NewServerRepo(db)
 	metricRepo := repository.NewMetricRepo(db)
 	serverSvc := service.NewServerService(serverRepo, metricRepo)
+
+	// Dependency chain — API Keys
+	apiKeyRepo := repository.NewAPIKeyRepo(db)
+	apiKeySvc := service.NewAPIKeyService(apiKeyRepo, serverRepo)
+	apiKeyHandler := handler.NewAPIKeyHandler(apiKeySvc)
 	serverHandler := handler.NewServerHandler(serverSvc)
 
 	// Dependency chain — Credentials
@@ -150,7 +150,7 @@ func main() {
 	terminalSvc := service.NewTerminalService(sshSvc)
 
 	execH := handler.NewExecHandler(sshSvc)
-	terminalH := handler.NewTerminalHandler(terminalSvc, jwtSvc)
+	terminalH := handler.NewTerminalHandler(terminalSvc)
 
 	// Dependency chain — Metrics
 	monitorSvc := service.NewMonitorService(sshSvc, metricRepo, serverRepo, time.Duration(cfg.MonitorInterval)*time.Second)
@@ -158,12 +158,12 @@ func main() {
 
 	go monitorSvc.Start(context.Background())
 
-	apiKeyAuth := mw.APIKeyValidatorFunc(func(ctx context.Context, rawKey string) (uint, string, string, []string, error) {
+	apiKeyAuth := mw.APIKeyValidatorFunc(func(ctx context.Context, rawKey string) (uint, string, string, []string, []uint, error) {
 		k, err := apiKeySvc.Validate(ctx, rawKey)
 		if err != nil {
-			return 0, "", "", nil, err
+			return 0, "", "", nil, nil, err
 		}
-		return k.ID, k.Name, "admin", k.Scopes, nil
+		return k.ID, k.Name, "admin", k.Scopes, k.ServerIDs, nil
 	})
 
 	router := server.NewRouter(server.RouteConfig{

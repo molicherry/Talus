@@ -17,8 +17,9 @@ func NewAPIKeyHandler(svc *service.APIKeyService) *APIKeyHandler {
 }
 
 type createAPIKeyRequest struct {
-	Name   string   `json:"name,omitempty"`
-	Scopes []string `json:"scopes,omitempty"`
+	Name      string   `json:"name,omitempty"`
+	Scopes    []string `json:"scopes,omitempty"`
+	ServerIDs []uint   `json:"server_ids,omitempty"`
 }
 
 func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +28,7 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
 		return
 	}
-	result, err := h.svc.Create(r.Context(), req.Name, req.Scopes)
+	result, err := h.svc.Create(r.Context(), req.Name, req.Scopes, req.ServerIDs)
 	if err != nil {
 		server.WriteError(w, r, err)
 		return

@@ -15,11 +15,12 @@ import (
 )
 
 type APIKeyService struct {
-	repo *repository.APIKeyRepo
+	repo       *repository.APIKeyRepo
+	serverRepo *repository.ServerRepo
 }
 
-func NewAPIKeyService(repo *repository.APIKeyRepo) *APIKeyService {
-	return &APIKeyService{repo: repo}
+func NewAPIKeyService(repo *repository.APIKeyRepo, serverRepo *repository.ServerRepo) *APIKeyService {
+	return &APIKeyService{repo: repo, serverRepo: serverRepo}
 }
 
 type CreateAPIKeyResult struct {
@@ -27,7 +28,7 @@ type CreateAPIKeyResult struct {
 	APIKey *model.APIKey `json:"api_key"`
 }
 
-func (s *APIKeyService) Create(ctx context.Context, name string, scopes []string) (*CreateAPIKeyResult, error) {
+func (s *APIKeyService) Create(ctx context.Context, name string, scopes []string, serverIDs []uint) (*CreateAPIKeyResult, error) {
 	if len(scopes) == 0 {
 		scopes = model.AllScopeGatedScopes
 	}
@@ -35,6 +36,27 @@ func (s *APIKeyService) Create(ctx context.Context, name string, scopes []string
 	if invalid := mw.ValidateScopes(scopes); len(invalid) > 0 {
 		return nil, server.NewAppError(http.StatusBadRequest,
 			fmt.Sprintf("invalid scopes: %v", invalid))
+	}
+
+	if len(serverIDs) > 0 {
+		existing, err := s.serverRepo.FindByIDs(ctx, serverIDs)
+		if err != nil {
+			return nil, fmt.Errorf("validate server ids: %w", err)
+		}
+		if len(existing) != len(serverIDs) {
+			existingIDs := make(map[uint]bool)
+			for _, srv := range existing {
+				existingIDs[srv.ID] = true
+			}
+			var missing []uint
+			for _, id := range serverIDs {
+				if !existingIDs[id] {
+					missing = append(missing, id)
+				}
+			}
+			return nil, server.NewAppError(http.StatusBadRequest,
+				fmt.Sprintf("invalid server_ids: servers not found: %v", missing))
+		}
 	}
 
 	raw := make([]byte, 32)
@@ -52,6 +74,7 @@ func (s *APIKeyService) Create(ctx context.Context, name string, scopes []string
 		KeyHash:   hashStr,
 		KeyPrefix: prefix,
 		Scopes:    scopes,
+		ServerIDs: serverIDs,
 	}
 	if err := s.repo.Create(ctx, k); err != nil {
 		return nil, fmt.Errorf("save key: %w", err)

@@ -75,9 +75,6 @@ func NewRouter(cfg RouteConfig) chi.Router {
 	// Health check
 	r.Get("/healthz", healthHandler)
 
-	// Terminal WebSocket (standalone — validates token from query param)
-	r.Get("/api/v1/servers/{id}/terminal", cfg.TerminalHandler)
-
 	// Public API routes (no authentication required)
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/", versionHandler)
@@ -104,6 +101,7 @@ func NewRouter(cfg RouteConfig) chi.Router {
 				r.Delete("/", cfg.DeleteServerHandler)
 				r.Post("/exec", cfg.ExecHandler)
 				r.Get("/metrics", cfg.MetricsHandler)
+				r.Get("/terminal", cfg.TerminalHandler)
 			})
 		})
 

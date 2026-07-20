@@ -44,7 +44,14 @@ func NewServerHandler(svc *service.ServerService) *ServerHandler {
 
 // List handles GET /api/v1/servers.
 func (h *ServerHandler) List(w http.ResponseWriter, r *http.Request) {
-	servers, err := h.svc.List(r.Context())
+	claims := mw.GetUserClaims(r.Context())
+	var servers []model.Server
+	var err error
+	if claims != nil && len(claims.ServerIDs) > 0 {
+		servers, err = h.svc.ListFiltered(r.Context(), claims.ServerIDs)
+	} else {
+		servers, err = h.svc.List(r.Context())
+	}
 	if err != nil {
 		server.WriteError(w, r, err)
 		return
@@ -57,6 +64,12 @@ func (h *ServerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid server id"))
+		return
+	}
+
+	claims := mw.GetUserClaims(r.Context())
+	if !mw.CheckServerAccess(claims, id) {
+		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to this server"))
 		return
 	}
 
@@ -115,6 +128,12 @@ func (h *ServerHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid server id"))
+		return
+	}
+
+	claims := mw.GetUserClaims(r.Context())
+	if !mw.CheckServerAccess(claims, id) {
+		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to this server"))
 		return
 	}
 

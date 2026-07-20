@@ -134,6 +134,68 @@ func (s *ServerService) Get(ctx context.Context, id uint) (*model.Server, error)
 	return srv, nil
 }
 
+// ListFiltered returns servers scoped to the given serverIDs. When serverIDs is empty,
+// it returns all servers (full access).
+func (s *ServerService) ListFiltered(ctx context.Context, serverIDs []uint) ([]model.Server, error) {
+	if len(serverIDs) == 0 {
+		return s.List(ctx)
+	}
+
+	servers, err := s.repo.FindByIDs(ctx, serverIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list filtered servers: %w", err)
+	}
+
+	if len(servers) == 0 {
+		return servers, nil
+	}
+
+	ids := make([]uint, len(servers))
+	for i, srv := range servers {
+		ids[i] = srv.ID
+	}
+
+	latest, err := s.metricRepo.FindLatestByServerIDs(ctx, ids)
+	if err != nil {
+		slog.Error("failed to fetch latest metrics, showing servers as unknown",
+			"error", err,
+		)
+		for i := range servers {
+			servers[i].Status = "unknown"
+		}
+		return servers, nil
+	}
+
+	now := time.Now().UTC()
+	for i := range servers {
+		row, ok := latest[servers[i].ID]
+		if !ok {
+			servers[i].Status = "unknown"
+			continue
+		}
+
+		seen := row.Time.Format(time.RFC3339)
+		servers[i].LastSeen = &seen
+
+		if now.Sub(row.Time) <= statusThreshold {
+			servers[i].Status = "online"
+		} else {
+			servers[i].Status = "offline"
+		}
+
+		servers[i].LatestMetrics = &model.LatestMetrics{
+			CPUPercent:    row.CPUPercent,
+			MemoryPercent: row.MemoryPercent,
+			DiskPercent:   row.DiskPercent,
+		}
+		servers[i].OS = row.OS
+		servers[i].CPUModel = row.CPUModel
+		servers[i].UptimeSeconds = row.UptimeSeconds
+	}
+
+	return servers, nil
+}
+
 // Create validates and inserts a new server.
 func (s *ServerService) Create(ctx context.Context, server *model.Server) (*model.Server, error) {
 	if server.Name == "" {

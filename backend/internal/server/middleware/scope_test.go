@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"testing"
+
+	"github.com/vpsmanager/backend/internal/pkg/token"
 )
 
 func TestNormalizePath(t *testing.T) {
@@ -111,6 +113,33 @@ func TestValidateScopes(t *testing.T) {
 			invalid := ValidateScopes(tt.scopes)
 			if len(invalid) != tt.wantLen {
 				t.Errorf("ValidateScopes(%v) returned %d invalid scopes, want %d: %v", tt.scopes, len(invalid), tt.wantLen, invalid)
+			}
+		})
+	}
+}
+
+func TestCheckServerAccess(t *testing.T) {
+	tests := []struct {
+		name      string
+		claims    *token.Claims
+		serverID  uint
+		wantAllow bool
+	}{
+		{"nil claims", nil, 1, true},
+		{"nil ServerIDs", &token.Claims{}, 1, true},
+		{"empty ServerIDs", &token.Claims{ServerIDs: []uint{}}, 1, true},
+		{"ServerIDs contains target", &token.Claims{ServerIDs: []uint{1, 2, 3}}, 2, true},
+		{"ServerIDs does not contain target", &token.Claims{ServerIDs: []uint{1, 2, 3}}, 99, false},
+		{"single ServerID match", &token.Claims{ServerIDs: []uint{5}}, 5, true},
+		{"single ServerID mismatch", &token.Claims{ServerIDs: []uint{5}}, 7, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			allowed := CheckServerAccess(tt.claims, tt.serverID)
+			if allowed != tt.wantAllow {
+				t.Errorf("CheckServerAccess(claims=%v, serverID=%d) = %v, want %v",
+					tt.claims, tt.serverID, allowed, tt.wantAllow)
 			}
 		})
 	}

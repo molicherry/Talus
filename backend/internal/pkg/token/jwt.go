@@ -9,9 +9,10 @@ import (
 // Claims holds the JWT payload for an authenticated user.
 type Claims struct {
 	jwt.RegisteredClaims
-	UserID   uint   `json:"uid"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	UserID    uint   `json:"uid"`
+	Username  string `json:"username"`
+	Role      string `json:"role"`
+	ServerIDs []uint `json:"server_ids,omitempty"`
 }
 
 // JWTService signs and validates JSON Web Tokens using HMAC-SHA256.
