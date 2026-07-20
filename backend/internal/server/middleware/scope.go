@@ -30,9 +30,10 @@ var jwtOnlyRoutes = map[string]bool{
 	"DELETE /api/v1/api-keys/{id}":      true,
 	"GET /api/v1/auth/profile":          true,
 	"PUT /api/v1/auth/password":         true,
-	"POST /api/v1/services":             true,
-	"PUT /api/v1/services/{id}":         true,
-	"DELETE /api/v1/services/{id}":      true,
+	"POST /api/v1/services":                    true,
+	"PUT /api/v1/services/{id}":                true,
+	"DELETE /api/v1/services/{id}":             true,
+	"GET /api/v1/services/{id}/credentials":    true,
 }
 
 // hasScope checks whether an API key with the given userScopes is permitted

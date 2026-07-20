@@ -156,6 +156,27 @@ func (s *ServiceRelayService) Get(ctx context.Context, id uint) (*model.Service,
 	return svc, nil
 }
 
+// GetCredentials decrypts and returns the credential map for a service.
+func (s *ServiceRelayService) GetCredentials(ctx context.Context, id uint) (map[string]string, error) {
+	svc, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, server.NewAppError(http.StatusNotFound, "service not found")
+		}
+		return nil, fmt.Errorf("get credentials %d: %w", id, err)
+	}
+	key := s.masterKey.DeriveKey(svc.Salt)
+	creds := make(map[string]string, len(svc.EncryptedCredentials))
+	for k, v := range svc.EncryptedCredentials {
+		plain, err := crypto.Decrypt(v, key)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt credential '%s': %w", k, server.NewAppError(http.StatusInternalServerError, "credential decryption failed"))
+		}
+		creds[k] = string(plain)
+	}
+	return creds, nil
+}
+
 // Update fully replaces an existing service's fields and credentials with a new salt.
 func (s *ServiceRelayService) Update(ctx context.Context, id uint, input CreateServiceInput) (*model.Service, error) {
 	existing, err := s.repo.FindByID(ctx, id)
