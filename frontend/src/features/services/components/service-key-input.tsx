@@ -1,5 +1,7 @@
-import { Plus, Trash2 } from "lucide-react";
+import { Copy, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 
 interface KeyValueHint {
   key: string;
@@ -30,8 +32,24 @@ function fromRows(rows: KeyValueHint[]): { credentials: Record<string, string>; 
   return { credentials, hints };
 }
 
+const copyToClipboard = (text: string): Promise<void> => {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text).then(() => {});
+  }
+  const el = document.createElement("textarea");
+  el.value = text;
+  el.style.position = "fixed";
+  el.style.opacity = "0";
+  document.body.appendChild(el);
+  el.select();
+  document.execCommand("copy");
+  document.body.removeChild(el);
+  return Promise.resolve();
+};
+
 export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
   const { t } = useTranslation();
+  const [visibleValues, setVisibleValues] = useState<Record<number, boolean>>({});
   const rows = toRows(value);
 
   const updateRow = (index: number, field: "key" | "value" | "hint", newVal: string) => {
@@ -45,6 +63,14 @@ export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
 
   const removeRow = (index: number) => {
     onChange(fromRows(rows.filter((_, i) => i !== index)));
+  };
+
+  const toggleVisible = (index: number) => {
+    setVisibleValues((prev) => ({ ...prev, [index]: !prev[index] }));
+  };
+
+  const handleCopy = (text: string) => {
+    copyToClipboard(text).then(() => toast.success(t("common.copied")));
   };
 
   return (
@@ -66,13 +92,33 @@ export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
             placeholder="token"
             className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
           />
-          <input
-            type="text"
-            value={row.value}
-            onChange={(e) => updateRow(index, "value", e.target.value)}
-            placeholder="ptr_xxx"
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
-          />
+          <div className="relative">
+            <input
+              type={visibleValues[index] ? "text" : "password"}
+              value={row.value}
+              onChange={(e) => updateRow(index, "value", e.target.value)}
+              placeholder="ptr_xxx"
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 pr-16 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
+            />
+            <div className="absolute right-0 top-0 flex h-full items-center gap-0.5 pr-1">
+              <button
+                type="button"
+                onClick={() => handleCopy(row.value)}
+                className="cursor-pointer rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                aria-label={t("common.copied")}
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleVisible(index)}
+                className="cursor-pointer rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                aria-label={visibleValues[index] ? t("service.hide") : t("service.show")}
+              >
+                {visibleValues[index] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
           <input
             type="text"
             value={row.hint}

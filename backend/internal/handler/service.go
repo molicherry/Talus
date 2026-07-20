@@ -150,6 +150,21 @@ func (h *ServiceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, svc)
 }
 
+// GetCredentials handles GET /api/v1/services/{id}/credentials.
+func (h *ServiceHandler) GetCredentials(w http.ResponseWriter, r *http.Request) {
+	id, err := parseServiceID(r)
+	if err != nil {
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid service id"))
+		return
+	}
+	creds, err := h.svc.GetCredentials(r.Context(), id)
+	if err != nil {
+		server.WriteError(w, r, err)
+		return
+	}
+	server.WriteJSON(w, http.StatusOK, creds)
+}
+
 // Update handles PUT /api/v1/services/{id}.
 func (h *ServiceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := parseServiceID(r)

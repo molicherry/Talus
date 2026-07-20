@@ -47,6 +47,7 @@ export function ApiKeysPage() {
   const [servers, setServers] = useState<ServerItem[]>([]);
   const [newServerIDs, setNewServerIDs] = useState<number[]>([]);
   const [newKey, setNewKey] = useState<string | null>(null);
+  const [revealedKeys, setRevealedKeys] = useState<Record<number, string>>({});
   const [creating, setCreating] = useState(false);
 
   const token = localStorage.getItem("auth_token");
@@ -106,6 +107,7 @@ export function ApiKeysPage() {
       if (!res.ok) throw new Error("Failed");
       const json = await res.json();
       setNewKey(json.data.key);
+      setRevealedKeys((prev) => ({ ...prev, [json.data.api_key.id]: json.data.key }));
       setNewName("");
       setNewScopes([...DEFAULT_SCOPES]);
       setNewServerIDs([]);
@@ -349,6 +351,15 @@ export function ApiKeysPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
+                      {revealedKeys[k.id] && (
+                        <button
+                          type="button"
+                          onClick={() => copyKey(revealedKeys[k.id])}
+                          className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => handleDelete(k.id)}

@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
+import { useEffect } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -28,6 +29,7 @@ export function ServiceForm({ service }: ServiceFormProps) {
     register,
     handleSubmit,
     control,
+    reset,
     setValue,
     formState: { errors },
   } = useForm<ServiceFormValues>({
@@ -40,7 +42,7 @@ export function ServiceForm({ service }: ServiceFormProps) {
           description: service.description ?? "",
           server_id: service.server_id ?? undefined,
           credentials: {},
-          credential_hints: {},
+          credential_hints: service.credential_hints ?? {},
         }
       : {
           credentials: {},
@@ -49,6 +51,30 @@ export function ServiceForm({ service }: ServiceFormProps) {
   });
 
   const hints = useWatch({ control, name: "credential_hints" }) ?? {};
+
+  useEffect(() => {
+    if (!service) return;
+    const token = localStorage.getItem("auth_token");
+    fetch(`/api/v1/services/${service.id}/credentials`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.data && typeof data.data === "object") {
+          const creds = data.data as Record<string, string>;
+          reset({
+            name: service.name,
+            display_name: service.display_name,
+            base_url: service.base_url,
+            description: service.description ?? "",
+            server_id: service.server_id ?? undefined,
+            credentials: creds,
+            credential_hints: service.credential_hints ?? {},
+          });
+        }
+      })
+      .catch(() => {});
+  }, [service, reset]);
 
   const onSubmit = (data: ServiceFormValues) => {
     if (isEdit && service) {

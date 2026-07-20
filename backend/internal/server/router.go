@@ -51,12 +51,13 @@ type RouteConfig struct {
 	DeleteAPIKeyHandler http.HandlerFunc
 
 	// Services
-	CreateServiceHandler  http.HandlerFunc
-	ListServicesHandler   http.HandlerFunc
-	GetServiceHandler     http.HandlerFunc
-	UpdateServiceHandler  http.HandlerFunc
-	DeleteServiceHandler  http.HandlerFunc
-	RelayServiceHandler   http.HandlerFunc
+	CreateServiceHandler        http.HandlerFunc
+	ListServicesHandler         http.HandlerFunc
+	GetServiceHandler           http.HandlerFunc
+	UpdateServiceHandler        http.HandlerFunc
+	DeleteServiceHandler        http.HandlerFunc
+	RelayServiceHandler         http.HandlerFunc
+	GetServiceCredentialsHandler http.HandlerFunc
 
 	// Static files directory for SPA (frontend/dist)
 	StaticDir string
@@ -132,6 +133,7 @@ func NewRouter(cfg RouteConfig) chi.Router {
 			r.Put("/{id}", cfg.UpdateServiceHandler)
 			r.Delete("/{id}", cfg.DeleteServiceHandler)
 			r.Post("/{id}/relay", cfg.RelayServiceHandler)
+			r.Get("/{id}/credentials", cfg.GetServiceCredentialsHandler)
 		})
 	})
 
