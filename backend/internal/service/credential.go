@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/crypto"
@@ -219,6 +220,43 @@ func (s *CredentialService) Delete(ctx context.Context, id uint) error {
 		return fmt.Errorf("credential %d: %w", id, err)
 	}
 	return nil
+}
+
+// RevealCredential contains the decrypted credential values.
+type RevealCredential struct {
+	Password   string `json:"password,omitempty"`
+	PrivateKey string `json:"private_key,omitempty"`
+}
+
+// Reveal decrypts and returns the credential's password or private key.
+func (s *CredentialService) Reveal(ctx context.Context, id uint) (*RevealCredential, error) {
+	cred, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, server.NewAppError(http.StatusNotFound, "credential not found")
+		}
+		return nil, fmt.Errorf("reveal credential %d: %w", id, err)
+	}
+
+	key := s.masterKey.DeriveKey(cred.Salt)
+	result := &RevealCredential{}
+
+	if cred.EncryptedPassword != nil && *cred.EncryptedPassword != "" {
+		plain, err := crypto.Decrypt(*cred.EncryptedPassword, key)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt password: %w", err)
+		}
+		result.Password = string(plain)
+	}
+	if cred.EncryptedPrivateKey != nil && *cred.EncryptedPrivateKey != "" {
+		plain, err := crypto.Decrypt(*cred.EncryptedPrivateKey, key)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt private key: %w", err)
+		}
+		result.PrivateKey = string(plain)
+	}
+
+	return result, nil
 }
 
 // List returns all credentials with encrypted fields masked.
