@@ -1,6 +1,6 @@
 ---
 name: talus
-description: Interact with a running Talus instance via its REST API to manage Linux servers, execute remote commands over SSH, open interactive terminals (WebSocket), query live monitoring metrics, manage SSH credentials, create API keys, register external services with encrypted credentials, and proxy authenticated requests through the relay endpoint. Talus is a self-hosted VPS management platform (Go backend + React frontend + PostgreSQL). Use when user wants to manage servers via Talus API, execute commands on remote hosts, check server metrics, manage SSH credentials programmatically, automate VPS operations through Talus, register proxied services, or relay API calls to external services. Triggers: "Talus API", "manage server via Talus", "execute command on server", "check server metrics Talus", "add SSH credential", "create API key", "relay request", "register service", "Talus 管理", "通过Talus执行命令".
+description: Interact with a running Talus instance via its REST API to manage Linux servers, execute remote commands over SSH, open interactive terminals (WebSocket), query live monitoring metrics, manage SSH credentials with show/hide/copy, create scoped API keys with per-server access control and persistent copy, register external services with encrypted credentials and credential reveal, and proxy authenticated requests through the relay endpoint. Talus is a self-hosted VPS management platform (Go backend + React frontend + PostgreSQL). Use when user wants to manage servers via Talus API, execute commands on remote hosts, check server metrics, manage SSH credentials programmatically, automate VPS operations through Talus, register proxied services, relay API calls to external services, or reveal stored credentials/API keys. Triggers: "Talus API", "manage server via Talus", "execute command on server", "check server metrics Talus", "add SSH credential", "create API key", "relay request", "register service", "reveal credential", "Talus 管理", "通过Talus执行命令".
 ---
 
 # Talus API
@@ -94,19 +94,42 @@ websocat -H="Authorization: Bearer $TOKEN" "ws://localhost:8080/api/v1/servers/1
 ### Create a scoped API key
 
 ```bash
-# Create key (JWT required)
+# Create key with scopes + server_ids (JWT required)
 KEY_RESP=$(curl -s -X POST $TALUS_URL/api/v1/api-keys \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"name":"monitoring","scopes":["servers:read","metrics:read"]}')
+  -d '{"name":"monitoring","scopes":["servers:read","metrics:read"],"server_ids":[1,3]}')
 API_KEY=$(echo $KEY_RESP | jq -r '.data.key')
+KEY_ID=$(echo $KEY_RESP | jq -r '.data.api_key.id')
 
-# Use it
+# Use it — only servers 1 and 3 are accessible
 curl -s $TALUS_URL/api/v1/servers -H "X-API-Key: $API_KEY"
 
 # Missing scope → 403
 curl -s -X POST $TALUS_URL/api/v1/servers -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" -d '{"name":"test","host":"10.0.0.1","port":22}'
 # → {"error":{"code":403,"message":"insufficient scope: requires servers:write"}}
+
+# Server not in key's list → 403
+curl -s $TALUS_URL/api/v1/servers/5 -H "X-API-Key: $API_KEY"
+# → {"error":{"code":403,"message":"access denied: api key does not have access to this server"}}
+
+# Reveal/copy a key later (JWT only, rate-limited: 5/min)
+curl -s $TALUS_URL/api/v1/api-keys/$KEY_ID/reveal \
+  -H "Authorization: Bearer $TOKEN"
+# → {"data":"<raw-key-string>"}
+
+### Reveal a credential or service credential
+
+```bash
+# Reveal SSH credential password/private key (JWT only, rate-limited)
+curl -s $TALUS_URL/api/v1/credentials/1/reveal \
+  -H "Authorization: Bearer $TOKEN"
+# → {"data":{"password":"my-secret-password"}}
+
+# Reveal service credentials (JWT only, rate-limited)
+curl -s $TALUS_URL/api/v1/services/1/credentials \
+  -H "Authorization: Bearer $TOKEN"
+# → {"data":{"token":"glsa_abc..."}}
 ```
 
 ### Register a service and relay requests
@@ -131,7 +154,10 @@ curl -s -X POST $TALUS_URL/api/v1/services/1/relay \
 
 ## Security Notes
 
-- SSH and service credentials encrypted with AES-256-GCM at rest — **never returned** in API responses
+- SSH, service, and API key raw values encrypted with AES-256-GCM at rest — **never returned** in list API responses (`json:"-"`)
+- Dedicated JWT-only reveal endpoints (`/reveal`, `/credentials`) decrypt on-demand with **audit logging** (structured JSON via slog) and **rate limiting** (5 req/min per user)
 - First login to empty instance creates admin account
-- API keys: scoped (7 scope types + optional server_ids), shown once at creation, JWT-only endpoints always reject
+- API keys: two-dimensional access control (7 scope types × optional server_ids), shown once at creation, re-copiable via reveal endpoint
+- All reveal operations logged: `slog.Info("audit: ...", user_id, key_id, ip)`
+- Rate limit exceeded → 429 with `{"error":{"code":429,"message":"too many requests"}}`
 - SSH host keys: TOFU (Trust On First Use) verification
