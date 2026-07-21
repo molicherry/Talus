@@ -42,7 +42,7 @@ export function Sidebar() {
         ))}
       </nav>
       <div className="border-t border-gray-200 px-4 py-3 dark:border-gray-800">
-        <p className="text-xs text-gray-400 dark:text-gray-500">v{VERSION}</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">{VERSION}</p>
       </div>
     </aside>
   );

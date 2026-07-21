@@ -33,8 +33,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
 
   if (response.status === 401) {
-    clearAuthToken();
-    window.location.href = "/login";
+    // Don't redirect for login/register endpoints — the error should be shown inline
+    if (!path.startsWith("/api/v1/auth/")) {
+      clearAuthToken();
+      window.location.href = "/login";
+    }
     throw new ApiClientError(401, {
       error: { code: 401, message: "Unauthorized" },
     });
