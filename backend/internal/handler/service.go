@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -162,6 +163,16 @@ func (h *ServiceHandler) GetCredentials(w http.ResponseWriter, r *http.Request) 
 		server.WriteError(w, r, err)
 		return
 	}
+
+	claims := mw.GetUserClaims(r.Context())
+	if claims != nil {
+		slog.Info("audit: service credentials revealed",
+			"user_id", claims.UserID,
+			"service_id", id,
+			"ip", r.RemoteAddr,
+		)
+	}
+
 	server.WriteJSON(w, http.StatusOK, creds)
 }
 

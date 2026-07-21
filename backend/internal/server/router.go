@@ -14,8 +14,9 @@ import (
 
 // RouteConfig holds all HTTP handler functions that the router needs to mount.
 type RouteConfig struct {
-	JWTService *token.JWTService
-	APIKeyAuth middleware.APIKeyValidator
+	JWTService   *token.JWTService
+	APIKeyAuth   middleware.APIKeyValidator
+	RevealLimiter *middleware.RateLimiter
 
 	// Auth
 	LoginHandler      http.HandlerFunc
@@ -115,7 +116,12 @@ func NewRouter(cfg RouteConfig) chi.Router {
 			r.Route("/{id}", func(r chi.Router) {
 				r.Put("/", cfg.UpdateCredentialHandler)
 				r.Delete("/", cfg.DeleteCredentialHandler)
-				r.Get("/reveal", cfg.RevealCredentialHandler)
+			})
+
+			// Rate-limited reveal endpoints
+			r.Group(func(r chi.Router) {
+				r.Use(cfg.RevealLimiter.Limit)
+				r.Get("/{id}/reveal", cfg.RevealCredentialHandler)
 			})
 		})
 
@@ -125,7 +131,12 @@ func NewRouter(cfg RouteConfig) chi.Router {
 			r.Post("/", cfg.CreateAPIKeyHandler)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Delete("/", cfg.DeleteAPIKeyHandler)
-				r.Get("/reveal", cfg.RevealAPIKeyHandler)
+			})
+
+			// Rate-limited reveal endpoint
+			r.Group(func(r chi.Router) {
+				r.Use(cfg.RevealLimiter.Limit)
+				r.Get("/{id}/reveal", cfg.RevealAPIKeyHandler)
 			})
 		})
 
@@ -137,7 +148,12 @@ func NewRouter(cfg RouteConfig) chi.Router {
 			r.Put("/{id}", cfg.UpdateServiceHandler)
 			r.Delete("/{id}", cfg.DeleteServiceHandler)
 			r.Post("/{id}/relay", cfg.RelayServiceHandler)
-			r.Get("/{id}/credentials", cfg.GetServiceCredentialsHandler)
+
+			// Rate-limited reveal endpoint
+			r.Group(func(r chi.Router) {
+				r.Use(cfg.RevealLimiter.Limit)
+				r.Get("/{id}/credentials", cfg.GetServiceCredentialsHandler)
+			})
 		})
 	})
 
