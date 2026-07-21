@@ -129,10 +129,11 @@ export function ApiKeysPage() {
     }
   };
 
-  const copyKey = (key: string) => {
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(key).then(() => toast.success(t("common.copied")));
-    } else {
+  const copyKey = async (key: string) => {
+    try {
+      await navigator.clipboard.writeText(key);
+      toast.success(t("common.copied"));
+    } catch {
       const el = document.createElement("textarea");
       el.value = key;
       el.style.position = "fixed";
