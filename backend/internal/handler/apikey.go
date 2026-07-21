@@ -2,9 +2,11 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/vpsmanager/backend/internal/server"
+	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
 )
 
@@ -69,5 +71,15 @@ func (h *APIKeyHandler) Reveal(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, err)
 		return
 	}
+
+	claims := mw.GetUserClaims(r.Context())
+	if claims != nil {
+		slog.Info("audit: api key revealed",
+			"user_id", claims.UserID,
+			"key_id", id,
+			"ip", r.RemoteAddr,
+		)
+	}
+
 	server.WriteJSON(w, http.StatusOK, rawKey)
 }

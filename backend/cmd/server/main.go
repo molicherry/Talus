@@ -167,8 +167,9 @@ func main() {
 	})
 
 	router := server.NewRouter(server.RouteConfig{
-		JWTService: jwtSvc,
-		APIKeyAuth: apiKeyAuth,
+		JWTService:    jwtSvc,
+		APIKeyAuth:    apiKeyAuth,
+		RevealLimiter: mw.NewRateLimiter(1*time.Minute, 5),
 		// Auth
 		LoginHandler:           authHandler.Login,
 		SetupHandler:           authHandler.Setup,
