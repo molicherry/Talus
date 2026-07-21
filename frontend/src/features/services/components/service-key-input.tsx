@@ -32,19 +32,19 @@ function fromRows(rows: KeyValueHint[]): { credentials: Record<string, string>; 
   return { credentials, hints };
 }
 
-const copyToClipboard = (text: string): Promise<void> => {
-  if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(text).then(() => {});
+const copyToClipboard = async (text: string): Promise<void> => {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const el = document.createElement("textarea");
+    el.value = text;
+    el.style.position = "fixed";
+    el.style.opacity = "0";
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand("copy");
+    document.body.removeChild(el);
   }
-  const el = document.createElement("textarea");
-  el.value = text;
-  el.style.position = "fixed";
-  el.style.opacity = "0";
-  document.body.appendChild(el);
-  el.select();
-  document.execCommand("copy");
-  document.body.removeChild(el);
-  return Promise.resolve();
 };
 
 export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
@@ -69,8 +69,9 @@ export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
     setVisibleValues((prev) => ({ ...prev, [index]: !prev[index] }));
   };
 
-  const handleCopy = (text: string) => {
-    copyToClipboard(text).then(() => toast.success(t("common.copied")));
+  const handleCopy = async (text: string) => {
+    await copyToClipboard(text);
+    toast.success(t("common.copied"));
   };
 
   return (
