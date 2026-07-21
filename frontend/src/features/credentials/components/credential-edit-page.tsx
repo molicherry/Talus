@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Copy, Eye, EyeOff, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
@@ -54,6 +54,7 @@ export function CredentialEditPage() {
     register,
     handleSubmit,
     watch,
+    reset,
     formState: { errors },
   } = useForm<EditFormValues>({
     resolver: zodResolver(EditFormSchema),
@@ -64,6 +65,25 @@ export function CredentialEditPage() {
   });
 
   const passwordValue = watch("password");
+
+  useEffect(() => {
+    if (!credential) return;
+    const token = localStorage.getItem("auth_token");
+    fetch(`/api/v1/credentials/${credential.id}/reveal`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data) {
+          reset({
+            username: credential.username,
+            password: d.data.password || "",
+            private_key: d.data.private_key || "",
+          });
+        }
+      })
+      .catch(() => {});
+  }, [credential, reset]);
 
   const onSubmit = (data: EditFormValues) => {
     const payload: { username?: string; password?: string; private_key?: string } = {};

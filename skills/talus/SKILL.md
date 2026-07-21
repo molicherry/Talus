@@ -25,7 +25,7 @@ Two auth methods with different privilege levels:
 | JWT (Bearer) | `Authorization: Bearer <token>` | `POST /api/v1/auth/login` | Full access — all endpoints |
 | API Key | `X-API-Key: <key>` | `POST /api/v1/api-keys` (JWT only) | Scoped — limited by assigned scopes; JWT-only endpoints return 403 |
 
-**JWT-only endpoints** (API key always rejected): `DELETE /servers/{id}`, all credential mutations (`POST/PUT/DELETE`), all API key management (`GET/POST/DELETE`), service mutations (`POST/PUT/DELETE /api/v1/services`), auth endpoints (`GET/PUT /auth/*`).
+**JWT-only endpoints** (API key always rejected): `DELETE /servers/{id}`, all credential mutations (`POST/PUT/DELETE`), all API key management (`GET/POST/DELETE`), service management (`POST/PUT/DELETE /api/v1/services` + `GET /api/v1/services/{id}/credentials`), auth endpoints (`GET/PUT /auth/*`).
 
 ### First-Time Setup (no users exist yet)
 
@@ -76,7 +76,9 @@ All protected endpoints require `Authorization: Bearer <token>` or `X-API-Key: <
 | `DELETE` | `/api/v1/servers/{id}` | Remove server — **JWT only** | — |
 | `POST` | `/api/v1/servers/{id}/exec` | Execute command over SSH | `{command, timeout?}` |
 | `GET` | `/api/v1/servers/{id}/metrics` | Query monitoring metrics | Query: `from`, `to` (ISO 8601), `interval` (1m/5m/15m/1h) |
-| `GET` | `/api/v1/servers/{id}/terminal` | **WebSocket** interactive PTY terminal | Query: `?token=<jwt>` |
+| `GET` | `/api/v1/servers/{id}/terminal` | **WebSocket** interactive PTY terminal | `Authorization: Bearer` header |
+
+> **Services on this server**: Use `GET /api/v1/services?server_id={id}` to list all services bound to a server. When operating on a server (exec, terminal, metrics), also consider its bound services — you can relay authenticated requests through them without managing external credentials yourself.
 
 ### SSH Credentials
 
@@ -99,6 +101,9 @@ All protected endpoints require `Authorization: Bearer <token>` or `X-API-Key: <
 | `PUT` | `/api/v1/services/{id}` | Update service (full replacement) — **JWT only** | Same body as POST |
 | `DELETE` | `/api/v1/services/{id}` | Remove service — **JWT only** | — |
 | `POST` | `/api/v1/services/{id}/relay` | Proxy a request through the service | `{method, path, headers?, body?}` |
+| `GET` | `/api/v1/services/{id}/credentials` | Get decrypted service credentials — **JWT only** | — |
+
+**Server binding** (`server_id`): A service can optionally be bound to a server. When bound, relay requests are gated by the API key's server access list — an API key restricted to specific servers (via `server_ids`) can only relay through services bound to those servers. An unbound service (`server_id: null`) is accessible to all API keys. Bind a service when you want per-server isolation (e.g. bind a Portainer service to server `web-01` so only keys with `web-01` access can proxy through it).
 
 Service credentials are encrypted with AES-256-GCM and **never returned** in API responses (`credentials` map is masked in all GET responses). The `credential_hints` map provides human-readable labels for each credential key (e.g. `"token": "Portainer API token"`).
 
@@ -111,12 +116,14 @@ Relay supports `{{key}}` placeholder substitution in path, headers, and body —
 | Method | Path | Description | Body |
 |--------|------|-------------|------|
 | `GET` | `/api/v1/api-keys` | List API keys (prefixes + scopes) | — |
-| `POST` | `/api/v1/api-keys` | Create scoped API key (full key returned ONCE) | `{name, scopes?}` |
+| `POST` | `/api/v1/api-keys` | Create scoped API key (full key returned ONCE) | `{name, scopes?, server_ids?}` |
 | `DELETE` | `/api/v1/api-keys/{id}` | Revoke API key | — |
 
 `scopes` field: optional array of `resource:action` strings. Valid values: `servers:read`, `servers:write`, `servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`, `services:relay`. Defaults to the first five (`servers:read`, `servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`) if omitted; `servers:write` and `services:relay` must be explicitly requested (opt-in).
 
-API keys can never access: credential mutation, API key management, auth endpoints, service management (`POST/PUT/DELETE /api/v1/services`), or `DELETE /servers/{id}`.
+`server_ids` field: optional array of server IDs. When set, the API key is restricted to only those servers — all endpoints with a `{id}` path parameter are gated by this list. Omit for access to all servers.
+
+API keys can never access: credential mutation, API key management, auth endpoints, service management (`POST/PUT/DELETE /api/v1/services` + `GET /api/v1/services/{id}/credentials`), or `DELETE /servers/{id}`.
 
 ### Health
 
@@ -124,6 +131,7 @@ API keys can never access: credential mutation, API key management, auth endpoin
 |--------|------|-------------|
 | `GET` | `/healthz` | Liveness check → `{"status":"ok"}` |
 | `GET` | `/api/v1/` | Version → `{"version":"0.1.0"}` |
+| `GET` | `/api/v1/version` | Version (alias) → `{"version":"0.1.0"}` |
 
 ## Data Models
 
@@ -131,7 +139,7 @@ API keys can never access: credential mutation, API key management, auth endpoin
 ```json
 {
   "id": 1, "name": "web-01", "host": "10.0.1.5", "port": 22,
-  "description": "Production web server",
+  "description": "Production web server", "notes": null,
   "status": "online",           // "online" | "offline" | "checking" | "unknown"
   "last_seen": "2026-07-10T...",
   "os": "Ubuntu 24.04", "cpu_model": "AMD EPYC",
@@ -173,9 +181,9 @@ Secrets (password / private_key) are **never returned** in API responses.
 ### APIKey
 ```json
 // List response (prefix + scopes only, no raw key):
-{ "id": 1, "name": "ci-pipeline", "key_prefix": "tv1-abc123...", "scopes": ["servers:read","servers:exec"], "created_at": "2026-07-10T..." }
-// Create response (full key shown ONCE):
-{ "id": 1, "name": "ci-pipeline", "key": "tv1-abc123def456...", "scopes": ["servers:read","servers:exec"], "created_at": "2026-07-10T..." }
+{ "id": 1, "name": "ci-pipeline", "key_prefix": "a1b2c3d4", "scopes": ["servers:read","servers:exec"], "server_ids": [1, 2], "created_at": "2026-07-10T..." }
+// Create response (full key shown ONCE, in {"data":{"key":"...","api_key":{...}}}):
+{ "key": "a1b2c3d4e5f6...", "api_key": { "id": 1, "name": "ci-pipeline", "key_prefix": "a1b2c3d4", "scopes": ["servers:read","servers:exec"], "server_ids": [1, 2], "created_at": "2026-07-10T..." } }
 ```
 
 ### Service (from `GET /api/v1/services`)
@@ -225,19 +233,32 @@ curl -s "$TALUS_URL/api/v1/servers/1/metrics?from=$FROM&to=$TO&interval=1m" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-### WebSocket Terminal (JavaScript)
+### WebSocket Terminal
 
+The terminal endpoint upgrades to WebSocket after standard `Authorization: Bearer` header auth. Browsers cannot set custom headers on `new WebSocket()` — use a server-side client or pass the token through a reverse proxy.
+
+**Node.js (server-side)**:
 ```js
-const ws = new WebSocket(`ws://localhost:8080/api/v1/servers/1/terminal?token=${token}`);
-ws.onmessage = (e) => {
-  const msg = JSON.parse(e.data);
+const WebSocket = require('ws');
+const ws = new WebSocket('ws://localhost:8080/api/v1/servers/1/terminal', {
+  headers: { 'Authorization': `Bearer ${token}` }
+});
+
+ws.on('message', (data) => {
+  const msg = JSON.parse(data);
   // msg.type: "connected" | "output" | "error" | "disconnected"
-  if (msg.type === "output") console.log(msg.data);
-};
+  if (msg.type === 'output') console.log(msg.data);
+});
 // Send input
-ws.send(JSON.stringify({ type: "input", data: "ls -la\n" }));
+ws.send(JSON.stringify({ type: 'input', data: 'ls -la\n' }));
 // Resize terminal
-ws.send(JSON.stringify({ type: "resize", cols: 120, rows: 40 }));
+ws.send(JSON.stringify({ type: 'resize', cols: 120, rows: 40 }));
+```
+
+**CLI (websocat)**:
+```bash
+websocat -H="Authorization: Bearer $TOKEN" \
+  "ws://localhost:8080/api/v1/servers/1/terminal"
 ```
 
 ### Create a scoped API key and use it

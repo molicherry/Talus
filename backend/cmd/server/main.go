@@ -185,6 +185,7 @@ func main() {
 		CreateCredentialHandler: credHandler.Create,
 		UpdateCredentialHandler: credHandler.Update,
 		DeleteCredentialHandler: credHandler.Delete,
+		RevealCredentialHandler: credHandler.Reveal,
 		// Exec
 		ExecHandler: execH.Execute,
 		// Terminal

@@ -31,10 +31,11 @@ type RouteConfig struct {
 	DeleteServerHandler http.HandlerFunc
 
 	// Credentials
-	ListCredentialsHandler  http.HandlerFunc
-	CreateCredentialHandler http.HandlerFunc
-	UpdateCredentialHandler http.HandlerFunc
-	DeleteCredentialHandler http.HandlerFunc
+	ListCredentialsHandler   http.HandlerFunc
+	CreateCredentialHandler  http.HandlerFunc
+	UpdateCredentialHandler  http.HandlerFunc
+	DeleteCredentialHandler  http.HandlerFunc
+	RevealCredentialHandler  http.HandlerFunc
 
 	// Exec
 	ExecHandler http.HandlerFunc
@@ -113,6 +114,7 @@ func NewRouter(cfg RouteConfig) chi.Router {
 			r.Route("/{id}", func(r chi.Router) {
 				r.Put("/", cfg.UpdateCredentialHandler)
 				r.Delete("/", cfg.DeleteCredentialHandler)
+				r.Get("/reveal", cfg.RevealCredentialHandler)
 			})
 		})
 
