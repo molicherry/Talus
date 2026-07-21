@@ -13,8 +13,8 @@
 - **Remote Shell** — Execute commands on any server and see stdout, stderr, and exit codes.
 - **Interactive Terminal** — Open a full PTY session in your browser (xterm.js, resize-aware, WebSocket-backed).
 - **Live Monitoring** — CPU, memory, disk, load, swap, network, and disk I/O charts with 1h / 6h / 24h / 7d time ranges. Ephemeral agent deployed on-demand over SSH.
-- **API Keys** — Create and manage API keys for programmatic access.
-- **Service Proxy** — Register external services (Grafana, Portainer, etc.) with encrypted credentials. Proxy API requests through Talus with credential injection and placeholder substitution.
+- **API Keys** — Create scoped API keys with per-server access control. Two-dimensional permissions (what actions × which servers). Keys are encrypted at rest and can be copied on demand. Rate-limited reveal with audit logging.
+- **Service Proxy** — Register external services (Grafana, Portainer, etc.) with encrypted credentials. Proxy API requests through Talus with credential injection and placeholder substitution. Edit forms load existing credentials with show/hide toggle and copy support.
 - **i18n** — English and 中文 interface with light/dark/system theme.
 - **Docker Compose** — One command to start: `docker compose up`.
 
@@ -167,8 +167,8 @@ An [OpenCode skill](skills/talus/SKILL.md) is included in the repository. AI ass
 
 ## Security
 
-- SSH private keys and passwords are encrypted with **AES-256-GCM** before storage, using an Argon2id-derived key from `VPSMANAGER_MASTER_KEY`.
-- Credentials are **never returned** in API responses.
+- SSH private keys and passwords, service credentials, and API key raw values are encrypted with **AES-256-GCM** at rest, using an Argon2id-derived key from `VPSMANAGER_MASTER_KEY`.
+- Credential and API key values are **never returned** in list API responses (`json:"-"`). Dedicated JWT-only reveal endpoints decrypt on-demand with **audit logging** (slog structured JSON) and **rate limiting** (5 req/min per user).
 - Target servers require **no additional open ports** — monitoring data flows over the existing SSH channel.
 - The monitoring agent is **ephemeral**: deployed on-demand, collects metrics, and exits. No persistent binary or daemon remains.
 - SSH host keys are verified using **TOFU (Trust On First Use)**: the key presented on first connection is recorded and verified on all subsequent connections, preventing MITM attacks.
