@@ -1,163 +1,168 @@
 ---
 name: talus
-description: Interact with a running Talus instance via its REST API to manage Linux servers, execute remote commands over SSH, open interactive terminals (WebSocket), query live monitoring metrics, manage SSH credentials with show/hide/copy, create scoped API keys with per-server access control and persistent copy, register external services with encrypted credentials and credential reveal, and proxy authenticated requests through the relay endpoint. Talus is a self-hosted VPS management platform (Go backend + React frontend + PostgreSQL). Use when user wants to manage servers via Talus API, execute commands on remote hosts, check server metrics, manage SSH credentials programmatically, automate VPS operations through Talus, register proxied services, relay API calls to external services, or reveal stored credentials/API keys. Triggers: "Talus API", "manage server via Talus", "execute command on server", "check server metrics Talus", "add SSH credential", "create API key", "relay request", "register service", "reveal credential", "Talus 管理", "通过Talus执行命令".
+description: Interact with a running Talus instance via its REST API to manage Linux servers, execute remote commands over SSH, open interactive terminals (WebSocket), query live monitoring metrics, manage SSH credentials, create scoped API keys, register external services with encrypted credentials, and proxy authenticated requests through the relay endpoint. Use when user wants to manage servers, execute commands, check metrics, manage credentials, create API keys, relay requests, or reveal stored secrets.
+triggers: "Talus", "manage server", "execute command on server", "check server metrics", "add SSH credential", "create API key", "relay request", "register service", "reveal credential", "copy API key", "Talus 管理", "通过Talus执行命令".
 ---
 
-# Talus API
+# Talus Skill — Agent Operation Guide
 
-Interact with a Talus instance through its REST API. Talus connects to Linux servers over SSH — manage servers, credentials, commands, terminals, and monitoring from a central hub.
+You are managing a live Talus instance. Talus is a self-hosted VPS management platform: Go backend, React frontend, PostgreSQL. Servers connect over SSH — no agent installed on targets.
 
-Full endpoint reference and data models: [REFERENCE.md](REFERENCE.md).
+Full endpoint specs and data models: [REFERENCE.md](REFERENCE.md).
 
-## Quick Connect
+## Quick Start
 
 ```bash
-TALUS_URL="http://localhost:8080"
+TALUS_URL="${TALUS_URL:-http://localhost:8080}"
 ```
 
-All responses: `{"data": <payload>}`. Errors: `{"error": {"code": <int>, "message": <string>}}`.
+Response envelope: `{"data": <payload>}`. Errors: `{"error": {"code": <int>, "message": <string>}}`.
 
-## Authentication
+### Auth
 
-| Method | Header | How to obtain | Privilege |
-|--------|--------|---------------|-----------|
-| JWT (Bearer) | `Authorization: Bearer <token>` | `POST /api/v1/auth/login` | Full access |
-| API Key | `X-API-Key: <key>` | `POST /api/v1/api-keys` (JWT only) | Scoped by scopes + server_ids |
+Two methods, different privilege levels:
 
-**JWT-only** (API keys always rejected): `DELETE /servers/{id}`, all credential mutations, all API key management, service management (`POST/PUT/DELETE` + `GET /{id}/credentials`), auth endpoints.
+| Auth | Header | How to get | Access |
+|------|--------|-----------|--------|
+| JWT | `Authorization: Bearer <token>` | `POST /api/v1/auth/login` | Full access — all endpoints |
+| API Key | `X-API-Key: <key>` | `POST /api/v1/api-keys` (JWT only) | Scoped: limited by `scopes` + `server_ids` |
 
-### Setup & Login
+**Rule**: Always prefer JWT for admin operations. Use API keys for read-only or limited automation tasks. If an operation needs credential mutation, API key management, or server deletion — it's JWT-only regardless of scopes.
+
+### First-time setup
 
 ```bash
-# Check if first-time setup needed
+# Check
 curl -s $TALUS_URL/api/v1/auth/setup  # → {"data":{"needed":true}}
 
-# Login (creates admin on first call)
+# First login creates admin
 TOKEN=$(curl -s -X POST $TALUS_URL/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"your-password"}' | jq -r '.data.token')
 ```
 
-## Common Workflows
+## Decision Trees
 
-### Add a server and run a command
+### "I need to run a command on a server"
 
-```bash
-# 1. Create SSH credential
-curl -s -X POST $TALUS_URL/api/v1/credentials \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"name":"my-key","username":"root","auth_type":"private_key","private_key":"-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"}'
-
-# 2. Register server
-curl -s -X POST $TALUS_URL/api/v1/servers \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"name":"prod-db","host":"10.0.1.10","port":22,"credential_id":1}'
-
-# 3. Execute command
-curl -s -X POST $TALUS_URL/api/v1/servers/1/exec \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"command":"uptime"}'
+```
+1. Do you already know the server ID?
+   ├─ Yes → POST /api/v1/servers/{id}/exec
+   └─ No  → GET /api/v1/servers to list and find it
+2. Does the user need the output parsed?
+   ├─ Yes → Parse stdout/stderr from response {stdout, stderr, exit_code}
+   └─ No  → Return raw result
+3. Command timed out? → Default 30s, max 300s. Pass `"timeout": 60` for long commands.
 ```
 
-### Query metrics
+### "I need to create an API key for someone"
 
-```bash
-FROM=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)
-TO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-curl -s "$TALUS_URL/api/v1/servers/1/metrics?from=$FROM&to=$TO&interval=1m" \
-  -H "Authorization: Bearer $TOKEN"
+```
+1. What should the key be able to do?
+   ├─ Read-only monitoring → scopes: ["servers:read", "metrics:read"]
+   ├─ Execute commands    → add "servers:exec"
+   ├─ Terminal access     → add "servers:terminal"
+   ├─ Relay services      → add "services:relay" (opt-in — NOT in defaults)
+   └─ Full read access    → ["servers:read", "servers:exec", "servers:terminal", "metrics:read", "credentials:read"]
+2. Which servers?
+   ├─ All servers  → omit server_ids (default: unrestricted)
+   └─ Specific     → pass server_ids: [1, 3, 5]
+3. Create it (JWT required):
+   POST /api/v1/api-keys -d '{"name":"my-key","scopes":[...],"server_ids":[...]}'
+4. Response includes the raw key ONCE. Save it immediately.
+5. If the user needs the key again later:
+   ├─ Same session (no page refresh) → frontend copy button still works
+   └─ Later or different session → GET /api/v1/api-keys/{id}/reveal (JWT, rate-limited: 5/min)
 ```
 
-### WebSocket Terminal
+### "I need to see a credential password"
 
-Auth via `Authorization: Bearer` header (browsers can't set WS headers — use server-side client or proxy).
-
-**Node.js:**
-```js
-const WebSocket = require('ws');
-const ws = new WebSocket('ws://localhost:8080/api/v1/servers/1/terminal', {
-  headers: { 'Authorization': `Bearer ${token}` }
-});
-ws.on('message', (data) => {
-  const msg = JSON.parse(data);  // type: "connected"|"output"|"error"|"disconnected"
-  if (msg.type === 'output') console.log(msg.data);
-});
-ws.send(JSON.stringify({ type: 'input', data: 'ls -la\n' }));
-ws.send(JSON.stringify({ type: 'resize', cols: 120, rows: 40 }));
+```
+1. Are you on the credential list page?
+   ├─ List only shows name, auth type, username, fingerprint — NOT values
+   └─ Use GET /api/v1/credentials/{id}/reveal (JWT only, rate-limited: 5/min)
+2. Reveal returns {password: "..."} or {private_key: "..."} depending on auth type
+3. The value was encrypted with AES-256-GCM — it's decrypted server-side
+4. This operation is AUDITED: `slog.Info("audit: credential revealed", user_id, credential_id, ip)`
 ```
 
-**CLI:**
-```bash
-websocat -H="Authorization: Bearer $TOKEN" "ws://localhost:8080/api/v1/servers/1/terminal"
+### "I need to see service credentials"
+
+```
+1. Service list shows only credential_hints (descriptions) — NOT values
+2. GET /api/v1/services/{id}/credentials (JWT only, rate-limited)
+3. Returns {key1: "value1", key2: "value2"}
+4. Also audited: logs user_id + service_id + ip
 ```
 
-### Create a scoped API key
+### "Something is returning 403"
 
-```bash
-# Create key with scopes + server_ids (JWT required)
-KEY_RESP=$(curl -s -X POST $TALUS_URL/api/v1/api-keys \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"name":"monitoring","scopes":["servers:read","metrics:read"],"server_ids":[1,3]}')
-API_KEY=$(echo $KEY_RESP | jq -r '.data.key')
-KEY_ID=$(echo $KEY_RESP | jq -r '.data.api_key.id')
-
-# Use it — only servers 1 and 3 are accessible
-curl -s $TALUS_URL/api/v1/servers -H "X-API-Key: $API_KEY"
-
-# Missing scope → 403
-curl -s -X POST $TALUS_URL/api/v1/servers -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" -d '{"name":"test","host":"10.0.0.1","port":22}'
-# → {"error":{"code":403,"message":"insufficient scope: requires servers:write"}}
-
-# Server not in key's list → 403
-curl -s $TALUS_URL/api/v1/servers/5 -H "X-API-Key: $API_KEY"
-# → {"error":{"code":403,"message":"access denied: api key does not have access to this server"}}
-
-# Reveal/copy a key later (JWT only, rate-limited: 5/min)
-curl -s $TALUS_URL/api/v1/api-keys/$KEY_ID/reveal \
-  -H "Authorization: Bearer $TOKEN"
-# → {"data":"<raw-key-string>"}
-
-### Reveal a credential or service credential
-
-```bash
-# Reveal SSH credential password/private key (JWT only, rate-limited)
-curl -s $TALUS_URL/api/v1/credentials/1/reveal \
-  -H "Authorization: Bearer $TOKEN"
-# → {"data":{"password":"my-secret-password"}}
-
-# Reveal service credentials (JWT only, rate-limited)
-curl -s $TALUS_URL/api/v1/services/1/credentials \
-  -H "Authorization: Bearer $TOKEN"
-# → {"data":{"token":"glsa_abc..."}}
+```
+Check in order:
+1. Are you using an API key on a JWT-only endpoint?
+   JWT-only: DELETE servers, all credential mutations, all API key management,
+   service CRUD, /reveal endpoints, /credentials endpoints, auth endpoints.
+   → Solution: switch to JWT Bearer token
+2. Does the API key have the right scope?
+   server:read = GET /servers, GET /servers/{id}
+   server:write = POST /servers, PUT /servers/{id}
+   server:exec = POST /servers/{id}/exec
+   server:terminal = GET /servers/{id}/terminal
+   metrics:read = GET /servers/{id}/metrics
+   credentials:read = GET /credentials
+   services:relay = POST /services/{id}/relay (NOT in default scopes!)
+   → Solution: re-create key with correct scopes
+3. Is the server in the key's server_ids?
+   server_ids=[] → all servers
+   server_ids=[1,3] → only servers 1 and 3
+   → Solution: re-create key with correct server_ids
 ```
 
-### Register a service and relay requests
+### "I'm getting 429 Too Many Requests"
 
-```bash
-# 1. Register service with credentials (JWT required)
-curl -s -X POST $TALUS_URL/api/v1/services \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"name":"grafana","display_name":"Grafana","base_url":"http://localhost:3000",
-       "credentials":{"token":"glsa_abc..."},"credential_hints":{"token":"API token"}}'
-
-# 2. Relay request — credentials injected automatically
-curl -s -X POST $TALUS_URL/api/v1/services/1/relay \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"method":"GET","path":"/api/dashboards/home"}'
-
-# 3. Relay with {{key}} placeholder substitution in path/headers/body
-curl -s -X POST $TALUS_URL/api/v1/services/1/relay \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"method":"GET","path":"/api/search","headers":{"Authorization":"Bearer {{token}}"}}'
+```
+Reveal endpoints are rate-limited: 5 requests per minute per user.
+   ├─ Wait 60 seconds and retry
+   ├─ If batching multiple reveals, space them 12+ seconds apart
+   └─ Rate limit is per-user, not per-endpoint — all 3 reveal endpoints share the counter
 ```
 
-## Security Notes
+## Multi-Step Workflows
 
-- SSH, service, and API key raw values encrypted with AES-256-GCM at rest — **never returned** in list API responses (`json:"-"`)
-- Dedicated JWT-only reveal endpoints (`/reveal`, `/credentials`) decrypt on-demand with **audit logging** (structured JSON via slog) and **rate limiting** (5 req/min per user)
-- First login to empty instance creates admin account
-- API keys: two-dimensional access control (7 scope types × optional server_ids), shown once at creation, re-copiable via reveal endpoint
-- All reveal operations logged: `slog.Info("audit: ...", user_id, key_id, ip)`
-- Rate limit exceeded → 429 with `{"error":{"code":429,"message":"too many requests"}}`
-- SSH host keys: TOFU (Trust On First Use) verification
+### Full server setup
+
+```
+1. Create credential:
+   POST /api/v1/credentials -d '{"name":"...","username":"root","auth_type":"password","password":"..."}'
+   (or auth_type:"private_key" with "private_key":"-----BEGIN...")
+2. Register server with credential:
+   POST /api/v1/servers -d '{"name":"prod-db","host":"10.0.1.10","port":22,"credential_id":<id>}'
+3. Verify connectivity:
+   POST /api/v1/servers/{id}/exec -d '{"command":"whoami"}'
+   → Expect stdout: "root", exit_code: 0
+```
+
+### Register a proxied service
+
+```
+1. Register service with credentials:
+   POST /api/v1/services -d '{"name":"grafana","base_url":"http://localhost:3000","credentials":{"token":"glsa_..."},"credential_hints":{"token":"API token"}}'
+2. Relay a request (credentials injected automatically):
+   POST /api/v1/services/{id}/relay -d '{"method":"GET","path":"/api/dashboards/home"}'
+3. Use {{key}} placeholders for credential substitution in headers:
+   {"method":"GET","path":"/api/search","headers":{"Authorization":"Bearer {{token}}"}}
+```
+
+## Critical Rules
+
+1. **Credentials NEVER appear in list responses** — `EncryptedPassword`, `EncryptedPrivateKey`, `EncryptedCredentials`, and `EncryptedRawKey` all have `json:"-"`. Use reveal endpoints to access them.
+
+2. **API key raw value is shown ONCE** — at creation. The `/reveal` endpoint lets you retrieve it later, but it's rate-limited and audited. Also: existing keys created before v0.6.14 don't have an encrypted raw key stored — reveal will return 404.
+
+3. **scopes and server_ids are orthogonal** — a key needs BOTH the right scope AND the right server access. server_ids=[] (or omitted) means all servers.
+
+4. **services:relay is NOT in default scopes** — must be explicitly requested when creating a key. This prevents accidental proxy access.
+
+5. **All credential mutations reject API keys** — always use JWT for creating, updating, or deleting credentials, services, and API keys.
+
+6. **Terminal WebSocket auth** — use `Authorization: Bearer <token>` header during WebSocket upgrade. API key auth also works via `X-API-Key` header.
