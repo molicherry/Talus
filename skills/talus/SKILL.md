@@ -1,230 +1,65 @@
---- 
+---
 name: talus
 description: Interact with a running Talus instance via its REST API to manage Linux servers, execute remote commands over SSH, open interactive terminals (WebSocket), query live monitoring metrics, manage SSH credentials, create API keys, register external services with encrypted credentials, and proxy authenticated requests through the relay endpoint. Talus is a self-hosted VPS management platform (Go backend + React frontend + PostgreSQL). Use when user wants to manage servers via Talus API, execute commands on remote hosts, check server metrics, manage SSH credentials programmatically, automate VPS operations through Talus, register proxied services, or relay API calls to external services. Triggers: "Talus API", "manage server via Talus", "execute command on server", "check server metrics Talus", "add SSH credential", "create API key", "relay request", "register service", "Talus 管理", "通过Talus执行命令".
 ---
 
-# Talus API Usage
+# Talus API
 
-Interact with a Talus instance through its REST API. Talus connects to Linux servers over SSH — you manage servers, credentials, commands, terminals, and monitoring from a central hub.
+Interact with a Talus instance through its REST API. Talus connects to Linux servers over SSH — manage servers, credentials, commands, terminals, and monitoring from a central hub.
+
+Full endpoint reference and data models: [REFERENCE.md](REFERENCE.md).
 
 ## Quick Connect
 
 ```bash
-# Base URL for a local Talus instance
 TALUS_URL="http://localhost:8080"
 ```
 
-All API responses follow `{ "data": <payload> }`. Errors follow `{ "error": { "code": <int>, "message": <string> } }`.
+All responses: `{"data": <payload>}`. Errors: `{"error": {"code": <int>, "message": <string>}}`.
 
 ## Authentication
 
-Two auth methods with different privilege levels:
-
 | Method | Header | How to obtain | Privilege |
 |--------|--------|---------------|-----------|
-| JWT (Bearer) | `Authorization: Bearer <token>` | `POST /api/v1/auth/login` | Full access — all endpoints |
-| API Key | `X-API-Key: <key>` | `POST /api/v1/api-keys` (JWT only) | Scoped — limited by assigned scopes; JWT-only endpoints return 403 |
+| JWT (Bearer) | `Authorization: Bearer <token>` | `POST /api/v1/auth/login` | Full access |
+| API Key | `X-API-Key: <key>` | `POST /api/v1/api-keys` (JWT only) | Scoped by scopes + server_ids |
 
-**JWT-only endpoints** (API key always rejected): `DELETE /servers/{id}`, all credential mutations (`POST/PUT/DELETE`), all API key management (`GET/POST/DELETE`), service management (`POST/PUT/DELETE /api/v1/services` + `GET /api/v1/services/{id}/credentials`), auth endpoints (`GET/PUT /auth/*`).
+**JWT-only** (API keys always rejected): `DELETE /servers/{id}`, all credential mutations, all API key management, service management (`POST/PUT/DELETE` + `GET /{id}/credentials`), auth endpoints.
 
-### First-Time Setup (no users exist yet)
-
-```bash
-# 1. Check if setup is needed
-curl -s $TALUS_URL/api/v1/auth/setup
-# → {"data":{"needed":true}}
-
-# 2. Create admin account (first login = automatic setup)
-curl -s -X POST $TALUS_URL/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"your-password"}'
-# → {"data":{"token":"eyJhbGciOi..."}}
-
-# Save token
-TOKEN="eyJhbGciOi..."
-```
-
-### Regular Login (after setup)
+### Setup & Login
 
 ```bash
-curl -s -X POST $TALUS_URL/api/v1/auth/login \
+# Check if first-time setup needed
+curl -s $TALUS_URL/api/v1/auth/setup  # → {"data":{"needed":true}}
+
+# Login (creates admin on first call)
+TOKEN=$(curl -s -X POST $TALUS_URL/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"your-password"}'
+  -d '{"username":"admin","password":"your-password"}' | jq -r '.data.token')
 ```
-
-## Complete API Reference
-
-All protected endpoints require `Authorization: Bearer <token>` or `X-API-Key: <key>`.
-
-### Auth & Profile — **JWT only**
-
-| Method | Path | Description | Body |
-|--------|------|-------------|------|
-| `GET` | `/api/v1/auth/setup` | Check if first-time setup needed | — |
-| `POST` | `/api/v1/auth/login` | Login (or create first admin) | `{username, password}` |
-| `GET` | `/api/v1/auth/profile` | Get current user profile | — |
-| `PUT` | `/api/v1/auth/password` | Change password | `{current_password, new_password}` |
-
-### Servers
-
-| Method | Path | Description | Body |
-|--------|------|-------------|------|
-| `GET` | `/api/v1/servers` | List all servers (with latest_metrics, credential, status) | — |
-| `POST` | `/api/v1/servers` | Register a server | `{name, host, port, description?, credential_id?}` |
-| `GET` | `/api/v1/servers/{id}` | Get server detail | — |
-| `PUT` | `/api/v1/servers/{id}` | Update server | Partial `{name?, host?, port?, description?, credential_id?}` |
-| `DELETE` | `/api/v1/servers/{id}` | Remove server — **JWT only** | — |
-| `POST` | `/api/v1/servers/{id}/exec` | Execute command over SSH | `{command, timeout?}` |
-| `GET` | `/api/v1/servers/{id}/metrics` | Query monitoring metrics | Query: `from`, `to` (ISO 8601), `interval` (1m/5m/15m/1h) |
-| `GET` | `/api/v1/servers/{id}/terminal` | **WebSocket** interactive PTY terminal | `Authorization: Bearer` header |
-
-> **Services on this server**: Use `GET /api/v1/services?server_id={id}` to list all services bound to a server. When operating on a server (exec, terminal, metrics), also consider its bound services — you can relay authenticated requests through them without managing external credentials yourself.
-
-### SSH Credentials
-
-| Method | Path | Description | Body |
-|--------|------|-------------|------|
-| `GET` | `/api/v1/credentials` | List credentials (secrets NOT returned) | — |
-| `POST` | `/api/v1/credentials` | Create credential — **JWT only** | `{username, auth_type, name?, password? \| private_key?}` |
-| `PUT` | `/api/v1/credentials/{id}` | Update credential — **JWT only** | `{username?, password? \| private_key?}` |
-| `DELETE` | `/api/v1/credentials/{id}` | Delete credential — **JWT only** | — |
-
-`auth_type` is `"password"` or `"private_key"`. Provide exactly one of `password` or `private_key` matching the type.
-
-### Services
-
-| Method | Path | Description | Body |
-|--------|------|-------------|------|
-| `GET` | `/api/v1/services` | List all services (credential hints only, no secrets) | Query: `?server_id=<id>` (optional filter) |
-| `POST` | `/api/v1/services` | Register a service — **JWT only** | `{name, base_url, credentials, credential_hints?, display_name?, description?, server_id?}` |
-| `GET` | `/api/v1/services/{id}` | Get a single service | — |
-| `PUT` | `/api/v1/services/{id}` | Update service (full replacement) — **JWT only** | Same body as POST |
-| `DELETE` | `/api/v1/services/{id}` | Remove service — **JWT only** | — |
-| `POST` | `/api/v1/services/{id}/relay` | Proxy a request through the service | `{method, path, headers?, body?}` |
-| `GET` | `/api/v1/services/{id}/credentials` | Get decrypted service credentials — **JWT only** | — |
-
-**Server binding** (`server_id`): A service can optionally be bound to a server. When bound, relay requests are gated by the API key's server access list — an API key restricted to specific servers (via `server_ids`) can only relay through services bound to those servers. An unbound service (`server_id: null`) is accessible to all API keys. Bind a service when you want per-server isolation (e.g. bind a Portainer service to server `web-01` so only keys with `web-01` access can proxy through it).
-
-Service credentials are encrypted with AES-256-GCM and **never returned** in API responses (`credentials` map is masked in all GET responses). The `credential_hints` map provides human-readable labels for each credential key (e.g. `"token": "Portainer API token"`).
-
-On update (PUT), credentials are **fully replaced** — re-enter all key-value pairs (existing values cannot be read back).
-
-Relay supports `{{key}}` placeholder substitution in path, headers, and body — placeholders are replaced with decrypted credential values before the request is proxied.
-
-### API Keys — **JWT only** (API key rejected with 403)
-
-| Method | Path | Description | Body |
-|--------|------|-------------|------|
-| `GET` | `/api/v1/api-keys` | List API keys (prefixes + scopes) | — |
-| `POST` | `/api/v1/api-keys` | Create scoped API key (full key returned ONCE) | `{name, scopes?, server_ids?}` |
-| `DELETE` | `/api/v1/api-keys/{id}` | Revoke API key | — |
-
-`scopes` field: optional array of `resource:action` strings. Valid values: `servers:read`, `servers:write`, `servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`, `services:relay`. Defaults to the first five (`servers:read`, `servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`) if omitted; `servers:write` and `services:relay` must be explicitly requested (opt-in).
-
-`server_ids` field: optional array of server IDs. When set, the API key is restricted to only those servers — all endpoints with a `{id}` path parameter are gated by this list. Omit for access to all servers.
-
-API keys can never access: credential mutation, API key management, auth endpoints, service management (`POST/PUT/DELETE /api/v1/services` + `GET /api/v1/services/{id}/credentials`), or `DELETE /servers/{id}`.
-
-### Health
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/healthz` | Liveness check → `{"status":"ok"}` |
-| `GET` | `/api/v1/` | Version → `{"version":"0.1.0"}` |
-| `GET` | `/api/v1/version` | Version (alias) → `{"version":"0.1.0"}` |
-
-## Data Models
-
-### Server (from `GET /api/v1/servers`)
-```json
-{
-  "id": 1, "name": "web-01", "host": "10.0.1.5", "port": 22,
-  "description": "Production web server", "notes": null,
-  "status": "online",           // "online" | "offline" | "checking" | "unknown"
-  "last_seen": "2026-07-10T...",
-  "os": "Ubuntu 24.04", "cpu_model": "AMD EPYC",
-  "uptime_seconds": 864000,
-  "latest_metrics": {           // included in list endpoint
-    "cpu_percent": 12.5, "memory_percent": 45.2, "disk_percent": 68.1
-  },
-  "credential": { "id": 1, "name": "admin-key", "auth_type": "private_key", "username": "root" }
-}
-```
-
-### SSHCredential
-```json
-{
-  "id": 1, "name": "admin-key", "auth_type": "private_key",
-  "username": "root", "key_fingerprint": "SHA256:abc...",
-  "created_at": "2026-07-10T..."
-}
-```
-Secrets (password / private_key) are **never returned** in API responses.
-
-### ExecResponse
-```json
-{ "stdout": "total 24\ndrwxr-xr-x ...", "stderr": "", "exit_code": 0, "duration_ms": 342 }
-```
-
-### MetricPoint
-```json
-{
-  "time": "2026-07-10T12:00:00Z",
-  "cpu_percent": 12.5, "memory_percent": 45.2, "disk_percent": 68.1,
-  "load_1": 0.5, "load_5": 0.8, "load_15": 1.2,
-  "swap_percent": 0.0,
-  "net_recv_rate": 1024000, "net_sent_rate": 512000,
-  "disk_read_rate": 2048000, "disk_write_rate": 1024000
-}
-```
-
-### APIKey
-```json
-// List response (prefix + scopes only, no raw key):
-{ "id": 1, "name": "ci-pipeline", "key_prefix": "a1b2c3d4", "scopes": ["servers:read","servers:exec"], "server_ids": [1, 2], "created_at": "2026-07-10T..." }
-// Create response (full key shown ONCE, in {"data":{"key":"...","api_key":{...}}}):
-{ "key": "a1b2c3d4e5f6...", "api_key": { "id": 1, "name": "ci-pipeline", "key_prefix": "a1b2c3d4", "scopes": ["servers:read","servers:exec"], "server_ids": [1, 2], "created_at": "2026-07-10T..." } }
-```
-
-### Service (from `GET /api/v1/services`)
-```json
-{
-  "id": 1, "name": "grafana", "display_name": "Grafana Dashboard",
-  "base_url": "http://localhost:3000",
-  "credential_hints": { "token": "API token for Portainer" },
-  "description": "Monitoring dashboards",
-  "server_id": null,
-  "created_at": "2026-07-17T..."
-}
-```
-
-Credentials (keys/values) and encryption salt are **never returned** in API responses — only `credential_hints` is visible for labeling.
 
 ## Common Workflows
 
 ### Add a server and run a command
 
 ```bash
-# 1. Create credential (private key)
+# 1. Create SSH credential
 curl -s -X POST $TALUS_URL/api/v1/credentials \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"name":"my-key","username":"root","auth_type":"private_key","private_key":"-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"}'
 
-# 2. Register server with that credential
+# 2. Register server
 curl -s -X POST $TALUS_URL/api/v1/servers \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"name":"prod-db","host":"10.0.1.10","port":22,"credential_id":1}'
 
-# 3. Execute uptime
+# 3. Execute command
 curl -s -X POST $TALUS_URL/api/v1/servers/1/exec \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"command":"uptime"}'
 ```
 
-### Query metrics (last hour, 1-minute intervals)
+### Query metrics
 
 ```bash
 FROM=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)
@@ -235,109 +70,68 @@ curl -s "$TALUS_URL/api/v1/servers/1/metrics?from=$FROM&to=$TO&interval=1m" \
 
 ### WebSocket Terminal
 
-The terminal endpoint upgrades to WebSocket after standard `Authorization: Bearer` header auth. Browsers cannot set custom headers on `new WebSocket()` — use a server-side client or pass the token through a reverse proxy.
+Auth via `Authorization: Bearer` header (browsers can't set WS headers — use server-side client or proxy).
 
-**Node.js (server-side)**:
+**Node.js:**
 ```js
 const WebSocket = require('ws');
 const ws = new WebSocket('ws://localhost:8080/api/v1/servers/1/terminal', {
   headers: { 'Authorization': `Bearer ${token}` }
 });
-
 ws.on('message', (data) => {
-  const msg = JSON.parse(data);
-  // msg.type: "connected" | "output" | "error" | "disconnected"
+  const msg = JSON.parse(data);  // type: "connected"|"output"|"error"|"disconnected"
   if (msg.type === 'output') console.log(msg.data);
 });
-// Send input
 ws.send(JSON.stringify({ type: 'input', data: 'ls -la\n' }));
-// Resize terminal
 ws.send(JSON.stringify({ type: 'resize', cols: 120, rows: 40 }));
 ```
 
-**CLI (websocat)**:
+**CLI:**
 ```bash
-websocat -H="Authorization: Bearer $TOKEN" \
-  "ws://localhost:8080/api/v1/servers/1/terminal"
+websocat -H="Authorization: Bearer $TOKEN" "ws://localhost:8080/api/v1/servers/1/terminal"
 ```
 
-### Create a scoped API key and use it
+### Create a scoped API key
 
 ```bash
-# 1. Create scoped API key (JWT auth required)
+# Create key (JWT required)
 KEY_RESP=$(curl -s -X POST $TALUS_URL/api/v1/api-keys \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"name":"monitoring","scopes":["servers:read","metrics:read"]}')
 API_KEY=$(echo $KEY_RESP | jq -r '.data.key')
 
-# 2. Use API key — scoped to servers:read + metrics:read
-curl -s $TALUS_URL/api/v1/servers \
-  -H "X-API-Key: $API_KEY"
+# Use it
+curl -s $TALUS_URL/api/v1/servers -H "X-API-Key: $API_KEY"
 
-# 3. Attempting POST /servers with this key → 403 (missing servers:write)
-curl -s -X POST $TALUS_URL/api/v1/servers \
-  -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"test","host":"10.0.0.1","port":22}'
+# Missing scope → 403
+curl -s -X POST $TALUS_URL/api/v1/servers -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" -d '{"name":"test","host":"10.0.0.1","port":22}'
 # → {"error":{"code":403,"message":"insufficient scope: requires servers:write"}}
 ```
 
-### Register a service and relay a request
+### Register a service and relay requests
 
 ```bash
-# 1. Register a Grafana service with an API token credential
+# 1. Register service with credentials (JWT required)
 curl -s -X POST $TALUS_URL/api/v1/services \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "grafana",
-    "display_name": "Grafana Dashboard",
-    "base_url": "http://localhost:3000",
-    "credentials": {"token": "glsa_abc123..."},
-    "credential_hints": {"token": "Service account token"},
-    "description": "Monitoring dashboards"
-  }'
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"grafana","display_name":"Grafana","base_url":"http://localhost:3000",
+       "credentials":{"token":"glsa_abc..."},"credential_hints":{"token":"API token"}}'
 
-# 2. Relay a GET request through the service (token injected from credentials)
+# 2. Relay request — credentials injected automatically
 curl -s -X POST $TALUS_URL/api/v1/services/1/relay \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "GET", "path": "/api/dashboards/home"}'
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"method":"GET","path":"/api/dashboards/home"}'
 
-# 3. Relay with placeholder substitution — {{token}} is replaced with the credential value
+# 3. Relay with {{key}} placeholder substitution in path/headers/body
 curl -s -X POST $TALUS_URL/api/v1/services/1/relay \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "method": "GET",
-    "path": "/api/search?query=health",
-    "headers": {"Authorization": "Bearer {{token}}"}
-  }'
-
-# 4. Update service credentials (full replacement — re-enter all keys)
-curl -s -X PUT $TALUS_URL/api/v1/services/1 \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "grafana",
-    "base_url": "http://localhost:3000",
-    "credentials": {"token": "glsa_newtoken456..."},
-    "credential_hints": {"token": "Rotated service account token"}
-  }'
-
-# 5. Delete a service
-curl -s -X DELETE $TALUS_URL/api/v1/services/1 \
-  -H "Authorization: Bearer $TOKEN"
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"method":"GET","path":"/api/search","headers":{"Authorization":"Bearer {{token}}"}}'
 ```
 
 ## Security Notes
 
-- SSH credentials (passwords, private keys) are encrypted with AES-256-GCM at rest
-- Service credentials are encrypted with AES-256-GCM at rest, same encryption scheme
-- Secrets are **never** returned in API responses (credential GET lists show only metadata; service GET shows only credential_hints)
-- First login to an empty instance creates the admin account automatically
-- API keys are scoped — assign only the minimum permissions needed (see scope list above)
-- API keys are shown in full only once at creation — save immediately
-- JWT-only endpoints (credential mutations, API key management, service management, server deletion, auth) reject API keys with 403 regardless of scope
-- SSH host keys use TOFU (Trust On First Use) verification
+- SSH and service credentials encrypted with AES-256-GCM at rest — **never returned** in API responses
+- First login to empty instance creates admin account
+- API keys: scoped (7 scope types + optional server_ids), shown once at creation, JWT-only endpoints always reject
+- SSH host keys: TOFU (Trust On First Use) verification
