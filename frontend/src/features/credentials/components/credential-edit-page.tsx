@@ -34,10 +34,11 @@ export function CredentialEditPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showPrivateKey, setShowPrivateKey] = useState(false);
 
-  const copyToClipboard = (text: string) => {
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).then(() => toast.success(t("common.copied")));
-    } else {
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(t("common.copied"));
+    } catch {
       const el = document.createElement("textarea");
       el.value = text;
       el.style.position = "fixed"; el.style.opacity = "0";
