@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { Copy, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
@@ -32,10 +32,27 @@ export function CredentialEditPage() {
   const linkedServers = servers?.filter((s) => s.credential_id === credential?.id) ?? [];
 
   const [showPassword, setShowPassword] = useState(false);
+  const [showPrivateKey, setShowPrivateKey] = useState(false);
+
+  const copyToClipboard = (text: string) => {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => toast.success(t("common.copied")));
+    } else {
+      const el = document.createElement("textarea");
+      el.value = text;
+      el.style.position = "fixed"; el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+      toast.success(t("common.copied"));
+    }
+  };
 
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<EditFormValues>({
     resolver: zodResolver(EditFormSchema),
@@ -44,6 +61,8 @@ export function CredentialEditPage() {
     },
     values: credential ? { username: credential.username } : undefined,
   });
+
+  const passwordValue = watch("password");
 
   const onSubmit = (data: EditFormValues) => {
     const payload: { username?: string; password?: string; private_key?: string } = {};
@@ -158,17 +177,26 @@ export function CredentialEditPage() {
                 id="password"
                 type={showPassword ? "text" : "password"}
                 {...register("password")}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 pr-10 text-sm text-gray-100 placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 pr-16 text-sm text-gray-100 placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 placeholder={t("credential.passwordPlaceholderNew")}
               />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
-                aria-label={showPassword ? t("credential.hidePassword") : t("credential.showPassword")}
-              >
-                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
+              <div className="absolute right-0 top-0 flex h-full items-center gap-0.5 pr-1">
+                <button
+                  type="button"
+                  onClick={() => passwordValue && copyToClipboard(passwordValue)}
+                  className="rounded p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  <Copy className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="rounded p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+                  aria-label={showPassword ? t("credential.hidePassword") : t("credential.showPassword")}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
             {errors.password && (
               <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.password.message}</p>
@@ -181,13 +209,41 @@ export function CredentialEditPage() {
             <label htmlFor="private_key" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {t("credential.privateKey")}
             </label>
-            <textarea
-              id="private_key"
-              {...register("private_key")}
-              rows={6}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 font-mono text-xs text-gray-100 placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              placeholder={t("credential.privateKeyPlaceholderNew")}
-            />
+            <div className="relative">
+              {showPrivateKey ? (
+                <textarea
+                  id="private_key"
+                  {...register("private_key")}
+                  rows={6}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 pr-16 font-mono text-xs text-gray-100 placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  placeholder={t("credential.privateKeyPlaceholderNew")}
+                />
+              ) : (
+                <input
+                  id="private_key"
+                  type="password"
+                  {...register("private_key")}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 pr-16 text-sm text-gray-100 placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  placeholder={t("credential.privateKeyPlaceholderNew")}
+                />
+              )}
+              <div className="absolute right-0 top-1.5 flex gap-0.5 pr-1">
+                <button
+                  type="button"
+                  onClick={() => { const v = watch("private_key"); if (v) copyToClipboard(v); }}
+                  className="rounded p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  <Copy className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPrivateKey(!showPrivateKey)}
+                  className="rounded p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  {showPrivateKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
             {errors.private_key && (
               <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.private_key.message}</p>
             )}
