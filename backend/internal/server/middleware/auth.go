@@ -59,7 +59,21 @@ func Auth(jwtSvc *token.JWTService, keyValidator APIKeyValidator) func(http.Hand
 				return
 			}
 
-			tokenStr, ok := extractBearerToken(r)
+			// Also try WebSocket token from query param (browsers can't set WS headers)
+		if r.Header.Get("Upgrade") == "websocket" {
+			if tokenStr := r.URL.Query().Get("token"); tokenStr != "" {
+				claims, err := jwtSvc.ValidateToken(tokenStr)
+				if err != nil {
+					writeAuthError(w, http.StatusUnauthorized, "invalid or expired token")
+					return
+				}
+				ctx := context.WithValue(r.Context(), userKey, claims)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+		}
+
+		tokenStr, ok := extractBearerToken(r)
 			if !ok {
 				writeAuthError(w, http.StatusUnauthorized, "missing or invalid authorization header")
 				return
