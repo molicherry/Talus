@@ -29,6 +29,7 @@ var jwtOnlyRoutes = map[string]bool{
 	"GET /api/v1/api-keys":              true,
 	"POST /api/v1/api-keys":             true,
 	"DELETE /api/v1/api-keys/{id}":      true,
+	"GET /api/v1/api-keys/{id}/reveal":  true,
 	"GET /api/v1/auth/profile":          true,
 	"PUT /api/v1/auth/password":         true,
 	"POST /api/v1/services":                    true,

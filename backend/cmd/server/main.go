@@ -123,7 +123,7 @@ func main() {
 
 	// Dependency chain — API Keys
 	apiKeyRepo := repository.NewAPIKeyRepo(db)
-	apiKeySvc := service.NewAPIKeyService(apiKeyRepo, serverRepo)
+	apiKeySvc := service.NewAPIKeyService(apiKeyRepo, serverRepo, masterKey)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeySvc)
 	serverHandler := handler.NewServerHandler(serverSvc)
 
@@ -196,6 +196,7 @@ func main() {
 		CreateAPIKeyHandler: apiKeyHandler.Create,
 		ListAPIKeysHandler:  apiKeyHandler.List,
 		DeleteAPIKeyHandler: apiKeyHandler.Delete,
+		RevealAPIKeyHandler: apiKeyHandler.Reveal,
 		// Services
 		CreateServiceHandler:        serviceHandler.Create,
 		ListServicesHandler:         serviceHandler.List,

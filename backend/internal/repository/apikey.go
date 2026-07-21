@@ -34,6 +34,15 @@ func (r *APIKeyRepo) FindByHash(ctx context.Context, hash string) (*model.APIKey
 	return &key, nil
 }
 
+func (r *APIKeyRepo) FindByID(ctx context.Context, id uint) (*model.APIKey, error) {
+	var key model.APIKey
+	err := r.db.WithContext(ctx).First(&key, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &key, nil
+}
+
 func (r *APIKeyRepo) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&model.APIKey{}, id).Error
 }

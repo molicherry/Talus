@@ -57,3 +57,17 @@ func (h *APIKeyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (h *APIKeyHandler) Reveal(w http.ResponseWriter, r *http.Request) {
+	id, err := parseIDParam(r)
+	if err != nil {
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid key id"))
+		return
+	}
+	rawKey, err := h.svc.Reveal(r.Context(), id)
+	if err != nil {
+		server.WriteError(w, r, err)
+		return
+	}
+	server.WriteJSON(w, http.StatusOK, rawKey)
+}

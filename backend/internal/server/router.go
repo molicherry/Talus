@@ -50,6 +50,7 @@ type RouteConfig struct {
 	CreateAPIKeyHandler http.HandlerFunc
 	ListAPIKeysHandler  http.HandlerFunc
 	DeleteAPIKeyHandler http.HandlerFunc
+	RevealAPIKeyHandler http.HandlerFunc
 
 	// Services
 	CreateServiceHandler        http.HandlerFunc
@@ -124,6 +125,7 @@ func NewRouter(cfg RouteConfig) chi.Router {
 			r.Post("/", cfg.CreateAPIKeyHandler)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Delete("/", cfg.DeleteAPIKeyHandler)
+				r.Get("/reveal", cfg.RevealAPIKeyHandler)
 			})
 		})
 
