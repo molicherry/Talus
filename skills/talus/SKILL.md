@@ -1,7 +1,15 @@
 ---
 name: talus
-description: Interact with a running Talus server management platform via REST API. Capabilities: list servers, execute remote commands over SSH, query live monitoring metrics, list credentials (metadata only), list/relay proxied services, create/update servers. API key scoped — credential mutations, API key management, service creation, and secret reveal require the Talus Web UI. Use when user wants to manage servers, execute commands, check server metrics, list credentials, relay service requests, or add/update servers.
-triggers: "Talus", "manage server", "execute command on server", "check server metrics", "list credentials", "relay request", "list servers", "Talus 管理", "通过Talus执行命令".
+description: >-
+  Interact with a running Talus server management platform via REST API.
+  Capabilities: list servers, execute remote commands over SSH,
+  query live monitoring metrics, list credentials (metadata only),
+  list/relay proxied services, create/update servers.
+  API key scoped — credential mutations, API key management,
+  service creation, and secret reveal require the Talus Web UI.
+  Use when user wants to manage servers, execute commands, check server metrics,
+  list credentials, relay service requests, or add/update servers.
+triggers: ["Talus", "manage server", "execute command on server", "check server metrics", "list credentials", "relay request", "list servers", "Talus 管理", "通过Talus执行命令"]
 ---
 
 # Talus Skill — Agent Operation Guide
