@@ -142,14 +142,14 @@ docker compose up -d
 
 ## AI Integration
 
-An [OpenCode skill](skills/talus/SKILL.md) is included in the repository. AI assistants that load this skill can manage servers, execute commands, query metrics, relay requests to registered services, and create scoped API keys through Talus's REST API — no manual endpoint lookup needed.
+An [OpenCode skill](skills/talus/SKILL.md) is included in the repository. AI assistants that load this skill can manage servers, execute commands, query metrics, relay requests to registered services, and add or update servers through Talus's REST API. Credential management, API key creation, and service registration are available via the Talus Web UI.
 
 ```bash
 # In any AI session with the Talus repository open:
 "List all servers via Talus API"
 "Check CPU metrics on server web-01"
+"Run 'docker ps' on prod-db"
 "Relay a request to the Grafana service"
-"Create a read-only API key for monitoring"
 ```
 
 ## Configuration
