@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/vpsmanager/backend/internal/model"
+	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
@@ -28,12 +30,13 @@ type UpdateCredentialRequest struct {
 
 // CredentialHandler exposes the credential management endpoints.
 type CredentialHandler struct {
-	svc *service.CredentialService
+	svc       *service.CredentialService
+	auditRepo *repository.AuditEventRepo
 }
 
 // NewCredentialHandler creates a CredentialHandler with the given service.
-func NewCredentialHandler(svc *service.CredentialService) *CredentialHandler {
-	return &CredentialHandler{svc: svc}
+func NewCredentialHandler(svc *service.CredentialService, auditRepo *repository.AuditEventRepo) *CredentialHandler {
+	return &CredentialHandler{svc: svc, auditRepo: auditRepo}
 }
 
 // Create handles POST /api/v1/credentials.
@@ -151,6 +154,15 @@ func (h *CredentialHandler) Reveal(w http.ResponseWriter, r *http.Request) {
 			"credential_id", id,
 			"ip", r.RemoteAddr,
 		)
+
+		_ = h.auditRepo.Create(r.Context(), &model.AuditEvent{
+			UserID:       claims.UserID,
+			Username:     claims.Username,
+			Action:       "credential.reveal",
+			ResourceType: "credential",
+			ResourceID:   id,
+			IPAddress:    r.RemoteAddr,
+		})
 	}
 
 	server.WriteJSON(w, http.StatusOK, result)

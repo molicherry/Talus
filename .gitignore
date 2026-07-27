@@ -3,8 +3,10 @@
 .opencode/
 .trellis/
 .pi/
+.pi-meetings/
 .agents/
 AGENTS.md
+
 
 # Dependencies
 frontend/node_modules/

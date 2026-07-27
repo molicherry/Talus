@@ -32,6 +32,11 @@ services:
     image: ghcr.io/molicherry/talus:latest
     ports:
       - "${PORT:-8080}:8080"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     environment:
       DATABASE_URL: postgres://vpsmanager:${DB_PASSWORD}@db:5432/vpsmanager?sslmode=disable
       VPSMANAGER_MASTER_KEY: ${VPSMANAGER_MASTER_KEY}
