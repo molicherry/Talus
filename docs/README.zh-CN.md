@@ -97,14 +97,14 @@ docker compose up -d
 
 ## AI 集成
 
-仓库中包含 [OpenCode skill](../skills/talus/SKILL.md)。加载此 skill 的 AI 助手可通过 Talus REST API 管理服务器、执行命令、查询指标、代理请求到已注册的外部服务以及创建带作用域的 API 密钥——无需手动查阅 API 文档。
+仓库中包含 [OpenCode skill](../skills/talus/SKILL.md)。加载此 skill 的 AI 助手可通过 Talus REST API 管理服务器、执行命令、查询指标、代理请求到已注册的外部服务以及添加或更新服务器。凭据管理、API 密钥创建和服务注册需通过 Talus Web UI 操作。
 
 ```bash
 # 在任意 AI 会话中（已打开 Talus 仓库）：
 "通过 Talus 列出所有服务器"
 "查看 web-01 的 CPU 指标"
+"在 prod-db 上执行 docker ps"
 "向 Grafana 服务转发请求"
-"创建一个只读的监控 API Key"
 ```
 
 ## 配置项
