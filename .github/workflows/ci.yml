@@ -28,6 +28,10 @@ jobs:
         run: go vet ./...
         working-directory: backend
 
+      - name: Test
+        run: go test -race ./...
+        working-directory: backend
+
       - name: Build
         run: go build ./...
         working-directory: backend

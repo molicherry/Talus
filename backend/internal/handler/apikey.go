@@ -5,17 +5,20 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/vpsmanager/backend/internal/model"
+	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
 )
 
 type APIKeyHandler struct {
-	svc *service.APIKeyService
+	svc       *service.APIKeyService
+	auditRepo *repository.AuditEventRepo
 }
 
-func NewAPIKeyHandler(svc *service.APIKeyService) *APIKeyHandler {
-	return &APIKeyHandler{svc: svc}
+func NewAPIKeyHandler(svc *service.APIKeyService, auditRepo *repository.AuditEventRepo) *APIKeyHandler {
+	return &APIKeyHandler{svc: svc, auditRepo: auditRepo}
 }
 
 type createAPIKeyRequest struct {
@@ -79,6 +82,15 @@ func (h *APIKeyHandler) Reveal(w http.ResponseWriter, r *http.Request) {
 			"key_id", id,
 			"ip", r.RemoteAddr,
 		)
+
+		_ = h.auditRepo.Create(r.Context(), &model.AuditEvent{
+			UserID:       claims.UserID,
+			Username:     claims.Username,
+			Action:       "api_key.reveal",
+			ResourceType: "api_key",
+			ResourceID:   id,
+			IPAddress:    r.RemoteAddr,
+		})
 	}
 
 	server.WriteJSON(w, http.StatusOK, rawKey)

@@ -91,6 +91,7 @@ func main() {
 			&model.APIKey{},
 			&model.Metric{},
 			&model.Service{},
+		&model.AuditEvent{},
 		)
 		if autoMigrateErr == nil {
 			break
@@ -124,18 +125,19 @@ func main() {
 	// Dependency chain — API Keys
 	apiKeyRepo := repository.NewAPIKeyRepo(db)
 	apiKeySvc := service.NewAPIKeyService(apiKeyRepo, serverRepo, masterKey)
-	apiKeyHandler := handler.NewAPIKeyHandler(apiKeySvc)
+	auditRepo := repository.NewAuditEventRepo(db)
+	apiKeyHandler := handler.NewAPIKeyHandler(apiKeySvc, auditRepo)
 	serverHandler := handler.NewServerHandler(serverSvc)
 
 	// Dependency chain — Credentials
 	credRepo := repository.NewCredentialRepo(db)
 	credSvc := service.NewCredentialService(credRepo, masterKey)
-	credHandler := handler.NewCredentialHandler(credSvc)
+	credHandler := handler.NewCredentialHandler(credSvc, auditRepo)
 
 	// Dependency chain — Services
 	serviceRepo := repository.NewServiceRepo(db)
 	serviceSvc := service.NewServiceRelayService(serviceRepo, masterKey)
-	serviceHandler := handler.NewServiceHandler(serviceSvc)
+	serviceHandler := handler.NewServiceHandler(serviceSvc, auditRepo)
 
 	// Dependency chain — SSH
 	sshPool := sshpool.NewPool(

@@ -7,6 +7,8 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vpsmanager/backend/internal/model"
+	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
@@ -31,12 +33,13 @@ type relayRequest struct {
 
 // ServiceHandler exposes the service management and relay endpoints.
 type ServiceHandler struct {
-	svc *service.ServiceRelayService
+	svc       *service.ServiceRelayService
+	auditRepo *repository.AuditEventRepo
 }
 
 // NewServiceHandler creates a ServiceHandler with the given service.
-func NewServiceHandler(svc *service.ServiceRelayService) *ServiceHandler {
-	return &ServiceHandler{svc: svc}
+func NewServiceHandler(svc *service.ServiceRelayService, auditRepo *repository.AuditEventRepo) *ServiceHandler {
+	return &ServiceHandler{svc: svc, auditRepo: auditRepo}
 }
 
 // Create handles POST /api/v1/services.
@@ -171,6 +174,15 @@ func (h *ServiceHandler) GetCredentials(w http.ResponseWriter, r *http.Request) 
 			"service_id", id,
 			"ip", r.RemoteAddr,
 		)
+
+		_ = h.auditRepo.Create(r.Context(), &model.AuditEvent{
+			UserID:       claims.UserID,
+			Username:     claims.Username,
+			Action:       "service.credentials",
+			ResourceType: "service",
+			ResourceID:   id,
+			IPAddress:    r.RemoteAddr,
+		})
 	}
 
 	server.WriteJSON(w, http.StatusOK, creds)
