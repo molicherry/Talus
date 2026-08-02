@@ -59,6 +59,24 @@ func (h *ServerHandler) List(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, servers)
 }
 
+// ListSummaries handles GET /api/v1/servers/summary — lightweight server
+// listing for the servers list page and server-select dropdowns.
+func (h *ServerHandler) ListSummaries(w http.ResponseWriter, r *http.Request) {
+	claims := mw.GetUserClaims(r.Context())
+	var summaries []model.ServerSummary
+	var err error
+	if claims != nil && len(claims.ServerIDs) > 0 {
+		summaries, err = h.svc.ListSummariesFiltered(r.Context(), claims.ServerIDs)
+	} else {
+		summaries, err = h.svc.ListSummaries(r.Context())
+	}
+	if err != nil {
+		server.WriteError(w, r, err)
+		return
+	}
+	server.WriteJSON(w, http.StatusOK, summaries)
+}
+
 // Get handles GET /api/v1/servers/{id}.
 func (h *ServerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)

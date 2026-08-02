@@ -1,55 +1,58 @@
-# docker-compose.yml — Production deployment
-# Usage: docker compose up -d
+# docker-compose.yml — Build Talus from source (local development / self-host build)
 #
-# 1. Set secrets in .env or export:
-#    DB_PASSWORD=<your-password>
-#    VPSMANAGER_MASTER_KEY=$(openssl rand -hex 32)
-#    JWT_SECRET=$(openssl rand -hex 32)
+# Quick Start:
+#   1. docker compose up -d --build
+#   2. Access at http://localhost:8080 (first login creates the admin account)
 #
-# 2. Login to GHCR:
-#    docker login ghcr.io -u <username> -p <token>
-#
-# 3. Start:
-#    docker compose up -d
+# All secrets have dev defaults so the stack starts out of the box. ⚠️ For
+# production, set DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET in your
+# environment or .env file — or use the pre-built GHCR image compose from the
+# README (no compilation needed).
 
 services:
+  # TimescaleDB (PostgreSQL + Timescale extension) — stores servers, metrics, audit logs
   db:
     image: timescale/timescaledb:latest-pg16
     environment:
       POSTGRES_USER: vpsmanager
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-vpsmanager_dev_password} # ⚠️ change in production
       POSTGRES_DB: vpsmanager
     volumes:
       - pgdata:/var/lib/postgresql/data
-    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vpsmanager"]
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
+  # Talus hub — compiled from the repository root Dockerfile
   hub:
-    image: ghcr.io/molicherry/talus:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
     ports:
       - "${PORT:-8080}:8080"
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp
     environment:
-      DATABASE_URL: postgres://vpsmanager:${DB_PASSWORD}@db:5432/vpsmanager?sslmode=disable
-      VPSMANAGER_MASTER_KEY: ${VPSMANAGER_MASTER_KEY}
-      JWT_SECRET: ${JWT_SECRET}
-      PORT: "${PORT:-8080}"
-      LOG_FORMAT: json
-      LOG_LEVEL: "${LOG_LEVEL:-info}"
-      MONITOR_INTERVAL: "${MONITOR_INTERVAL:-60}"
-      SSH_TIMEOUT: "${SSH_TIMEOUT:-10}"
-      EXEC_TIMEOUT: "${EXEC_TIMEOUT:-30}"
+      DATABASE_URL: postgres://vpsmanager:${DB_PASSWORD:-vpsmanager_dev_password}@db:5432/vpsmanager?sslmode=disable
+      VPSMANAGER_MASTER_KEY: ${VPSMANAGER_MASTER_KEY:-dev_master_key_change_me} # ⚠️ change in production (openssl rand -hex 32)
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_me} # ⚠️ change in production (openssl rand -hex 32)
+      PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MONITOR_INTERVAL: ${MONITOR_INTERVAL:-60}
+      SSH_TIMEOUT: ${SSH_TIMEOUT:-10}
+      EXEC_TIMEOUT: ${EXEC_TIMEOUT:-30}
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
 
 volumes:

@@ -37,6 +37,18 @@ export const ServerSchema = z.object({
 });
 export type Server = z.infer<typeof ServerSchema>;
 
+// Contract for GET /api/v1/servers/summary — keep in sync with the backend
+// model.ServerSummary. All fields listed here must be returned by the endpoint.
+export const ServerSummarySchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  host: z.string(),
+  credential_id: z.number().nullable(),
+  status: z.enum(["online", "offline", "checking", "unknown"]),
+});
+export type ServerSummary = z.infer<typeof ServerSummarySchema>;
+
 export const ServerFormSchema = z.object({
   name: z.string().min(1, i18n.t("validation.nameRequired")).max(128),
   host: z.string().min(1, i18n.t("validation.hostRequired")).max(256),

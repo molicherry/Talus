@@ -1,3 +1,8 @@
+# Talus image — built from the repository root as build context.
+# Used by docker compose (docker-compose.yml), CI (ci.yml) and platforms
+# that build with the Dockerfile's directory as context.
+# backend/Dockerfile is kept in sync for standalone backend-only builds.
+
 FROM golang:1.25-alpine AS go-builder
 ARG VERSION=dev
 ARG TARGETARCH=amd64

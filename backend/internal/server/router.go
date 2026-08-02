@@ -25,11 +25,12 @@ type RouteConfig struct {
 	ChangePasswordHandler http.HandlerFunc
 
 	// Servers
-	ListServersHandler  http.HandlerFunc
-	CreateServerHandler http.HandlerFunc
-	GetServerHandler    http.HandlerFunc
-	UpdateServerHandler http.HandlerFunc
-	DeleteServerHandler http.HandlerFunc
+	ListServersHandler        http.HandlerFunc
+	ListServerSummariesHandler http.HandlerFunc
+	CreateServerHandler        http.HandlerFunc
+	GetServerHandler           http.HandlerFunc
+	UpdateServerHandler        http.HandlerFunc
+	DeleteServerHandler        http.HandlerFunc
 
 	// Credentials
 	ListCredentialsHandler   http.HandlerFunc
@@ -98,6 +99,9 @@ func NewRouter(cfg RouteConfig) chi.Router {
 		// Server CRUD
 		r.Route("/api/v1/servers", func(r chi.Router) {
 			r.Get("/", cfg.ListServersHandler)
+			// Static segment must be registered before the {id} parameter route so
+			// chi resolves /summary as the summary listing, not a server id.
+			r.Get("/summary", cfg.ListServerSummariesHandler)
 			r.Post("/", cfg.CreateServerHandler)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Get("/", cfg.GetServerHandler)

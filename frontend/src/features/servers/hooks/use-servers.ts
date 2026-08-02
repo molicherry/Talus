@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createServer, deleteServer, getServer, getServers, updateServer } from "../api";
+import { createServer, deleteServer, getServer, getServerSummaries, updateServer } from "../api";
 
 export function useServers() {
   return useQuery({
     queryKey: ["servers"],
-    queryFn: getServers,
+    queryFn: getServerSummaries,
     staleTime: 30_000,
   });
 }

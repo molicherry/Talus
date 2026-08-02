@@ -152,7 +152,7 @@ func main() {
 	terminalSvc := service.NewTerminalService(sshSvc)
 
 	execH := handler.NewExecHandler(sshSvc)
-	terminalH := handler.NewTerminalHandler(terminalSvc)
+	terminalH := handler.NewTerminalHandler(terminalSvc, jwtSvc)
 
 	// Dependency chain — Metrics
 	monitorSvc := service.NewMonitorService(sshSvc, metricRepo, serverRepo, time.Duration(cfg.MonitorInterval)*time.Second)
@@ -178,11 +178,12 @@ func main() {
 		ProfileHandler:         authHandler.Profile,
 		ChangePasswordHandler:  authHandler.ChangePassword,
 		// Servers
-		ListServersHandler:   serverHandler.List,
-		CreateServerHandler:  serverHandler.Create,
-		GetServerHandler:     serverHandler.Get,
-		UpdateServerHandler:  serverHandler.Update,
-		DeleteServerHandler:  serverHandler.Delete,
+		ListServersHandler:         serverHandler.List,
+		ListServerSummariesHandler: serverHandler.ListSummaries,
+		CreateServerHandler:        serverHandler.Create,
+		GetServerHandler:           serverHandler.Get,
+		UpdateServerHandler:        serverHandler.Update,
+		DeleteServerHandler:        serverHandler.Delete,
 		// Credentials
 		ListCredentialsHandler:  credHandler.List,
 		CreateCredentialHandler: credHandler.Create,

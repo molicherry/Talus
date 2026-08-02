@@ -161,7 +161,7 @@
   "backToServer": "Back to server",
   "connected": "Connected",
   "connecting": "Connecting...",
-  "disconnected": "Disconnected",
+  "reconnecting": "Reconnecting ({{attempt}}/{{max}})...",
   "reconnect": "Reconnect",
   "disconnect": "Disconnect",
   "title": "Terminal — {{name}}"

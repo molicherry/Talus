@@ -23,6 +23,18 @@ type Server struct {
 	Credential *SSHCredential `gorm:"foreignKey:CredentialID" json:"credential,omitempty"`
 }
 
+// ServerSummary is a lightweight server representation for list endpoints.
+// Field set is the contract for GET /api/v1/servers/summary — keep in sync
+// with the frontend ServerSummarySchema.
+type ServerSummary struct {
+	ID           uint    `json:"id"`
+	Name         string  `json:"name"`
+	Description  *string `json:"description,omitempty"`
+	Host         string  `json:"host"`
+	CredentialID *uint   `json:"credential_id"`
+	Status       string  `gorm:"-" json:"status"`
+}
+
 // LatestMetrics holds the most recent snapshot of key metrics for a server.
 type LatestMetrics struct {
 	CPUPercent    *float64 `json:"cpu_percent,omitempty"`

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { apiClient } from "../../lib/api-client";
-import { type Server, type ServerFormValues, ServerSchema } from "../../types/models";
+import { type Server, type ServerFormValues, type ServerSummary, ServerSchema, ServerSummarySchema } from "../../types/models";
 import type { ExecResponse } from "../../types/ssh";
 
 const ExecResponseSchema = z.object({
@@ -10,9 +10,11 @@ const ExecResponseSchema = z.object({
   duration_ms: z.number(),
 });
 
-export async function getServers(): Promise<Server[]> {
-  const res = await apiClient.get<Server[]>("/api/v1/servers");
-  return z.array(ServerSchema).parse(res);
+// getServerSummaries fetches the lightweight server list used by the servers
+// page and server-select dropdowns (GET /api/v1/servers/summary).
+export async function getServerSummaries(): Promise<ServerSummary[]> {
+	const res = await apiClient.get<ServerSummary[]>("/api/v1/servers/summary");
+	return z.array(ServerSummarySchema).parse(res);
 }
 
 export async function getServer(id: number): Promise<Server> {
