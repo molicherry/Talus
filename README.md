@@ -157,10 +157,44 @@ docker compose -f docker-compose.prod.yml up -d
 
 ## AI Integration
 
-An [OpenCode skill](skills/talus/SKILL.md) is included in the repository. AI assistants that load this skill can manage servers, execute commands, query metrics, relay requests to registered services, and add or update servers through Talus's REST API. Credential management, API key creation, and service registration are available via the Talus Web UI.
+Talus ships with a portable [agent skill](skills/talus/SKILL.md) so any AI
+coding assistant (OpenCode, Claude Code, Cursor, …) can operate Talus through
+its REST API: list servers, run commands, read metrics, relay requests to
+registered services, and add/update servers.
+
+### Prerequisites
+
+- A running Talus instance (see Deployment above)
+- An API key — create one in **Talus Web UI → API Keys** (default scopes cover
+  read/exec/metrics; `servers:write` and `services:relay` are opt-in)
+
+### Install
+
+Copy the skill into your AI tool's skills directory (the skill is portable
+and does not need to live inside this repository):
 
 ```bash
-# In any AI session with the Talus repository open:
+# OpenCode
+mkdir -p ~/.config/opencode/skills && cp -r skills/talus ~/.config/opencode/skills/
+# Claude Code
+mkdir -p ~/.claude/skills && cp -r skills/talus ~/.claude/skills/
+```
+
+Point the assistant at your instance:
+
+```bash
+export TALUS_URL=https://your-talus.example.com   # defaults to http://localhost:8080
+export TALUS_API_KEY=<your-api-key>
+```
+
+### Verify
+
+In a new AI session, ask *"List all servers via Talus"* — a list of servers
+(or an empty array) means the skill is wired up.
+
+### Example prompts
+
+```bash
 "List all servers via Talus API"
 "Check CPU metrics on server web-01"
 "Run 'docker ps' on prod-db"

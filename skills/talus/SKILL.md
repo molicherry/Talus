@@ -80,6 +80,8 @@ Any endpoint not in the scope table or jwtOnly table is **unrestricted** — e.g
 
 ```
 GET /api/v1/servers           → list all with status + latest_metrics
+GET /api/v1/servers/summary   → lightweight list (id, name, description, host,
+                                 credential_id, status) — no metrics
 GET /api/v1/servers/{id}      → full detail with credential info
 ```
 
