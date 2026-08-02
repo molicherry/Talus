@@ -13,8 +13,6 @@
 - **实时监控** — CPU、内存、磁盘、负载、Swap、网络和磁盘 I/O 图表，支持 1 小时 / 6 小时 / 24 小时 / 7 天时间范围。临时 Agent 通过 SSH 按需部署。
 - **API 密钥** — 创建带作用域和服务器级别访问控制的 API 密钥。二维权限模型（操作 × 服务器）。密钥加密存储，支持按需复制，带有审计日志和速率限制。
 - **服务代理** — 注册外部服务（Grafana、Portainer 等），加密存储凭据。通过 Talus 代理 API 请求，支持凭据注入和占位符替换。编辑时可加载已有凭据，支持显示/隐藏切换和复制。
-- **国际化** — 英文和中文界面，支持亮色/暗色/跟随系统主题。
-- **Docker Compose** — 一条命令启动：`docker compose up`。
 
 ## 架构
 
@@ -47,13 +45,9 @@ git clone https://github.com/molicherry/Talus.git
 cd Talus
 ```
 
-### 2. 配置
+### 2. 配置（可选）
 
-```bash
-cp .env.example .env
-```
-
-编辑 `.env` 并设置：
+所有密钥都有开发默认值，开箱即用。除本地测试外，请复制 `.env.example` 为 `.env` 并设置真实值：
 
 ```env
 DB_PASSWORD=<你的数据库密码>
@@ -61,15 +55,15 @@ VPSMANAGER_MASTER_KEY=<使用 openssl rand -hex 32 生成>
 JWT_SECRET=<使用 openssl rand -hex 32 生成>
 ```
 
-### 3. 启动
+### 3. 启动（源码构建）
+
+仓库内的 `docker-compose.yml` 从源码构建 Talus：
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
 访问控制台：**http://localhost:8080**
-
-首次登录时，输入任意用户名和密码即可——首次登录会自动创建管理员账号。
 
 ### 4. 添加服务器
 
@@ -97,10 +91,41 @@ docker compose up -d
 
 ## AI 集成
 
-仓库中包含 [OpenCode skill](../skills/talus/SKILL.md)。加载此 skill 的 AI 助手可通过 Talus REST API 管理服务器、执行命令、查询指标、代理请求到已注册的外部服务以及添加或更新服务器。凭据管理、API 密钥创建和服务注册需通过 Talus Web UI 操作。
+Talus 附带一个**可移植的** [agent skill](../skills/talus/SKILL.md)，任何 AI 编程助手
+（OpenCode、Claude Code、Cursor 等）都可以通过 Talus REST API 操作它：
+列出服务器、执行命令、查询指标、向已注册服务转发请求、添加/更新服务器。
+
+### 准备
+
+- 一个运行中的 Talus 实例（见上文部署）
+- 一个 API 密钥——在 **Talus Web UI → API Keys** 创建（默认作用域覆盖读/执行/指标；
+  `servers:write` 和 `services:relay` 为可选勾选）
+
+### 安装
+
+把 skill 复制到你所用 AI 工具的 skills 目录（skill 是可移植的，不要求放在本仓库内）：
 
 ```bash
-# 在任意 AI 会话中（已打开 Talus 仓库）：
+# OpenCode
+mkdir -p ~/.config/opencode/skills && cp -r skills/talus ~/.config/opencode/skills/
+# Claude Code
+mkdir -p ~/.claude/skills && cp -r skills/talus ~/.claude/skills/
+```
+
+把助手指向你的实例：
+
+```bash
+export TALUS_URL=https://your-talus.example.com   # 默认 http://localhost:8080
+export TALUS_API_KEY=<你的 API 密钥>
+```
+
+### 验证
+
+在新的 AI 会话中问 *"通过 Talus 列出所有服务器"*——返回服务器列表（或空数组）即表示 skill 已生效。
+
+### 示例提示词
+
+```bash
 "通过 Talus 列出所有服务器"
 "查看 web-01 的 CPU 指标"
 "在 prod-db 上执行 docker ps"
@@ -128,23 +153,63 @@ docker compose up -d
 - 监控 Agent 是**临时的**：按需部署，采集指标后退出。不会在目标服务器上留下持久化二进制文件或守护进程。
 - SSH 主机密钥采用 **TOFU（首次信任）** 机制验证：首次连接时记录密钥，后续连接验证匹配，防止中间人攻击。
 
-## 本地构建
+## 生产部署（GHCR 镜像）
 
-如果不使用预构建的 GHCR 镜像，可以在 `docker-compose.yml` 的 `hub` 服务下添加 `build:` 块：
+预构建镜像由 CI 在每个版本 tag（`v*`）发布到 [GHCR](https://github.com/molicherry/Talus/pkgs/container/talus)。
+不想编译的话，把下面的 compose 保存为 `docker-compose.prod.yml`：
 
 ```yaml
-hub:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    # image: ghcr.io/molicherry/talus:latest  # 注释掉 image 行
+# docker-compose.prod.yml — 使用预构建 GHCR 镜像部署 Talus
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_USER: vpsmanager
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?请在 .env 中设置 DB_PASSWORD}
+      POSTGRES_DB: vpsmanager
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vpsmanager"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  hub:
+    image: ghcr.io/molicherry/talus:${TALUS_VERSION:-latest}
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: postgres://vpsmanager:${DB_PASSWORD:?请在 .env 中设置 DB_PASSWORD}@db:5432/vpsmanager?sslmode=disable
+      VPSMANAGER_MASTER_KEY: ${VPSMANAGER_MASTER_KEY:?请在 .env 中设置 VPSMANAGER_MASTER_KEY}
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置 JWT_SECRET}
+      PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MONITOR_INTERVAL: ${MONITOR_INTERVAL:-60}
+      SSH_TIMEOUT: ${SSH_TIMEOUT:-10}
+      EXEC_TIMEOUT: ${EXEC_TIMEOUT:-30}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
 ```
 
-然后运行：
+部署：
 
 ```bash
-docker compose build
-docker compose up -d
+cp .env.example .env   # 填入 DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET
+docker compose -f docker-compose.prod.yml up -d
+```
+
+**升级到新版本：**
+
+```bash
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ## 许可证

@@ -7,6 +7,11 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// probeTimeout bounds a single keepalive round-trip used to verify a pooled
+// connection is still alive. Connections that do not respond within this
+// window are treated as dead and discarded so callers dial a fresh one.
+const probeTimeout = 3 * time.Second
+
 // Pool manages a cache of SSH client connections keyed by server ID.
 // It limits concurrent sessions per server and evicts idle connections.
 type Pool struct {
@@ -15,6 +20,9 @@ type Pool struct {
 	maxIdle  time.Duration
 	maxConns int
 	done     chan struct{}
+	// probe reports whether a pooled connection is still usable. It is
+	// overridable in tests; the default performs a keepalive round-trip.
+	probe func(*ssh.Client) bool
 }
 
 // connEntry tracks a single cached SSH client and its usage.
@@ -32,14 +40,16 @@ func NewPool(maxIdle time.Duration, maxConns int) *Pool {
 		maxIdle:  maxIdle,
 		maxConns: maxConns,
 		done:     make(chan struct{}),
+		probe:    keepAliveProbe,
 	}
 	go p.evictLoop()
 	return p
 }
 
 // Get acquires a concurrency slot for the given server and returns a cached
-// client if one is available. Returns nil if no cached client exists — the
-// caller must dial a new connection and pass it to Release when finished.
+// client if one is available and healthy. Returns nil if no cached client
+// exists or the cached one is dead — the caller must dial a new connection
+// and pass it to Release when finished.
 // Blocks if maxConns sessions are already active for this server.
 func (p *Pool) Get(serverID uint) *ssh.Client {
 	p.mu.Lock()
@@ -62,6 +72,15 @@ func (p *Pool) Get(serverID uint) *ssh.Client {
 	}
 	entry.lastUsed = time.Now()
 	p.mu.Unlock()
+
+	// A cached connection may have died silently (network drop, server
+	// restart, or the peer timing it out). Verify it is still usable before
+	// handing it out; otherwise close and drop it so the caller dials a fresh
+	// connection instead of reusing a dead one forever.
+	if client != nil && !p.probe(client) {
+		client.Close()
+		client = nil
+	}
 
 	return client
 }
@@ -92,6 +111,23 @@ func (p *Pool) Release(serverID uint, client *ssh.Client) {
 	p.mu.Unlock()
 
 	<-entry.sem // release concurrency slot
+}
+
+// Discard closes client without returning it to the pool and releases the
+// concurrency slot acquired by Get. Callers should use Discard instead of
+// Release when they know the connection is broken, so a dead connection is
+// never cached and reused.
+func (p *Pool) Discard(serverID uint, client *ssh.Client) {
+	p.mu.Lock()
+	entry, ok := p.conns[serverID]
+	p.mu.Unlock()
+
+	if client != nil {
+		client.Close()
+	}
+	if ok {
+		<-entry.sem // release concurrency slot
+	}
 }
 
 // Close shuts down the eviction goroutine and closes all cached connections.
@@ -138,5 +174,21 @@ func (p *Pool) evict() {
 		if entry.client == nil && len(entry.sem) == 0 {
 			delete(p.conns, id)
 		}
+	}
+}
+
+// keepAliveProbe performs a bounded keepalive round-trip over the SSH channel.
+// It returns true only when the server responds within probeTimeout.
+func keepAliveProbe(client *ssh.Client) bool {
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := client.SendRequest("keepalive@talus.local", true, nil)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err == nil
+	case <-time.After(probeTimeout):
+		return false
 	}
 }

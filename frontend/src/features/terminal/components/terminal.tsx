@@ -4,12 +4,14 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useTerminal } from "../hooks/use-terminal";
 
+const MAX_RETRIES = 5;
+
 interface TerminalViewProps {
   serverId: number;
 }
 
 export function TerminalView({ serverId }: TerminalViewProps) {
-  const { terminalRef, status, error, connect, disconnect } = useTerminal(serverId);
+  const { terminalRef, status, error, retryCount, connect, disconnect } = useTerminal(serverId);
   const { t } = useTranslation();
 
   useEffect(() => {
@@ -18,6 +20,8 @@ export function TerminalView({ serverId }: TerminalViewProps) {
       disconnect();
     };
   }, [connect, disconnect]);
+
+  const isIdle = status === "disconnected" || status === "reconnecting";
 
   return (
     <div className="flex h-full flex-col">
@@ -47,19 +51,29 @@ export function TerminalView({ serverId }: TerminalViewProps) {
             {status === "disconnected" && (
               <>
                 <WifiOff className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
-                <span className="text-gray-400 dark:text-gray-500">{t("terminal.disconnected")}</span>
+                <span className="text-gray-400 dark:text-gray-500">
+                  {t("terminal.disconnected")}
+                </span>
+              </>
+            )}
+            {status === "reconnecting" && (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-yellow-400" />
+                <span className="text-yellow-400">
+                  {t("terminal.reconnecting", { attempt: retryCount, max: MAX_RETRIES })}
+                </span>
               </>
             )}
           </span>
         </div>
         <button
           type="button"
-          onClick={status === "disconnected" ? connect : disconnect}
+						onClick={isIdle ? () => connect() : disconnect}
           disabled={status === "connecting"}
           className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
         >
           <Plug className="h-3.5 w-3.5" />
-          {status === "disconnected" ? t("terminal.reconnect") : t("terminal.disconnect")}
+          {isIdle ? t("terminal.reconnect") : t("terminal.disconnect")}
         </button>
       </div>
 

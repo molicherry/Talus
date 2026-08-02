@@ -9,6 +9,7 @@ import (
 // routeScopes maps normalized "METHOD /api/v1/..." patterns to required scopes.
 var routeScopes = map[string]string{
 	"GET /api/v1/servers":               "servers:read",
+	"GET /api/v1/servers/summary":       "servers:read",
 	"POST /api/v1/servers":              "servers:write",
 	"GET /api/v1/servers/{id}":          "servers:read",
 	"PUT /api/v1/servers/{id}":          "servers:write",

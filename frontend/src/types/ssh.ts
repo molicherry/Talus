@@ -11,7 +11,7 @@ export interface ExecResponse {
 }
 
 export interface TerminalClientMessage {
-  type: "input" | "resize";
+  type: "auth" | "input" | "resize";
   data?: string;
   cols?: number;
   rows?: number;

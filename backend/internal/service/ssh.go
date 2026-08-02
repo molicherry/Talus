@@ -58,13 +58,20 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 	if err != nil {
 		return nil, err
 	}
-	defer s.pool.Release(serverID, client)
 
 	result, err := s.runCommand(client, command, timeout)
 	duration := time.Since(start).Milliseconds()
 
 	if result != nil {
 		result.DurationMs = duration
+	}
+
+	// Never cache a connection whose transport failed — reuse would
+	// immediately fail again on the next call.
+	if isConnectionError(err) {
+		s.pool.Discard(serverID, client)
+	} else {
+		s.pool.Release(serverID, client)
 	}
 
 	return result, err
@@ -201,6 +208,32 @@ func wrapSSHError(err error) error {
 		return fmt.Errorf("%w: %v", server.ErrSSHConnection, err)
 	}
 	return fmt.Errorf("%w: %v", server.ErrSSHConnection, err)
+}
+
+// isConnectionError reports whether err indicates the SSH transport itself
+// failed (as opposed to the remote command failing with a non-zero exit).
+// Connections failing in this way must not be returned to the pool.
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, frag := range []string{
+		"connection closed",
+		"connection reset",
+		"broken pipe",
+		"i/o timeout",
+		"EOF",
+		"network is unreachable",
+		"no route to host",
+		"connection refused",
+		"unable to authenticate",
+	} {
+		if strings.Contains(msg, frag) {
+			return true
+		}
+	}
+	return false
 }
 
 // CopyFile pipes a local file to a remote path over SSH.

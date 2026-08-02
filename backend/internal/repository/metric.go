@@ -159,6 +159,40 @@ func (r *MetricRepo) FindLatestByServerIDs(
 	return result, nil
 }
 
+// FindLatestTimesByServerIDs returns the timestamp of the most recent metric
+// row for each server ID — a lightweight variant used to compute server
+// status without transferring full metric payloads. Servers with no metrics
+// are absent from the returned map.
+func (r *MetricRepo) FindLatestTimesByServerIDs(ctx context.Context, ids []uint) (map[uint]time.Time, error) {
+	if len(ids) == 0 {
+		return map[uint]time.Time{}, nil
+	}
+
+	type row struct {
+		ServerID uint      `gorm:"column:server_id"`
+		Time     time.Time `gorm:"column:time"`
+	}
+	sql := `
+		SELECT DISTINCT ON (server_id)
+			server_id,
+			time
+		FROM metrics
+		WHERE server_id = ANY($1)
+		ORDER BY server_id, time DESC
+	`
+
+	rows := make([]row, 0, len(ids))
+	if err := r.db.WithContext(ctx).Raw(sql, ids).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[uint]time.Time, len(rows))
+	for _, r := range rows {
+		result[r.ServerID] = r.Time
+	}
+	return result, nil
+}
+
 // Query returns aggregated metrics for a server over a time range.
 // interval is a PostgreSQL interval string (e.g. "1 minute", "5 minutes", "1 hour").
 func (r *MetricRepo) Query(

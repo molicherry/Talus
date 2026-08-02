@@ -1,23 +1,25 @@
+import { lazy } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
 import { MainLayout } from "../components/layout/main-layout";
-import { ApiKeysPage } from "../features/auth/components/api-keys-page";
 import { LoginPage } from "../features/auth/components/login-form";
 import { SetupPage } from "../features/auth/components/setup-page";
-import { CredentialCreatePage } from "../features/credentials/components/credential-create-page";
-import { CredentialEditPage } from "../features/credentials/components/credential-edit-page";
-import { CredentialListPage } from "../features/credentials/components/credential-list-page";
 import { DashboardPage } from "../features/dashboard/components/dashboard-page";
-import { ExecPage } from "../features/servers/components/exec-page";
-import { ServerCreatePage } from "../features/servers/components/server-create-page";
-import { ServerDetailPage } from "../features/servers/components/server-detail-page";
-import { ServerEditPage } from "../features/servers/components/server-edit-page";
-import { ServerListPage } from "../features/servers/components/server-list-page";
-import { ServiceCreatePage } from "../features/services/components/service-create-page";
-import { ServiceEditPage } from "../features/services/components/service-edit-page";
-import { ServiceListPage } from "../features/services/components/service-list-page";
-import { TerminalPage } from "../features/terminal/components/terminal-page";
 import { useAuth } from "../hooks/use-auth";
+
+const ApiKeysPage = lazy(() => import("../features/auth/components/api-keys-page").then(m => ({ default: m.ApiKeysPage })));
+const CredentialCreatePage = lazy(() => import("../features/credentials/components/credential-create-page").then(m => ({ default: m.CredentialCreatePage })));
+const CredentialEditPage = lazy(() => import("../features/credentials/components/credential-edit-page").then(m => ({ default: m.CredentialEditPage })));
+const CredentialListPage = lazy(() => import("../features/credentials/components/credential-list-page").then(m => ({ default: m.CredentialListPage })));
+const ExecPage = lazy(() => import("../features/servers/components/exec-page").then(m => ({ default: m.ExecPage })));
+const ServerCreatePage = lazy(() => import("../features/servers/components/server-create-page").then(m => ({ default: m.ServerCreatePage })));
+const ServerDetailPage = lazy(() => import("../features/servers/components/server-detail-page").then(m => ({ default: m.ServerDetailPage })));
+const ServerEditPage = lazy(() => import("../features/servers/components/server-edit-page").then(m => ({ default: m.ServerEditPage })));
+const ServerListPage = lazy(() => import("../features/servers/components/server-list-page").then(m => ({ default: m.ServerListPage })));
+const ServiceCreatePage = lazy(() => import("../features/services/components/service-create-page").then(m => ({ default: m.ServiceCreatePage })));
+const ServiceEditPage = lazy(() => import("../features/services/components/service-edit-page").then(m => ({ default: m.ServiceEditPage })));
+const ServiceListPage = lazy(() => import("../features/services/components/service-list-page").then(m => ({ default: m.ServiceListPage })));
+const TerminalPage = lazy(() => import("../features/terminal/components/terminal-page").then(m => ({ default: m.TerminalPage })));
 
 function ProtectedRoute() {
   const { isAuthenticated } = useAuth();
