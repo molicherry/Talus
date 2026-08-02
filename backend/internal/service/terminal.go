@@ -34,11 +34,21 @@ func (s *TerminalService) StartSession(ctx context.Context, serverID uint, wsCon
 	if err != nil {
 		return err
 	}
-	// Hold client for the entire session; release when done.
-	defer s.sshSvc.pool.Release(serverID, client)
+	// Hold client for the entire session; release when done. If the session
+	// fails to start (or the transport breaks), discard the connection so a
+	// dead client is never cached and reused.
+	var sessionErr error
+	defer func() {
+		if sessionErr != nil {
+			s.sshSvc.pool.Discard(serverID, client)
+		} else {
+			s.sshSvc.pool.Release(serverID, client)
+		}
+	}()
 
 	session, err := client.NewSession()
 	if err != nil {
+		sessionErr = err
 		return err
 	}
 	defer session.Close()
@@ -50,27 +60,33 @@ func (s *TerminalService) StartSession(ctx context.Context, serverID uint, wsCon
 		ssh.TTY_OP_OSPEED: 14400,
 	}
 	if err := session.RequestPty("xterm-256color", 24, 80, modes); err != nil {
+		sessionErr = err
 		return err
 	}
 
 	stdin, err := session.StdinPipe()
 	if err != nil {
+		sessionErr = err
 		return err
 	}
 
 	stdout, err := session.StdoutPipe()
 	if err != nil {
+		sessionErr = err
 		return err
 	}
 
 	if err := session.Shell(); err != nil {
+		sessionErr = err
 		return err
 	}
 
 	// Notify client that the session is ready.
 	if err := wsConn.WriteJSON(wsMessage{Type: "connected"}); err != nil {
+		sessionErr = err
 		return err
 	}
+
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
