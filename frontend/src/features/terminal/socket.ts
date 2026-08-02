@@ -7,17 +7,32 @@ export function createTerminalSocket(
   onClose: () => void,
   onError: (error: Event) => void,
 ): WebSocket {
-  const token = getAuthToken();
   const baseUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin;
   const wsBase = baseUrl.replace(/^http/, "ws");
-  const ws = new WebSocket(`${wsBase}/api/v1/servers/${serverId}/terminal?token=${token}`);
+  // Authentication happens via the FIRST message after the handshake
+  // (browsers cannot set custom headers on WebSocket connections), so the
+  // token never appears in the URL or in access logs.
+  const ws = new WebSocket(`${wsBase}/api/v1/servers/${serverId}/terminal`);
 
   ws.onmessage = (event: MessageEvent) => {
-    const msg = JSON.parse(event.data as string) as TerminalServerMessage;
-    onMessage(msg);
+    try {
+      const msg = JSON.parse(event.data as string) as TerminalServerMessage;
+      onMessage(msg);
+    } catch {
+      // Ignore malformed frames; the terminal stays open.
+    }
   };
   ws.onclose = onClose;
   ws.onerror = onError;
+
+  ws.onopen = () => {
+    const token = getAuthToken();
+    if (token) {
+      sendTerminalMessage(ws, { type: "auth", data: token });
+    } else {
+      onError(new Event("no-auth-token"));
+    }
+  };
 
   return ws;
 }
