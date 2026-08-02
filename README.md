@@ -15,8 +15,6 @@
 - **Live Monitoring** — CPU, memory, disk, load, swap, network, and disk I/O charts with 1h / 6h / 24h / 7d time ranges. Ephemeral agent deployed on-demand over SSH.
 - **API Keys** — Create scoped API keys with per-server access control. Two-dimensional permissions (what actions × which servers). Keys are encrypted at rest and can be copied on demand. Rate-limited reveal with audit logging.
 - **Service Proxy** — Register external services (Grafana, Portainer, etc.) with encrypted credentials. Proxy API requests through Talus with credential injection and placeholder substitution. Edit forms load existing credentials with show/hide toggle and copy support.
-- **i18n** — English and 中文 interface with light/dark/system theme.
-- **Docker Compose** — One command to start: `docker compose up`.
 
 ## Architecture
 
@@ -49,13 +47,11 @@ git clone https://github.com/molicherry/Talus.git
 cd Talus
 ```
 
-### 2. Configure
+### 2. Configure (optional)
 
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and set:
+All secrets have development defaults so the stack starts out of the box. For
+anything beyond local testing, copy `.env.example` to `.env` and set real
+secrets:
 
 ```env
 DB_PASSWORD=<your-postgres-password>
@@ -63,10 +59,12 @@ VPSMANAGER_MASTER_KEY=<openssl rand -hex 32>
 JWT_SECRET=<openssl rand -hex 32>
 ```
 
-### 3. Start
+### 3. Start (build from source)
+
+The repository `docker-compose.yml` builds Talus from source:
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
 The dashboard is at **http://localhost:8080**.
@@ -87,47 +85,64 @@ On first login, enter any username and password — the first login automaticall
 3. Optionally assign the service to a server for SSH-tunneled access
 4. Use the relay API to proxy requests through Talus — credentials are injected automatically, `{{key}}` placeholders are substituted
 
-## Production Deployment
+## Production Deployment (GHCR images)
 
-Pre-built images are published to [GHCR](https://github.com/molicherry/Talus/pkgs/container/talus) on every version tag (`v*`).
+Pre-built images are published to [GHCR](https://github.com/molicherry/Talus/pkgs/container/talus)
+on every version tag (`v*`) by CI. To deploy without compiling, save the
+compose file below as `docker-compose.prod.yml`:
+
+```yaml
+# docker-compose.prod.yml — deploy Talus from pre-built GHCR images
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_USER: vpsmanager
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      POSTGRES_DB: vpsmanager
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vpsmanager"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  hub:
+    image: ghcr.io/molicherry/talus:${TALUS_VERSION:-latest}
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: postgres://vpsmanager:${DB_PASSWORD:?set DB_PASSWORD in .env}@db:5432/vpsmanager?sslmode=disable
+      VPSMANAGER_MASTER_KEY: ${VPSMANAGER_MASTER_KEY:?set VPSMANAGER_MASTER_KEY in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MONITOR_INTERVAL: ${MONITOR_INTERVAL:-60}
+      SSH_TIMEOUT: ${SSH_TIMEOUT:-10}
+      EXEC_TIMEOUT: ${EXEC_TIMEOUT:-30}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+```
+
+Deploy:
 
 ```bash
-# 1. Login to GitHub Container Registry
-docker login ghcr.io -u <your-github-username> -p <personal-access-token>
-
-# 2. Set secrets
-export DB_PASSWORD=<your-password>
-export VPSMANAGER_MASTER_KEY=$(openssl rand -hex 32)
-export JWT_SECRET=$(openssl rand -hex 32)
-
-# 3. Deploy
-docker compose up -d
+cp .env.example .env   # then fill in DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 **Upgrade to a new version:**
 
 ```bash
-docker compose pull
-docker compose up -d
-```
-
-### Local Build
-
-If you prefer to build from source instead of using pre-built GHCR images, add a `build:` block to `docker-compose.yml` under the `hub` service:
-
-```yaml
-hub:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    # image: ghcr.io/molicherry/talus:latest  # comment out the image line
-```
-
-Then run:
-
-```bash
-docker compose build
-docker compose up -d
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ## Tech Stack

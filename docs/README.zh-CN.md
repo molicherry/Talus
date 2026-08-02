@@ -13,8 +13,6 @@
 - **实时监控** — CPU、内存、磁盘、负载、Swap、网络和磁盘 I/O 图表，支持 1 小时 / 6 小时 / 24 小时 / 7 天时间范围。临时 Agent 通过 SSH 按需部署。
 - **API 密钥** — 创建带作用域和服务器级别访问控制的 API 密钥。二维权限模型（操作 × 服务器）。密钥加密存储，支持按需复制，带有审计日志和速率限制。
 - **服务代理** — 注册外部服务（Grafana、Portainer 等），加密存储凭据。通过 Talus 代理 API 请求，支持凭据注入和占位符替换。编辑时可加载已有凭据，支持显示/隐藏切换和复制。
-- **国际化** — 英文和中文界面，支持亮色/暗色/跟随系统主题。
-- **Docker Compose** — 一条命令启动：`docker compose up`。
 
 ## 架构
 
@@ -47,13 +45,9 @@ git clone https://github.com/molicherry/Talus.git
 cd Talus
 ```
 
-### 2. 配置
+### 2. 配置（可选）
 
-```bash
-cp .env.example .env
-```
-
-编辑 `.env` 并设置：
+所有密钥都有开发默认值，开箱即用。除本地测试外，请复制 `.env.example` 为 `.env` 并设置真实值：
 
 ```env
 DB_PASSWORD=<你的数据库密码>
@@ -61,15 +55,15 @@ VPSMANAGER_MASTER_KEY=<使用 openssl rand -hex 32 生成>
 JWT_SECRET=<使用 openssl rand -hex 32 生成>
 ```
 
-### 3. 启动
+### 3. 启动（源码构建）
+
+仓库内的 `docker-compose.yml` 从源码构建 Talus：
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
 访问控制台：**http://localhost:8080**
-
-首次登录时，输入任意用户名和密码即可——首次登录会自动创建管理员账号。
 
 ### 4. 添加服务器
 
@@ -128,23 +122,63 @@ docker compose up -d
 - 监控 Agent 是**临时的**：按需部署，采集指标后退出。不会在目标服务器上留下持久化二进制文件或守护进程。
 - SSH 主机密钥采用 **TOFU（首次信任）** 机制验证：首次连接时记录密钥，后续连接验证匹配，防止中间人攻击。
 
-## 本地构建
+## 生产部署（GHCR 镜像）
 
-如果不使用预构建的 GHCR 镜像，可以在 `docker-compose.yml` 的 `hub` 服务下添加 `build:` 块：
+预构建镜像由 CI 在每个版本 tag（`v*`）发布到 [GHCR](https://github.com/molicherry/Talus/pkgs/container/talus)。
+不想编译的话，把下面的 compose 保存为 `docker-compose.prod.yml`：
 
 ```yaml
-hub:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    # image: ghcr.io/molicherry/talus:latest  # 注释掉 image 行
+# docker-compose.prod.yml — 使用预构建 GHCR 镜像部署 Talus
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_USER: vpsmanager
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?请在 .env 中设置 DB_PASSWORD}
+      POSTGRES_DB: vpsmanager
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vpsmanager"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  hub:
+    image: ghcr.io/molicherry/talus:${TALUS_VERSION:-latest}
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: postgres://vpsmanager:${DB_PASSWORD:?请在 .env 中设置 DB_PASSWORD}@db:5432/vpsmanager?sslmode=disable
+      VPSMANAGER_MASTER_KEY: ${VPSMANAGER_MASTER_KEY:?请在 .env 中设置 VPSMANAGER_MASTER_KEY}
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置 JWT_SECRET}
+      PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MONITOR_INTERVAL: ${MONITOR_INTERVAL:-60}
+      SSH_TIMEOUT: ${SSH_TIMEOUT:-10}
+      EXEC_TIMEOUT: ${EXEC_TIMEOUT:-30}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
 ```
 
-然后运行：
+部署：
 
 ```bash
-docker compose build
-docker compose up -d
+cp .env.example .env   # 填入 DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET
+docker compose -f docker-compose.prod.yml up -d
+```
+
+**升级到新版本：**
+
+```bash
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ## 许可证
