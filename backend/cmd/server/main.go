@@ -152,7 +152,7 @@ func main() {
 	terminalSvc := service.NewTerminalService(sshSvc)
 
 	execH := handler.NewExecHandler(sshSvc)
-	terminalH := handler.NewTerminalHandler(terminalSvc)
+	terminalH := handler.NewTerminalHandler(terminalSvc, jwtSvc)
 
 	// Dependency chain — Metrics
 	monitorSvc := service.NewMonitorService(sshSvc, metricRepo, serverRepo, time.Duration(cfg.MonitorInterval)*time.Second)
