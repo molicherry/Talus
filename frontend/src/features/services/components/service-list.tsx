@@ -4,11 +4,11 @@ import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
-import type { Server } from "../../../types/models";
+import type { ServerSummary } from "../../../types/models";
 import { useServers } from "../../servers/hooks/use-servers";
 import { useDeleteService, useServices } from "../hooks/use-services";
 
-function getServerName(servers: Server[], serverId?: number | null): string {
+function getServerName(servers: ServerSummary[], serverId?: number | null): string {
   if (serverId == null) return "";
   const server = servers.find((s) => s.id === serverId);
   return server ? server.name : "";

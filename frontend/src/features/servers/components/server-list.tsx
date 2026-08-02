@@ -87,12 +87,6 @@ export function ServerList() {
                 {t("server.host")}
               </th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("server.port")}
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("server.credential")}
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                 {t("server.status.column")}
               </th>
               <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
@@ -115,17 +109,11 @@ export function ServerList() {
                     {server.name}
                   </button>
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
                   {server.host}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
-                  {server.port}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
-                  {server.credential?.name ?? "—"}
-                </td>
                 <td className="px-4 py-3">
-                  <StatusIndicator status={server.status ?? "unknown"} size="sm" />
+                  <StatusIndicator status={server.status} size="sm" />
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-end gap-1">

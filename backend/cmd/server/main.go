@@ -178,11 +178,12 @@ func main() {
 		ProfileHandler:         authHandler.Profile,
 		ChangePasswordHandler:  authHandler.ChangePassword,
 		// Servers
-		ListServersHandler:   serverHandler.List,
-		CreateServerHandler:  serverHandler.Create,
-		GetServerHandler:     serverHandler.Get,
-		UpdateServerHandler:  serverHandler.Update,
-		DeleteServerHandler:  serverHandler.Delete,
+		ListServersHandler:         serverHandler.List,
+		ListServerSummariesHandler: serverHandler.ListSummaries,
+		CreateServerHandler:        serverHandler.Create,
+		GetServerHandler:           serverHandler.Get,
+		UpdateServerHandler:        serverHandler.Update,
+		DeleteServerHandler:        serverHandler.Delete,
 		// Credentials
 		ListCredentialsHandler:  credHandler.List,
 		CreateCredentialHandler: credHandler.Create,
