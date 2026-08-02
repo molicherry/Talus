@@ -91,10 +91,41 @@ docker compose up -d --build
 
 ## AI 集成
 
-仓库中包含 [OpenCode skill](../skills/talus/SKILL.md)。加载此 skill 的 AI 助手可通过 Talus REST API 管理服务器、执行命令、查询指标、代理请求到已注册的外部服务以及添加或更新服务器。凭据管理、API 密钥创建和服务注册需通过 Talus Web UI 操作。
+Talus 附带一个**可移植的** [agent skill](../skills/talus/SKILL.md)，任何 AI 编程助手
+（OpenCode、Claude Code、Cursor 等）都可以通过 Talus REST API 操作它：
+列出服务器、执行命令、查询指标、向已注册服务转发请求、添加/更新服务器。
+
+### 准备
+
+- 一个运行中的 Talus 实例（见上文部署）
+- 一个 API 密钥——在 **Talus Web UI → API Keys** 创建（默认作用域覆盖读/执行/指标；
+  `servers:write` 和 `services:relay` 为可选勾选）
+
+### 安装
+
+把 skill 复制到你所用 AI 工具的 skills 目录（skill 是可移植的，不要求放在本仓库内）：
 
 ```bash
-# 在任意 AI 会话中（已打开 Talus 仓库）：
+# OpenCode
+mkdir -p ~/.config/opencode/skills && cp -r skills/talus ~/.config/opencode/skills/
+# Claude Code
+mkdir -p ~/.claude/skills && cp -r skills/talus ~/.claude/skills/
+```
+
+把助手指向你的实例：
+
+```bash
+export TALUS_URL=https://your-talus.example.com   # 默认 http://localhost:8080
+export TALUS_API_KEY=<你的 API 密钥>
+```
+
+### 验证
+
+在新的 AI 会话中问 *"通过 Talus 列出所有服务器"*——返回服务器列表（或空数组）即表示 skill 已生效。
+
+### 示例提示词
+
+```bash
 "通过 Talus 列出所有服务器"
 "查看 web-01 的 CPU 指标"
 "在 prod-db 上执行 docker ps"
