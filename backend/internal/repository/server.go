@@ -27,6 +27,15 @@ func (r *ServerRepo) FindAll(ctx context.Context) ([]model.Server, error) {
 	return servers, nil
 }
 
+// FindAllSummaries returns all servers as lightweight summaries, ordered by
+// name ascending. Only the ServerSummary fields are selected; the transient
+// Status field is populated by the service layer.
+func (r *ServerRepo) FindAllSummaries(ctx context.Context) ([]model.ServerSummary, error) {
+	var summaries []model.ServerSummary
+	err := r.db.WithContext(ctx).Model(&model.Server{}).Order("name ASC").Find(&summaries).Error
+	return summaries, err
+}
+
 // FindByID returns the server with the given primary key, or gorm.ErrRecordNotFound.
 func (r *ServerRepo) FindByID(ctx context.Context, id uint) (*model.Server, error) {
 	var server model.Server
@@ -57,4 +66,12 @@ func (r *ServerRepo) FindByIDs(ctx context.Context, ids []uint) ([]model.Server,
 	var servers []model.Server
 	result := r.db.WithContext(ctx).Where("id IN ?", ids).Order("name ASC").Preload("Credential").Find(&servers)
 	return servers, result.Error
+}
+
+// FindByIDSummaries returns summaries for the given server IDs, ordered by
+// name ascending. Used for API-key-scoped summary listings.
+func (r *ServerRepo) FindByIDSummaries(ctx context.Context, ids []uint) ([]model.ServerSummary, error) {
+	var summaries []model.ServerSummary
+	err := r.db.WithContext(ctx).Model(&model.Server{}).Where("id IN ?", ids).Order("name ASC").Find(&summaries).Error
+	return summaries, err
 }

@@ -134,8 +134,8 @@ func (s *ServerService) Get(ctx context.Context, id uint) (*model.Server, error)
 	return srv, nil
 }
 
-// ListFiltered returns servers scoped to the given serverIDs. When serverIDs is empty,
-// it returns all servers (full access).
+// ListFiltered returns servers scoped to the given serverIDs. When serverIDs
+// is empty, it returns all servers (full access).
 func (s *ServerService) ListFiltered(ctx context.Context, serverIDs []uint) ([]model.Server, error) {
 	if len(serverIDs) == 0 {
 		return s.List(ctx)
@@ -194,6 +194,69 @@ func (s *ServerService) ListFiltered(ctx context.Context, serverIDs []uint) ([]m
 	}
 
 	return servers, nil
+}
+
+// ListSummaries returns all servers as lightweight summaries (id, name,
+// description, host, credential_id, status).
+func (s *ServerService) ListSummaries(ctx context.Context) ([]model.ServerSummary, error) {
+	summaries, err := s.repo.FindAllSummaries(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list server summaries: %w", err)
+	}
+	return s.applyStatus(ctx, summaries)
+}
+
+// ListSummariesFiltered returns summaries scoped to the given serverIDs.
+func (s *ServerService) ListSummariesFiltered(ctx context.Context, serverIDs []uint) ([]model.ServerSummary, error) {
+	if len(serverIDs) == 0 {
+		return s.ListSummaries(ctx)
+	}
+
+	summaries, err := s.repo.FindByIDSummaries(ctx, serverIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list filtered server summaries: %w", err)
+	}
+	return s.applyStatus(ctx, summaries)
+}
+
+// applyStatus computes the online/offline/unknown status for summaries from
+// the timestamp of each server's most recent metric, without transferring the
+// full metric payload.
+func (s *ServerService) applyStatus(ctx context.Context, summaries []model.ServerSummary) ([]model.ServerSummary, error) {
+	if len(summaries) == 0 {
+		return summaries, nil
+	}
+
+	ids := make([]uint, len(summaries))
+	for i, srv := range summaries {
+		ids[i] = srv.ID
+	}
+
+	latest, err := s.metricRepo.FindLatestTimesByServerIDs(ctx, ids)
+	if err != nil {
+		slog.Error("failed to fetch latest metric times, showing servers as unknown",
+			"error", err,
+		)
+		for i := range summaries {
+			summaries[i].Status = "unknown"
+		}
+		return summaries, nil
+	}
+
+	now := time.Now().UTC()
+	for i := range summaries {
+		t, ok := latest[summaries[i].ID]
+		if !ok {
+			summaries[i].Status = "unknown"
+			continue
+		}
+		if now.Sub(t) <= statusThreshold {
+			summaries[i].Status = "online"
+		} else {
+			summaries[i].Status = "offline"
+		}
+	}
+	return summaries, nil
 }
 
 // Create validates and inserts a new server.
