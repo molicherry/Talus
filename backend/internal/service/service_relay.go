@@ -267,10 +267,13 @@ func (s *ServiceRelayService) Relay(ctx context.Context, serviceID uint, input R
 		creds[k] = string(plain)
 	}
 
-	// Build target URL.
-	targetURL, err := url.JoinPath(svc.BaseURL, input.Path)
+	// Build target URL. Preserves any query string in the relay path —
+	// url.JoinPath escapes '?' into %3F and silently drops query parameters,
+	// which broke parameterized requests (e.g. Dokploy tRPC endpoints that pass
+	// all arguments via ?input=...).
+	targetURL, err := buildTargetURL(svc.BaseURL, input.Path)
 	if err != nil {
-		return fmt.Errorf("join url: %w", server.NewAppError(http.StatusBadRequest, "invalid relay path"))
+		return fmt.Errorf("build target url: %w", server.NewAppError(http.StatusBadRequest, "invalid relay path"))
 	}
 
 	// Substitute placeholders in path.
@@ -318,6 +321,42 @@ func substitute(input string, credentials map[string]string) string {
 		input = strings.ReplaceAll(input, "{{"+k+"}}", v)
 	}
 	return input
+}
+
+// buildTargetURL joins a service base URL with a relay path, preserving any
+// query string embedded in the path.
+//
+// url.JoinPath escapes '?' into %3F, silently dropping query parameters —
+// services like Dokploy (tRPC over HTTP) pass every argument via ?input=...,
+// so the escaped form made parameterized requests unusable through relay.
+// This builds the URL manually so ?query survives.
+func buildTargetURL(baseURL, path string) (string, error) {
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+
+	relPath := path
+	rawQuery := ""
+	if i := strings.Index(path, "?"); i >= 0 {
+		relPath = path[:i]
+		rawQuery = path[i+1:]
+	}
+
+	basePath := strings.TrimSuffix(base.Path, "/")
+	rel := strings.TrimPrefix(relPath, "/")
+	switch {
+	case basePath == "" && rel == "":
+		base.Path = "/"
+	case rel == "":
+		base.Path = basePath + "/"
+	default:
+		base.Path = basePath + "/" + rel
+	}
+
+	// The relay path's query wins over any base query.
+	base.RawQuery = rawQuery
+	return base.String(), nil
 }
 
 // copyHeaders copies headers from src to dst, dropping hop-by-hop headers.

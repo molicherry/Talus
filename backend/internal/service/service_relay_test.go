@@ -31,6 +31,43 @@ func TestExcerpt(t *testing.T) {
 	}
 }
 
+func TestBuildTargetURL(t *testing.T) {
+	cases := []struct {
+		name    string
+		baseURL string
+		path    string
+		want    string
+	}{
+		{"plain path", "https://svc.example.com", "/api/x", "https://svc.example.com/api/x"},
+		{"trailing slash base", "https://svc.example.com/", "/api/x", "https://svc.example.com/api/x"},
+		{"query preserved", "https://svc.example.com/", "/api/x?a=b", "https://svc.example.com/api/x?a=b"},
+		{"encoded query preserved", "https://svc.example.com/", "/api/compose.one?input=%7B%22json%22%3A%7B%22composeId%22%3A%22abc%22%7D%7D", "https://svc.example.com/api/compose.one?input=%7B%22json%22%3A%7B%22composeId%22%3A%22abc%22%7D%7D"},
+		{"multi-param query", "https://svc.example.com/", "/api/list?a=1&b=2", "https://svc.example.com/api/list?a=1&b=2"},
+		{"empty path", "https://svc.example.com/", "", "https://svc.example.com/"},
+		{"root path", "https://svc.example.com/", "/", "https://svc.example.com/"},
+		{"base subpath", "https://svc.example.com/sub", "/api/x", "https://svc.example.com/sub/api/x"},
+		{"query without path", "https://svc.example.com/", "?a=1", "https://svc.example.com/?a=1"},
+		{"no leading slash path", "https://svc.example.com/", "api/x", "https://svc.example.com/api/x"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := buildTargetURL(c.baseURL, c.path)
+			if err != nil {
+				t.Fatalf("buildTargetURL(%q, %q) error: %v", c.baseURL, c.path, err)
+			}
+			if got != c.want {
+				t.Errorf("buildTargetURL(%q, %q) = %q, want %q", c.baseURL, c.path, got, c.want)
+			}
+		})
+	}
+}
+
+func TestBuildTargetURLInvalidBase(t *testing.T) {
+	if _, err := buildTargetURL("://bad", "/api"); err == nil {
+		t.Error("expected error for invalid base URL")
+	}
+}
+
 func TestDefaultExcerptRunes(t *testing.T) {
 	if defaultExcerptRunes != 200 {
 		t.Errorf("defaultExcerptRunes = %d, want 200", defaultExcerptRunes)
