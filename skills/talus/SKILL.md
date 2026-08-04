@@ -119,6 +119,26 @@ Placeholder substitution: {{key}} in headers/body → credential value.
   e.g. {"headers": {"Authorization": "Bearer {{token}}"}}
 ```
 
+### "How do I use a specific service?"
+
+Each registered service can carry its own usage guide (`usage_guide`, markdown) — the
+per-service "skill" written by whoever registered it. Always check it before calling:
+
+```
+1. List available services: GET /api/v1/services
+   → name, description, usage_guide_excerpt (first ~200 chars)
+2. Pick the target and read its guide: GET /api/v1/services/{id}
+   → usage_guide (full markdown)
+3. If usage_guide exists, follow it to build the relay request
+   (method/path/headers/body, {{key}} placeholder substitution).
+4. If absent, infer from description + credential_hints, or ask the user.
+```
+
+The service directory (name + description + guide excerpt) may also be injected each
+turn by an optional platform plugin — see ai-integration/ in the repo. Either way, the
+full usage_guide is fetched on demand and never embedded in the system prompt.
+
+
 ### "Something is returning 403"
 
 Two checks, in order:

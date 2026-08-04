@@ -62,6 +62,7 @@ type CreateServiceInput struct {
 	Credentials     map[string]string
 	CredentialHints map[string]string
 	Description     *string
+	UsageGuide      *string
 	ServerID        *uint
 }
 
@@ -134,6 +135,7 @@ func (s *ServiceRelayService) Create(ctx context.Context, input CreateServiceInp
 		EncryptedCredentials: encryptedCreds,
 		CredentialHints:      hints,
 		Description:          input.Description,
+		UsageGuide:           input.UsageGuide,
 		Salt:                 salt,
 		ServerID:             input.ServerID,
 	}
@@ -198,6 +200,7 @@ func (s *ServiceRelayService) Update(ctx context.Context, id uint, input CreateS
 	existing.EncryptedCredentials = encryptedCreds
 	existing.CredentialHints = hints
 	existing.Description = input.Description
+	existing.UsageGuide = input.UsageGuide
 	existing.Salt = salt
 	existing.ServerID = input.ServerID
 
@@ -222,11 +225,24 @@ func (s *ServiceRelayService) Delete(ctx context.Context, id uint) error {
 }
 
 // List returns all services, optionally filtered by server ID.
+// UsageGuide full text is stripped from list responses; only a short excerpt
+// is included so AI agents can build a service directory cheaply.
 func (s *ServiceRelayService) List(ctx context.Context, serverID *uint) ([]model.Service, error) {
+	var services []model.Service
+	var err error
 	if serverID != nil {
-		return s.repo.FindByServerID(ctx, *serverID)
+		services, err = s.repo.FindByServerID(ctx, *serverID)
+	} else {
+		services, err = s.repo.FindAll(ctx)
 	}
-	return s.repo.FindAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range services {
+		services[i].UsageGuideExcerpt = excerpt(services[i].UsageGuide, defaultExcerptRunes)
+		services[i].UsageGuide = nil
+	}
+	return services, nil
 }
 
 // Relay decrypts service credentials, substitutes placeholders, and proxies the request.
@@ -314,6 +330,23 @@ func copyHeaders(dst, src http.Header) {
 			dst.Add(k, v)
 		}
 	}
+}
+
+// defaultExcerptRunes is the max length of the usage_guide excerpt surfaced in
+// list responses (rune count, not bytes, so UTF-8 text is never cut mid-codepoint).
+const defaultExcerptRunes = 200
+
+// excerpt returns the first max runes of s as a summary. nil → "".
+// A trailing ellipsis is appended when the guide was truncated.
+func excerpt(s *string, max int) string {
+	if s == nil {
+		return ""
+	}
+	runes := []rune(*s)
+	if len(runes) <= max {
+		return string(runes)
+	}
+	return string(runes[:max]) + "…"
 }
 
 // isTimeout checks if the error represents a timeout.

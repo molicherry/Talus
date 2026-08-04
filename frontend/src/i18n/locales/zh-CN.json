@@ -224,6 +224,8 @@
    "show": "显示",
    "hide": "隐藏",
    "description": "描述",
+   "usageGuide": "使用指南（Markdown）",
+   "usageGuideHint": "写给 AI 的操作说明：端点、认证头、请求示例。AI 调用该服务时会读取此内容。请勿写入密钥等敏感信息——凭据请放在凭据区域。",
   "server": "关联服务器",
   "noServer": "无（独立服务）",
   "notFound": "服务未找到",

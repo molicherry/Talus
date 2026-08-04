@@ -192,6 +192,25 @@ export TALUS_API_KEY=<your-api-key>
 In a new AI session, ask *"List all servers via Talus"* — a list of servers
 (or an empty array) means the skill is wired up.
 
+### Per-service usage guides (AI)
+
+Every registered service can carry its own **usage guide** (`usage_guide`, markdown) —
+written in the **Talus Web UI → Services → Add/Edit Service → Usage Guide** field. It is
+the per-service "skill" that tells an AI how to use that service (endpoints, auth
+headers, request examples) without hard-coding any service specifics into the shared
+skill. The AI reads it on demand before relaying:
+
+```
+GET /api/v1/services          → directory (name, description, guide excerpt)
+GET /api/v1/services/{id}     → full usage_guide
+POST /api/v1/services/{id}/relay → follow the guide to build the request
+```
+
+Optional: an [ai-integration](ai-integration/) plugin (OpenCode / pi / Claude Code /
+Codex) can inject the service directory into every turn, so the AI always sees what is
+available without asking. Cursor and other platforms rely on the skill's discovery
+rules instead — the capability is complete either way.
+
 ### Example prompts
 
 ```bash

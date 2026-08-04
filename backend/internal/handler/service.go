@@ -14,6 +14,9 @@ import (
 	"github.com/vpsmanager/backend/internal/service"
 )
 
+// maxUsageGuideRunes caps the length of a service usage guide (rune count).
+const maxUsageGuideRunes = 20000
+
 type createServiceRequest struct {
 	Name            string            `json:"name"`
 	DisplayName     string            `json:"display_name"`
@@ -21,6 +24,7 @@ type createServiceRequest struct {
 	Credentials     map[string]string `json:"credentials"`
 	CredentialHints map[string]string `json:"credential_hints"`
 	Description     *string           `json:"description,omitempty"`
+	UsageGuide      *string           `json:"usage_guide,omitempty"`
 	ServerID        *uint             `json:"server_id,omitempty"`
 }
 
@@ -60,6 +64,9 @@ func (h *ServiceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if len(req.Credentials) == 0 {
 		details = append(details, server.ErrorDetail{Field: "credentials", Message: "at least one credential is required"})
 	}
+	if req.UsageGuide != nil && len([]rune(*req.UsageGuide)) > maxUsageGuideRunes {
+		details = append(details, server.ErrorDetail{Field: "usage_guide", Message: "usage_guide must be at most 20000 characters"})
+	}
 	if len(details) > 0 {
 		server.WriteError(w, r, server.NewValidationError(details))
 		return
@@ -72,6 +79,7 @@ func (h *ServiceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Credentials:     req.Credentials,
 		CredentialHints: req.CredentialHints,
 		Description:     req.Description,
+		UsageGuide:      req.UsageGuide,
 		ServerID:        req.ServerID,
 	}
 
@@ -212,6 +220,9 @@ func (h *ServiceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if len(req.Credentials) == 0 {
 		details = append(details, server.ErrorDetail{Field: "credentials", Message: "at least one credential is required"})
 	}
+	if req.UsageGuide != nil && len([]rune(*req.UsageGuide)) > maxUsageGuideRunes {
+		details = append(details, server.ErrorDetail{Field: "usage_guide", Message: "usage_guide must be at most 20000 characters"})
+	}
 	if len(details) > 0 {
 		server.WriteError(w, r, server.NewValidationError(details))
 		return
@@ -224,6 +235,7 @@ func (h *ServiceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Credentials:     req.Credentials,
 		CredentialHints: req.CredentialHints,
 		Description:     req.Description,
+		UsageGuide:      req.UsageGuide,
 		ServerID:        req.ServerID,
 	}
 
