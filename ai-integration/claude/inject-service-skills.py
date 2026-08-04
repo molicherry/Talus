@@ -4,11 +4,16 @@
 Talus Service Skills — Claude Code hook (UserPromptSubmit)
 
 Injects the Talus service directory (name + description + usage_guide excerpt)
-into every user prompt, so the AI always sees what services are available and
-is reminded to fetch the per-service usage guide before relaying.
+into the CURRENT prompt only when the user message mentions services.
 
-Silent-skip behavior: no TALUS_API_KEY, unreachable Talus, empty service list,
-or any error -> prints nothing (empty stdout), conversation untouched.
+Design (zero accumulation):
+- Conditional trigger: reads the user prompt from stdin (UserPromptSubmit JSON)
+  and injects only when it matches service keywords or names a registered
+  service. Unrelated turns print nothing and make no Talus API call.
+- Hook additionalContext affects only the current turn — it is never written
+  to conversation history, so context does not grow turn over turn.
+- Silent skip: no TALUS_API_KEY, unreachable Talus, empty service list, or
+  any error -> prints nothing, conversation untouched.
 
 Install:
   1. Copy this file to ~/.claude/hooks/inject-service-skills.py (chmod +x)
@@ -36,15 +41,27 @@ TALUS_URL = os.environ.get("TALUS_URL", "http://localhost:8080").rstrip("/")
 TALUS_API_KEY = os.environ.get("TALUS_API_KEY", "")
 
 TTL_MS = 60_000
-_cache = {"ts": 0, "text": ""}
+_cache = {"ts": 0, "text": "", "names": []}
+
+SERVICE_KEYWORDS = [
+    "service", "services", "relay", "proxy", "deploy",
+    "部署", "服务", "代理", "应用", "业务", "面板",
+    "dokploy", "portainer", "grafana",
+]
+
+
+def _has_service_keyword(text):
+    lower = text.lower()
+    return any(kw in lower for kw in SERVICE_KEYWORDS)
 
 
 def _fetch_service_directory():
+    global _cache
     now_ms = time.time() * 1000
     if now_ms - _cache["ts"] < TTL_MS:
-        return _cache["text"]
+        return _cache
     if not TALUS_API_KEY:
-        return ""
+        return {"text": "", "names": []}
     try:
         req = urllib.request.Request(
             f"{TALUS_URL}/api/v1/services",
@@ -54,10 +71,12 @@ def _fetch_service_directory():
             payload = json.loads(resp.read().decode("utf-8"))
         data = payload if isinstance(payload, list) else payload.get("data")
         if not isinstance(data, list) or len(data) == 0:
-            return ""
+            return {"text": "", "names": []}
+        names = []
         lines = []
         for s in data:
-            name = s.get("name", "")
+            name = str(s.get("name", ""))
+            names.append(name)
             desc = s.get("description") or ""
             excerpt = s.get("usage_guide_excerpt") or "无"
             lines.append(f"- {name} — {desc} | 指南: {excerpt}")
@@ -67,25 +86,52 @@ def _fetch_service_directory():
             + "\n".join(lines)
             + "\n</service-skills-directory>"
         )
-        _cache["ts"] = now_ms
-        _cache["text"] = text
-        return text
+        _cache = {"ts": now_ms, "text": text, "names": names}
+        return _cache
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError, OSError):
+        return {"text": "", "names": []}
+
+
+def _read_user_prompt():
+    """UserPromptSubmit hooks receive a JSON payload on stdin with a `prompt` field."""
+    try:
+        raw = sys.stdin.read()
+        if not raw:
+            return ""
+        data = json.loads(raw)
+        prompt = data.get("prompt") or data.get("user_prompt") or ""
+        return str(prompt)
+    except Exception:
         return ""
+
+
+def _emit(text):
+    output = {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": text,
+        }
+    }
+    print(json.dumps(output, ensure_ascii=False), flush=True)
 
 
 def main():
     try:
-        block = _fetch_service_directory()
-        if not block:
+        prompt = _read_user_prompt()
+        if not prompt:
             return 0
-        output = {
-            "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
-                "additionalContext": block,
-            }
-        }
-        print(json.dumps(output, ensure_ascii=False), flush=True)
+        if not _has_service_keyword(prompt):
+            # No keyword — maybe the user named a service directly; that needs
+            # the directory, so fetch once and check names.
+            dir_data = _fetch_service_directory()
+            if dir_data["text"] and any(
+                n and n.lower() in prompt.lower() for n in dir_data["names"]
+            ):
+                _emit(dir_data["text"])
+            return 0
+        dir_data = _fetch_service_directory()
+        if dir_data["text"]:
+            _emit(dir_data["text"])
     except Exception:
         # Never break the conversation.
         pass

@@ -137,11 +137,13 @@ per-service "skill" written by whoever registered it. Always check it before cal
 4. If absent, infer from description + credential_hints, or ask the user.
 ```
 
-The service directory (name + description + guide excerpt) is injected each turn by
-the standard platform plugin (see ai-integration/ in the repo, install via
-install.sh). If the plugin is not installed (e.g. Cursor), the rules above still
-apply — always list services via the API before calling one. The full usage_guide
-is fetched on demand and never embedded in the system prompt.
+The service directory (name + description + guide excerpt) is injected by the
+standard platform plugin (see ai-integration/ in the repo, install via
+install.sh) whenever the user mentions services — injection affects only the
+current turn and is never persisted to history. If the plugin is not installed
+(e.g. Cursor), the rules above still apply — always list services via the API
+before calling one. The full usage_guide is fetched on demand and never embedded
+in the system prompt.
 
 
 ### "Something is returning 403"

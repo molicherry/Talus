@@ -7,17 +7,21 @@ Usage Guide**. Any AI that can reach your Talus API can read it on demand via th
 
 This directory ships the **standard service-directory injection component**: a small
 plugin/hook per AI platform that injects the service directory (name + description
-+ guide excerpt) into every turn, so the AI *always* sees what services are
-available and is reminded to fetch the usage guide — no asking, no guessing, no
-SSH-ing around the platform. The full `usage_guide` is still fetched on demand —
++ guide excerpt) **only when the user mentions services** — so the AI sees what is
+available exactly when it matters, without paying tokens on unrelated turns.
+
+**Zero context accumulation**: injection affects only the current LLM call (pi
+`context` messages / OpenCode `experimental.chat.messages.transform` / hook
+`additionalContext`) and is never written to conversation history. Context does
+not grow turn over turn. The full `usage_guide` is still fetched on demand —
 only the directory is injected.
 
 ## Supported platforms
 
 | Platform | File | Mechanism | Prerequisites |
 | --- | --- | --- | --- |
-| OpenCode | `opencode/inject-service-skills.js` | plugin (`chat.message`) | copy to plugins dir |
-| pi | `pi/service-skills/index.ts` | extension (`context` event) | copy to extensions dir |
+| OpenCode | `opencode/inject-service-skills.js` | plugin (`experimental.chat.messages.transform`) | copy to plugins dir |
+| pi | `pi/service-skills/index.ts` | extension (`context` → messages) | copy to extensions dir |
 | Claude Code | `claude/inject-service-skills.py` | hook (`UserPromptSubmit`) | register in settings.json |
 | Codex | `codex/inject-service-skills.py` | hook (`UserPromptSubmit`) | 0.129+ · `[features].hooks=true` · `/hooks` approval |
 
@@ -27,12 +31,17 @@ is complete either way, this plugin is just an ergonomic boost.
 
 ## Behavior
 
-- Every turn, the plugin fetches `GET {TALUS_URL}/api/v1/services` and injects:
-  `- <name> — <description> | 指南: <excerpt or 无>` per service, plus the
-  reminder: *调用某个服务前，先 GET /services/{id} 读取 usage_guide*.
+- **Conditional trigger**: injects only when the latest user message matches
+  service keywords (`service`, `服务`, `deploy`, `dokploy`, `portainer`, ...) or
+  names a registered service. Unrelated turns: no injection, no Talus API call.
+- Injected block per service:
+  `- <name> — <description> | 指南: <excerpt or 无>`, plus the reminder:
+  *调用某个服务前，先 GET /services/{id} 读取 usage_guide*.
+- **Zero accumulation**: injection is per-current-call only, never persisted to
+  conversation history.
 - **Silent skip**: no `TALUS_API_KEY`, unreachable Talus, empty service list, or
   any error → nothing is injected, the conversation is untouched.
-- 60s in-process cache avoids hammering the API every turn.
+- 60s in-process cache avoids hammering the API.
 - Backward compatible: only stable fields (`name`, `description`,
   `usage_guide_excerpt`) are read; older Talus instances simply show no excerpt.
 
