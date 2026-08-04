@@ -192,25 +192,37 @@ export TALUS_API_KEY=<your-api-key>
 In a new AI session, ask *"List all servers via Talus"* — a list of servers
 (or an empty array) means the skill is wired up.
 
-### Per-service usage guides (AI)
+### Services: Talus is the ONLY way an AI reaches them
 
-Every registered service can carry its own **usage guide** (`usage_guide`, markdown) —
-written in the **Talus Web UI → Services → Add/Edit Service → Usage Guide** field. It is
-the per-service "skill" that tells an AI how to use that service (endpoints, auth
-headers, request examples) without hard-coding any service specifics into the shared
-skill. The AI reads it on demand before relaying:
+Registered services (Dokploy, Portainer, or any internal app) are **only reachable
+through Talus relay** — their `base_url` is an internal address an AI cannot touch,
+and their credentials are injected by Talus at relay time. The AI's workflow is:
 
 ```
 GET /api/v1/services          → directory (name, description, guide excerpt)
-GET /api/v1/services/{id}     → full usage_guide
+GET /api/v1/services/{id}     → full usage_guide (per-service "skill")
 POST /api/v1/services/{id}/relay → follow the guide to build the request
 ```
 
-Optional: an [ai-integration](ai-integration/) plugin (OpenCode / pi / Claude Code /
-Codex) can inject the service directory into every turn, so the AI always sees what is
-available without asking. Cursor and other platforms rely on the skill's discovery
-rules instead — the capability is complete either way.
+Every registered service can carry its own **usage guide** (`usage_guide`, markdown) —
+written in the **Talus Web UI → Services → Add/Edit Service → Usage Guide** field. It
+tells the AI how to use that service (endpoints, auth headers, request examples)
+without hard-coding any service specifics into the shared skill.
 
+### Install the service-directory injection plugin (recommended)
+
+The [ai-integration](ai-integration/) plugin (OpenCode / pi / Claude Code / Codex)
+injects the service directory into **every turn**, so the AI always sees what is
+available and is reminded to fetch the usage guide — no asking, no guessing.
+Install it after the skill:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/molicherry/Talus/main/ai-integration/install.sh)
+```
+
+Platforms without a prompt-injection hook (e.g. Cursor) rely on the skill's
+discovery rules instead — the capability works either way; the plugin just makes
+it impossible to miss.
 ### Example prompts
 
 ```bash

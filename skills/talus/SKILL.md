@@ -5,11 +5,14 @@ description: >-
   Capabilities: list servers, execute remote commands over SSH,
   query live monitoring metrics, list credentials (metadata only),
   list/relay proxied services, create/update servers.
+  Services are ONLY reachable through Talus relay — list them, read their
+  usage guides, and proxy requests; never SSH around the platform or guess URLs.
   API key scoped — credential mutations, API key management,
   service creation, and secret reveal require the Talus Web UI.
   Use when user wants to manage servers, execute commands, check server metrics,
-  list credentials, relay service requests, or add/update servers.
-triggers: ["Talus", "manage server", "execute command on server", "check server metrics", "list credentials", "relay request", "list servers", "Talus 管理", "通过Talus执行命令"]
+  list credentials, list or use proxied services, relay service requests,
+  or add/update servers.
+triggers: ["Talus", "manage server", "execute command on server", "check server metrics", "list credentials", "relay request", "list servers", "Talus 管理", "通过Talus执行命令", "service", "services", "proxied service", "service list", "service usage", "服务", "服务列表", "使用服务", "代理服务", "dokploy", "portainer"]
 ---
 
 # Talus Skill — Agent Operation Guide
@@ -134,9 +137,11 @@ per-service "skill" written by whoever registered it. Always check it before cal
 4. If absent, infer from description + credential_hints, or ask the user.
 ```
 
-The service directory (name + description + guide excerpt) may also be injected each
-turn by an optional platform plugin — see ai-integration/ in the repo. Either way, the
-full usage_guide is fetched on demand and never embedded in the system prompt.
+The service directory (name + description + guide excerpt) is injected each turn by
+the standard platform plugin (see ai-integration/ in the repo, install via
+install.sh). If the plugin is not installed (e.g. Cursor), the rules above still
+apply — always list services via the API before calling one. The full usage_guide
+is fetched on demand and never embedded in the system prompt.
 
 
 ### "Something is returning 403"
@@ -180,8 +185,15 @@ Guide user to **Talus Web UI → API Keys**:
 
 ## Critical Rules
 
-1. **Credentials NEVER appear in API responses** — list endpoints return metadata only. Secrets require the Talus Web UI (all reveal endpoints are jwtOnly).
-2. **API key raw value shown ONCE** at creation via Web UI. No API-based retrieval.
-3. **scopes and server_ids are orthogonal** — both must match. server_ids=[] means all servers.
-4. **`services:relay` and `servers:write` are opt-in** — not in default scopes.
-5. **Terminal** — pass API key via `X-API-Key` header during WebSocket upgrade.
+1. **Services are ONLY reachable through Talus relay.** A service's `base_url` is an
+   internal address you cannot reach directly, and its credentials are injected by
+   Talus. Before using any service: (a) `GET /api/v1/services` to see the directory
+   (name, description, usage_guide_excerpt); (b) `GET /api/v1/services/{id}` to read
+   its `usage_guide`; (c) build the relay request per the guide:
+   `POST /api/v1/services/{id}/relay`. Never SSH into a server to "find" a service
+   or guess its URL — if you don't know what services exist, ask the API.
+2. **Credentials NEVER appear in API responses** — list endpoints return metadata only. Secrets require the Talus Web UI (all reveal endpoints are jwtOnly).
+3. **API key raw value shown ONCE** at creation via Web UI. No API-based retrieval.
+4. **scopes and server_ids are orthogonal** — both must match. server_ids=[] means all servers.
+5. **`services:relay` and `servers:write` are opt-in** — not in default scopes.
+6. **Terminal** — pass API key via `X-API-Key` header during WebSocket upgrade.

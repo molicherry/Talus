@@ -5,11 +5,12 @@ the per-service "skill" written in **Talus Web UI → Services → Add/Edit Serv
 Usage Guide**. Any AI that can reach your Talus API can read it on demand via the
 [talus skill](../skills/talus/SKILL.md) ("How do I use a specific service?").
 
-This directory adds an **optional enhancement**: a small plugin/hook per AI
-platform that injects the service directory (name + description + guide excerpt)
-into every turn, so the AI *always* sees what services are available without
-having to ask. The full `usage_guide` is still fetched on demand — only the
-directory is injected.
+This directory ships the **standard service-directory injection component**: a small
+plugin/hook per AI platform that injects the service directory (name + description
++ guide excerpt) into every turn, so the AI *always* sees what services are
+available and is reminded to fetch the usage guide — no asking, no guessing, no
+SSH-ing around the platform. The full `usage_guide` is still fetched on demand —
+only the directory is injected.
 
 ## Supported platforms
 
@@ -35,7 +36,14 @@ is complete either way, this plugin is just an ergonomic boost.
 - Backward compatible: only stable fields (`name`, `description`,
   `usage_guide_excerpt`) are read; older Talus instances simply show no excerpt.
 
-## Install
+## Install (one-liner)
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/molicherry/Talus/main/ai-integration/install.sh)
+```
+
+The script detects installed platforms under `$HOME` and installs the matching
+plugin (OpenCode / pi / Claude Code / Codex). Manual per-platform steps below.
 
 Prerequisites: a running Talus instance and an API key (Talus Web UI → API Keys).
 Set `TALUS_URL` and `TALUS_API_KEY` in your shell environment (see
