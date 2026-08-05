@@ -23,7 +23,7 @@ import (
 var hopByHopHeaders = map[string]bool{
 	"Connection":          true,
 	"Keep-Alive":          true,
-	"Proxy-Authenticate": true,
+	"Proxy-Authenticate":  true,
 	"Proxy-Authorization": true,
 	"TE":                  true,
 	"Trailer":             true,
@@ -35,8 +35,8 @@ const relayTimeout = 30 * time.Second
 
 // ServiceRelayService provides business logic for external service management and relay.
 type ServiceRelayService struct {
-	repo      *repository.ServiceRepo
-	masterKey *crypto.MasterKey
+	repo       *repository.ServiceRepo
+	masterKey  *crypto.MasterKey
 	httpClient *http.Client
 }
 
@@ -200,7 +200,13 @@ func (s *ServiceRelayService) Update(ctx context.Context, id uint, input CreateS
 	existing.EncryptedCredentials = encryptedCreds
 	existing.CredentialHints = hints
 	existing.Description = input.Description
-	existing.UsageGuide = input.UsageGuide
+	// Preserve the usage guide when the caller omits it (nil) — otherwise an
+	// API client that does not know about usage_guide would silently wipe a
+	// service's guide on every update. Explicitly sending an empty string
+	// (or a shorter guide) still updates it, so clearing via the UI works.
+	if input.UsageGuide != nil {
+		existing.UsageGuide = input.UsageGuide
+	}
 	existing.Salt = salt
 	existing.ServerID = input.ServerID
 
@@ -354,8 +360,11 @@ func buildTargetURL(baseURL, path string) (string, error) {
 		base.Path = basePath + "/" + rel
 	}
 
-	// The relay path's query wins over any base query.
-	base.RawQuery = rawQuery
+	// Only override the base URL's own query when the relay path carries one;
+	// otherwise keep the base URL's query string.
+	if rawQuery != "" {
+		base.RawQuery = rawQuery
+	}
 	return base.String(), nil
 }
 

@@ -48,6 +48,8 @@ func TestBuildTargetURL(t *testing.T) {
 		{"base subpath", "https://svc.example.com/sub", "/api/x", "https://svc.example.com/sub/api/x"},
 		{"query without path", "https://svc.example.com/", "?a=1", "https://svc.example.com/?a=1"},
 		{"no leading slash path", "https://svc.example.com/", "api/x", "https://svc.example.com/api/x"},
+		{"base query preserved", "https://svc.example.com/?token=abc", "/api/x", "https://svc.example.com/api/x?token=abc"},
+		{"path query wins over base query", "https://svc.example.com/?token=abc", "/api/x?a=1", "https://svc.example.com/api/x?a=1"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -65,12 +67,6 @@ func TestBuildTargetURL(t *testing.T) {
 func TestBuildTargetURLInvalidBase(t *testing.T) {
 	if _, err := buildTargetURL("://bad", "/api"); err == nil {
 		t.Error("expected error for invalid base URL")
-	}
-}
-
-func TestDefaultExcerptRunes(t *testing.T) {
-	if defaultExcerptRunes != 200 {
-		t.Errorf("defaultExcerptRunes = %d, want 200", defaultExcerptRunes)
 	}
 }
 

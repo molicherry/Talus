@@ -1,6 +1,8 @@
 package model
 
 // Service represents an external service that Talus can proxy requests to.
+// Credentials are encrypted with AES-256-GCM using per-service random salt,
+// matching the SSH credential encryption scheme.
 type Service struct {
 	BaseModel
 	ServerID             *uint             `gorm:"index;constraint:OnUpdate:CASCADE,OnDelete:SET NULL" json:"server_id,omitempty"`

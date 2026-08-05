@@ -28,7 +28,7 @@ let cache = { ts: 0, text: "", names: [] };
 // 注意："服务"用负向断言排除"服务器"等复合词，避免纯运维查询误触发。
 const SERVICE_KEYWORDS = [
 	/service|services|relay|proxy|deploy/i,
-	/服务(?!器)/,
+	/服务(?!器|端|商)/,
 	/代理|应用|业务|面板/,
 	/dokploy|portainer|grafana/i,
 ];
@@ -58,7 +58,7 @@ async function fetchServiceDirectory() {
 			ts: now,
 			names,
 			text:
-				"<service-skills-directory>\n可用服务（调用某个服务前，先 GET /services/{id} 读取 usage_guide）：\n" +
+				"<service-skills-directory>\n可用服务 / Available services（调用某个服务前，先 GET /services/{id} 读取 usage_guide / read its usage_guide before calling）：\n" +
 				lines.join("\n") +
 				"\n</service-skills-directory>",
 		};

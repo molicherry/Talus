@@ -192,11 +192,15 @@ export TALUS_API_KEY=<your-api-key>
 In a new AI session, ask *"List all servers via Talus"* — a list of servers
 (or an empty array) means the skill is wired up.
 
-### Services: Talus is the ONLY way an AI reaches them
+### Services: prefer Talus relay for registered services
 
-Registered services (Dokploy, Portainer, or any internal app) are **only reachable
-through Talus relay** — their `base_url` is an internal address an AI cannot touch,
-and their credentials are injected by Talus at relay time. The AI's workflow is:
+Registered services (Dokploy, Portainer, or any internal app) are proxied by
+Talus — their `base_url` is an internal address an AI cannot touch directly,
+and their credentials are injected by Talus at relay time. When operating a
+service on a server, the AI should first check whether it is registered in
+Talus (`GET /api/v1/services?server_id=<id>`); if it is, use it through relay.
+If it is not registered, the AI may operate it directly on the server (and
+consider registering it). The workflow for a registered service is:
 
 ```
 GET /api/v1/services          → directory (name, description, guide excerpt)
@@ -212,9 +216,11 @@ without hard-coding any service specifics into the shared skill.
 ### Install the service-directory injection plugin (recommended)
 
 The [ai-integration](ai-integration/) plugin (OpenCode / pi / Claude Code / Codex)
-injects the service directory into **every turn**, so the AI always sees what is
-available and is reminded to fetch the usage guide — no asking, no guessing.
-Install it after the skill:
+injects the service directory **when the user mentions services** — so the AI
+sees what is available exactly when it matters and is reminded to fetch the
+usage guide, without paying tokens on unrelated turns. Injection affects only
+the current turn and is never written to conversation history. Install it after
+the skill:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/molicherry/Talus/main/ai-integration/install.sh)

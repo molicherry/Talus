@@ -5,8 +5,10 @@ description: >-
   Capabilities: list servers, execute remote commands over SSH,
   query live monitoring metrics, list credentials (metadata only),
   list/relay proxied services, create/update servers.
-  Services are ONLY reachable through Talus relay — list them, read their
-  usage guides, and proxy requests; never SSH around the platform or guess URLs.
+  Registered services are reachable through Talus relay — list them, read
+  their usage guides, and proxy requests via relay. Prefer Talus for any
+  registered service; only operate directly on the server when a service is
+  not registered in Talus.
   API key scoped — credential mutations, API key management,
   service creation, and secret reveal require the Talus Web UI.
   Use when user wants to manage servers, execute commands, check server metrics,
@@ -202,13 +204,14 @@ Guide user to **Talus Web UI → API Keys**:
 
 ## Critical Rules
 
-1. **Services are ONLY reachable through Talus relay.** A service's `base_url` is an
-   internal address you cannot reach directly, and its credentials are injected by
-   Talus. Before using any service: (a) `GET /api/v1/services` to see the directory
-   (name, description, usage_guide_excerpt); (b) `GET /api/v1/services/{id}` to read
-   its `usage_guide`; (c) build the relay request per the guide:
-   `POST /api/v1/services/{id}/relay`. Never SSH into a server to "find" a service
-   or guess its URL — if you don't know what services exist, ask the API.
+1. **Prefer Talus for registered services.** Before operating any service on a
+   server, check whether it is registered in Talus: `GET /api/v1/services?server_id=<id>`
+   to see the directory (name, description, usage_guide_excerpt). If it is
+   registered: (a) `GET /api/v1/services/{id}` to read its `usage_guide`; (b) build
+   the relay request per the guide: `POST /api/v1/services/{id}/relay` — Talus
+   injects the credentials. If it is NOT registered, operate it directly on the
+   server (and consider registering it so future calls can use relay). Never
+   guess a registered service's URL or credentials — ask the API.
 2. **Credentials NEVER appear in API responses** — list endpoints return metadata only. Secrets require the Talus Web UI (all reveal endpoints are jwtOnly).
 3. **API key raw value shown ONCE** at creation via Web UI. No API-based retrieval.
 4. **scopes and server_ids are orthogonal** — both must match. server_ids=[] means all servers.

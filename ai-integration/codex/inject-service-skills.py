@@ -9,7 +9,8 @@ into the CURRENT prompt only when the user message mentions services.
 Design (zero accumulation):
 - Conditional trigger: reads the user prompt from stdin (UserPromptSubmit JSON)
   and injects only when it matches service keywords or names a registered
-  service. Unrelated turns print nothing and make no Talus API call.
+  service. Unrelated turns print nothing; no Talus API call within the 60s
+  cache window (a cold-cache turn fetches once to match service names).
 - Hook additionalContext affects only the current turn — it is never written
   to conversation history, so context does not grow turn over turn.
 - Silent skip: no TALUS_API_KEY, unreachable Talus, empty service list, or
@@ -38,6 +39,7 @@ Config: TALUS_URL (default http://localhost:8080) + TALUS_API_KEY env vars.
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -49,20 +51,11 @@ TALUS_API_KEY = os.environ.get("TALUS_API_KEY", "")
 TTL_MS = 60_000
 _cache = {"ts": 0, "text": "", "names": []}
 
-SERVICE_KEYWORDS = [
-    "service", "services", "relay", "proxy", "deploy",
-    "dokploy", "portainer", "grafana",
-]
-SERVICE_KEYWORD_RES = [
-    "service", "services", "relay", "proxy", "deploy",
-    "dokploy", "portainer", "grafana", "代理", "应用", "业务", "面板",
-]
-import re as _re
 SERVICE_KEYWORD_PATTERNS = [
-    _re.compile(r"service|services|relay|proxy|deploy", _re.I),
-    _re.compile(r"服务(?!器)"),
-    _re.compile(r"代理|应用|业务|面板"),
-    _re.compile(r"dokploy|portainer|grafana", _re.I),
+    re.compile(r"service|services|relay|proxy|deploy", re.I),
+    re.compile(r"服务(?!器|端|商)"),
+    re.compile(r"代理|应用|业务|面板"),
+    re.compile(r"dokploy|portainer|grafana", re.I),
 ]
 
 
@@ -97,7 +90,7 @@ def _fetch_service_directory():
             lines.append(f"- {name} — {desc} | 指南: {excerpt}")
         text = (
             "<service-skills-directory>\n"
-            "可用服务（调用某个服务前，先 GET /services/{id} 读取 usage_guide）：\n"
+            "可用服务 / Available services（调用某个服务前，先 GET /services/{id} 读取 usage_guide / read its usage_guide before calling）：\n"
             + "\n".join(lines)
             + "\n</service-skills-directory>"
         )

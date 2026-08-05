@@ -33,10 +33,12 @@ is complete either way, this plugin is just an ergonomic boost.
 
 - **Conditional trigger**: injects only when the latest user message matches
   service keywords (`service`, `服务`, `deploy`, `dokploy`, `portainer`, ...) or
-  names a registered service. Unrelated turns: no injection, no Talus API call.
-- Injected block per service:
-  `- <name> — <description> | 指南: <excerpt or 无>`, plus the reminder:
-  *调用某个服务前，先 GET /services/{id} 读取 usage_guide*.
+  names a registered service. Unrelated turns: no injection (and, within the 60s
+  cache window, no Talus API call either).
+- Injected block: a bilingual header — *可用服务 / Available services（调用某个
+  服务前，先 GET /services/{id} 读取 usage_guide / read its usage_guide before
+  calling）* — followed by one line per service:
+  `- <name> — <description> | 指南: <excerpt or 无>`.
 - **Zero accumulation**: injection is per-current-call only, never persisted to
   conversation history.
 - **Silent skip**: no `TALUS_API_KEY`, unreachable Talus, empty service list, or
