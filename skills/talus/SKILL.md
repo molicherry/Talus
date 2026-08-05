@@ -115,12 +115,28 @@ Response: array of {time, cpu_percent, memory_percent, disk_percent,
 
 ```
 POST /api/v1/services/{id}/relay
-Body: {"method": "GET", "path": "/api/endpoint", "headers": {...}, "body": "..."}
+Body: {"method": "GET", "path": "/api/endpoint", "headers": {...}, "body": {...}}
 
 Credentials stored on the service are injected automatically.
 Placeholder substitution: {{key}} in headers/body → credential value.
   e.g. {"headers": {"Authorization": "Bearer {{token}}"}}
 ```
+
+**Building the relay request correctly** (learned the hard way — these two
+mistakes silently break parameterized calls):
+
+1. **`path` is forwarded verbatim** — query strings pass through as-is. Use the
+   target service's own parameter style, e.g. Dokploy accepts direct query
+   params (`/api/compose.one?composeId=xxx`), NOT the generic tRPC wrapper
+   (`?input={"json":{...}}`). Check the service's usage_guide for the exact
+   format before guessing.
+2. **`body` must be a JSON object/array, not a string.** Passing a pre-serialized
+   string (`"{\"composeId\":\"x\"}"`) forwards a quoted string to the target and
+   its fields come back `undefined`. Pass the object itself:
+   `{"method": "POST", "path": "/api/x", "body": {"composeId": "x"}}`.
+
+The relay never adapts to the target — it forwards whatever you give it. Read the
+service's usage_guide, then construct method/path/headers/body per the target API.
 
 ### "How do I use a specific service?"
 
