@@ -47,8 +47,7 @@ All requests use `X-API-Key` header. **Auto-auth**: If `TALUS_API_KEY` is set, u
 | Execute command | `servers:exec` |
 | Query metrics | `metrics:read` |
 | List credentials (no secrets) | `credentials:read` |
-| List/get services | (unrestricted) |
-| Relay service request | `services:relay` |
+| List/get services | any valid key (no specific scope required) |
 | Add/update server | `servers:write` |
 | Open WebSocket terminal | `servers:terminal` |
 
@@ -56,8 +55,7 @@ All requests use `X-API-Key` header. **Auto-auth**: If `TALUS_API_KEY` is set, u
 
 ### jwtOnly — hard-rejected regardless of scopes
 
-Even `"*"` wildcard scope does not help. These require the **Talus Web UI**:
-
+Even a key with every scope does not help. These require the **Talus Web UI** (user JWT):
 | Route | Operation |
 | ------- | ----------- |
 | `DELETE /servers/{id}` | Delete server |
@@ -75,8 +73,9 @@ Even `"*"` wildcard scope does not help. These require the **Talus Web UI**:
 | `GET /services/{id}/credentials` | Get service credentials |
 | `GET /auth/profile`, `PUT /auth/password` | Auth operations |
 
-Any endpoint not in the scope table or jwtOnly table is **unrestricted** — e.g. `GET /services`, `GET /services/{id}` work with any valid key.
-
+Every API endpoint requires authentication (`X-API-Key` header or user JWT) — there are
+no unauthenticated routes. `GET /services` / `GET /services/{id}` work with any valid
+key (no specific scope), but an invalid or missing credential returns 401.
 ## Decision Trees
 
 ### "What servers do I have?" / "Show me server X"
