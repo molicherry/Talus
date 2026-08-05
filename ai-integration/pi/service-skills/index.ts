@@ -26,21 +26,12 @@ let cache = { ts: 0, text: "", names: [] as string[] };
 // Keywords that hint the user is talking about services. Keep them broad —
 // a false positive only costs a tiny per-turn injection, a false negative
 // costs the whole point of the feature.
+// 注意：“服务”用负向断言排除“服务器”等复合词，避免纯运维查询误触发。
 const SERVICE_KEYWORDS = [
-	"service",
-	"services",
-	"relay",
-	"proxy",
-	"deploy",
-	"部署",
-	"服务",
-	"代理",
-	"应用",
-	"业务",
-	"面板",
-	"dokploy",
-	"portainer",
-	"grafana",
+	/service|services|relay|proxy|deploy/i,
+	/服务(?!器)/,
+	/代理|应用|业务|面板/,
+	/dokploy|portainer|grafana/i,
 ];
 
 async function fetchServiceDirectory() {
@@ -80,10 +71,10 @@ async function fetchServiceDirectory() {
 
 function shouldInject(text: string, serviceNames: string[]): boolean {
 	if (!text) return false;
-	const lower = text.toLowerCase();
-	for (const kw of SERVICE_KEYWORDS) {
-		if (lower.includes(kw)) return true;
+	for (const re of SERVICE_KEYWORDS) {
+		if (re.test(text)) return true;
 	}
+	const lower = text.toLowerCase();
 	for (const name of serviceNames) {
 		if (name && lower.includes(name.toLowerCase())) return true;
 	}

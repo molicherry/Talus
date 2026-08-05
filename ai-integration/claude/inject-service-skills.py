@@ -45,14 +45,23 @@ _cache = {"ts": 0, "text": "", "names": []}
 
 SERVICE_KEYWORDS = [
     "service", "services", "relay", "proxy", "deploy",
-    "部署", "服务", "代理", "应用", "业务", "面板",
     "dokploy", "portainer", "grafana",
+]
+SERVICE_KEYWORD_RES = [
+    "service", "services", "relay", "proxy", "deploy",
+    "dokploy", "portainer", "grafana", "代理", "应用", "业务", "面板",
+]
+import re as _re
+SERVICE_KEYWORD_PATTERNS = [
+    _re.compile(r"service|services|relay|proxy|deploy", _re.I),
+    _re.compile(r"服务(?!器)"),
+    _re.compile(r"代理|应用|业务|面板"),
+    _re.compile(r"dokploy|portainer|grafana", _re.I),
 ]
 
 
 def _has_service_keyword(text):
-    lower = text.lower()
-    return any(kw in lower for kw in SERVICE_KEYWORDS)
+    return any(p.search(text) for p in SERVICE_KEYWORD_PATTERNS)
 
 
 def _fetch_service_directory():
