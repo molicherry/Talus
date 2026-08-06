@@ -5,11 +5,16 @@ description: >-
   Capabilities: list servers, execute remote commands over SSH,
   query live monitoring metrics, list credentials (metadata only),
   list/relay proxied services, create/update servers.
+  Registered services are reachable through Talus relay — list them, read
+  their usage guides, and proxy requests via relay. Prefer Talus for any
+  registered service; only operate directly on the server when a service is
+  not registered in Talus.
   API key scoped — credential mutations, API key management,
   service creation, and secret reveal require the Talus Web UI.
   Use when user wants to manage servers, execute commands, check server metrics,
-  list credentials, relay service requests, or add/update servers.
-triggers: ["Talus", "manage server", "execute command on server", "check server metrics", "list credentials", "relay request", "list servers", "Talus 管理", "通过Talus执行命令"]
+  list credentials, list or use proxied services, relay service requests,
+  or add/update servers.
+triggers: ["Talus", "manage server", "execute command on server", "check server metrics", "list credentials", "relay request", "list servers", "Talus 管理", "通过Talus执行命令", "service", "services", "proxied service", "service list", "service usage", "服务", "服务列表", "使用服务", "代理服务", "dokploy", "portainer"]
 ---
 
 # Talus Skill — Agent Operation Guide
@@ -44,8 +49,7 @@ All requests use `X-API-Key` header. **Auto-auth**: If `TALUS_API_KEY` is set, u
 | Execute command | `servers:exec` |
 | Query metrics | `metrics:read` |
 | List credentials (no secrets) | `credentials:read` |
-| List/get services | (unrestricted) |
-| Relay service request | `services:relay` |
+| List/get services | any valid key (no specific scope required) |
 | Add/update server | `servers:write` |
 | Open WebSocket terminal | `servers:terminal` |
 
@@ -53,8 +57,7 @@ All requests use `X-API-Key` header. **Auto-auth**: If `TALUS_API_KEY` is set, u
 
 ### jwtOnly — hard-rejected regardless of scopes
 
-Even `"*"` wildcard scope does not help. These require the **Talus Web UI**:
-
+Even a key with every scope does not help. These require the **Talus Web UI** (user JWT):
 | Route | Operation |
 | ------- | ----------- |
 | `DELETE /servers/{id}` | Delete server |
@@ -72,8 +75,9 @@ Even `"*"` wildcard scope does not help. These require the **Talus Web UI**:
 | `GET /services/{id}/credentials` | Get service credentials |
 | `GET /auth/profile`, `PUT /auth/password` | Auth operations |
 
-Any endpoint not in the scope table or jwtOnly table is **unrestricted** — e.g. `GET /services`, `GET /services/{id}` work with any valid key.
-
+Every operational endpoint requires authentication (`X-API-Key` header or user JWT) —
+only the public entry points `/auth/login`, `/auth/setup` and `/version` are unauthenticated.
+`GET /services` / `GET /services/{id}` work with any valid
 ## Decision Trees
 
 ### "What servers do I have?" / "Show me server X"
@@ -85,7 +89,7 @@ GET /api/v1/servers/summary   → lightweight list (id, name, description, host,
 GET /api/v1/servers/{id}      → full detail with credential info
 ```
 
-Key fields: `status` ("online"|"offline"|"checking"|"unknown"), `latest_metrics` {cpu_percent, memory_percent, disk_percent}, `os`, `cpu_model`, `uptime_seconds`.
+Key fields: `status` ("online"|"offline"|"unknown"), `latest_metrics` {cpu_percent, memory_percent, disk_percent}, `os`, `cpu_model`, `uptime_seconds`.
 
 ### "Run a command on server X"
 
@@ -112,12 +116,52 @@ Response: array of {time, cpu_percent, memory_percent, disk_percent,
 
 ```
 POST /api/v1/services/{id}/relay
-Body: {"method": "GET", "path": "/api/endpoint", "headers": {...}, "body": "..."}
+Body: {"method": "GET", "path": "/api/endpoint", "headers": {...}, "body": {...}}
 
 Credentials stored on the service are injected automatically.
 Placeholder substitution: {{key}} in headers/body → credential value.
   e.g. {"headers": {"Authorization": "Bearer {{token}}"}}
 ```
+
+**Building the relay request correctly** (learned the hard way — these two
+mistakes silently break parameterized calls):
+
+1. **`path` is forwarded verbatim** — query strings pass through as-is. Use the
+   target service's own parameter style, e.g. Dokploy accepts direct query
+   params (`/api/compose.one?composeId=xxx`), NOT the generic tRPC wrapper
+   (`?input={"json":{...}}`). Check the service's usage_guide for the exact
+   format before guessing.
+2. **`body` must be a JSON object/array, not a string.** Passing a pre-serialized
+   string (`"{\"composeId\":\"x\"}"`) forwards a quoted string to the target and
+   its fields come back `undefined`. Pass the object itself:
+   `{"method": "POST", "path": "/api/x", "body": {"composeId": "x"}}`.
+
+The relay never adapts to the target — it forwards whatever you give it. Read the
+service's usage_guide, then construct method/path/headers/body per the target API.
+
+### "How do I use a specific service?"
+
+Each registered service can carry its own usage guide (`usage_guide`, markdown) — the
+per-service "skill" written by whoever registered it. Always check it before calling:
+
+```
+1. List available services: GET /api/v1/services
+   → name, description, usage_guide_excerpt (first ~200 chars)
+2. Pick the target and read its guide: GET /api/v1/services/{id}
+   → usage_guide (full markdown)
+3. If usage_guide exists, follow it to build the relay request
+   (method/path/headers/body, {{key}} placeholder substitution).
+4. If absent, infer from description + credential_hints, or ask the user.
+```
+
+The service directory (name + description + guide excerpt) is injected by the
+standard platform plugin (see ai-integration/ in the repo, install via
+install.sh) whenever the user mentions services — injection affects only the
+current turn and is never persisted to history. If the plugin is not installed
+(e.g. Cursor), the rules above still apply — always list services via the API
+before calling one. The full usage_guide is fetched on demand and never embedded
+in the system prompt.
+
 
 ### "Something is returning 403"
 
@@ -160,8 +204,16 @@ Guide user to **Talus Web UI → API Keys**:
 
 ## Critical Rules
 
-1. **Credentials NEVER appear in API responses** — list endpoints return metadata only. Secrets require the Talus Web UI (all reveal endpoints are jwtOnly).
-2. **API key raw value shown ONCE** at creation via Web UI. No API-based retrieval.
-3. **scopes and server_ids are orthogonal** — both must match. server_ids=[] means all servers.
-4. **`services:relay` and `servers:write` are opt-in** — not in default scopes.
-5. **Terminal** — pass API key via `X-API-Key` header during WebSocket upgrade.
+1. **Prefer Talus for registered services.** Before operating any service on a
+   server, check whether it is registered in Talus: `GET /api/v1/services?server_id=<id>`
+   to see the directory (name, description, usage_guide_excerpt). If it is
+   registered: (a) `GET /api/v1/services/{id}` to read its `usage_guide`; (b) build
+   the relay request per the guide: `POST /api/v1/services/{id}/relay` — Talus
+   injects the credentials. If it is NOT registered, operate it directly on the
+   server (and consider registering it so future calls can use relay). Never
+   guess a registered service's URL or credentials — ask the API.
+2. **Credentials NEVER appear in API responses** — list endpoints return metadata only. Secrets require the Talus Web UI (all reveal endpoints are jwtOnly).
+3. **API key raw value shown ONCE** at creation via Web UI. No API-based retrieval.
+4. **scopes and server_ids are orthogonal** — both must match. server_ids=[] means all servers.
+5. **`services:relay` and `servers:write` are opt-in** — not in default scopes.
+6. **Terminal** — pass API key via `X-API-Key` header during WebSocket upgrade.
