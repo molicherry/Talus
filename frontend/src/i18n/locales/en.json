@@ -193,7 +193,8 @@
   "authTypeRequired": "Auth type is required",
   "usernameRequired": "Username is required",
   "passwordRequired": "Password is required",
-  "credentialRequired": "Either password or private key is required"
+  "credentialRequired": "Either password or private key is required",
+  "usageGuideTooLong": "Usage guide must be at most 20000 characters"
  },
  "language": {
   "switch": "中文"
@@ -223,6 +224,8 @@
    "show": "Show",
    "hide": "Hide",
    "description": "Description",
+   "usageGuide": "Usage Guide (Markdown)",
+   "usageGuideHint": "Written for AI agents: endpoints, auth headers, request examples. The AI reads this when calling the service. Do NOT put secrets here — credentials go in the Credentials section.",
   "server": "Server",
   "noServer": "None (standalone)",
   "notFound": "Service not found",
