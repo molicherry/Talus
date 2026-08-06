@@ -14,6 +14,28 @@ import (
 	"github.com/vpsmanager/backend/internal/service"
 )
 
+// maxUsageGuideRunes caps the length of a service usage guide (rune count).
+const maxUsageGuideRunes = 20000
+
+// validateServiceRequest checks create/update input and returns any error details.
+// Create and Update share this helper so the rules cannot drift.
+func validateServiceRequest(req createServiceRequest) []server.ErrorDetail {
+	var details []server.ErrorDetail
+	if req.Name == "" {
+		details = append(details, server.ErrorDetail{Field: "name", Message: "name is required"})
+	}
+	if req.BaseURL == "" {
+		details = append(details, server.ErrorDetail{Field: "base_url", Message: "base_url is required"})
+	}
+	if len(req.Credentials) == 0 {
+		details = append(details, server.ErrorDetail{Field: "credentials", Message: "at least one credential is required"})
+	}
+	if req.UsageGuide != nil && len([]rune(*req.UsageGuide)) > maxUsageGuideRunes {
+		details = append(details, server.ErrorDetail{Field: "usage_guide", Message: "usage_guide must be at most 20000 characters"})
+	}
+	return details
+}
+
 type createServiceRequest struct {
 	Name            string            `json:"name"`
 	DisplayName     string            `json:"display_name"`
@@ -21,6 +43,7 @@ type createServiceRequest struct {
 	Credentials     map[string]string `json:"credentials"`
 	CredentialHints map[string]string `json:"credential_hints"`
 	Description     *string           `json:"description,omitempty"`
+	UsageGuide      *string           `json:"usage_guide,omitempty"`
 	ServerID        *uint             `json:"server_id,omitempty"`
 }
 
@@ -50,17 +73,7 @@ func (h *ServiceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var details []server.ErrorDetail
-	if req.Name == "" {
-		details = append(details, server.ErrorDetail{Field: "name", Message: "name is required"})
-	}
-	if req.BaseURL == "" {
-		details = append(details, server.ErrorDetail{Field: "base_url", Message: "base_url is required"})
-	}
-	if len(req.Credentials) == 0 {
-		details = append(details, server.ErrorDetail{Field: "credentials", Message: "at least one credential is required"})
-	}
-	if len(details) > 0 {
+	if details := validateServiceRequest(req); len(details) > 0 {
 		server.WriteError(w, r, server.NewValidationError(details))
 		return
 	}
@@ -72,6 +85,7 @@ func (h *ServiceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Credentials:     req.Credentials,
 		CredentialHints: req.CredentialHints,
 		Description:     req.Description,
+		UsageGuide:      req.UsageGuide,
 		ServerID:        req.ServerID,
 	}
 
@@ -101,7 +115,18 @@ func (h *ServiceHandler) List(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, err)
 		return
 	}
-	server.WriteJSON(w, http.StatusOK, services)
+	// Only surface services the caller may reach — mirrors the server-scope
+	// check the relay handler applies, so a key scoped to one server cannot
+	// read usage guides of services bound to other servers.
+	claims := mw.GetUserClaims(r.Context())
+	out := make([]model.Service, 0, len(services))
+	for _, s := range services {
+		if s.ServerID != nil && !mw.CheckServerAccess(claims, *s.ServerID) {
+			continue
+		}
+		out = append(out, s)
+	}
+	server.WriteJSON(w, http.StatusOK, out)
 }
 
 // Relay handles POST /api/v1/services/{id}/relay.
@@ -150,6 +175,13 @@ func (h *ServiceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		server.WriteError(w, r, err)
 		return
+	}
+	if svc.ServerID != nil {
+		claims := mw.GetUserClaims(r.Context())
+		if !mw.CheckServerAccess(claims, *svc.ServerID) {
+			server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to the server this service is bound to"))
+			return
+		}
 	}
 	server.WriteJSON(w, http.StatusOK, svc)
 }
@@ -202,17 +234,7 @@ func (h *ServiceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var details []server.ErrorDetail
-	if req.Name == "" {
-		details = append(details, server.ErrorDetail{Field: "name", Message: "name is required"})
-	}
-	if req.BaseURL == "" {
-		details = append(details, server.ErrorDetail{Field: "base_url", Message: "base_url is required"})
-	}
-	if len(req.Credentials) == 0 {
-		details = append(details, server.ErrorDetail{Field: "credentials", Message: "at least one credential is required"})
-	}
-	if len(details) > 0 {
+	if details := validateServiceRequest(req); len(details) > 0 {
 		server.WriteError(w, r, server.NewValidationError(details))
 		return
 	}
@@ -224,6 +246,7 @@ func (h *ServiceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Credentials:     req.Credentials,
 		CredentialHints: req.CredentialHints,
 		Description:     req.Description,
+		UsageGuide:      req.UsageGuide,
 		ServerID:        req.ServerID,
 	}
 
