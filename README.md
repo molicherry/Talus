@@ -192,6 +192,43 @@ export TALUS_API_KEY=<your-api-key>
 In a new AI session, ask *"List all servers via Talus"* — a list of servers
 (or an empty array) means the skill is wired up.
 
+### Services: prefer Talus relay for registered services
+
+Registered services (Dokploy, Portainer, or any internal app) are proxied by
+Talus — their `base_url` is an internal address an AI cannot touch directly,
+and their credentials are injected by Talus at relay time. When operating a
+service on a server, the AI should first check whether it is registered in
+Talus (`GET /api/v1/services?server_id=<id>`); if it is, use it through relay.
+If it is not registered, the AI may operate it directly on the server (and
+consider registering it). The workflow for a registered service is:
+
+```
+GET /api/v1/services          → directory (name, description, guide excerpt)
+GET /api/v1/services/{id}     → full usage_guide (per-service "skill")
+POST /api/v1/services/{id}/relay → follow the guide to build the request
+```
+
+Every registered service can carry its own **usage guide** (`usage_guide`, markdown) —
+written in the **Talus Web UI → Services → Add/Edit Service → Usage Guide** field. It
+tells the AI how to use that service (endpoints, auth headers, request examples)
+without hard-coding any service specifics into the shared skill.
+
+### Install the service-directory injection plugin (recommended)
+
+The [ai-integration](ai-integration/) plugin (OpenCode / pi / Claude Code / Codex)
+injects the service directory **when the user mentions services** — so the AI
+sees what is available exactly when it matters and is reminded to fetch the
+usage guide, without paying tokens on unrelated turns. Injection affects only
+the current turn and is never written to conversation history. Install it after
+the skill:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/molicherry/Talus/main/ai-integration/install.sh)
+```
+
+Platforms without a prompt-injection hook (e.g. Cursor) rely on the skill's
+discovery rules instead — the capability works either way; the plugin just makes
+it impossible to miss.
 ### Example prompts
 
 ```bash

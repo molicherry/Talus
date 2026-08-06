@@ -123,6 +123,38 @@ export TALUS_API_KEY=<你的 API 密钥>
 
 在新的 AI 会话中问 *"通过 Talus 列出所有服务器"*——返回服务器列表（或空数组）即表示 skill 已生效。
 
+### 服务：已注册服务优先走 Talus relay
+
+已注册服务（Dokploy、Portainer 或任意内部应用）由 Talus 代理——它们的 `base_url`
+是 AI 无法直接访问的内网地址，凭据在 relay 时由 Talus 注入。在服务器上操作某个服务时，
+AI 应首先检查它是否已在 Talus 注册（`GET /api/v1/services?server_id=<id>`）；若已注册，
+通过 relay 使用它；若未注册，AI 可以直接在服务器上操作（并可考虑补注册）。已注册服务的
+工作流：
+
+```
+GET /api/v1/services             → 服务目录（name、description、指南摘要）
+GET /api/v1/services/{id}        → 完整 usage_guide（每个服务自己的 "skill"）
+POST /api/v1/services/{id}/relay → 按指南构造请求
+```
+
+每个已注册服务都可以携带自己的**使用指南**（`usage_guide`，markdown）——在
+**Talus Web UI → 服务 → 添加/编辑服务 → 使用指南** 字段中编写。它告诉 AI 如何使用该服务
+（端点、认证头、请求示例），而无需把任何服务细节硬编码进通用 skill。
+
+### 安装服务目录注入插件（推荐）
+
+[ai-integration](../ai-integration/) 插件（OpenCode / pi / Claude Code / Codex）
+在**用户提到服务时**注入服务目录——让 AI 在需要时恰好看到有哪些服务可用，并被提醒
+读取使用指南，同时无关对话轮次不消耗 token。注入只影响当前这一轮，不会写入对话历史。
+在安装 skill 之后安装它：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/molicherry/Talus/main/ai-integration/install.sh)
+```
+
+没有提示词注入钩子的平台（如 Cursor）依赖 skill 的发现规则——两种方式能力都完整；
+插件只是让它不可能被漏掉。
+
 ### 示例提示词
 
 ```bash

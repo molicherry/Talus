@@ -96,6 +96,7 @@ export const ServiceSchema = z.object({
   base_url: z.string(),
   credential_hints: z.record(z.string(), z.string()).optional(),
   description: z.string().nullable().optional(),
+  usage_guide: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string().optional(),
 });
@@ -110,6 +111,12 @@ export const ServiceFormSchema = z.object({
     .refine((v) => Object.keys(v).length > 0, { message: i18n.t("validation.credentialRequired") }),
   credential_hints: z.record(z.string(), z.string()).optional(),
   description: z.string().max(500).optional(),
+  usage_guide: z
+    .string()
+    .optional()
+    .refine((v) => v === undefined || [...v].length <= 20000, {
+      message: i18n.t("validation.usageGuideTooLong"),
+    }),
   server_id: z.number().nullable().optional(),
 });
 export type ServiceFormValues = z.infer<typeof ServiceFormSchema>;

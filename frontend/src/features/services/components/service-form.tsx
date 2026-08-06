@@ -40,6 +40,7 @@ export function ServiceForm({ service }: ServiceFormProps) {
           display_name: service.display_name,
           base_url: service.base_url,
           description: service.description ?? "",
+          usage_guide: service.usage_guide ?? "",
           server_id: service.server_id ?? undefined,
           credentials: {},
           credential_hints: service.credential_hints ?? {},
@@ -67,6 +68,7 @@ export function ServiceForm({ service }: ServiceFormProps) {
             display_name: service.display_name,
             base_url: service.base_url,
             description: service.description ?? "",
+            usage_guide: service.usage_guide ?? "",
             server_id: service.server_id ?? undefined,
             credentials: creds,
             credential_hints: service.credential_hints ?? {},
@@ -195,6 +197,29 @@ export function ServiceForm({ service }: ServiceFormProps) {
         {errors.description && (
           <p className="mt-1 text-xs text-red-600 dark:text-red-400">
             {errors.description.message}
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label
+          htmlFor="usage_guide"
+          className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+        >
+          {t("service.usageGuide")}
+        </label>
+        <textarea
+          id="usage_guide"
+          {...register("usage_guide")}
+          rows={10}
+          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
+        />
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          {t("service.usageGuideHint")}
+        </p>
+        {errors.usage_guide && (
+          <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+            {errors.usage_guide.message}
           </p>
         )}
       </div>

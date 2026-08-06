@@ -6,6 +6,7 @@
 .pi-meetings/
 .agents/
 AGENTS.md
+.gitattributes
 
 
 # Dependencies
@@ -46,3 +47,7 @@ pgdata/
 
 # Logs
 *.log
+
+# Python
+__pycache__/
+*.pyc
