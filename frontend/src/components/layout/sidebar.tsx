@@ -16,33 +16,45 @@ export function Sidebar() {
   const { t } = useTranslation();
 
   return (
-    <aside className="flex w-56 flex-col border-r border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
-      <div className="flex h-16 items-center border-b border-gray-200 px-6 dark:border-gray-800">
-        <Server className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-        <span className="ml-2 text-sm font-semibold text-gray-800 dark:text-gray-200">
-          {t("app.name")}
-        </span>
+    <aside className="flex w-60 flex-col border-r border-sidebar-border bg-sidebar">
+      <div className="flex h-16 items-center border-b border-sidebar-border px-6">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+          <Server className="h-4 w-4" />
+        </div>
+        <span className="ml-3 text-sm font-semibold text-sidebar-foreground">{t("app.name")}</span>
       </div>
+
       <nav className="flex-1 space-y-1 p-4">
         {navItems.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+              `group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
                 isActive
-                  ? "bg-white text-gray-900 dark:bg-gray-800 dark:text-gray-100"
-                  : "text-gray-500 hover:bg-gray-100/50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200"
+                  ? "bg-sidebar-active text-sidebar-active-foreground"
+                  : "text-sidebar-foreground hover:bg-secondary hover:text-foreground"
               }`
             }
           >
-            <Icon className="h-4 w-4" />
-            {t(label)}
+            {({ isActive }) => (
+              <>
+                {isActive && (
+                  <span
+                    className="absolute -left-4 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r bg-primary"
+                    aria-hidden="true"
+                  />
+                )}
+                <Icon className="h-4 w-4 shrink-0 transition-colors" />
+                <span className="truncate">{t(label)}</span>
+              </>
+            )}
           </NavLink>
         ))}
       </nav>
-      <div className="border-t border-gray-200 px-4 py-3 dark:border-gray-800">
-        <p className="text-xs text-gray-400 dark:text-gray-500">{VERSION}</p>
+
+      <div className="border-t border-sidebar-border px-4 py-3">
+        <p className="text-xs font-medium text-muted-foreground">{VERSION}</p>
       </div>
     </aside>
   );

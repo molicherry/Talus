@@ -40,15 +40,15 @@ function NotFoundPage() {
   const { t } = useTranslation();
 
   return (
-    <div className="flex h-screen items-center justify-center bg-white dark:bg-gray-950">
+    <div className="flex h-screen items-center justify-center bg-background text-foreground">
       <div className="text-center">
-        <h1 className="text-6xl font-bold text-gray-900 dark:text-gray-100">
+        <h1 className="text-6xl font-bold tracking-tight text-foreground">
           {t("notFound.title")}
         </h1>
-        <p className="mt-4 text-gray-500 dark:text-gray-400">{t("notFound.message")}</p>
+        <p className="mt-4 text-muted-foreground">{t("notFound.message")}</p>
         <a
           href="/"
-          className="mt-6 inline-block text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+          className="mt-6 inline-block font-medium text-primary hover:text-primary-hover"
         >
           {t("notFound.goHome")}
         </a>
