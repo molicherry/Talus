@@ -8,10 +8,10 @@ interface StatusIndicatorProps {
 }
 
 const statusColor: Record<StatusIndicatorProps["status"], string> = {
-  online: "bg-green-500",
-  offline: "bg-red-500",
-  checking: "bg-yellow-500",
-  unknown: "bg-gray-400",
+  online: "bg-success",
+  offline: "bg-danger",
+  checking: "bg-warning",
+  unknown: "bg-muted-foreground/60",
 };
 
 const statusLabel: Record<StatusIndicatorProps["status"], string> = {
@@ -22,8 +22,8 @@ const statusLabel: Record<StatusIndicatorProps["status"], string> = {
 };
 
 const pulseColor: Record<string, string> = {
-  online: "bg-green-500/75",
-  checking: "bg-yellow-500/75",
+  online: "bg-success/75",
+  checking: "bg-warning/75",
 };
 
 const dotSize: Record<NonNullable<StatusIndicatorProps["size"]>, string> = {
@@ -52,7 +52,7 @@ export function StatusIndicator({
     shouldPulse && pulseColor[status] ? (
       <span
         className={cn(
-          "animate-ping absolute inline-flex h-full w-full rounded-full",
+          "absolute inline-flex h-full w-full animate-ping rounded-full",
           pulseColor[status],
         )}
       />
