@@ -5,6 +5,7 @@ import { useAuth } from "../../hooks/use-auth";
 import type { Theme } from "../../hooks/use-theme";
 import { useTheme } from "../../hooks/use-theme";
 import { clearAuthToken, getAuthToken } from "../../lib/auth";
+import { Button } from "../ui/button";
 
 const themeIcons: Record<Theme, typeof Sun> = {
   light: Sun,
@@ -54,7 +55,12 @@ export function Header() {
         return;
       }
       setPwOk(true);
-      setTimeout(() => { setShowPasswordModal(false); setPwOk(false); setCurrentPw(""); setNewPw(""); }, 1500);
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setPwOk(false);
+        setCurrentPw("");
+        setNewPw("");
+      }, 1500);
     } catch {
       setPwError(t("common.error"));
     }
@@ -63,51 +69,54 @@ export function Header() {
   const ThemeIcon = themeIcons[theme];
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-gray-200 bg-white px-6 dark:border-gray-800 dark:bg-gray-900">
-      <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("app.name")}</h1>
-      <div className="flex items-center gap-4">
-        <button
+    <header className="flex h-16 items-center justify-between border-b border-border bg-card px-6">
+      <h1 className="text-lg font-semibold text-foreground">{t("app.name")}</h1>
+      <div className="flex items-center gap-3">
+        <Button
           type="button"
+          variant="ghost"
+          size="icon"
           onClick={() => setTheme(themeNext[theme])}
-          className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"
           title={t(`theme.${theme}`)}
+          aria-label={t(`theme.${theme}`)}
         >
           <ThemeIcon className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={toggleLanguage}
-          className="rounded-md px-2.5 py-1.5 text-xs font-medium text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-200 dark:hover:bg-gray-800"
-        >
+        </Button>
+
+        <Button type="button" variant="ghost" size="sm" onClick={toggleLanguage}>
           {t("language.switch")}
-        </button>
+        </Button>
 
         {user && (
           <div className="relative">
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => setShowDropdown(!showDropdown)}
-              className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+              className="gap-2"
             >
               <User className="h-4 w-4" />
-              {user.username}
-            </button>
+              <span className="max-w-[10rem] truncate">{user.username}</span>
+            </Button>
             {showDropdown && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowDropdown(false)} />
-                <div className="absolute right-0 z-20 mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                <div className="absolute right-0 z-20 mt-2 w-52 rounded-xl border border-border bg-card-elevated p-1 shadow-dropdown">
                   <button
                     type="button"
-                    onClick={() => { setShowDropdown(false); setShowPasswordModal(true); }}
-                    className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                    onClick={() => {
+                      setShowDropdown(false);
+                      setShowPasswordModal(true);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-foreground transition-colors hover:bg-secondary"
                   >
-                    <Key className="h-4 w-4" />
+                    <Key className="h-4 w-4 text-muted-foreground" />
                     {t("auth.changePassword")}
                   </button>
                   <button
                     type="button"
                     onClick={handleLogout}
-                    className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-danger transition-colors hover:bg-danger-subtle"
                   >
                     <LogOut className="h-4 w-4" />
                     {t("header.logout")}
@@ -120,43 +129,40 @@ export function Header() {
       </div>
 
       {showPasswordModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("auth.changePassword")}</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-elevated">
+            <h2 className="text-lg font-semibold text-foreground">{t("auth.changePassword")}</h2>
             {pwOk ? (
-              <p className="mt-4 text-sm text-green-600 dark:text-green-400">{t("auth.passwordChanged")}</p>
+              <p className="mt-4 text-sm text-success">{t("auth.passwordChanged")}</p>
             ) : (
               <div className="mt-4 space-y-3">
                 <input
                   type="password"
                   value={currentPw}
                   onChange={(e) => setCurrentPw(e.target.value)}
-                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                  className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
                   placeholder={t("auth.currentPassword")}
                 />
                 <input
                   type="password"
                   value={newPw}
                   onChange={(e) => setNewPw(e.target.value)}
-                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                  className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
                   placeholder={t("auth.newPassword")}
                 />
-                {pwError && <p className="text-xs text-red-500">{pwError}</p>}
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={handleChangePassword}
-                    className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-                  >
+                {pwError && <p className="text-xs text-danger">{pwError}</p>}
+                <div className="flex gap-3 pt-1">
+                  <Button type="button" onClick={handleChangePassword} className="flex-1">
                     {t("common.save")}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="secondary"
                     onClick={() => setShowPasswordModal(false)}
-                    className="flex-1 rounded-lg bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200"
+                    className="flex-1"
                   >
                     {t("common.cancel")}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
