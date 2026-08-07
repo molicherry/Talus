@@ -1,13 +1,15 @@
 export function ServerCardSkeleton() {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-      <div className="mb-3">
-        <div className="h-4 w-24 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+    <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+      <div className="mb-4 flex items-center gap-2.5">
+        <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-muted-foreground/30" />
+        <div className="h-4 w-28 animate-pulse rounded bg-muted" />
       </div>
-      <div className="space-y-2">
-        <div className="h-3 w-full animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
-        <div className="h-3 w-full animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
-        <div className="h-3 w-full animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+      <div className="mb-4 h-3 w-20 animate-pulse rounded bg-muted-foreground/20" />
+      <div className="mt-auto space-y-3">
+        <div className="h-3 w-full animate-pulse rounded bg-muted" />
+        <div className="h-3 w-full animate-pulse rounded bg-muted" />
+        <div className="h-3 w-full animate-pulse rounded bg-muted" />
       </div>
     </div>
   );
