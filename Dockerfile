@@ -3,19 +3,20 @@
 # that build with the Dockerfile's directory as context.
 # backend/Dockerfile is kept in sync for standalone backend-only builds.
 
-FROM golang:1.25-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS go-builder
 ARG VERSION=dev
-ARG TARGETARCH=amd64
+ARG TARGETOS
+ARG TARGETARCH
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}
 WORKDIR /app
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/vpsmanager/backend/internal/server.Version=${VERSION}" -o /hub ./cmd/server
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /agent ./cmd/agent
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w -X github.com/vpsmanager/backend/internal/server.Version=${VERSION}" -o /hub ./cmd/server
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /agent ./cmd/agent
 
-FROM node:22-alpine AS ui-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine AS ui-builder
 ARG VERSION=dev
 ARG NPM_REGISTRY=https://registry.npmjs.org
 ENV VITE_APP_VERSION=${VERSION}
