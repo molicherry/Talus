@@ -56,6 +56,10 @@ jobs:
         run: npm run lint
         working-directory: frontend
 
+      - name: Test (query layer + i18n locales)
+        run: npm test
+        working-directory: frontend
+
       - name: Type-check & Build
         run: npm run build
         working-directory: frontend
