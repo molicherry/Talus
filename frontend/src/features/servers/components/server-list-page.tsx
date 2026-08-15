@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "../../../i18n";
 import { Link } from "react-router-dom";
 import { ServerList } from "./server-list";
 

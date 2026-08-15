@@ -1,4 +1,4 @@
-import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
+import { useEffect, useState } from "react";
 
 interface GaugeChartProps {
   value: number;
@@ -17,33 +17,44 @@ export function GaugeChart({ value, size = 140 }: GaugeChartProps) {
   const clamped = Math.max(0, Math.min(100, value));
   const color = getGaugeColor(clamped);
 
-  const data = [
-    { name: "Used", value: clamped },
-    { name: "Free", value: Math.max(0, 100 - clamped) },
-  ];
+  // Donut geometry matching recharts Pie (innerRadius 70%, outerRadius 85%)
+  const strokeWidth = size * 0.075; // (0.85 - 0.70) * size
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const dash = (clamped / 100) * circumference;
+
+  // Animate the arc from empty on mount, mirroring recharts' 600ms entrance
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    const id = window.setTimeout(() => setProgress(1), 30);
+    return () => window.clearTimeout(id);
+  }, [clamped]);
+
+  const shown = dash * progress;
 
   return (
     <div className="relative mx-auto" style={{ width: size, height: size }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <PieChart>
-          <Pie
-            data={data}
-            cx="50%"
-            cy="50%"
-            innerRadius="70%"
-            outerRadius="85%"
-            startAngle={90}
-            endAngle={-270}
-            dataKey="value"
-            strokeWidth={0}
-            isAnimationActive={true}
-            animationDuration={600}
-          >
-            <Cell fill={color} />
-            <Cell fill={TRACK_COLOR} />
-          </Pie>
-        </PieChart>
-      </ResponsiveContainer>
+      <svg width="100%" height="100%" viewBox={`0 0 ${size} ${size}`}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={TRACK_COLOR}
+          strokeWidth={strokeWidth}
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeDasharray={`${shown} ${circumference}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          style={{ transition: "stroke-dasharray 600ms ease" }}
+        />
+      </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-100">
           {clamped.toFixed(0)}

@@ -1,5 +1,5 @@
 import { Plus, Server } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "../../../i18n";
 import { Link } from "react-router-dom";
 
 export function DashboardEmpty() {

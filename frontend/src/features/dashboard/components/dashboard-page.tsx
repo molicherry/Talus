@@ -1,4 +1,4 @@
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "../../../i18n";
 import { useDashboardData } from "../hooks/use-dashboard";
 import { DashboardGrid } from "./dashboard-grid";
 

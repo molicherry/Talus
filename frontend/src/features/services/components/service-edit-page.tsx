@@ -1,5 +1,5 @@
 import { Loader2 } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "../../../i18n";
 import { useParams } from "react-router-dom";
 import { useService } from "../hooks/use-services";
 import { ServiceForm } from "./service-form";

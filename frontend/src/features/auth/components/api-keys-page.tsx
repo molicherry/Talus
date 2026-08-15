@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "../../../i18n";
 import { Copy, Key, Plus, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "../../../lib/toast";
 
 const API_BASE = "";
 
@@ -51,7 +51,7 @@ export function ApiKeysPage() {
 
   const token = localStorage.getItem("auth_token");
 
-  const fetchKeys = async () => {
+  const fetchKeys = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/v1/api-keys`, {
@@ -63,9 +63,15 @@ export function ApiKeysPage() {
       toast.error(t("common.loadError"));
     }
     setLoading(false);
-  };
+  }, [token, t]);
 
-  useState(() => { fetchKeys(); });
+  // Initial load. (Note: this was previously `useState(() => { fetchKeys(); })` —
+  // a side effect inside a state initializer, which violates the rules of hooks
+  // and double-fires under StrictMode. useEffect is the correct way to run a
+  // mount-time fetch.)
+  useEffect(() => {
+    fetchKeys();
+  }, [fetchKeys]);
 
   useEffect(() => {
     const fetchServers = async () => {

@@ -1,4 +1,4 @@
-import { type UseMutationResult, useMutation } from "@tanstack/react-query";
+import { useMutation, type UseMutationResult } from "../../../lib/query";
 import type { ExecResponse } from "../../../types/ssh";
 import { execCommand } from "../api";
 

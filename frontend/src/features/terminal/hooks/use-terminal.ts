@@ -1,7 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
-import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TerminalServerMessage } from "../../../types/ssh";
@@ -29,6 +27,10 @@ export function useTerminal(serverId: number): UseTerminalReturn {
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef = useRef(0);
   const manualDisconnectRef = useRef(false);
+  // handleResize is recreated per connect(); keep a ref so disconnect can
+  // remove the exact listener that was added (otherwise reconnects leak
+  // window "resize" listeners).
+  const windowResizeHandlerRef = useRef<(() => void) | null>(null);
 
   const [status, setStatus] = useState<UseTerminalReturn["status"]>("disconnected");
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +50,22 @@ export function useTerminal(serverId: number): UseTerminalReturn {
   const disconnect = useCallback(() => {
     manualDisconnectRef.current = true;
     clearTimers();
-    wsRef.current?.close();
+    if (windowResizeHandlerRef.current !== null) {
+      window.removeEventListener("resize", windowResizeHandlerRef.current);
+      windowResizeHandlerRef.current = null;
+    }
+    // Detach WS handlers BEFORE closing so the stale onclose can't fire later
+    // and call term.writeln on the disposed terminal (xterm throws "Object has
+    // been disposed") — or null the NEW ws / schedule a spurious retry.
+    const ws = wsRef.current;
+    wsRef.current = null;
+    if (ws) {
+      ws.onclose = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onopen = null;
+      ws.close();
+    }
     termInstanceRef.current?.dispose();
     termInstanceRef.current = null;
     fitAddonRef.current = null;
@@ -63,6 +80,26 @@ export function useTerminal(serverId: number): UseTerminalReturn {
 
     manualDisconnectRef.current = false;
     clearTimers();
+    // Dispose any previous terminal before opening a new one. Auto-reconnect
+    // (scheduleRetry → connect(true)) reaches here with the old terminal
+    // still mounted — without this, open() stacks a second terminal on the
+    // same DOM node and the old term's handlers/WS keep leaking.
+    if (termInstanceRef.current !== null) {
+      termInstanceRef.current.dispose();
+      termInstanceRef.current = null;
+      fitAddonRef.current = null;
+    }
+    if (wsRef.current !== null) {
+      const oldWs = wsRef.current;
+      wsRef.current = null;
+      // Detach handlers before close so the stale onclose can't null the new
+      // WS or schedule a spurious retry after this reconnect.
+      oldWs.onclose = null;
+      oldWs.onmessage = null;
+      oldWs.onerror = null;
+      oldWs.onopen = null;
+      oldWs.close();
+    }
     // Only a fresh (manual/initial) connect resets the retry counter; a
     // reconnect scheduled by scheduleRetry must keep counting so the
     // exponential backoff and MAX_RETRIES cap actually take effect.
@@ -105,13 +142,8 @@ export function useTerminal(serverId: number): UseTerminalReturn {
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
-    term.loadAddon(new SearchAddon());
 
-    try {
-      term.loadAddon(new WebglAddon());
-    } catch {
-      // WebGL not available — fall back to default canvas renderer
-    }
+    // Default canvas renderer (WebGL addon removed — see autoresearch log)
 
     term.open(terminalRef.current);
     fitAddon.fit();
@@ -190,7 +222,14 @@ export function useTerminal(serverId: number): UseTerminalReturn {
       resizeTimerRef.current = setTimeout(sendResize, RESIZE_DEBOUNCE_MS);
     };
 
+    // Remove any listener from a previous connect (auto-reconnect calls
+    // connect() directly without going through disconnect), so repeated
+    // reconnects don't accumulate window "resize" listeners.
+    if (windowResizeHandlerRef.current !== null) {
+      window.removeEventListener("resize", windowResizeHandlerRef.current);
+    }
     window.addEventListener("resize", handleResize);
+    windowResizeHandlerRef.current = handleResize;
     term.onResize(() => {
       // onResize fires after fit() — debounce same way
       if (resizeTimerRef.current !== null) {

@@ -14,6 +14,9 @@
 type RouteLoader = () => Promise<unknown>;
 
 const ROUTE_LOADERS: RouteLoader[] = [
+  // The post-login landing page first — DashboardPage became lazy in the
+  // initial-load work, so warm it so the first route after login is instant.
+  () => import("../features/dashboard/components/dashboard-page"),
   // Main nav list pages — small, cover tab switching.
   () => import("../features/servers/components/server-list-page"),
   () => import("../features/services/components/service-list-page"),

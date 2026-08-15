@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "../../../lib/query";
 import { getServersWithMetrics } from "../api";
 
 export function useDashboardData() {

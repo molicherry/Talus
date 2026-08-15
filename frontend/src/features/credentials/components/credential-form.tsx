@@ -2,9 +2,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Copy, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "../../../i18n";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { toast } from "../../../lib/toast";
 import { ApiClientError } from "../../../lib/api-client";
 import { CredentialFormSchema, type CredentialFormValues } from "../../../types/models";
 import { useCreateCredential } from "../hooks/use-credentials";
@@ -15,7 +15,9 @@ export function CredentialForm() {
   const createMutation = useCreateCredential();
 
   const [showPassword, setShowPassword] = useState(false);
-  const [showPrivateKey, setShowPrivateKey] = useState(false);
+  // Default to the textarea (multi-line) — browsers strip newlines from
+  // <input> values, which would corrupt multi-line OpenSSH private keys.
+  const [showPrivateKey, setShowPrivateKey] = useState(true);
 
   const {
     register,

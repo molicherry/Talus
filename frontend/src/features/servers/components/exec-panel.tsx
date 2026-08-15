@@ -1,6 +1,6 @@
 import { Loader2, Play, RotateCw, Terminal } from "lucide-react";
 import { type FormEvent, useCallback, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "../../../i18n";
 import { useExecCommand } from "../hooks/use-exec";
 
 interface ExecPanelProps {

@@ -1,8 +1,8 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "../../../i18n";
 import { Link } from "react-router-dom";
-import { toast } from "sonner";
+import { toast } from "../../../lib/toast";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
 import { useCredentials, useDeleteCredential } from "../hooks/use-credentials";
 
