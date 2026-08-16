@@ -84,7 +84,7 @@ docker compose up -d --build
 | 层级 | 技术 |
 |------|------|
 | 后端 | Go、[chi](https://github.com/go-chi/chi)、[GORM](https://gorm.io)、[gorilla/websocket](https://github.com/gorilla/websocket)、[golang-jwt](https://github.com/golang-jwt/jwt) |
-| 前端 | React 19、TypeScript、[Vite](https://vite.dev)、[Tailwind CSS](https://tailwindcss.com)、[Tremor](https://tremor.so)、[xterm.js](https://xtermjs.org) |
+| 前端 | React 19、TypeScript、[Vite](https://vite.dev)、[Tailwind CSS](https://tailwindcss.com)、[xterm.js](https://xtermjs.org) |
 | 数据库 | PostgreSQL 16 + [TimescaleDB](https://www.timescale.com) |
 | 监控 Agent | Go + [gopsutil](https://github.com/shirou/gopsutil) |
 | 部署 | Docker Compose |

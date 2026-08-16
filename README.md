@@ -67,7 +67,7 @@ The repository `docker-compose.yml` builds Talus from source:
 docker compose up -d --build
 ```
 
-The dashboard is at **http://localhost:8080**.
+The dashboard is at **<http://localhost:8080>**.
 
 On first login, enter any username and password — the first login automatically creates the admin account.
 
@@ -148,9 +148,9 @@ docker compose -f docker-compose.prod.yml up -d
 ## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
+| ------- | ----------- |
 | Backend | Go, [chi](https://github.com/go-chi/chi), [GORM](https://gorm.io), [gorilla/websocket](https://github.com/gorilla/websocket), [golang-jwt](https://github.com/golang-jwt/jwt) |
-| Frontend | React 19, TypeScript, [Vite](https://vite.dev), [Tailwind CSS](https://tailwindcss.com), [Tremor](https://tremor.so), [xterm.js](https://xtermjs.org) |
+| Frontend | React 19, TypeScript, [Vite](https://vite.dev), [Tailwind CSS](https://tailwindcss.com), [xterm.js](https://xtermjs.org) |
 | Database | PostgreSQL 16 + [TimescaleDB](https://www.timescale.com) |
 | Monitoring Agent | Go + [gopsutil](https://github.com/shirou/gopsutil) |
 | Deployment | Docker Compose |
@@ -229,6 +229,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/molicherry/Talus/main/ai-int
 Platforms without a prompt-injection hook (e.g. Cursor) rely on the skill's
 discovery rules instead — the capability works either way; the plugin just makes
 it impossible to miss.
+
 ### Example prompts
 
 ```bash
@@ -241,7 +242,7 @@ it impossible to miss.
 ## Configuration
 
 | Variable | Default | Description |
-|----------|---------|-------------|
+| ---------- | --------- | ------------- |
 | `DB_PASSWORD` | *(required)* | PostgreSQL password |
 | `VPSMANAGER_MASTER_KEY` | *(required)* | 64-char hex key for SSH credential encryption |
 | `JWT_SECRET` | *(required)* | JWT signing secret |

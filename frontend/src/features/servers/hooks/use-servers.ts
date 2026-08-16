@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateQueries, useMutation, useQuery } from "../../../lib/query";
 import { createServer, deleteServer, getServer, getServerSummaries, updateServer } from "../api";
 
 export function useServers() {
@@ -18,19 +18,15 @@ export function useServer(id: number) {
 }
 
 export function useCreateServer() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: createServer,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["servers"] });
+      invalidateQueries(["servers"]);
     },
   });
 }
 
 export function useUpdateServer() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: ({
       id,
@@ -46,19 +42,17 @@ export function useUpdateServer() {
       }>;
     }) => updateServer(id, data),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["servers"] });
-      queryClient.invalidateQueries({ queryKey: ["servers", variables.id] });
+      invalidateQueries(["servers"]);
+      invalidateQueries(["servers", variables.id]);
     },
   });
 }
 
 export function useDeleteServer() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: deleteServer,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["servers"] });
+      invalidateQueries(["servers"]);
     },
   });
 }

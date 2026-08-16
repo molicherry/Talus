@@ -80,7 +80,10 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 // GetClient returns a pooled SSH client for the given server, dialing a new
 // connection if none is cached. The caller must call pool.Release when done.
 func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client, error) {
-	client := s.pool.Get(serverID)
+	client, err := s.pool.Get(serverID)
+	if err != nil {
+		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
+	}
 	if client != nil {
 		return client, nil
 	}

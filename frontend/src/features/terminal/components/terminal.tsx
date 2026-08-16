@@ -1,6 +1,6 @@
 import { ArrowLeft, Loader2, Plug, Wifi, WifiOff } from "lucide-react";
 import { useEffect } from "react";
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "../../../i18n";
 import { Link } from "react-router-dom";
 import { useTerminal } from "../hooks/use-terminal";
 

@@ -1,6 +1,7 @@
 package sshpool
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -14,12 +15,17 @@ const probeTimeout = 3 * time.Second
 
 // Pool manages a cache of SSH client connections keyed by server ID.
 // It limits concurrent sessions per server and evicts idle connections.
+// ErrSlotTimeout is returned by Get when the server already has maxConns
+// active sessions and no slot frees up within slotTimeout.
+var ErrSlotTimeout = errors.New("sshpool: too many concurrent sessions for this server")
+
 type Pool struct {
-	mu       sync.Mutex
-	conns    map[uint]*connEntry
-	maxIdle  time.Duration
-	maxConns int
-	done     chan struct{}
+	mu          sync.Mutex
+	conns       map[uint]*connEntry
+	maxIdle     time.Duration
+	maxConns    int
+	slotTimeout time.Duration
+	done        chan struct{}
 	// probe reports whether a pooled connection is still usable. It is
 	// overridable in tests; the default performs a keepalive round-trip.
 	probe func(*ssh.Client) bool
@@ -33,14 +39,16 @@ type connEntry struct {
 }
 
 // NewPool creates a connection pool that evicts idle connections after maxIdle
-// and limits concurrent sessions per server to maxConns.
-func NewPool(maxIdle time.Duration, maxConns int) *Pool {
+// and limits concurrent sessions per server to maxConns. Get blocks for at
+// most slotTimeout waiting for a slot before returning ErrSlotTimeout.
+func NewPool(maxIdle time.Duration, maxConns int, slotTimeout time.Duration) *Pool {
 	p := &Pool{
-		conns:    make(map[uint]*connEntry),
-		maxIdle:  maxIdle,
-		maxConns: maxConns,
-		done:     make(chan struct{}),
-		probe:    keepAliveProbe,
+		conns:       make(map[uint]*connEntry),
+		maxIdle:     maxIdle,
+		maxConns:    maxConns,
+		slotTimeout: slotTimeout,
+		done:        make(chan struct{}),
+		probe:       keepAliveProbe,
 	}
 	go p.evictLoop()
 	return p
@@ -50,8 +58,9 @@ func NewPool(maxIdle time.Duration, maxConns int) *Pool {
 // client if one is available and healthy. Returns nil if no cached client
 // exists or the cached one is dead — the caller must dial a new connection
 // and pass it to Release when finished.
-// Blocks if maxConns sessions are already active for this server.
-func (p *Pool) Get(serverID uint) *ssh.Client {
+// Blocks up to slotTimeout if maxConns sessions are already active for this
+// server, then returns ErrSlotTimeout instead of hanging the caller forever.
+func (p *Pool) Get(serverID uint) (*ssh.Client, error) {
 	p.mu.Lock()
 	entry, ok := p.conns[serverID]
 	if !ok {
@@ -62,8 +71,12 @@ func (p *Pool) Get(serverID uint) *ssh.Client {
 	}
 	p.mu.Unlock()
 
-	// Acquire concurrency slot (blocks if at capacity)
-	entry.sem <- struct{}{}
+	// Acquire concurrency slot (bounded wait; never block forever)
+	select {
+	case entry.sem <- struct{}{}:
+	case <-time.After(p.slotTimeout):
+		return nil, ErrSlotTimeout
+	}
 
 	p.mu.Lock()
 	client := entry.client
@@ -82,7 +95,7 @@ func (p *Pool) Get(serverID uint) *ssh.Client {
 		client = nil
 	}
 
-	return client
+	return client, nil
 }
 
 // Release returns a client to the pool or closes it if the pool already has

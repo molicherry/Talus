@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation } from "../../../lib/query";
 import { useNavigate } from "react-router-dom";
 import { setAuthToken } from "../../../lib/auth";
 import { login } from "../api";

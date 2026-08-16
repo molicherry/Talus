@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "../../../lib/query";
 import { usePageVisibility } from "../../../hooks/use-page-visibility";
 import type { TimeRange } from "../../../types/metrics";
 import { getMetrics } from "../api";

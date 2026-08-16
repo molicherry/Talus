@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateQueries, useMutation, useQuery } from "../../../lib/query";
 import { createService, deleteService, getService, getServices, updateService } from "../api";
 
 export function useServices(serverId?: number) {
@@ -18,19 +18,15 @@ export function useService(id: number) {
 }
 
 export function useCreateService() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: createService,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["services"] });
+      invalidateQueries(["services"]);
     },
   });
 }
 
 export function useUpdateService() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: ({
       id,
@@ -40,19 +36,17 @@ export function useUpdateService() {
       data: Parameters<typeof updateService>[1];
     }) => updateService(id, data),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["services"] });
-      queryClient.invalidateQueries({ queryKey: ["services", variables.id] });
+      invalidateQueries(["services"]);
+      invalidateQueries(["services", variables.id]);
     },
   });
 }
 
 export function useDeleteService() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: deleteService,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["services"] });
+      invalidateQueries(["services"]);
     },
   });
 }

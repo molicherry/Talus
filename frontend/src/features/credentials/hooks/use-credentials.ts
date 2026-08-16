@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateQueries, useMutation, useQuery } from "../../../lib/query";
 import { createCredential, deleteCredential, getCredentials, updateCredential } from "../api";
 
 export function useCredentials() {
@@ -10,35 +10,29 @@ export function useCredentials() {
 }
 
 export function useCreateCredential() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: createCredential,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["credentials"] });
+      invalidateQueries(["credentials"]);
     },
   });
 }
 
 export function useDeleteCredential() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: deleteCredential,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["credentials"] });
+      invalidateQueries(["credentials"]);
     },
   });
 }
 
 export function useUpdateCredential() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: ({ id, data }: { id: number; data: { username?: string; password?: string; private_key?: string } }) =>
       updateCredential(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["credentials"] });
+      invalidateQueries(["credentials"]);
     },
   });
 }

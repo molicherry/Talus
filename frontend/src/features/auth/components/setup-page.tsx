@@ -1,37 +1,28 @@
-import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
-import { useTranslation } from "react-i18next";
-import { useMutation } from "@tanstack/react-query";
+import { useTranslation } from "../../../i18n";
+import { useMutation } from "../../../lib/query";
 import { Navigate, useNavigate } from "react-router-dom";
-import { z } from "zod";
 import { Button } from "../../../components/ui/button";
 import { ApiClientError, apiClient } from "../../../lib/api-client";
 import { setAuthToken } from "../../../lib/auth";
 import type { LoginResponse } from "../../../types/api";
 
-function createSetupSchema(t: (key: string) => string) {
-  return z
-    .object({
-      username: z.string().min(3, t("validation.usernameRequired")),
-      password: z.string().min(4, t("validation.passwordRequired")),
-      confirm: z.string(),
-    })
-    .refine((data) => data.password === data.confirm, {
-      message: "Passwords do not match",
-      path: ["confirm"],
-    });
+interface SetupErrors {
+  username?: string;
+  password?: string;
+  confirm?: string;
 }
-
-type SetupFormValues = z.infer<ReturnType<typeof createSetupSchema>>;
 
 export function SetupPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const setupSchema = createSetupSchema(t);
   const [checking, setChecking] = useState(true);
   const [setupNeeded, setSetupNeeded] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [errors, setErrors] = useState<SetupErrors>({});
 
   useEffect(() => {
     fetch("/api/v1/auth/setup")
@@ -47,14 +38,6 @@ export function SetupPage() {
       .finally(() => setChecking(false));
   }, [navigate]);
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<SetupFormValues>({
-    resolver: zodResolver(setupSchema),
-  });
-
   const setupMutation = useMutation({
     mutationFn: (data: { username: string; password: string }) =>
       apiClient.post<LoginResponse>("/api/v1/auth/login", data),
@@ -64,8 +47,15 @@ export function SetupPage() {
     },
   });
 
-  const onSubmit = (data: SetupFormValues) => {
-    setupMutation.mutate({ username: data.username, password: data.password });
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const next: SetupErrors = {};
+    if (username.length < 3) next.username = t("validation.usernameRequired");
+    if (password.length < 4) next.password = t("validation.passwordRequired");
+    if (password !== confirm) next.confirm = "Passwords do not match";
+    setErrors(next);
+    if (next.username || next.password || next.confirm) return;
+    setupMutation.mutate({ username, password });
   };
 
   const errorMessage =
@@ -93,7 +83,7 @@ export function SetupPage() {
             <p className="mt-1 text-sm text-muted-foreground">Create your admin account</p>
           </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={onSubmit} className="space-y-4" noValidate>
             {errorMessage && (
               <div className="rounded-lg border border-danger/20 bg-danger-subtle px-4 py-3 text-sm text-danger">
                 {errorMessage}
@@ -111,12 +101,16 @@ export function SetupPage() {
                 id="username"
                 type="text"
                 autoComplete="username"
-                {...register("username")}
+                value={username}
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  if (errors.username) setErrors((prev) => ({ ...prev, username: undefined }));
+                }}
                 className="w-full rounded-lg border border-input bg-card px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
                 placeholder={t("auth.usernamePlaceholder")}
               />
               {errors.username && (
-                <p className="mt-1.5 text-xs text-danger">{errors.username.message}</p>
+                <p className="mt-1.5 text-xs text-danger">{errors.username}</p>
               )}
             </div>
 
@@ -131,12 +125,16 @@ export function SetupPage() {
                 id="password"
                 type="password"
                 autoComplete="new-password"
-                {...register("password")}
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
+                }}
                 className="w-full rounded-lg border border-input bg-card px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
                 placeholder={t("auth.passwordPlaceholder")}
               />
               {errors.password && (
-                <p className="mt-1.5 text-xs text-danger">{errors.password.message}</p>
+                <p className="mt-1.5 text-xs text-danger">{errors.password}</p>
               )}
             </div>
 
@@ -148,12 +146,16 @@ export function SetupPage() {
                 id="confirm"
                 type="password"
                 autoComplete="new-password"
-                {...register("confirm")}
+                value={confirm}
+                onChange={(e) => {
+                  setConfirm(e.target.value);
+                  if (errors.confirm) setErrors((prev) => ({ ...prev, confirm: undefined }));
+                }}
                 className="w-full rounded-lg border border-input bg-card px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
                 placeholder="Re-enter your password"
               />
               {errors.confirm && (
-                <p className="mt-1.5 text-xs text-danger">{errors.confirm.message}</p>
+                <p className="mt-1.5 text-xs text-danger">{errors.confirm}</p>
               )}
             </div>
 

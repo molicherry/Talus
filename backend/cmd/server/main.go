@@ -143,6 +143,7 @@ func main() {
 	sshPool := sshpool.NewPool(
 		time.Duration(cfg.SSHMaxIdle)*time.Second,
 		3,
+		time.Duration(cfg.SSHTimeout)*time.Second,
 	)
 	defer sshPool.Close()
 

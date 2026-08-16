@@ -1,12 +1,12 @@
-import { lazy } from "react";
-import { useTranslation } from "react-i18next";
+import { lazy, Suspense } from "react";
+import { useTranslation } from "../i18n";
 import { Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
-import { MainLayout } from "../components/layout/main-layout";
 import { LoginPage } from "../features/auth/components/login-form";
 import { SetupPage } from "../features/auth/components/setup-page";
-import { DashboardPage } from "../features/dashboard/components/dashboard-page";
 import { useAuth } from "../hooks/use-auth";
 
+const MainLayout = lazy(() => import("../components/layout/main-layout").then(m => ({ default: m.MainLayout })));
+const DashboardPage = lazy(() => import("../features/dashboard/components/dashboard-page").then(m => ({ default: m.DashboardPage })));
 const ApiKeysPage = lazy(() => import("../features/auth/components/api-keys-page").then(m => ({ default: m.ApiKeysPage })));
 const CredentialCreatePage = lazy(() => import("../features/credentials/components/credential-create-page").then(m => ({ default: m.CredentialCreatePage })));
 const CredentialEditPage = lazy(() => import("../features/credentials/components/credential-edit-page").then(m => ({ default: m.CredentialEditPage })));
@@ -59,7 +59,14 @@ function NotFoundPage() {
 
 export function AppRouter() {
   return (
-    <Routes>
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      }
+    >
+      <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/setup" element={<SetupPage />} />
       <Route element={<ProtectedRoute />}>
@@ -82,6 +89,7 @@ export function AppRouter() {
         </Route>
       </Route>
       <Route path="*" element={<NotFoundPage />} />
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 }

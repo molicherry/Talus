@@ -1,4 +1,4 @@
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "../../../i18n";
 import type { Server } from "../../../types/models";
 import { Button } from "../../../components/ui/button";
 import { DashboardEmpty } from "./dashboard-empty";

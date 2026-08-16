@@ -1,5 +1,5 @@
 import { Clock, Cpu, Pencil, Terminal, Zap } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "../../../i18n";
 import { Link } from "react-router-dom";
 import { StatusIndicator } from "../../../components/ui/status-indicator";
 import type { Server } from "../../../types/models";

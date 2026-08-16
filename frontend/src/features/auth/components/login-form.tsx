@@ -1,28 +1,23 @@
-import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
-import { useEffect } from "react";
-import { useForm } from "react-hook-form";
-import { useTranslation } from "react-i18next";
+import { useEffect, useState } from "react";
+import { useTranslation } from "../../../i18n";
 import { useNavigate } from "react-router-dom";
-import { z } from "zod";
 import { Button } from "../../../components/ui/button";
 import { ApiClientError } from "../../../lib/api-client";
 import { useLogin } from "../hooks/use-login";
 
-type LoginFormValues = z.infer<ReturnType<typeof createLoginSchema>>;
-
-function createLoginSchema(t: (key: string) => string) {
-  return z.object({
-    username: z.string().min(1, t("validation.usernameRequired")),
-    password: z.string().min(1, t("validation.passwordRequired")),
-  });
+interface LoginErrors {
+  username?: string;
+  password?: string;
 }
 
 export function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const loginSchema = createLoginSchema(t);
   const loginMutation = useLogin();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [errors, setErrors] = useState<LoginErrors>({});
 
   useEffect(() => {
     fetch("/api/v1/auth/setup")
@@ -33,16 +28,14 @@ export function LoginPage() {
       .catch(() => {});
   }, [navigate]);
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<LoginFormValues>({
-    resolver: zodResolver(loginSchema),
-  });
-
-  const onSubmit = (data: LoginFormValues) => {
-    loginMutation.mutate(data);
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const next: LoginErrors = {};
+    if (username.length < 1) next.username = t("validation.usernameRequired");
+    if (password.length < 1) next.password = t("validation.passwordRequired");
+    setErrors(next);
+    if (next.username || next.password) return;
+    loginMutation.mutate({ username, password });
   };
 
   const errorMessage =
@@ -65,7 +58,7 @@ export function LoginPage() {
           <p className="mt-1 text-sm text-muted-foreground">{t("auth.signInSubtitle")}</p>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <form onSubmit={onSubmit} className="space-y-4" noValidate>
           {errorMessage && (
             <div className="rounded-lg border border-danger/20 bg-danger-subtle px-4 py-3 text-sm text-danger">
               {errorMessage}
@@ -80,12 +73,16 @@ export function LoginPage() {
               id="username"
               type="text"
               autoComplete="username"
-              {...register("username")}
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                if (errors.username) setErrors((prev) => ({ ...prev, username: undefined }));
+              }}
               className="w-full rounded-lg border border-input bg-card px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
               placeholder={t("auth.usernamePlaceholder")}
             />
             {errors.username && (
-              <p className="mt-1.5 text-xs text-danger">{errors.username.message}</p>
+              <p className="mt-1.5 text-xs text-danger">{errors.username}</p>
             )}
           </div>
 
@@ -97,12 +94,16 @@ export function LoginPage() {
               id="password"
               type="password"
               autoComplete="current-password"
-              {...register("password")}
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
+              }}
               className="w-full rounded-lg border border-input bg-card px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
               placeholder={t("auth.passwordPlaceholder")}
             />
             {errors.password && (
-              <p className="mt-1.5 text-xs text-danger">{errors.password.message}</p>
+              <p className="mt-1.5 text-xs text-danger">{errors.password}</p>
             )}
           </div>
 

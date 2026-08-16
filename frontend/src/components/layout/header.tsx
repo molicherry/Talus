@@ -1,6 +1,6 @@
 import { LogOut, Monitor, Moon, Sun, User, Key } from "lucide-react";
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "../../i18n";
 import { useAuth } from "../../hooks/use-auth";
 import type { Theme } from "../../hooks/use-theme";
 import { useTheme } from "../../hooks/use-theme";

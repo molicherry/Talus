@@ -1,5 +1,5 @@
 import { Fingerprint, Key, LayoutDashboard, Link2, Server } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "../../i18n";
 import { NavLink } from "react-router-dom";
 
 const VERSION = import.meta.env.VITE_APP_VERSION || "dev";

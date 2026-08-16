@@ -52,7 +52,7 @@ func waitForEntry(t *testing.T, p *Pool, serverID uint, timeout time.Duration) {
 }
 
 func TestGetDropsDeadConnection(t *testing.T) {
-	p := NewPool(time.Minute, 1)
+	p := NewPool(time.Minute, 1, time.Second)
 	// Override probe: first call reports the connection dead.
 	p.probe = func(*ssh.Client) bool { return false }
 
@@ -62,7 +62,10 @@ func TestGetDropsDeadConnection(t *testing.T) {
 	p.conns[1] = &connEntry{client: fake, sem: make(chan struct{}, 1), lastUsed: time.Now()}
 	p.mu.Unlock()
 
-	got := p.Get(1)
+	got, gerr := p.Get(1)
+	if gerr != nil {
+		t.Fatalf("Get: %v", gerr)
+	}
 	if got != nil {
 		t.Fatalf("expected dead cached connection to be dropped, got non-nil client")
 	}
@@ -77,7 +80,7 @@ func TestGetDropsDeadConnection(t *testing.T) {
 }
 
 func TestGetReturnsLiveConnection(t *testing.T) {
-	p := NewPool(time.Minute, 1)
+	p := NewPool(time.Minute, 1, time.Second)
 	p.probe = func(*ssh.Client) bool { return true }
 
 	fake := newTestClient(t)
@@ -85,7 +88,10 @@ func TestGetReturnsLiveConnection(t *testing.T) {
 	p.conns[1] = &connEntry{client: fake, sem: make(chan struct{}, 1), lastUsed: time.Now()}
 	p.mu.Unlock()
 
-	got := p.Get(1)
+	got, gerr := p.Get(1)
+	if gerr != nil {
+		t.Fatalf("Get: %v", gerr)
+	}
 	if got != fake {
 		t.Fatalf("expected live cached connection to be returned, got %v", got)
 	}
@@ -99,7 +105,7 @@ func TestGetReturnsLiveConnection(t *testing.T) {
 }
 
 func TestDiscardDoesNotCache(t *testing.T) {
-	p := NewPool(time.Minute, 1)
+	p := NewPool(time.Minute, 1, time.Second)
 	p.probe = func(*ssh.Client) bool { return true }
 
 	fake := newTestClient(t)
@@ -108,7 +114,10 @@ func TestDiscardDoesNotCache(t *testing.T) {
 	p.mu.Unlock()
 
 	// Take it out, then discard instead of release.
-	got := p.Get(1)
+	got, gerr := p.Get(1)
+	if gerr != nil {
+		t.Fatalf("Get: %v", gerr)
+	}
 	if got != fake {
 		t.Fatalf("expected to acquire the cached client")
 	}
@@ -123,7 +132,7 @@ func TestDiscardDoesNotCache(t *testing.T) {
 }
 
 func TestReleaseCachesConnection(t *testing.T) {
-	p := NewPool(time.Minute, 1)
+	p := NewPool(time.Minute, 1, time.Second)
 	p.probe = func(*ssh.Client) bool { return true }
 
 	fake := newTestClient(t)
@@ -131,7 +140,10 @@ func TestReleaseCachesConnection(t *testing.T) {
 	p.conns[1] = &connEntry{client: fake, sem: make(chan struct{}, 1), lastUsed: time.Now()}
 	p.mu.Unlock()
 
-	got := p.Get(1)
+	got, gerr := p.Get(1)
+	if gerr != nil {
+		t.Fatalf("Get: %v", gerr)
+	}
 	p.Release(1, got)
 
 	p.mu.Lock()
@@ -143,12 +155,12 @@ func TestReleaseCachesConnection(t *testing.T) {
 }
 
 func TestEvictRemovesIdleEntry(t *testing.T) {
-	p := NewPool(50*time.Millisecond, 1)
+	p := NewPool(50*time.Millisecond, 1, time.Second)
 	p.probe = func(*ssh.Client) bool { return true }
 
 	// Create the entry by calling Get (returns nil since nothing cached).
 	// Then release nothing — the entry stays with no cached client.
-	_ = p.Get(2)
+	_, _ = p.Get(2)
 	// Entry now exists with client == nil and one held sem slot; release the
 	// slot by Discard with nil.
 	p.Discard(2, nil)
@@ -163,5 +175,35 @@ func TestEvictRemovesIdleEntry(t *testing.T) {
 	p.mu.Unlock()
 	if ok {
 		t.Fatalf("idle empty entry should have been evicted")
+	}
+}
+
+func TestGetSlotTimeout(t *testing.T) {
+	p := NewPool(time.Minute, 2, 50*time.Millisecond)
+	p.probe = func(*ssh.Client) bool { return true } // fake client: never probe
+	defer p.Close()
+
+	// Acquire both slots without releasing.
+	fake := newTestClient(t)
+	p.mu.Lock()
+	p.conns[1] = &connEntry{client: fake, sem: make(chan struct{}, 2), lastUsed: time.Now()}
+	p.mu.Unlock()
+	for i := 0; i < 2; i++ {
+		if _, err := p.Get(1); err != nil {
+			t.Fatalf("Get %d: %v", i, err)
+		}
+	}
+
+	// Third acquire must time out instead of blocking forever.
+	start := time.Now()
+	got, err := p.Get(1)
+	if err == nil {
+		t.Fatalf("expected ErrSlotTimeout, got client %v", got)
+	}
+	if err != ErrSlotTimeout {
+		t.Fatalf("expected ErrSlotTimeout, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("Get blocked too long: %v", elapsed)
 	}
 }
