@@ -12,6 +12,7 @@ const ALL_SCOPES = [
   "servers:terminal",
   "metrics:read",
   "credentials:read",
+  "services:read",
   "services:relay",
 ];
 
@@ -21,6 +22,7 @@ const DEFAULT_SCOPES = [
   "servers:terminal",
   "metrics:read",
   "credentials:read",
+  "services:read",
 ];
 
 interface APIKeyItem {

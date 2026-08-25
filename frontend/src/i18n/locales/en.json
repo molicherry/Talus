@@ -262,6 +262,7 @@
       "servers_terminal": "Terminal",
       "metrics_read": "Read metrics",
       "credentials_read": "Read credentials",
+      "services_read": "Read services",
       "services_relay": "Relay services"
     },
     "serversLabel": "Servers",
