@@ -17,26 +17,28 @@ var routeScopes = map[string]string{
 	"GET /api/v1/servers/{id}/terminal": "servers:terminal",
 	"GET /api/v1/servers/{id}/metrics":  "metrics:read",
 	"GET /api/v1/credentials":           "credentials:read",
+	"GET /api/v1/services":              "services:read",
+	"GET /api/v1/services/{id}":         "services:read",
 	"POST /api/v1/services/{id}/relay":  "services:relay",
 }
 
 // jwtOnlyRoutes defines routes where API keys are always rejected.
 var jwtOnlyRoutes = map[string]bool{
-	"DELETE /api/v1/servers/{id}":       true,
-	"POST /api/v1/credentials":          true,
-	"PUT /api/v1/credentials/{id}":      true,
-	"DELETE /api/v1/credentials/{id}":   true,
-	"GET /api/v1/credentials/{id}/reveal": true,
-	"GET /api/v1/api-keys":              true,
-	"POST /api/v1/api-keys":             true,
-	"DELETE /api/v1/api-keys/{id}":      true,
-	"GET /api/v1/api-keys/{id}/reveal":  true,
-	"GET /api/v1/auth/profile":          true,
-	"PUT /api/v1/auth/password":         true,
-	"POST /api/v1/services":                    true,
-	"PUT /api/v1/services/{id}":                true,
-	"DELETE /api/v1/services/{id}":             true,
-	"GET /api/v1/services/{id}/credentials":    true,
+	"DELETE /api/v1/servers/{id}":           true,
+	"POST /api/v1/credentials":              true,
+	"PUT /api/v1/credentials/{id}":          true,
+	"DELETE /api/v1/credentials/{id}":       true,
+	"GET /api/v1/credentials/{id}/reveal":   true,
+	"GET /api/v1/api-keys":                  true,
+	"POST /api/v1/api-keys":                 true,
+	"DELETE /api/v1/api-keys/{id}":          true,
+	"GET /api/v1/api-keys/{id}/reveal":      true,
+	"GET /api/v1/auth/profile":              true,
+	"PUT /api/v1/auth/password":             true,
+	"POST /api/v1/services":                 true,
+	"PUT /api/v1/services/{id}":             true,
+	"DELETE /api/v1/services/{id}":          true,
+	"GET /api/v1/services/{id}/credentials": true,
 }
 
 // hasScope checks whether an API key with the given userScopes is permitted
@@ -98,13 +100,14 @@ func isNumeric(s string) bool {
 
 // validScopes is the set of all scope strings that a user may request.
 var validScopes = map[string]bool{
-	"servers:read":       true,
-	"servers:write":      true,
-	"servers:exec":       true,
-	"servers:terminal":   true,
-	"metrics:read":       true,
-	"credentials:read":   true,
-	"services:relay":     true,
+	"servers:read":     true,
+	"servers:write":    true,
+	"servers:exec":     true,
+	"servers:terminal": true,
+	"metrics:read":     true,
+	"credentials:read": true,
+	"services:read":    true,
+	"services:relay":   true,
 }
 
 // CheckServerAccess returns true if the claims have full access (nil or empty ServerIDs)
