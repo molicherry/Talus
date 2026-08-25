@@ -9,6 +9,7 @@ var AllScopeGatedScopes = []string{
 	"servers:terminal",
 	"metrics:read",
 	"credentials:read",
+	"services:read",
 }
 
 type APIKey struct {

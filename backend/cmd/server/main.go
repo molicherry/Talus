@@ -91,7 +91,7 @@ func main() {
 			&model.APIKey{},
 			&model.Metric{},
 			&model.Service{},
-		&model.AuditEvent{},
+			&model.AuditEvent{},
 		)
 		if autoMigrateErr == nil {
 			break
@@ -104,6 +104,15 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("auto-migrate complete")
+
+	// 4.5 Backfill services:read scope onto existing API keys (was fail-open).
+	// Preserves current behavior (every key could list services) while making the
+	// scope revocable per key. Idempotent via jsonb containment check.
+	if err := db.Exec(`UPDATE api_keys SET scopes = scopes || '["services:read"]'::jsonb WHERE scopes IS NOT NULL AND NOT scopes @> '["services:read"]'::jsonb`).Error; err != nil {
+		slog.Error("failed to backfill services:read scope", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("services:read scope backfill complete")
 
 	// 4. Create TimescaleDB hypertable for metrics
 	if err := db.Exec("SELECT create_hypertable('metrics', 'time', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE)").Error; err != nil {
@@ -174,10 +183,10 @@ func main() {
 		APIKeyAuth:    apiKeyAuth,
 		RevealLimiter: mw.NewRateLimiter(1*time.Minute, 5),
 		// Auth
-		LoginHandler:           authHandler.Login,
-		SetupHandler:           authHandler.Setup,
-		ProfileHandler:         authHandler.Profile,
-		ChangePasswordHandler:  authHandler.ChangePassword,
+		LoginHandler:          authHandler.Login,
+		SetupHandler:          authHandler.Setup,
+		ProfileHandler:        authHandler.Profile,
+		ChangePasswordHandler: authHandler.ChangePassword,
 		// Servers
 		ListServersHandler:         serverHandler.List,
 		ListServerSummariesHandler: serverHandler.ListSummaries,
@@ -203,12 +212,12 @@ func main() {
 		DeleteAPIKeyHandler: apiKeyHandler.Delete,
 		RevealAPIKeyHandler: apiKeyHandler.Reveal,
 		// Services
-		CreateServiceHandler:        serviceHandler.Create,
-		ListServicesHandler:         serviceHandler.List,
-		GetServiceHandler:           serviceHandler.Get,
-		UpdateServiceHandler:        serviceHandler.Update,
-		DeleteServiceHandler:        serviceHandler.Delete,
-		RelayServiceHandler:         serviceHandler.Relay,
+		CreateServiceHandler:         serviceHandler.Create,
+		ListServicesHandler:          serviceHandler.List,
+		GetServiceHandler:            serviceHandler.Get,
+		UpdateServiceHandler:         serviceHandler.Update,
+		DeleteServiceHandler:         serviceHandler.Delete,
+		RelayServiceHandler:          serviceHandler.Relay,
 		GetServiceCredentialsHandler: serviceHandler.GetCredentials,
 		// Static files
 		StaticDir: os.Getenv("STATIC_DIR"),

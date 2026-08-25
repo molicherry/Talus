@@ -59,12 +59,16 @@ func TestHasScope(t *testing.T) {
 		{"credentials read with scope", "GET", "/api/v1/credentials", []string{"credentials:read"}, true, ""},
 		{"wildcard grants all scope-gated", "POST", "/api/v1/servers", []string{"*"}, true, ""},
 		{"multi-scope keys", "GET", "/api/v1/servers", []string{"servers:read", "servers:exec"}, true, ""},
+		{"list services with scope", "GET", "/api/v1/services", []string{"services:read"}, true, ""},
+		{"get service with scope", "GET", "/api/v1/services/3", []string{"services:read"}, true, ""},
 
 		// Scope-gated: denied
 		{"read scope missing for write", "POST", "/api/v1/servers", []string{"servers:read"}, false, "servers:write"},
 		{"no server scope", "POST", "/api/v1/servers/1/exec", []string{"servers:read"}, false, "servers:exec"},
 		{"wrong scope entirely", "POST", "/api/v1/servers", []string{"metrics:read"}, false, "servers:write"},
 		{"empty scopes denied", "GET", "/api/v1/servers", []string{}, false, "servers:read"},
+		{"list services without scope", "GET", "/api/v1/services", []string{}, false, "services:read"},
+		{"get service without scope", "GET", "/api/v1/services/3", []string{"servers:read"}, false, "services:read"},
 
 		// JWT-only: always denied
 		{"jwt-only delete server", "DELETE", "/api/v1/servers/1", []string{"servers:write"}, false, ""},
@@ -101,6 +105,7 @@ func TestValidateScopes(t *testing.T) {
 	}{
 		{"all valid", []string{"servers:read", "servers:write"}, 0},
 		{"single valid", []string{"servers:exec"}, 0},
+		{"services read valid", []string{"services:read"}, 0},
 		{"empty is valid", []string{}, 0},
 		{"nil is valid", nil, 0},
 		{"one invalid", []string{"servers:read", "fake:scope"}, 1},
