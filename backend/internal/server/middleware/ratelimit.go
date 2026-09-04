@@ -78,6 +78,7 @@ type IPRateLimiter struct {
 	maxReqs    int
 	requests   map[string][]time.Time
 	trustProxy bool
+	lastSweep  time.Time
 }
 
 // NewIPRateLimiter creates a per-IP rate limiter. Set trustProxy only when
@@ -99,6 +100,17 @@ func (rl *IPRateLimiter) Allow(ip string) bool {
 
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
+
+	// Periodically evict fully-expired keys so the map cannot grow without
+	// bound: keys are attacker-controlled IPs on a public endpoint.
+	if now.Sub(rl.lastSweep) >= rl.window {
+		for k, ts := range rl.requests {
+			if len(ts) == 0 || ts[len(ts)-1].Before(cutoff) {
+				delete(rl.requests, k)
+			}
+		}
+		rl.lastSweep = now
+	}
 
 	times := rl.requests[ip]
 	valid := make([]time.Time, 0, len(times))
@@ -131,14 +143,15 @@ func (rl *IPRateLimiter) Limit(next http.Handler) http.Handler {
 }
 
 // clientIP extracts the client IP from the request. With trustProxy, the
-// leftmost X-Forwarded-For entry is used (set by a trusted reverse proxy).
-// Otherwise the RemoteAddr host is used — the only value that cannot be
-// spoofed when the server is exposed directly.
+// rightmost X-Forwarded-For entry is used — the one appended by the trusted
+// reverse proxy immediately in front of us. Earlier entries may be
+// client-supplied and spoofable. Otherwise the RemoteAddr host is used, the
+// only value that cannot be spoofed when the server is exposed directly.
 func clientIP(r *http.Request, trustProxy bool) string {
 	if trustProxy {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			if i := strings.IndexByte(xff, ','); i >= 0 {
-				xff = xff[:i]
+			if i := strings.LastIndexByte(xff, ','); i >= 0 {
+				xff = xff[i+1:]
 			}
 			if ip := strings.TrimSpace(xff); ip != "" {
 				return ip
