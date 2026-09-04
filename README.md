@@ -47,10 +47,10 @@ git clone https://github.com/molicherry/Talus.git
 cd Talus
 ```
 
-### 2. Configure (optional)
+### 2. Configure
 
-All secrets have development defaults so the stack starts out of the box. For
-anything beyond local testing, copy `.env.example` to `.env` and set real
+Copy `.env.example` to `.env` and set real secrets — the stack refuses to start
+without them:
 secrets:
 
 ```env
@@ -69,7 +69,7 @@ docker compose up -d --build
 
 The dashboard is at **<http://localhost:8080>**.
 
-On first login, enter any username and password — the first login automatically creates the admin account.
+On first login, enter any username and a password of at least 8 characters — the first login automatically creates the admin account.
 
 ### 4. Add a Server
 

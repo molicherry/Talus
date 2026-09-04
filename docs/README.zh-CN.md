@@ -45,9 +45,9 @@ git clone https://github.com/molicherry/Talus.git
 cd Talus
 ```
 
-### 2. 配置（可选）
+### 2. 配置
 
-所有密钥都有开发默认值，开箱即用。除本地测试外，请复制 `.env.example` 为 `.env` 并设置真实值：
+复制 `.env.example` 为 `.env` 并设置真实值——未设置时服务无法启动：
 
 ```env
 DB_PASSWORD=<你的数据库密码>
