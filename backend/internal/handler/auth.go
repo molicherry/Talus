@@ -61,8 +61,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if len(req.Username) < 3 || len(req.Username) > 64 {
 		details = append(details, server.ErrorDetail{Field: "username", Message: "must be between 3 and 64 characters"})
 	}
-	if len(req.Password) < 3 || len(req.Password) > 64 {
-		details = append(details, server.ErrorDetail{Field: "password", Message: "must be between 3 and 64 characters"})
+	if len(req.Password) < 8 || len(req.Password) > 64 {
+		details = append(details, server.ErrorDetail{Field: "password", Message: "must be between 8 and 64 characters"})
 	}
 	if len(details) > 0 {
 		server.WriteError(w, r, server.NewValidationError(details))
@@ -98,8 +98,8 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.NewPassword) < 3 || len(req.NewPassword) > 64 {
-		server.WriteError(w, r, server.NewValidationError([]server.ErrorDetail{{Field: "new_password", Message: "must be between 3 and 64 characters"}}))
+	if len(req.NewPassword) < 8 || len(req.NewPassword) > 64 {
+		server.WriteError(w, r, server.NewValidationError([]server.ErrorDetail{{Field: "new_password", Message: "must be between 8 and 64 characters"}}))
 		return
 	}
 

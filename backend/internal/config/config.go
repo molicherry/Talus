@@ -31,7 +31,8 @@ type Config struct {
 	ExecTimeout int
 
 	// Rate Limiting
-	RateLimit int
+	LoginRateLimit int
+	TrustProxy     bool
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -52,7 +53,8 @@ func Load() *Config {
 	cfg.SSHTimeout = getEnvIntOrDefault("SSH_TIMEOUT", 10)
 	cfg.SSHMaxIdle = getEnvIntOrDefault("SSH_MAX_IDLE", 300)
 	cfg.ExecTimeout = getEnvIntOrDefault("EXEC_TIMEOUT", 30)
-	cfg.RateLimit = getEnvIntOrDefault("RATE_LIMIT", 100)
+	cfg.LoginRateLimit = getEnvIntOrDefault("LOGIN_RATE_LIMIT", 10)
+	cfg.TrustProxy = getEnvBool("TRUST_PROXY")
 
 	return cfg
 }
@@ -85,4 +87,17 @@ func getEnvIntOrDefault(key string, defaultVal int) int {
 		return defaultVal
 	}
 	return n
+}
+
+func getEnvBool(key string) bool {
+	val := os.Getenv(key)
+	if val == "" {
+		return false
+	}
+	b, err := strconv.ParseBool(val)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: environment variable %q=%q is not a valid boolean, using false\n", key, val)
+		return false
+	}
+	return b
 }

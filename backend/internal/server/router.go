@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -17,6 +18,7 @@ type RouteConfig struct {
 	JWTService   *token.JWTService
 	APIKeyAuth   middleware.APIKeyValidator
 	RevealLimiter *middleware.RateLimiter
+	LoginLimiter  *middleware.IPRateLimiter
 
 	// Auth
 	LoginHandler      http.HandlerFunc
@@ -84,8 +86,19 @@ func NewRouter(cfg RouteConfig) chi.Router {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/", versionHandler)
 		r.Get("/version", versionHandler)
-		r.Post("/auth/login", cfg.LoginHandler)
-		r.Get("/auth/setup", cfg.SetupHandler)
+
+		// Rate-limit unauthenticated auth endpoints per client IP to slow
+		// brute-force login attempts. Fall back to a conservative default when
+		// no limiter is wired (e.g. tests).
+		loginLimiter := cfg.LoginLimiter
+		if loginLimiter == nil {
+			loginLimiter = middleware.NewIPRateLimiter(time.Minute, 10, false)
+		}
+		r.Group(func(r chi.Router) {
+			r.Use(loginLimiter.Limit)
+			r.Post("/auth/login", cfg.LoginHandler)
+			r.Get("/auth/setup", cfg.SetupHandler)
+		})
 	})
 
 	// Protected API routes (JWT or API key required)

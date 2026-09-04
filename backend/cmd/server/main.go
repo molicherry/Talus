@@ -182,6 +182,7 @@ func main() {
 		JWTService:    jwtSvc,
 		APIKeyAuth:    apiKeyAuth,
 		RevealLimiter: mw.NewRateLimiter(1*time.Minute, 5),
+		LoginLimiter:  mw.NewIPRateLimiter(1*time.Minute, cfg.LoginRateLimit, cfg.TrustProxy),
 		// Auth
 		LoginHandler:          authHandler.Login,
 		SetupHandler:          authHandler.Setup,
