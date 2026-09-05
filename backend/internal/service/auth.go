@@ -13,7 +13,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// errFirstUserTaken signals that another concurrent request created the first user.
+// errFirstUserTaken signals that another concurrent request committed the first user
+// before this one's COUNT check — best-effort only; see createFirstUser.
 var errFirstUserTaken = errors.New("first user already created")
 
 // AuthService handles authentication including first-user bootstrap.
@@ -57,8 +58,15 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (str
 	return s.authenticateExisting(ctx, username, password)
 }
 
-// createFirstUser inserts the initial admin account inside a transaction
-// to detect concurrent first-user registration.
+// createFirstUser inserts the initial admin account inside a transaction.
+//
+// NOTE: the COUNT-then-INSERT inside the transaction is a best-effort guard,
+// not a serialization guarantee. Under READ COMMITTED, two concurrent first
+// logins can both read count==0 and both insert an admin (different usernames
+// won't trip the username unique index). errFirstUserTaken only recovers when
+// one insert commits before the other's count. A guaranteed single admin
+// requires restricting access during initial setup (or a dedicated
+// serialization constraint).
 func (s *AuthService) createFirstUser(ctx context.Context, username, password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
