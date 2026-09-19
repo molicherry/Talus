@@ -2,8 +2,12 @@ package server
 
 import (
 	"context"
+	"mime"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,5 +77,62 @@ func TestSummaryRouteDoesNotConflictWithIDRoute(t *testing.T) {
 	}
 	if summaryHit {
 		t.Fatal("/servers/42 wrongly matched the summary route")
+	}
+}
+
+// TestSPAFallbackServesIndexForRoutesOnly pins the static-fallback contract:
+// extensionless paths are SPA routes and get index.html, while a missing
+// hashed asset must 404 so a client with a stale index.html sees a clean
+// failure instead of HTML served under a .js/.css content type.
+func TestSPAFallbackServesIndexForRoutesOnly(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>spa"), 0o600); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o750); err != nil {
+		t.Fatalf("mkdir assets: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "app-abc123.js"), []byte("console.log(1)"), 0o600); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+
+	handler := spaFallback(dir)
+	cases := []struct {
+		name          string
+		path          string
+		wantStatus    int
+		wantMediaType string
+		wantBodyHas   string
+	}{
+		{"spa route falls back", "/servers/8", http.StatusOK, "text/html", "spa"},
+		{"nested route falls back", "/api-keys", http.StatusOK, "text/html", "spa"},
+		{"trailing slash route falls back", "/servers/", http.StatusOK, "text/html", "spa"},
+		{"existing asset is served", "/assets/app-abc123.js", http.StatusOK, "text/javascript", "console.log(1)"},
+		{"missing asset 404s", "/assets/app-gone.js", http.StatusNotFound, "text/plain", "404"},
+		{"missing root file 404s", "/favicon-gone.svg", http.StatusNotFound, "text/plain", "404"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			handler(rr, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rr.Code, tc.wantStatus)
+			}
+			if body := rr.Body.String(); !strings.Contains(body, tc.wantBodyHas) {
+				t.Fatalf("body = %q, want it to contain %q", body, tc.wantBodyHas)
+			}
+			// Assert the media type exactly, not just "is not javascript": a 404
+			// must be text/plain (http.NotFound), never text/html — serving the
+			// entry document under a failed asset URL is the bug being fixed.
+			ct := rr.Header().Get("Content-Type")
+			mediaType, _, err := mime.ParseMediaType(ct)
+			if err != nil {
+				t.Fatalf("unparsable Content-Type %q: %v", ct, err)
+			}
+			if mediaType != tc.wantMediaType {
+				t.Fatalf("Content-Type = %q (media type %q), want %q", ct, mediaType, tc.wantMediaType)
+			}
+		})
 	}
 }

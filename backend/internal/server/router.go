@@ -187,10 +187,19 @@ func NewRouter(cfg RouteConfig) chi.Router {
 
 func spaFallback(staticDir string) http.HandlerFunc {
 	fs := http.FileServer(http.Dir(staticDir))
+	indexPath := filepath.Join(staticDir, "index.html")
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := filepath.Join(staticDir, filepath.Clean(r.URL.Path))
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
+			// Only extensionless paths are SPA routes and may fall back to
+			// index.html. A missing hashed asset must 404: answering with HTML
+			// makes a client holding a stale index.html fail on a confusing
+			// MIME-type error instead of simply refetching the entry document.
+			if filepath.Ext(path) != "" {
+				http.NotFound(w, r)
+				return
+			}
+			http.ServeFile(w, r, indexPath)
 			return
 		}
 		fs.ServeHTTP(w, r)
