@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -97,17 +98,18 @@ func TestSPAFallbackServesIndexForRoutesOnly(t *testing.T) {
 
 	handler := spaFallback(dir)
 	cases := []struct {
-		name        string
-		path        string
-		wantStatus  int
-		wantBodyHas string
+		name          string
+		path          string
+		wantStatus    int
+		wantMediaType string
+		wantBodyHas   string
 	}{
-		{"spa route falls back", "/servers/8", http.StatusOK, "spa"},
-		{"nested route falls back", "/api-keys", http.StatusOK, "spa"},
-		{"trailing slash route falls back", "/servers/", http.StatusOK, "spa"},
-		{"existing asset is served", "/assets/app-abc123.js", http.StatusOK, "console.log(1)"},
-		{"missing asset 404s", "/assets/app-gone.js", http.StatusNotFound, "404"},
-		{"missing root file 404s", "/favicon-gone.svg", http.StatusNotFound, "404"},
+		{"spa route falls back", "/servers/8", http.StatusOK, "text/html", "spa"},
+		{"nested route falls back", "/api-keys", http.StatusOK, "text/html", "spa"},
+		{"trailing slash route falls back", "/servers/", http.StatusOK, "text/html", "spa"},
+		{"existing asset is served", "/assets/app-abc123.js", http.StatusOK, "text/javascript", "console.log(1)"},
+		{"missing asset 404s", "/assets/app-gone.js", http.StatusNotFound, "text/plain", "404"},
+		{"missing root file 404s", "/favicon-gone.svg", http.StatusNotFound, "text/plain", "404"},
 	}
 
 	for _, tc := range cases {
@@ -120,8 +122,16 @@ func TestSPAFallbackServesIndexForRoutesOnly(t *testing.T) {
 			if body := rr.Body.String(); !strings.Contains(body, tc.wantBodyHas) {
 				t.Fatalf("body = %q, want it to contain %q", body, tc.wantBodyHas)
 			}
-			if ct := rr.Header().Get("Content-Type"); tc.wantStatus == http.StatusNotFound && strings.Contains(ct, "javascript") {
-				t.Fatalf("404 for a missing .js must not be labelled javascript, got %q", ct)
+			// Assert the media type exactly, not just "is not javascript": a 404
+			// must be text/plain (http.NotFound), never text/html — serving the
+			// entry document under a failed asset URL is the bug being fixed.
+			ct := rr.Header().Get("Content-Type")
+			mediaType, _, err := mime.ParseMediaType(ct)
+			if err != nil {
+				t.Fatalf("unparsable Content-Type %q: %v", ct, err)
+			}
+			if mediaType != tc.wantMediaType {
+				t.Fatalf("Content-Type = %q (media type %q), want %q", ct, mediaType, tc.wantMediaType)
 			}
 		})
 	}
