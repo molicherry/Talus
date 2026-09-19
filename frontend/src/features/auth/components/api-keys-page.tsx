@@ -178,10 +178,11 @@ export function ApiKeysPage() {
       if (!res.ok) throw new Error("Failed");
       await fetchKeys();
       toast.success(t("common.deleted"));
-      setDeleteTarget(null);
     } catch {
       toast.error(t("apiKeys.deleteFailed"));
     }
+    // Close either way, matching the server/service/credential lists.
+    setDeleteTarget(null);
     setDeleting(false);
   };
 
