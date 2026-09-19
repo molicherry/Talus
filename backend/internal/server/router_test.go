@@ -95,21 +95,58 @@ func TestSPAFallbackServesIndexForRoutesOnly(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "assets", "app-abc123.js"), []byte("console.log(1)"), 0o600); err != nil {
 		t.Fatalf("write asset: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "favicon.svg"), []byte("<svg></svg>"), 0o600); err != nil {
+		t.Fatalf("write favicon: %v", err)
+	}
 
 	handler := spaFallback(dir)
 	cases := []struct {
-		name          string
-		path          string
-		wantStatus    int
-		wantMediaType string
-		wantBodyHas   string
+		name             string
+		path             string
+		wantStatus       int
+		wantMediaType    string
+		wantCacheControl string
+		wantBodyHas      string
 	}{
-		{"spa route falls back", "/servers/8", http.StatusOK, "text/html", "spa"},
-		{"nested route falls back", "/api-keys", http.StatusOK, "text/html", "spa"},
-		{"trailing slash route falls back", "/servers/", http.StatusOK, "text/html", "spa"},
-		{"existing asset is served", "/assets/app-abc123.js", http.StatusOK, "text/javascript", "console.log(1)"},
-		{"missing asset 404s", "/assets/app-gone.js", http.StatusNotFound, "text/plain", "404"},
-		{"missing root file 404s", "/favicon-gone.svg", http.StatusNotFound, "text/plain", "404"},
+		{
+			name: "spa route falls back", path: "/servers/8",
+			wantStatus: http.StatusOK, wantMediaType: "text/html",
+			wantCacheControl: revalidateCacheControl, wantBodyHas: "spa",
+		},
+		{
+			// The entry document must be revalidated on every navigation: a
+			// cached copy is what points a client at deleted chunk names.
+			name: "nested route falls back", path: "/api-keys",
+			wantStatus: http.StatusOK, wantMediaType: "text/html",
+			wantCacheControl: revalidateCacheControl, wantBodyHas: "spa",
+		},
+		{
+			name: "trailing slash route falls back", path: "/servers/",
+			wantStatus: http.StatusOK, wantMediaType: "text/html",
+			wantCacheControl: revalidateCacheControl, wantBodyHas: "spa",
+		},
+		{
+			// Hashed build output is immutable by construction.
+			name: "existing hashed asset is served immutably", path: "/assets/app-abc123.js",
+			wantStatus: http.StatusOK, wantMediaType: "text/javascript",
+			wantCacheControl: immutableCacheControl, wantBodyHas: "console.log(1)",
+		},
+		{
+			// Unhashed files can change between deploys, so they revalidate too.
+			name: "existing unhashed file revalidates", path: "/favicon.svg",
+			wantStatus: http.StatusOK, wantMediaType: "image/svg+xml",
+			wantCacheControl: revalidateCacheControl, wantBodyHas: "<svg",
+		},
+		{
+			name: "missing asset 404s", path: "/assets/app-gone.js",
+			wantStatus: http.StatusNotFound, wantMediaType: "text/plain",
+			wantCacheControl: "", wantBodyHas: "404",
+		},
+		{
+			name: "missing root file 404s", path: "/favicon-gone.svg",
+			wantStatus: http.StatusNotFound, wantMediaType: "text/plain",
+			wantCacheControl: "", wantBodyHas: "404",
+		},
 	}
 
 	for _, tc := range cases {
@@ -132,6 +169,9 @@ func TestSPAFallbackServesIndexForRoutesOnly(t *testing.T) {
 			}
 			if mediaType != tc.wantMediaType {
 				t.Fatalf("Content-Type = %q (media type %q), want %q", ct, mediaType, tc.wantMediaType)
+			}
+			if cc := rr.Header().Get("Cache-Control"); cc != tc.wantCacheControl {
+				t.Fatalf("Cache-Control = %q, want %q", cc, tc.wantCacheControl)
 			}
 		})
 	}

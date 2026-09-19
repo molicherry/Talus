@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -185,6 +186,28 @@ func NewRouter(cfg RouteConfig) chi.Router {
 	return r
 }
 
+// Cache policies for the served frontend.
+//
+// Vite writes every build artifact under /assets/ with a content hash in the
+// name, so a given URL never changes and can be cached indefinitely. The entry
+// document and unhashed files (favicon, robots.txt) must revalidate instead:
+// otherwise a browser keeps a cached index.html across a redeploy and asks for
+// chunk names that no longer exist, which is exactly the state the 404 below
+// can only report, not prevent.
+const (
+	immutableCacheControl  = "public, max-age=31536000, immutable"
+	revalidateCacheControl = "no-cache"
+)
+
+// setStaticCacheControl selects the policy for an existing static file.
+func setStaticCacheControl(w http.ResponseWriter, urlPath string) {
+	if strings.HasPrefix(urlPath, "/assets/") {
+		w.Header().Set("Cache-Control", immutableCacheControl)
+		return
+	}
+	w.Header().Set("Cache-Control", revalidateCacheControl)
+}
+
 func spaFallback(staticDir string) http.HandlerFunc {
 	fs := http.FileServer(http.Dir(staticDir))
 	indexPath := filepath.Join(staticDir, "index.html")
@@ -199,9 +222,11 @@ func spaFallback(staticDir string) http.HandlerFunc {
 				http.NotFound(w, r)
 				return
 			}
+			setStaticCacheControl(w, r.URL.Path)
 			http.ServeFile(w, r, indexPath)
 			return
 		}
+		setStaticCacheControl(w, r.URL.Path)
 		fs.ServeHTTP(w, r)
 	}
 }
