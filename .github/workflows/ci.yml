@@ -5,6 +5,10 @@ on:
     branches: [main]
     # Documentation cannot break the build. Path filters are not evaluated for
     # pushes of tags (GitHub Actions docs), so releases still run in full.
+    #
+    # `main` has no required status checks today. If it ever gains any, a
+    # path-filtered skip leaves this workflow Pending and blocks the merge,
+    # so the filter has to be dropped or widened at the same time.
     paths-ignore:
       - "**.md"
       - "docs/**"
