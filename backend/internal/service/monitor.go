@@ -20,14 +20,14 @@ const localAgentPath = "/usr/local/bin/vpsmanager-agent"
 type agentOutput struct {
 	Timestamp  string       `json:"timestamp"`
 	Hostname   string       `json:"hostname"`
-	CPU        agentCPU      `json:"cpu"`
-	Memory     agentMemory   `json:"memory"`
-	Swap       *agentSwap    `json:"swap"`
-	Disks      []agentDisk   `json:"disks"`
-	DiskIO     *agentDiskIO  `json:"disk_io"`
-	NetIO      *agentNetIO   `json:"net_io"`
-	OS         agentOS       `json:"os"`
-	UptimeSecs uint64        `json:"uptime_seconds"`
+	CPU        agentCPU     `json:"cpu"`
+	Memory     agentMemory  `json:"memory"`
+	Swap       *agentSwap   `json:"swap"`
+	Disks      []agentDisk  `json:"disks"`
+	DiskIO     *agentDiskIO `json:"disk_io"`
+	NetIO      *agentNetIO  `json:"net_io"`
+	OS         agentOS      `json:"os"`
+	UptimeSecs uint64       `json:"uptime_seconds"`
 }
 
 type agentCPU struct {

@@ -3,8 +3,22 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # Documentation cannot break the build. Path filters are not evaluated for
+    # pushes of tags (GitHub Actions docs), so releases still run in full.
+    #
+    # `main` has no required status checks today. If it ever gains any, a
+    # path-filtered skip leaves this workflow Pending and blocks the merge,
+    # so the filter has to be dropped or widened at the same time.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
     tags:
       - "v*"
 
@@ -12,17 +26,46 @@ permissions:
   contents: read
   packages: write
 
+# One run per ref, so a new push to an open pull request cancels its stale run.
+# Tag runs are never cancelled: a superseded release build must still finish and
+# publish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
 jobs:
   backend:
     name: Backend (Go)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+
+      - name: Format check
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            while IFS= read -r file; do
+              echo "::error file=backend/${file#./}::not gofmt-formatted (run: gofmt -w backend)"
+            done <<< "$unformatted"
+            exit 1
+          fi
+
+      # Config lives in backend/.golangci.yml (standard linters + the
+      # std-error-handling exclusion preset; see the file for the rationale).
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2
+          working-directory: backend
+          args: --timeout=5m
 
       - name: Vet
         run: go vet ./...
@@ -39,12 +82,18 @@ jobs:
   frontend:
     name: Frontend (React)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version-file: frontend/package.json
+          # Must match the runtime the shipped image is built with (see
+          # Dockerfile: `node:24-alpine`). This used to be
+          # `node-version-file: frontend/package.json`, which was a silent
+          # no-op: that file has no engines/volta field, so setup-node fell
+          # back to the runner default and only emitted a warning.
+          node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -67,17 +116,28 @@ jobs:
   docker:
     name: Docker
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
+      # Both builder stages are pinned to $BUILDPLATFORM and cross-compile, so
+      # QEMU is only needed for the final alpine stage's `apk add`. Only the
+      # arch-independent ui-builder is shared between the two targets (one
+      # `npm ci` + `npm run build`, and both final stages copy the same
+      # /app/dist); go-builder runs once per target platform, natively and in
+      # parallel.
       - name: Set up QEMU (only for the final alpine stage's apk add)
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
+      # Nothing is pushed outside a release tag, so the registry is only
+      # contacted when there is something to publish (and fork pull requests,
+      # whose token is read-only, never attempt it).
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -85,7 +145,7 @@ jobs:
 
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -95,7 +155,7 @@ jobs:
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Build and push Hub
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -105,5 +165,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VERSION=${{ github.ref_name }}
+          # mode=min on purpose: mode=max bloats the 10 GB repository cache.
           cache-from: type=gha
           cache-to: type=gha,mode=min

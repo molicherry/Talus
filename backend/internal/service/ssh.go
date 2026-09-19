@@ -20,20 +20,20 @@ import (
 
 // SSHService provides SSH command execution and connection management.
 type SSHService struct {
-	pool              *sshpool.Pool
-	serverRepo        *repository.ServerRepo
-	credSvc           *CredentialService
-	sshDialTimeout    time.Duration
+	pool               *sshpool.Pool
+	serverRepo         *repository.ServerRepo
+	credSvc            *CredentialService
+	sshDialTimeout     time.Duration
 	execDefaultTimeout time.Duration
 }
 
 // NewSSHService creates an SSHService with the given dependencies.
 func NewSSHService(pool *sshpool.Pool, serverRepo *repository.ServerRepo, credSvc *CredentialService, sshDialTimeout, execDefaultTimeout time.Duration) *SSHService {
 	return &SSHService{
-		pool:              pool,
-		serverRepo:        serverRepo,
-		credSvc:           credSvc,
-		sshDialTimeout:    sshDialTimeout,
+		pool:               pool,
+		serverRepo:         serverRepo,
+		credSvc:            credSvc,
+		sshDialTimeout:     sshDialTimeout,
 		execDefaultTimeout: execDefaultTimeout,
 	}
 }

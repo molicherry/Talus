@@ -16,7 +16,7 @@ COPY backend/ .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w -X github.com/vpsmanager/backend/internal/server.Version=${VERSION}" -o /hub ./cmd/server
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /agent ./cmd/agent
 
-FROM --platform=$BUILDPLATFORM node:22-alpine AS ui-builder
+FROM --platform=$BUILDPLATFORM node:24-alpine AS ui-builder
 ARG VERSION=dev
 ARG NPM_REGISTRY=https://registry.npmjs.org
 ENV VITE_APP_VERSION=${VERSION}

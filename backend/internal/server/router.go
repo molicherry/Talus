@@ -15,19 +15,19 @@ import (
 
 // RouteConfig holds all HTTP handler functions that the router needs to mount.
 type RouteConfig struct {
-	JWTService   *token.JWTService
-	APIKeyAuth   middleware.APIKeyValidator
+	JWTService    *token.JWTService
+	APIKeyAuth    middleware.APIKeyValidator
 	RevealLimiter *middleware.RateLimiter
 	LoginLimiter  *middleware.IPRateLimiter
 
 	// Auth
-	LoginHandler      http.HandlerFunc
-	SetupHandler      http.HandlerFunc
-	ProfileHandler    http.HandlerFunc
+	LoginHandler          http.HandlerFunc
+	SetupHandler          http.HandlerFunc
+	ProfileHandler        http.HandlerFunc
 	ChangePasswordHandler http.HandlerFunc
 
 	// Servers
-	ListServersHandler        http.HandlerFunc
+	ListServersHandler         http.HandlerFunc
 	ListServerSummariesHandler http.HandlerFunc
 	CreateServerHandler        http.HandlerFunc
 	GetServerHandler           http.HandlerFunc
@@ -35,11 +35,11 @@ type RouteConfig struct {
 	DeleteServerHandler        http.HandlerFunc
 
 	// Credentials
-	ListCredentialsHandler   http.HandlerFunc
-	CreateCredentialHandler  http.HandlerFunc
-	UpdateCredentialHandler  http.HandlerFunc
-	DeleteCredentialHandler  http.HandlerFunc
-	RevealCredentialHandler  http.HandlerFunc
+	ListCredentialsHandler  http.HandlerFunc
+	CreateCredentialHandler http.HandlerFunc
+	UpdateCredentialHandler http.HandlerFunc
+	DeleteCredentialHandler http.HandlerFunc
+	RevealCredentialHandler http.HandlerFunc
 
 	// Exec
 	ExecHandler http.HandlerFunc
@@ -57,12 +57,12 @@ type RouteConfig struct {
 	RevealAPIKeyHandler http.HandlerFunc
 
 	// Services
-	CreateServiceHandler        http.HandlerFunc
-	ListServicesHandler         http.HandlerFunc
-	GetServiceHandler           http.HandlerFunc
-	UpdateServiceHandler        http.HandlerFunc
-	DeleteServiceHandler        http.HandlerFunc
-	RelayServiceHandler         http.HandlerFunc
+	CreateServiceHandler         http.HandlerFunc
+	ListServicesHandler          http.HandlerFunc
+	GetServiceHandler            http.HandlerFunc
+	UpdateServiceHandler         http.HandlerFunc
+	DeleteServiceHandler         http.HandlerFunc
+	RelayServiceHandler          http.HandlerFunc
 	GetServiceCredentialsHandler http.HandlerFunc
 
 	// Static files directory for SPA (frontend/dist)

@@ -318,7 +318,7 @@ func (s *ServiceRelayService) Relay(ctx context.Context, serviceID uint, input R
 	// Copy response — bypasses the WriteJSON envelope for raw passthrough.
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, resp.Body)
 	return nil
 }
 

@@ -1,0 +1,15 @@
+# golangci-lint configuration (schema v2).
+#
+# The default linter set is used (errcheck, govet, ineffassign, staticcheck,
+# unused) with one exclusion preset: `std-error-handling` drops the classic
+# low-signal errcheck patterns around the standard library — unchecked
+# (io.Closer).Close on cleanup paths, fmt.Fprint*, (*http.Response).Body.Close
+# and friends. Those are deliberately ignored across the codebase; everything
+# else has to be handled explicitly, which is why response writers spell out
+# `_, _ = w.Write(...)` instead of leaving the error bare.
+version: "2"
+
+linters:
+  exclusions:
+    presets:
+      - std-error-handling

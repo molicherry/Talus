@@ -83,10 +83,10 @@ type errorResponse struct {
 }
 
 type errorBody struct {
-	Code    int            `json:"code"`
-	Message string         `json:"message"`
-	Details []ErrorDetail  `json:"details,omitempty"`
-	RequestID string       `json:"request_id,omitempty"`
+	Code      int           `json:"code"`
+	Message   string        `json:"message"`
+	Details   []ErrorDetail `json:"details,omitempty"`
+	RequestID string        `json:"request_id,omitempty"`
 }
 
 // marshalError serializes an error into the JSON error envelope.

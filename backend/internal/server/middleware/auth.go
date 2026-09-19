@@ -76,7 +76,6 @@ func Auth(jwtSvc *token.JWTService, keyValidator APIKeyValidator) func(http.Hand
 				return
 			}
 
-
 			claims, err := jwtSvc.ValidateToken(tokenStr)
 			if err != nil {
 				writeAuthError(w, http.StatusUnauthorized, "invalid or expired token")
@@ -124,5 +123,5 @@ func writeAuthError(w http.ResponseWriter, statusCode int, message string) {
 			"message": message,
 		},
 	})
-	w.Write(body)
+	_, _ = w.Write(body)
 }
