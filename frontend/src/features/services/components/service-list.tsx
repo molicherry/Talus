@@ -1,9 +1,12 @@
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { useTranslation } from "../../../i18n";
 import { Link, useNavigate } from "react-router-dom";
-import { toast } from "../../../lib/toast";
+
+import { Button } from "../../../components/ui/button";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
+import { TBody, Table, TableCard, Td, Th, THead } from "../../../components/ui/table";
+import { useTranslation } from "../../../i18n";
+import { toast } from "../../../lib/toast";
 import type { ServerSummary } from "../../../types/models";
 import { useServers } from "../../servers/hooks/use-servers";
 import { useDeleteService, useServices } from "../hooks/use-services";
@@ -41,10 +44,7 @@ export function ServiceList() {
     return (
       <div className="space-y-3">
         {["sk-1", "sk-2", "sk-3"].map((id) => (
-          <div
-            key={id}
-            className="h-14 animate-pulse rounded-lg bg-gray-100/50 dark:bg-gray-800/50"
-          />
+          <div key={id} className="h-14 animate-pulse rounded-xl bg-muted/60" />
         ))}
       </div>
     );
@@ -52,28 +52,24 @@ export function ServiceList() {
 
   if (isError) {
     return (
-      <div className="rounded-lg border border-red-300 bg-red-50 p-6 text-center dark:border-red-800 dark:bg-red-900/20">
-        <p className="text-sm text-red-600 dark:text-red-400">
+      <div className="rounded-2xl border border-danger/20 bg-danger-subtle p-8 text-center">
+        <p className="text-sm text-danger">
           {error instanceof Error ? error.message : t("service.loadError")}
         </p>
-        <button
-          type="button"
-          onClick={() => refetch()}
-          className="mt-3 rounded-lg bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-        >
+        <Button type="button" variant="outline" onClick={() => refetch()} className="mt-4">
           {t("common.retry")}
-        </button>
+        </Button>
       </div>
     );
   }
 
   if (!services || services.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 p-12 text-center dark:border-gray-800">
-        <p className="text-gray-500 dark:text-gray-400">{t("service.emptyState")}</p>
+      <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
+        <p className="text-muted-foreground">{t("service.emptyState")}</p>
         <Link
           to="/services/new"
-          className="mt-4 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
+          className="mt-4 inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
         >
           <Plus className="h-4 w-4" />
           {t("service.add")}
@@ -84,69 +80,46 @@ export function ServiceList() {
 
   return (
     <>
-      <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/50">
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("service.name")}
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("service.displayName")}
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("service.baseUrl")}
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("service.credentials")}
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("service.server")}
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("common.actions")}
-              </th>
+      <TableCard>
+        <Table>
+          <THead>
+            <tr>
+              <Th>{t("service.name")}</Th>
+              <Th>{t("service.displayName")}</Th>
+              <Th>{t("service.baseUrl")}</Th>
+              <Th>{t("service.credentials")}</Th>
+              <Th>{t("service.server")}</Th>
+              <Th align="right">{t("common.actions")}</Th>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+          </THead>
+          <TBody>
             {services.map((service) => (
-              <tr
-                key={service.id}
-                className="transition-colors hover:bg-gray-100/50 dark:hover:bg-gray-800/50"
-              >
-                <td className="px-4 py-3">
-                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {service.name}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
-                  {service.display_name || "—"}
-                </td>
-                <td className="px-4 py-3 font-mono text-xs text-gray-500 dark:text-gray-400">
-                  {service.base_url}
-                </td>
-                <td className="px-4 py-3">
+              <tr key={service.id} className="transition-colors hover:bg-muted/40">
+                <Td className="font-medium text-foreground">{service.name}</Td>
+                <Td className="text-foreground">{service.display_name || "—"}</Td>
+                <Td className="font-mono text-xs text-muted-foreground">{service.base_url}</Td>
+                <Td>
                   <div className="flex flex-wrap gap-1">
                     {service.credential_hints &&
                       Object.keys(service.credential_hints).map((key) => (
                         <span
                           key={key}
-                          className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                          className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground"
                         >
                           {key}
                         </span>
                       ))}
                   </div>
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                </Td>
+                <Td className="text-foreground">
                   {getServerName(servers ?? [], service.server_id) || t("service.noServer")}
-                </td>
-                <td className="px-4 py-3">
+                </Td>
+                <Td>
                   <div className="flex items-center justify-end gap-1">
                     <button
                       type="button"
                       onClick={() => navigate(`/services/${service.id}/edit`)}
-                      className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                      className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                       aria-label={t("service.ariaEdit", { name: service.name })}
                     >
                       <Pencil className="h-4 w-4" />
@@ -154,18 +127,18 @@ export function ServiceList() {
                     <button
                       type="button"
                       onClick={() => setDeleteId(service.id)}
-                      className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-gray-400 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                      className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-danger-subtle hover:text-danger"
                       aria-label={t("service.ariaDelete", { name: service.name })}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
-                </td>
+                </Td>
               </tr>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TBody>
+        </Table>
+      </TableCard>
 
       <ConfirmDialog
         open={deleteId !== null}

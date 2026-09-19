@@ -22,7 +22,8 @@
     "error": "Error",
     "loadError": "Failed to load data",
     "close": "Close",
-    "save": "Save"
+    "save": "Save",
+    "copy": "Copy"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -32,7 +33,8 @@
     "apiKeys": "API Keys"
   },
   "header": {
-    "logout": "Logout"
+    "logout": "Logout",
+    "openMenu": "Open navigation"
   },
   "auth": {
     "signIn": "Sign in",
@@ -55,7 +57,11 @@
     "getStarted": "Select a section from the sidebar to get started.",
     "emptyTitle": "No servers yet",
     "emptyDescription": "Add your first server to start monitoring its health and performance.",
-    "addServer": "Add Server"
+    "addServer": "Add Server",
+    "summaryTotal": "Servers",
+    "summaryOnline": "Online",
+    "summaryOffline": "Offline",
+    "summaryCaption": "Live fleet status, refreshed every minute."
   },
   "notFound": {
     "title": "404",
@@ -106,7 +112,11 @@
       "updateFailed": "Failed to update server",
       "deleted": "Server deleted",
       "deleteFailed": "Failed to delete server"
-    }
+    },
+    "listSubtitle": "Manage server connections and configuration.",
+    "listSubtitleCount": "{{count}} servers · {{online}} online",
+    "lastSeen": "Last collected {{time}}",
+    "neverSeen": "Awaiting first sample"
   },
   "credential": {
     "add": "Add Credential",
@@ -179,7 +189,21 @@
     "diskUsage": "Disk Usage",
     "noCpuData": "No CPU data yet",
     "noMemoryData": "No memory data yet",
-    "noDiskData": "No disk data yet"
+    "noDiskData": "No disk data yet",
+    "usageTrend": "Usage Trend",
+    "network": "Network Throughput",
+    "diskIo": "Disk I/O",
+    "swapUsage": "Swap Usage",
+    "loadAverage": "Load Average",
+    "lastCollected": "Last collected {{time}}",
+    "neverCollected": "Awaiting first sample",
+    "gapNote": "A break in a line means no sample was collected for that interval.",
+    "avg": "Avg",
+    "max": "Max",
+    "rx": "RX",
+    "tx": "TX",
+    "read": "Read",
+    "write": "Write"
   },
   "timeRange": {
     "1h": "1 Hour",
@@ -244,7 +268,15 @@
       "updateFailed": "Failed to update service",
       "deleted": "Service deleted",
       "deleteFailed": "Failed to delete service"
-    }
+    },
+    "sectionBasics": "Basic information",
+    "sectionConnection": "Connection & credentials",
+    "sectionUsageGuide": "AI usage guide",
+    "newCredential": "New credential",
+    "newCredentialHint": "Create a new SSH credential, then return to select it.",
+    "usageGuideEmpty": "No usage guide yet.",
+    "usageGuidePreview": "Preview",
+    "usageGuideEdit": "Edit"
   },
   "apiKeys": {
     "title": "API Keys",
@@ -267,6 +299,27 @@
     },
     "serversLabel": "Servers",
     "serversAll": "All servers",
-    "serversCount": "{{count}} servers"
+    "serversCount": "{{count}} servers",
+    "serversScopeLabel": "Server access",
+    "serversAllOption": "All servers",
+    "serversSpecificOption": "Specific servers",
+    "serversAllHint": "Applies to every server, including ones added later.",
+    "serversSelected": "{{count}} servers selected",
+    "presetsLabel": "Presets",
+    "presetReadonly": "Read-only monitoring",
+    "presetOps": "Daily operations",
+    "presetCustom": "Custom",
+    "presetReadonlyHint": "Can view servers, metrics and services, but cannot execute anything.",
+    "presetOpsHint": "Monitoring plus command execution and terminal access.",
+    "summaryLabel": "Permission summary",
+    "summaryScopes": "{{count}} scopes",
+    "summaryNoScopes": "No scopes selected",
+    "summaryServersAll": "All servers",
+    "summaryServersCount": "{{count}} servers",
+    "deleteTitle": "Delete API Key",
+    "deleteMessage": "Delete \"{{name}}\"? Applications using this key lose access immediately.",
+    "deleteFailed": "Failed to delete API key",
+    "serversNoneSelected": "Select at least one server",
+    "prefix": "Prefix"
   }
 }

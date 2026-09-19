@@ -1,5 +1,7 @@
 import { Copy, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
+
+import { Input } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
 import { toast } from "../../../lib/toast";
 
@@ -47,6 +49,8 @@ const copyToClipboard = async (text: string): Promise<void> => {
   }
 };
 
+const ROW_GRID = "grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]";
+
 export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
   const { t } = useTranslation();
   const [visibleValues, setVisibleValues] = useState<Record<number, boolean>>({});
@@ -77,7 +81,7 @@ export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
   return (
     <div className="space-y-3">
       {rows.length > 0 && (
-        <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+        <div className={`${ROW_GRID} hidden text-xs font-medium text-muted-foreground sm:grid`}>
           <span>{t("service.key")}</span>
           <span>{t("service.value")}</span>
           <span>{t("service.hint")}</span>
@@ -85,52 +89,54 @@ export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
         </div>
       )}
       {rows.map((row, index) => (
-        <div key={index} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
-          <input
+        <div key={index} className={ROW_GRID}>
+          <Input
             type="text"
             value={row.key}
             onChange={(e) => updateRow(index, "key", e.target.value)}
             placeholder="token"
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
           />
           <div className="relative">
-            <input
+            <Input
               type={visibleValues[index] ? "text" : "password"}
               value={row.value}
               onChange={(e) => updateRow(index, "value", e.target.value)}
               placeholder="ptr_xxx"
-              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 pr-16 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
+              className="pr-16"
             />
             <div className="absolute right-0 top-0 flex h-full items-center gap-0.5 pr-1">
               <button
                 type="button"
                 onClick={() => handleCopy(row.value)}
-                className="cursor-pointer rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
-                aria-label={t("common.copied")}
+                className="cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                aria-label={t("common.copy")}
               >
                 <Copy className="h-3.5 w-3.5" />
               </button>
               <button
                 type="button"
                 onClick={() => toggleVisible(index)}
-                className="cursor-pointer rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                className="cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                 aria-label={visibleValues[index] ? t("service.hide") : t("service.show")}
               >
-                {visibleValues[index] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                {visibleValues[index] ? (
+                  <EyeOff className="h-3.5 w-3.5" />
+                ) : (
+                  <Eye className="h-3.5 w-3.5" />
+                )}
               </button>
             </div>
           </div>
-          <input
+          <Input
             type="text"
             value={row.hint}
             onChange={(e) => updateRow(index, "hint", e.target.value)}
             placeholder={t("service.hintPlaceholder")}
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
           />
           <button
             type="button"
             onClick={() => removeRow(index)}
-            className="cursor-pointer rounded p-2 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
+            className="cursor-pointer justify-self-end rounded p-2 text-muted-foreground transition-colors hover:bg-danger-subtle hover:text-danger"
             aria-label={t("service.removeKey")}
           >
             <Trash2 className="h-4 w-4" />
@@ -140,7 +146,7 @@ export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
       <button
         type="button"
         onClick={addRow}
-        className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 transition-colors hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-600 dark:border-gray-600 dark:text-gray-400 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/20 dark:hover:text-indigo-400"
+        className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-primary-subtle hover:text-primary"
       >
         <Plus className="h-4 w-4" />
         {t("service.addKey")}

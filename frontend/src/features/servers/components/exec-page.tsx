@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react";
-import { useTranslation } from "../../../i18n";
 import { useParams } from "react-router-dom";
+
+import { useTranslation } from "../../../i18n";
 import { useServer } from "../hooks/use-servers";
 import { ExecPanel } from "./exec-panel";
 
@@ -13,15 +14,15 @@ export function ExecPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-500 dark:text-gray-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   if (isError || !server) {
     return (
-      <div className="rounded-lg border border-red-300 bg-red-50 p-6 text-center dark:border-red-800 dark:bg-red-900/20">
-        <p className="text-sm text-red-600 dark:text-red-400">
+      <div className="rounded-2xl border border-danger/30 bg-danger-subtle p-6 text-center">
+        <p className="text-sm text-danger">
           {error instanceof Error ? error.message : t("server.notFound")}
         </p>
       </div>
@@ -30,9 +31,10 @@ export function ExecPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-semibold text-gray-900 dark:text-gray-100">{t("server.executeCommand")}</h1>
-      <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-        {t("exec.server")} <span className="text-gray-800 dark:text-gray-200">{server.name}</span> ({server.host}:{server.port})
+      <h1 className="mb-2 text-2xl font-semibold text-foreground">{t("server.executeCommand")}</h1>
+      <p className="mb-6 text-sm text-muted-foreground">
+        {t("exec.server")} <span className="text-foreground">{server.name}</span> ({server.host}:
+        {server.port})
       </p>
       <ExecPanel serverId={serverId} />
     </div>

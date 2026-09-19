@@ -68,8 +68,8 @@ export function Toaster() {
             aria-hidden
             className={
               t.type === "success"
-                ? "mt-0.5 h-2 w-2 shrink-0 rounded-full bg-green-500"
-                : "mt-0.5 h-2 w-2 shrink-0 rounded-full bg-red-500"
+                ? "mt-0.5 h-2 w-2 shrink-0 rounded-full bg-success"
+                : "mt-0.5 h-2 w-2 shrink-0 rounded-full bg-danger"
             }
           />
           <span className="break-words">{t.message}</span>

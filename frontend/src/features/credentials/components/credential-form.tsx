@@ -2,16 +2,21 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Copy, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+
+import { Button } from "../../../components/ui/button";
+import { Field, Input, Label, Textarea } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
-import { useNavigate } from "react-router-dom";
-import { toast } from "../../../lib/toast";
 import { ApiClientError } from "../../../lib/api-client";
+import { toast } from "../../../lib/toast";
 import { CredentialFormSchema, type CredentialFormValues } from "../../../types/models";
 import { useCreateCredential } from "../hooks/use-credentials";
 
 export function CredentialForm() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const createMutation = useCreateCredential();
 
   const [showPassword, setShowPassword] = useState(false);
@@ -33,6 +38,11 @@ export function CredentialForm() {
 
   const authType = watch("auth_type");
 
+  // When opened from the server form, return there and let it auto-select the
+  // credential we just created.
+  const returnTo = searchParams.get("returnTo") ?? location.state?.returnTo ?? null;
+  const cancelTarget = returnTo ?? "/credentials";
+
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -41,7 +51,8 @@ export function CredentialForm() {
       // Fallback for older browsers or non-secure contexts
       const el = document.createElement("textarea");
       el.value = text;
-      el.style.position = "fixed"; el.style.opacity = "0";
+      el.style.position = "fixed";
+      el.style.opacity = "0";
       document.body.appendChild(el);
       el.select();
       document.execCommand("copy");
@@ -54,9 +65,13 @@ export function CredentialForm() {
 
   const onSubmit = (data: CredentialFormValues) => {
     createMutation.mutate(data, {
-      onSuccess: () => {
+      onSuccess: (created) => {
         toast.success(t("credential.toast.created"));
-        navigate("/credentials");
+        if (returnTo) {
+          navigate(returnTo, { state: { newCredentialId: created.id } });
+        } else {
+          navigate("/credentials");
+        }
       },
       onError: () => {
         toast.error(t("credential.toast.createFailed"));
@@ -74,165 +89,149 @@ export function CredentialForm() {
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="max-w-lg space-y-4">
       {errorMessage && (
-        <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/50 dark:text-red-300">
+        <div className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger">
           {errorMessage}
         </div>
       )}
 
-      <div>
-        <label htmlFor="name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t("credential.name")}
-        </label>
-        <input
+      <Field label={t("credential.name")} htmlFor="name">
+        <Input
           id="name"
           type="text"
           {...register("name")}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
           placeholder={t("credential.namePlaceholder")}
         />
-      </div>
+      </Field>
 
       <div>
-        <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t("credential.authType")}</span>
+        <Label>{t("credential.authType")}</Label>
         <div className="flex gap-4">
-          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <label className="flex items-center gap-2 text-sm text-foreground">
             <input
               type="radio"
               value="password"
               {...register("auth_type")}
-              className="border-gray-300 bg-white text-indigo-500 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
+              className="border-input accent-primary"
             />
             {t("credential.passwordAuth")}
           </label>
-          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <label className="flex items-center gap-2 text-sm text-foreground">
             <input
               type="radio"
               value="private_key"
               {...register("auth_type")}
-              className="border-gray-300 bg-white text-indigo-500 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
+              className="border-input accent-primary"
             />
             {t("credential.privateKeyAuth")}
           </label>
         </div>
-        {errors.auth_type && (
-          <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.auth_type.message}</p>
-        )}
+        {errors.auth_type && <p className="mt-1 text-xs text-danger">{errors.auth_type.message}</p>}
       </div>
 
-      <div>
-        <label htmlFor="username" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t("credential.username")}
-        </label>
-        <input
+      <Field label={t("credential.username")} htmlFor="username" error={errors.username?.message}>
+        <Input
           id="username"
           type="text"
           {...register("username")}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
           placeholder={t("credential.usernamePlaceholder")}
         />
-        {errors.username && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.username.message}</p>}
-      </div>
+      </Field>
 
       {authType === "password" && (
-        <div>
-          <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t("credential.password")}
-          </label>
+        <Field label={t("credential.password")} htmlFor="password" error={errors.password?.message}>
           <div className="relative">
-            <input
+            <Input
               id="password"
               type={showPassword ? "text" : "password"}
               {...register("password")}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 pr-16 text-sm text-gray-100 placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="pr-16"
               placeholder={t("credential.passwordPlaceholder")}
             />
             <div className="absolute right-0 top-0 flex h-full items-center gap-0.5 pr-1">
               <button
                 type="button"
                 onClick={() => passwordValue && copyToClipboard(passwordValue)}
-                className="rounded p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
-                aria-label={t("common.copied")}
+                className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                aria-label={t("common.copy")}
               >
                 <Copy className="h-4 w-4" />
               </button>
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="rounded p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
-                aria-label={showPassword ? t("credential.hidePassword") : t("credential.showPassword")}
+                className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                aria-label={
+                  showPassword ? t("credential.hidePassword") : t("credential.showPassword")
+                }
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </div>
-          {errors.password && (
-            <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.password.message}</p>
-          )}
-        </div>
+        </Field>
       )}
 
       {authType === "private_key" && (
-        <div>
-          <label htmlFor="private_key" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t("credential.privateKey")}
-          </label>
+        <Field
+          label={t("credential.privateKey")}
+          htmlFor="private_key"
+          // The schema's "credential required" refinement reports on `password`
+          // for both auth types, so surface it here when the key field is shown.
+          error={errors.password?.message}
+        >
           <div className="relative">
             {showPrivateKey ? (
-              <textarea
+              <Textarea
                 id="private_key"
                 {...register("private_key")}
                 rows={6}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 pr-16 font-mono text-xs text-gray-100 placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="pr-16 font-mono text-xs"
                 placeholder={t("credential.privateKeyPlaceholder")}
               />
             ) : (
-              <input
+              <Input
                 id="private_key"
                 type="password"
                 {...register("private_key")}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 pr-16 text-sm text-gray-100 placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="pr-16"
                 placeholder={t("credential.privateKeyPlaceholder")}
               />
             )}
             <div className="absolute right-0 top-1.5 flex gap-0.5 pr-1">
               <button
                 type="button"
-                onClick={() => { const v = watch("private_key"); if (v) copyToClipboard(v); }}
-                className="rounded p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+                onClick={() => {
+                  const value = watch("private_key");
+                  if (value) copyToClipboard(value);
+                }}
+                className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                aria-label={t("common.copy")}
               >
                 <Copy className="h-4 w-4" />
               </button>
               <button
                 type="button"
                 onClick={() => setShowPrivateKey(!showPrivateKey)}
-                className="rounded p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+                className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                aria-label={
+                  showPrivateKey ? t("credential.hidePassword") : t("credential.showPassword")
+                }
               >
                 {showPrivateKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </div>
-          {errors.private_key && (
-            <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.private_key.message}</p>
-          )}
-        </div>
+        </Field>
       )}
 
       <div className="flex gap-3">
-        <button
-          type="submit"
-          disabled={createMutation.isPending}
-          className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
+        <Button type="submit" disabled={createMutation.isPending}>
           {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
           {createMutation.isPending ? t("common.creating") : t("credential.create")}
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate("/credentials")}
-          className="rounded-lg bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-        >
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => navigate(cancelTarget)}>
           {t("common.cancel")}
-        </button>
+        </Button>
       </div>
     </form>
   );

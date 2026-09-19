@@ -1,10 +1,14 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
-import { useNavigate } from "react-router-dom";
-import { toast } from "../../../lib/toast";
-import { ApiClientError } from "../../../lib/api-client";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+
+import { Button } from "../../../components/ui/button";
+import { Field, Input, Label, Select, Textarea } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
+import { ApiClientError } from "../../../lib/api-client";
+import { toast } from "../../../lib/toast";
 import { type Server, ServerFormSchema, type ServerFormValues } from "../../../types/models";
 import { useCredentials } from "../../credentials/hooks/use-credentials";
 import { useCreateServer, useUpdateServer } from "../hooks/use-servers";
@@ -15,6 +19,7 @@ interface ServerFormProps {
 
 export function ServerForm({ server }: ServerFormProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const createMutation = useCreateServer();
   const updateMutation = useUpdateServer();
 
@@ -26,6 +31,7 @@ export function ServerForm({ server }: ServerFormProps) {
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors },
   } = useForm<ServerFormValues>({
     resolver: zodResolver(ServerFormSchema),
@@ -42,6 +48,18 @@ export function ServerForm({ server }: ServerFormProps) {
           port: 22,
         },
   });
+
+  // The credential create page navigates back here with the id it created, so
+  // the user does not have to hunt for it in the dropdown.
+  const createdCredentialId = (location.state as { newCredentialId?: number } | null)
+    ?.newCredentialId;
+
+  useEffect(() => {
+    if (!createdCredentialId) return;
+    setValue("credential_id", createdCredentialId);
+    // Drop the nav state so a manual refresh does not re-apply the selection.
+    navigate(location.pathname, { replace: true, state: null });
+  }, [createdCredentialId, setValue, navigate, location.pathname]);
 
   const onSubmit = (data: ServerFormValues) => {
     if (isEdit && server) {
@@ -74,7 +92,7 @@ export function ServerForm({ server }: ServerFormProps) {
     activeMutation.error instanceof ApiClientError
       ? activeMutation.error.message
       : activeMutation.error
-          ? t("common.unexpectedError")
+        ? t("common.unexpectedError")
         : null;
 
   const isPending = activeMutation.isPending;
@@ -82,95 +100,75 @@ export function ServerForm({ server }: ServerFormProps) {
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="max-w-lg space-y-4">
       {errorMessage && (
-        <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/50 dark:text-red-300">
+        <div className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger">
           {errorMessage}
         </div>
       )}
 
-      <div>
-          <label htmlFor="name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t("server.name")}
-          </label>
-        <input
+      <Field label={t("server.name")} htmlFor="name" error={errors.name?.message}>
+        <Input
           id="name"
           type="text"
           {...register("name")}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
           placeholder={t("server.namePlaceholder")}
         />
-        {errors.name && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.name.message}</p>}
-      </div>
+      </Field>
 
-      <div>
-          <label htmlFor="host" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t("server.host")}
-          </label>
-        <input
+      <Field label={t("server.host")} htmlFor="host" error={errors.host?.message}>
+        <Input
           id="host"
           type="text"
           {...register("host")}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
           placeholder={t("server.hostPlaceholder")}
         />
-        {errors.host && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.host.message}</p>}
-      </div>
+      </Field>
 
-      <div>
-          <label htmlFor="port" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t("server.port")}
-          </label>
-        <input
+      <Field label={t("server.port")} htmlFor="port" error={errors.port?.message}>
+        <Input
           id="port"
           type="number"
           {...register("port", { valueAsNumber: true })}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
           placeholder={t("server.portPlaceholder")}
         />
-        {errors.port && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.port.message}</p>}
-      </div>
+      </Field>
 
-      <div>
-          <label htmlFor="description" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t("server.description")}
-          </label>
-        <textarea
+      <Field label={t("server.description")} htmlFor="description" error={errors.description?.message}>
+        <Textarea
           id="description"
           {...register("description")}
           rows={3}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
           placeholder={t("server.descriptionPlaceholder")}
         />
-        {errors.description && (
-          <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.description.message}</p>
-        )}
-      </div>
+      </Field>
 
-      <div>
-          <label htmlFor="notes" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t("server.notes")}
-          </label>
-        <textarea
+      <Field label={t("server.notes")} htmlFor="notes" error={errors.notes?.message}>
+        <Textarea
           id="notes"
           {...register("notes")}
           rows={4}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500"
           placeholder={t("server.notesPlaceholder")}
         />
-        {errors.notes && (
-          <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.notes.message}</p>
-        )}
-      </div>
+      </Field>
 
       <div>
-        <label htmlFor="credential_id" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t("server.credential")}
-        </label>
-        <select
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <Label htmlFor="credential_id" className="mb-0">
+            {t("server.credential")}
+          </Label>
+          <Link
+            to={`/credentials/new?returnTo=${encodeURIComponent(location.pathname)}`}
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary-hover"
+            title={t("service.newCredentialHint")}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t("service.newCredential")}
+          </Link>
+        </div>
+        <Select
           id="credential_id"
           {...register("credential_id", {
             setValueAs: (v: string) => (v === "" ? undefined : Number(v)),
           })}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         >
           <option value="">{t("server.noCredential")}</option>
           {(credentials ?? []).map((c) => (
@@ -178,31 +176,23 @@ export function ServerForm({ server }: ServerFormProps) {
               {c.name || `#${c.id}`} ({c.username}@{c.auth_type})
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
       <div className="flex gap-3">
-        <button
-          type="submit"
-          disabled={isPending}
-          className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
+        <Button type="submit" disabled={isPending}>
           {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
           {isPending
             ? isEdit
-                ? t("common.updating")
-                : t("common.creating")
+              ? t("common.updating")
+              : t("common.creating")
             : isEdit
-                ? t("server.update")
-                : t("server.create")}
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate("/servers")}
-          className="rounded-lg bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-        >
-            {t("common.cancel")}
-          </button>
+              ? t("server.update")
+              : t("server.create")}
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => navigate("/servers")}>
+          {t("common.cancel")}
+        </Button>
       </div>
     </form>
   );

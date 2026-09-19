@@ -1,20 +1,19 @@
 export function LoadingSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          className="animate-pulse rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900"
-        >
-          <div className="mb-4 h-3 w-20 rounded bg-gray-200 dark:bg-gray-800" />
-          <div className="mx-auto mb-3 h-[140px] w-[140px] rounded-full bg-gray-100 dark:bg-gray-800/50" />
-          <div className="h-[60px] rounded bg-gray-100 dark:bg-gray-800/50" />
-          <div className="mt-3 flex justify-between border-t border-gray-100 pt-3 dark:border-gray-800">
-            <div className="h-3 w-12 rounded bg-gray-200 dark:bg-gray-800" />
-            <div className="h-3 w-12 rounded bg-gray-200 dark:bg-gray-800" />
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="animate-pulse rounded-2xl border border-border bg-card p-4">
+            <div className="h-3 w-16 rounded bg-muted" />
+            <div className="mt-4 h-7 w-20 rounded bg-muted" />
+            <div className="mt-3 h-3 w-24 rounded bg-muted/70" />
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
+      <div className="animate-pulse rounded-2xl border border-border bg-card p-5">
+        <div className="h-3 w-24 rounded bg-muted" />
+        <div className="mt-4 h-[240px] rounded bg-muted/60" />
+      </div>
     </div>
   );
 }

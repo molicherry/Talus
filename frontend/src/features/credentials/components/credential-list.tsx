@@ -1,9 +1,13 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { useTranslation } from "../../../i18n";
 import { Link } from "react-router-dom";
-import { toast } from "../../../lib/toast";
+
+import { Button } from "../../../components/ui/button";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
+import { TBody, Table, TableCard, Td, Th, THead } from "../../../components/ui/table";
+import { useTranslation } from "../../../i18n";
+import { cn } from "../../../lib/utils";
+import { toast } from "../../../lib/toast";
 import { useCredentials, useDeleteCredential } from "../hooks/use-credentials";
 
 export function CredentialList() {
@@ -31,7 +35,7 @@ export function CredentialList() {
     return (
       <div className="space-y-3">
         {["sk-1", "sk-2", "sk-3"].map((id) => (
-          <div key={id} className="h-14 animate-pulse rounded-lg bg-gray-100/50 dark:bg-gray-800/50" />
+          <div key={id} className="h-14 animate-pulse rounded-xl bg-muted/60" />
         ))}
       </div>
     );
@@ -39,78 +43,65 @@ export function CredentialList() {
 
   if (isError) {
     return (
-      <div className="rounded-lg border border-red-300 bg-red-50 p-6 text-center dark:border-red-800 dark:bg-red-900/20">
-        <p className="text-sm text-red-600 dark:text-red-400">
+      <div className="rounded-2xl border border-danger/20 bg-danger-subtle p-8 text-center">
+        <p className="text-sm text-danger">
           {error instanceof Error ? error.message : t("credential.loadError")}
         </p>
-        <button
-          type="button"
-          onClick={() => refetch()}
-          className="mt-3 rounded-lg bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-        >
+        <Button type="button" variant="outline" onClick={() => refetch()} className="mt-4">
           {t("common.retry")}
-        </button>
+        </Button>
       </div>
     );
   }
 
   if (!credentials || credentials.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 p-12 text-center dark:border-gray-800">
-        <p className="text-gray-500 dark:text-gray-400">{t("credential.emptyState")}</p>
+      <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
+        <p className="text-muted-foreground">{t("credential.emptyState")}</p>
       </div>
     );
   }
 
   return (
     <>
-      <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/50">
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("credential.name")}
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("credential.authType")}
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("credential.username")}
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("credential.fingerprint")}
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                {t("common.actions")}
-              </th>
+      <TableCard>
+        <Table>
+          <THead>
+            <tr>
+              <Th>{t("credential.name")}</Th>
+              <Th>{t("credential.authType")}</Th>
+              <Th>{t("credential.username")}</Th>
+              <Th>{t("credential.fingerprint")}</Th>
+              <Th align="right">{t("common.actions")}</Th>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+          </THead>
+          <TBody>
             {credentials.map((credential) => (
-              <tr key={credential.id} className="transition-colors hover:bg-gray-100/50 dark:hover:bg-gray-800/50">
-                <td className="px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+              <tr key={credential.id} className="transition-colors hover:bg-muted/40">
+                <Td className="font-medium text-foreground">
                   {credential.name || `#${credential.id}`}
-                </td>
-                <td className="px-4 py-3 text-sm">
+                </Td>
+                <Td>
                   <span
-                    className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                    className={cn(
+                      "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
                       credential.auth_type === "password"
-                        ? "bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
-                        : "bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400"
-                    }`}
+                        ? "bg-warning-subtle text-warning"
+                        : "bg-success-subtle text-success",
+                    )}
                   >
-                    {credential.auth_type === "password" ? t("credential.passwordAuth") : t("credential.privateKeyAuth")}
+                    {credential.auth_type === "password"
+                      ? t("credential.passwordAuth")
+                      : t("credential.privateKeyAuth")}
                   </span>
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{credential.username}</td>
-                <td className="px-4 py-3 text-sm text-gray-400 dark:text-gray-500">
-                  {credential.key_fingerprint ?? "—"}
-                </td>
-                <td className="px-4 py-3">
+                </Td>
+                <Td className="text-foreground">{credential.username}</Td>
+                <Td className="text-muted-foreground">{credential.key_fingerprint ?? "—"}</Td>
+                <Td>
                   <div className="flex items-center justify-end gap-1">
                     <Link
                       to={`/credentials/${credential.id}/edit`}
-                      className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-indigo-50 hover:text-indigo-600 dark:text-gray-400 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-400"
+                      className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                       aria-label={t("credential.ariaEdit")}
                     >
                       <Pencil className="h-4 w-4" />
@@ -118,18 +109,18 @@ export function CredentialList() {
                     <button
                       type="button"
                       onClick={() => setDeleteId(credential.id)}
-                      className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-gray-400 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                      className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-danger-subtle hover:text-danger"
                       aria-label={t("credential.ariaDelete")}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
-                </td>
+                </Td>
               </tr>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TBody>
+        </Table>
+      </TableCard>
 
       <ConfirmDialog
         open={deleteId !== null}
