@@ -1,8 +1,10 @@
+import { useTranslation } from "../../i18n";
 import { cn } from "../../lib/utils";
 
 interface StatusIndicatorProps {
   status: "online" | "offline" | "checking" | "unknown";
   showPulse?: boolean;
+  showLabel?: boolean;
   size?: "sm" | "md";
   className?: string;
 }
@@ -14,15 +16,7 @@ const statusColor: Record<StatusIndicatorProps["status"], string> = {
   unknown: "bg-muted-foreground/60",
 };
 
-const statusLabel: Record<StatusIndicatorProps["status"], string> = {
-  online: "Online",
-  offline: "Offline",
-  checking: "Checking",
-  unknown: "Unknown",
-};
-
 const pulseColor: Record<string, string> = {
-  online: "bg-success/75",
   checking: "bg-warning/75",
 };
 
@@ -39,10 +33,14 @@ const wrapperSize: Record<NonNullable<StatusIndicatorProps["size"]>, string> = {
 export function StatusIndicator({
   status,
   showPulse,
+  showLabel = false,
   size = "md",
   className,
 }: StatusIndicatorProps) {
-  const shouldPulse = showPulse ?? (status === "online" || status === "checking");
+  const { t } = useTranslation();
+  // Only an in-flight probe animates; a settled online/offline state is static.
+  const shouldPulse = showPulse ?? status === "checking";
+  const label = t(`server.status.${status}`);
 
   const dot = (
     <span className={cn("rounded-full", dotSize[size], statusColor[status])} aria-hidden="true" />
@@ -68,7 +66,11 @@ export function StatusIndicator({
       ) : (
         dot
       )}
-      <span className="sr-only">{statusLabel[status]}</span>
+      {showLabel ? (
+        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      ) : (
+        <span className="sr-only">{label}</span>
+      )}
     </span>
   );
 }

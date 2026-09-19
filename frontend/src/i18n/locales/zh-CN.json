@@ -22,7 +22,8 @@
     "error": "错误",
     "loadError": "加载失败",
     "close": "关闭",
-    "save": "保存"
+    "save": "保存",
+    "copy": "复制"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -32,7 +33,8 @@
     "apiKeys": "API 密钥"
   },
   "header": {
-    "logout": "退出登录"
+    "logout": "退出登录",
+    "openMenu": "打开导航"
   },
   "auth": {
     "signIn": "登录",
@@ -55,7 +57,11 @@
     "getStarted": "从侧边栏选择一个功能开始使用。",
     "emptyTitle": "暂无服务器",
     "emptyDescription": "添加你的第一台服务器，开始监控其健康状态和性能。",
-    "addServer": "添加服务器"
+    "addServer": "添加服务器",
+    "summaryTotal": "服务器总数",
+    "summaryOnline": "在线",
+    "summaryOffline": "离线",
+    "summaryCaption": "实时状态，每分钟刷新。"
   },
   "notFound": {
     "title": "404",
@@ -106,7 +112,11 @@
       "updateFailed": "更新服务器失败",
       "deleted": "服务器已删除",
       "deleteFailed": "删除服务器失败"
-    }
+    },
+    "listSubtitle": "管理服务器连接与配置。",
+    "listSubtitleCount": "共 {{count}} 台服务器 · {{online}} 台在线",
+    "lastSeen": "最后采集 {{time}}",
+    "neverSeen": "等待首次采集"
   },
   "credential": {
     "add": "添加凭证",
@@ -179,7 +189,21 @@
     "diskUsage": "磁盘使用率",
     "noCpuData": "暂无 CPU 数据",
     "noMemoryData": "暂无内存数据",
-    "noDiskData": "暂无磁盘数据"
+    "noDiskData": "暂无磁盘数据",
+    "usageTrend": "使用率趋势",
+    "network": "网络吞吐",
+    "diskIo": "磁盘 I/O",
+    "swapUsage": "Swap 使用率",
+    "loadAverage": "负载均值",
+    "lastCollected": "最后采集 {{time}}",
+    "neverCollected": "等待首次采集",
+    "gapNote": "曲线断点表示该时段未采集到数据。",
+    "avg": "均值",
+    "max": "峰值",
+    "rx": "接收",
+    "tx": "发送",
+    "read": "读取",
+    "write": "写入"
   },
   "timeRange": {
     "1h": "1 小时",
@@ -244,7 +268,15 @@
       "updateFailed": "更新服务失败",
       "deleted": "服务已删除",
       "deleteFailed": "删除服务失败"
-    }
+    },
+    "sectionBasics": "基本信息",
+    "sectionConnection": "连接与凭据",
+    "sectionUsageGuide": "AI 使用指南",
+    "newCredential": "新建凭据",
+    "newCredentialHint": "新建 SSH 凭据，创建后返回此处选择。",
+    "usageGuideEmpty": "暂无使用指南。",
+    "usageGuidePreview": "预览",
+    "usageGuideEdit": "编辑"
   },
   "apiKeys": {
     "title": "API 密钥",
@@ -267,6 +299,27 @@
     },
     "serversLabel": "服务器",
     "serversAll": "全部服务器",
-    "serversCount": "{{count}} 台服务器"
+    "serversCount": "{{count}} 台服务器",
+    "serversScopeLabel": "服务器范围",
+    "serversAllOption": "全部服务器",
+    "serversSpecificOption": "指定服务器",
+    "serversAllHint": "适用于所有服务器，包括之后新增的服务器。",
+    "serversSelected": "已选 {{count}} 台服务器",
+    "presetsLabel": "权限预设",
+    "presetReadonly": "只读监控",
+    "presetOps": "日常运维",
+    "presetCustom": "自定义",
+    "presetReadonlyHint": "可查看服务器、指标与服务，但不能执行任何操作。",
+    "presetOpsHint": "在只读基础上增加命令执行与终端访问。",
+    "summaryLabel": "权限摘要",
+    "summaryScopes": "{{count}} 项权限",
+    "summaryNoScopes": "未选择任何权限",
+    "summaryServersAll": "全部服务器",
+    "summaryServersCount": "{{count}} 台服务器",
+    "deleteTitle": "删除 API 密钥",
+    "deleteMessage": "确定删除「{{name}}」吗？使用该密钥的应用会立即失去访问权限。",
+    "deleteFailed": "删除密钥失败",
+    "serversNoneSelected": "请至少选择一台服务器",
+    "prefix": "前缀"
   }
 }

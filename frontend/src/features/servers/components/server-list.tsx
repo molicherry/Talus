@@ -1,11 +1,13 @@
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { useTranslation } from "../../../i18n";
 import { Link, useNavigate } from "react-router-dom";
-import { toast } from "../../../lib/toast";
+
 import { Button } from "../../../components/ui/button";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
 import { StatusIndicator } from "../../../components/ui/status-indicator";
+import { TBody, Table, TableCard, Td, Th, THead } from "../../../components/ui/table";
+import { useTranslation } from "../../../i18n";
+import { toast } from "../../../lib/toast";
 import { useDeleteServer, useServers } from "../hooks/use-servers";
 
 export function ServerList() {
@@ -70,28 +72,20 @@ export function ServerList() {
 
   return (
     <>
-      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border bg-muted/60">
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                {t("server.name")}
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                {t("server.host")}
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                {t("server.status.column")}
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                {t("common.actions")}
-              </th>
+      <TableCard>
+        <Table>
+          <THead>
+            <tr>
+              <Th>{t("server.name")}</Th>
+              <Th>{t("server.host")}</Th>
+              <Th>{t("server.status.column")}</Th>
+              <Th align="right">{t("common.actions")}</Th>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
+          </THead>
+          <TBody>
             {servers.map((server) => (
               <tr key={server.id} className="transition-colors hover:bg-muted/40">
-                <td className="px-4 py-3">
+                <Td>
                   <button
                     type="button"
                     onClick={() => navigate(`/servers/${server.id}`)}
@@ -99,12 +93,12 @@ export function ServerList() {
                   >
                     {server.name}
                   </button>
-                </td>
-                <td className="px-4 py-3 text-sm text-muted-foreground">{server.host}</td>
-                <td className="px-4 py-3">
-                  <StatusIndicator status={server.status} size="sm" />
-                </td>
-                <td className="px-4 py-3">
+                </Td>
+                <Td className="text-muted-foreground">{server.host}</Td>
+                <Td>
+                  <StatusIndicator status={server.status} size="sm" showLabel />
+                </Td>
+                <Td>
                   <div className="flex items-center justify-end gap-1">
                     <button
                       type="button"
@@ -123,12 +117,12 @@ export function ServerList() {
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
-                </td>
+                </Td>
               </tr>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TBody>
+        </Table>
+      </TableCard>
 
       <ConfirmDialog
         open={deleteId !== null}

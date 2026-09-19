@@ -53,19 +53,19 @@ function ErrorFallback({ onRetry }: { onRetry: () => void }) {
   const { t } = useTranslation();
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-      <AlertTriangle className="h-10 w-10 text-red-500" />
+      <AlertTriangle className="h-10 w-10 text-danger" />
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+        <h2 className="text-lg font-semibold text-foreground">
           {t("common.unexpectedError")}
         </h2>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+        <p className="mt-1 text-sm text-muted-foreground">
           {t("common.loadError")}
         </p>
       </div>
       <button
         type="button"
         onClick={onRetry}
-        className="inline-flex items-center gap-2 rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+        className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
       >
         <RefreshCw className="h-4 w-4" />
         {t("common.retry")}

@@ -1,7 +1,8 @@
+import { Button } from "../../../components/ui/button";
 import { useTranslation } from "../../../i18n";
 import type { Server } from "../../../types/models";
-import { Button } from "../../../components/ui/button";
 import { DashboardEmpty } from "./dashboard-empty";
+import { DashboardSummary } from "./dashboard-summary";
 import { ServerCard } from "./server-card";
 import { ServerCardSkeleton } from "./server-card-skeleton";
 
@@ -18,11 +19,18 @@ export function DashboardGrid({ servers, isLoading, isError, error, refetch }: D
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        <ServerCardSkeleton />
-        <ServerCardSkeleton />
-        <ServerCardSkeleton />
-      </div>
+      <>
+        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-[68px] animate-pulse rounded-2xl border border-border bg-card" />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <ServerCardSkeleton />
+          <ServerCardSkeleton />
+          <ServerCardSkeleton />
+        </div>
+      </>
     );
   }
 
@@ -44,10 +52,13 @@ export function DashboardGrid({ servers, isLoading, isError, error, refetch }: D
   }
 
   return (
-    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-      {servers.map((server) => (
-        <ServerCard key={server.id} server={server} />
-      ))}
-    </div>
+    <>
+      <DashboardSummary servers={servers} />
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {servers.map((server) => (
+          <ServerCard key={server.id} server={server} />
+        ))}
+      </div>
+    </>
   );
 }

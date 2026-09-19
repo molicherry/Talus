@@ -1,12 +1,15 @@
 import { Loader2 } from "lucide-react";
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
+
 import { prefetchRoutes } from "../../lib/prefetch-routes";
 import { ErrorBoundary } from "../ui/error-boundary";
 import { Header } from "./header";
 import { Sidebar } from "./sidebar";
 
 export function MainLayout() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   // Warm the lazy route chunks in the background once the app shell mounts
   // (after login), so first visits to other sections are instant.
   useEffect(() => {
@@ -20,10 +23,10 @@ export function MainLayout() {
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
-      <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
-        <main className="flex-1 overflow-auto p-6 lg:p-8">
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <div className="flex min-w-0 flex-1 flex-col lg:overflow-hidden">
+        <Header onOpenSidebar={() => setSidebarOpen(true)} />
+        <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
           <ErrorBoundary>
             <Suspense
               fallback={

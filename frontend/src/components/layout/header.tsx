@@ -1,4 +1,4 @@
-import { LogOut, Monitor, Moon, Sun, User, Key } from "lucide-react";
+import { Key, LogOut, Menu, Monitor, Moon, Sun, User } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "../../i18n";
 import { useAuth } from "../../hooks/use-auth";
@@ -19,7 +19,11 @@ const themeNext: Record<Theme, Theme> = {
   system: "light",
 };
 
-export function Header() {
+interface HeaderProps {
+  onOpenSidebar: () => void;
+}
+
+export function Header({ onOpenSidebar }: HeaderProps) {
   const { user } = useAuth();
   const { t, i18n } = useTranslation();
   const { theme, setTheme } = useTheme();
@@ -69,8 +73,18 @@ export function Header() {
   const ThemeIcon = themeIcons[theme];
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-border bg-card px-6">
-      <h1 className="text-lg font-semibold text-foreground">{t("app.name")}</h1>
+    <header className="flex h-16 items-center justify-between gap-3 border-b border-border bg-card px-4 sm:px-6">
+      <div className="flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={onOpenSidebar}
+          aria-label={t("header.openMenu")}
+          className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground lg:hidden"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <h1 className="truncate text-lg font-semibold text-foreground">{t("app.name")}</h1>
+      </div>
       <div className="flex items-center gap-3">
         <Button
           type="button"

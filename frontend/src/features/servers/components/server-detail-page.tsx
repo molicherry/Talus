@@ -14,15 +14,15 @@ export function ServerDetailPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-500 dark:text-gray-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   if (isError || !server) {
     return (
-      <div className="rounded-lg border border-red-300 bg-red-50 p-6 text-center dark:border-red-800 dark:bg-red-900/20">
-        <p className="text-sm text-red-600 dark:text-red-400">
+      <div className="rounded-2xl border border-danger/30 bg-danger-subtle p-6 text-center">
+        <p className="text-sm text-danger">
           {error instanceof Error ? error.message : t("server.notFound")}
         </p>
       </div>
