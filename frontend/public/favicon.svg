@@ -1,4 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
-  <rect x="7" y="5" width="34" height="7" rx="3" fill="#0ea5e9"/>
-  <rect x="20.5" y="5" width="7" height="39" rx="3" fill="#0ea5e9"/>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 512 512"
+  width="512"
+  height="512"
+>
+  <!-- 小型锁梁 -->
+  <path
+    d="M206 195V164C206 135 228 112 256 112C284 112 306 135 306 164V195"
+    fill="none"
+    stroke="#55BFF2"
+    stroke-width="28"
+    stroke-linecap="round"
+  />
+
+  <!-- 瘦身后的锁体 -->
+  <rect
+    x="154"
+    y="184"
+    width="204"
+    height="242"
+    rx="36"
+    fill="#55BFF2"
+  />
+
+  <!-- 白色 T -->
+  <path
+    d="M194 244H318V284H278V380H234V284H194V244Z"
+    fill="#FFFFFF"
+  />
 </svg>
