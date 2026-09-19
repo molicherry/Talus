@@ -87,9 +87,11 @@ func (s *TerminalService) StartSession(ctx context.Context, serverID uint, wsCon
 		return err
 	}
 
-	// Only the cancel handle is used: neither pump reads this context (each one
-	// stops on its own I/O error — readFromWS closes stdin, which unblocks the
-	// remote shell and therefore readFromSSH).
+	// Only the cancel handle is used: neither pump observes this context, so a
+	// pump that exits does NOT interrupt the other one. That is a known gap
+	// (issue #12), not a guarantee. The session only unwinds today because
+	// readFromWS closes stdin, which normally makes the remote shell exit and
+	// therefore unblocks readFromSSH.
 	_, cancel := context.WithCancel(ctx)
 	defer cancel()
 
