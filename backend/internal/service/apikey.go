@@ -28,7 +28,7 @@ func NewAPIKeyService(repo *repository.APIKeyRepo, serverRepo *repository.Server
 }
 
 type CreateAPIKeyResult struct {
-	Key    string       `json:"key"`
+	Key    string        `json:"key"`
 	APIKey *model.APIKey `json:"api_key"`
 }
 

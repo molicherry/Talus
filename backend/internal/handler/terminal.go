@@ -69,13 +69,15 @@ func (h *TerminalHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if claims == nil {
 		// No X-API-Key was presented at handshake — require the client's
 		// first message to carry a valid JWT.
-		conn.SetReadDeadline(time.Now().Add(authTimeout))
+		// Best-effort: if the deadline cannot be set the transport is already
+		// broken, and the ReadJSON below fails immediately.
+		_ = conn.SetReadDeadline(time.Now().Add(authTimeout))
 		var msg wsMessage
 		if err := conn.ReadJSON(&msg); err != nil {
 			slog.Warn("terminal auth message read failed", "server_id", id, "error", err)
 			return
 		}
-		conn.SetReadDeadline(time.Time{})
+		_ = conn.SetReadDeadline(time.Time{})
 
 		if msg.Type != "auth" || msg.Data == "" {
 			_ = conn.WriteJSON(wsMessage{Type: "error", Data: "authentication required"})

@@ -34,5 +34,5 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	w.Write(marshalError(err, requestID))
+	_, _ = w.Write(marshalError(err, requestID))
 }

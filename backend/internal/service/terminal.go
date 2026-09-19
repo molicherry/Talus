@@ -87,8 +87,10 @@ func (s *TerminalService) StartSession(ctx context.Context, serverID uint, wsCon
 		return err
 	}
 
-
-	ctx, cancel := context.WithCancel(ctx)
+	// Only the cancel handle is used: neither pump reads this context (each one
+	// stops on its own I/O error — readFromWS closes stdin, which unblocks the
+	// remote shell and therefore readFromSSH).
+	_, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var wg sync.WaitGroup

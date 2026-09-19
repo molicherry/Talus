@@ -16,8 +16,8 @@ func DialSSH(host string, port int, username string, authMethod ssh.AuthMethod, 
 	var capturedKey []byte
 
 	config := &ssh.ClientConfig{
-		User:  username,
-		Auth:  []ssh.AuthMethod{authMethod},
+		User:    username,
+		Auth:    []ssh.AuthMethod{authMethod},
 		Timeout: timeout,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			presented := key.Marshal()
