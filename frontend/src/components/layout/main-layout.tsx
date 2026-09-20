@@ -5,6 +5,7 @@ import { Outlet } from "react-router-dom";
 import { prefetchRoutes } from "../../lib/prefetch-routes";
 import { ErrorBoundary } from "../ui/error-boundary";
 import { Header } from "./header";
+import { UpdateBanner } from "./update-banner";
 import { Sidebar } from "./sidebar";
 
 export function MainLayout() {
@@ -26,6 +27,7 @@ export function MainLayout() {
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex min-w-0 flex-1 flex-col lg:overflow-hidden">
         <Header onOpenSidebar={() => setSidebarOpen(true)} />
+        <UpdateBanner />
         <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
           <ErrorBoundary>
             <Suspense

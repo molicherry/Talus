@@ -321,5 +321,9 @@
     "deleteFailed": "Failed to delete API key",
     "serversNoneSelected": "Select at least one server",
     "prefix": "Prefix"
+  },
+  "update": {
+    "available": "A new version has been deployed.",
+    "reload": "Reload"
   }
 }

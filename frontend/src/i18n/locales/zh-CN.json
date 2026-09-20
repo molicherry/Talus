@@ -321,5 +321,9 @@
     "deleteFailed": "删除密钥失败",
     "serversNoneSelected": "请至少选择一台服务器",
     "prefix": "前缀"
+  },
+  "update": {
+    "available": "新版本已部署。",
+    "reload": "刷新页面"
   }
 }
