@@ -358,7 +358,9 @@ export function ApiKeysPage() {
                   <p className="mt-1 text-xs text-muted-foreground">{t("common.loading")}</p>
                 ) : serversQuery.isError ? (
                   <div className="mt-1 flex items-center gap-2 text-xs text-danger">
-                    <span>{t("apiKeys.serversLoadFailed")}</span>
+                    <span>
+                      {t("apiKeys.serversLoadFailed")} — {errorText(serversQuery.error)}
+                    </span>
                     <button
                       type="button"
                       onClick={() => serversQuery.refetch()}
@@ -463,7 +465,9 @@ export function ApiKeysPage() {
         </div>
       ) : showFirstLoadError ? (
         <div className="rounded-2xl border border-danger/30 bg-danger-subtle p-8 text-center">
-          <p className="text-sm text-danger">{t("apiKeys.loadFailed")}</p>
+          <p className="text-sm text-danger">
+            {t("apiKeys.loadFailed")} — {errorText(keysQuery.error)}
+          </p>
           <Button
             type="button"
             variant="outline"
@@ -487,7 +491,9 @@ export function ApiKeysPage() {
         <>
           {showRefreshError && (
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning-subtle px-4 py-2 text-sm text-warning">
-              <span>{t("apiKeys.refreshFailed")}</span>
+              <span>
+                {t("apiKeys.refreshFailed")} — {errorText(keysQuery.error)}
+              </span>
               <button
                 type="button"
                 onClick={() => keysQuery.refetch()}
