@@ -26,6 +26,7 @@ compile() { # <src> <outName>
 
 compile src/lib/query.ts query
 compile src/features/monitoring/lib/series.ts series
+compile src/features/auth/lib/api-key-error.ts api-key-error
 
 # 2. Run every test file under tests/ (skip this runner + compiled artifacts).
 FAIL=0

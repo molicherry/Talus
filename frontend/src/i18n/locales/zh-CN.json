@@ -279,6 +279,15 @@
     "usageGuideEdit": "编辑"
   },
   "apiKeys": {
+    "loadFailed": "加载 API Key 失败",
+    "refreshFailed": "刷新失败，显示上次加载的列表。",
+    "serversLoadFailed": "加载服务器列表失败",
+    "errorUnauthorized": "登录已失效，请重新登录。",
+    "errorForbidden": "你没有执行该操作的权限。",
+    "errorRateLimited": "请求过于频繁，请稍后重试。",
+    "errorServer": "服务器返回错误，请重试。",
+    "errorNetwork": "网络不可用，请检查连接。",
+
     "title": "API 密钥",
     "create": "创建密钥",
     "name": "名称",

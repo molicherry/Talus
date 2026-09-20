@@ -279,6 +279,15 @@
     "usageGuideEdit": "Edit"
   },
   "apiKeys": {
+    "loadFailed": "Failed to load API keys",
+    "refreshFailed": "Could not refresh the list — showing the last loaded keys.",
+    "serversLoadFailed": "Failed to load servers",
+    "errorUnauthorized": "Your session expired. Please sign in again.",
+    "errorForbidden": "You do not have permission to do that.",
+    "errorRateLimited": "Too many requests. Please try again shortly.",
+    "errorServer": "The server returned an error. Please retry.",
+    "errorNetwork": "Network unavailable. Check your connection.",
+
     "title": "API Keys",
     "create": "Create Key",
     "name": "Name",
