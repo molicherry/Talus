@@ -86,14 +86,37 @@ func (s *TerminalService) StartSession(ctx context.Context, serverID uint, wsCon
 		sessionErr = err
 		return err
 	}
-
-	// Only the cancel handle is used: neither pump observes this context, so a
-	// pump that exits does NOT interrupt the other one. That is a known gap
-	// (issue #12), not a guarantee. The session only unwinds today because
-	// readFromWS closes stdin, which normally makes the remote shell exit and
-	// therefore unblocks readFromSSH.
-	_, cancel := context.WithCancel(ctx)
+	// Derive a cancellable context so an aborted request, or either pump
+	// finishing, can tear the whole session down.
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// teardown ends the session exactly once, from whichever side finishes
+	// first: closing the SSH session unblocks a parked stdout.Read and closing
+	// the WebSocket unblocks a parked ReadJSON. Without it, a pump that exits
+	// leaves the other parked in a read, so wg.Wait() never returns and the
+	// goroutine, SSH session and pool slot stay held (issue #12).
+	var teardownOnce sync.Once
+	teardown := func() {
+		teardownOnce.Do(func() {
+			cancel()
+			_ = session.Close()
+			_ = wsConn.Close()
+		})
+	}
+
+	// Unwind the session when the caller's context is cancelled (aborted
+	// request, shutdown): neither pump can select on ctx.Done() while it is
+	// blocked in a read, so this watcher closes their primitives instead.
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			teardown()
+		case <-done:
+		}
+	}()
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -101,7 +124,7 @@ func (s *TerminalService) StartSession(ctx context.Context, serverID uint, wsCon
 	// readFromSSH: reads SSH stdout and forwards to WebSocket.
 	go func() {
 		defer wg.Done()
-		defer cancel()
+		defer teardown()
 		buf := make([]byte, 4096)
 		for {
 			n, readErr := stdout.Read(buf)
@@ -122,12 +145,15 @@ func (s *TerminalService) StartSession(ctx context.Context, serverID uint, wsCon
 	// readFromWS: reads WebSocket messages and forwards to SSH stdin.
 	go func() {
 		defer wg.Done()
-		defer cancel()
+		defer teardown()
 		defer stdin.Close()
 		for {
 			var msg wsMessage
 			if readErr := wsConn.ReadJSON(&msg); readErr != nil {
 				if !websocket.IsCloseError(readErr, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					// The browser vanished or the transport broke instead of
+					// closing the terminal cleanly: never cache this connection.
+					sessionErr = readErr
 					slog.Warn("terminal ws read closed", "error", readErr)
 				}
 				return

@@ -1,0 +1,253 @@
+package service
+
+import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/vpsmanager/backend/internal/pkg/sshpool"
+	"golang.org/x/crypto/ssh"
+)
+
+// startTestSSHServer starts an in-process SSH server that accepts a session
+// with a PTY and then never writes output or EOF on it. It stands in for a
+// remote full-screen program (top, vim) that ignores stdin EOF — the case
+// where a terminal session used to stay parked forever.
+func startTestSSHServer(t *testing.T) (addr string, hostKey ssh.PublicKey) {
+	t.Helper()
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate host key: %v", err)
+	}
+	signer, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatalf("host key signer: %v", err)
+	}
+
+	cfg := &ssh.ServerConfig{NoClientAuth: true}
+	cfg.AddHostKey(signer)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go serveTestSSHConn(conn, cfg)
+		}
+	}()
+
+	return ln.Addr().String(), signer.PublicKey()
+}
+
+// serveTestSSHConn serves one SSH connection. Global requests are rejected,
+// which is all the pool keepalive probe needs, and every session channel is
+// accepted and kept open without ever being written to.
+func serveTestSSHConn(conn net.Conn, cfg *ssh.ServerConfig) {
+	sshConn, chans, reqs, err := ssh.NewServerConn(conn, cfg)
+	if err != nil {
+		_ = conn.Close()
+		return
+	}
+	defer sshConn.Close()
+	go ssh.DiscardRequests(reqs)
+
+	for newChan := range chans {
+		if newChan.ChannelType() != "session" {
+			_ = newChan.Reject(ssh.UnknownChannelType, "only session channels are supported")
+			continue
+		}
+		ch, channelReqs, err := newChan.Accept()
+		if err != nil {
+			continue
+		}
+		go func() {
+			for req := range channelReqs {
+				_ = req.Reply(req.Type == "shell" || req.Type == "pty-req", nil)
+			}
+		}()
+		// Drain stdin but never treat its EOF as the shell exiting, and never
+		// write or close: the channel only ends when the client tears it down.
+		// This is the remote program (top, vim) that ignores stdin EOF, which
+		// is what the incidental stdin-EOF teardown chain relies on.
+		go func() {
+			buf := make([]byte, 4096)
+			for {
+				if _, err := ch.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+	}
+}
+
+// terminalTestUpgrader upgrades the httptest handler into a WebSocket.
+var terminalTestUpgrader = websocket.Upgrader{
+	CheckOrigin: func(*http.Request) bool { return true },
+}
+
+// startSeededTerminalService builds a TerminalService whose pool already holds
+// a live SSH client for serverID, so StartSession never dials and the test
+// needs no server repository or credential service.
+func startSeededTerminalService(t *testing.T, serverID uint) (*TerminalService, *sshpool.Pool) {
+	t.Helper()
+
+	addr, hostKey := startTestSSHServer(t)
+
+	pool := sshpool.NewPool(time.Minute, 1, time.Second)
+	t.Cleanup(pool.Close)
+
+	client, err := ssh.Dial("tcp", addr, &ssh.ClientConfig{
+		User:            "test",
+		HostKeyCallback: ssh.FixedHostKey(hostKey),
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("dial test ssh server: %v", err)
+	}
+
+	// Acquire the single slot first so the client can be handed to the pool
+	// without Release's slot accounting blocking on an unacquired slot.
+	if got, err := pool.Get(serverID); err != nil || got != nil {
+		t.Fatalf("seed pool Get = (%v, %v), want (nil, nil)", got, err)
+	}
+	pool.Release(serverID, client)
+
+	// nil repository and credential service are safe here: the cached client
+	// means GetClient takes the pool hit and never dereferences them.
+	return NewTerminalService(NewSSHService(pool, nil, nil, time.Second, time.Second)), pool
+}
+
+// sessionHarness is one StartSession call in flight over a real WebSocket.
+type sessionHarness struct {
+	ws     *websocket.Conn
+	result chan error
+}
+
+// beginSession serves one StartSession call over an httptest WebSocket server
+// and connects a client to it, waiting until the SSH shell is up.
+func beginSession(t *testing.T, svc *TerminalService, serverID uint) *sessionHarness {
+	t.Helper()
+
+	started := make(chan struct{})
+	result := make(chan error, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := terminalTestUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			result <- err
+			return
+		}
+		close(started)
+		// r.Context() stays live for the whole handler call, matching the real
+		// terminal handler (which calls StartSession and only then returns).
+		result <- svc.StartSession(r.Context(), serverID, conn)
+	}))
+	t.Cleanup(srv.Close)
+
+	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	t.Cleanup(func() { _ = ws.Close() })
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not start the terminal session")
+	}
+
+	// The "connected" frame is written once the shell is up; waiting for it
+	// proves the session (and both pumps) are running before we disconnect.
+	if err := ws.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	var ready wsMessage
+	if err := ws.ReadJSON(&ready); err != nil {
+		t.Fatalf("read connected frame: %v", err)
+	}
+	if ready.Type != "connected" {
+		t.Fatalf("first frame = %q, want %q", ready.Type, "connected")
+	}
+
+	return &sessionHarness{ws: ws, result: result}
+}
+
+// wait asserts StartSession returned on its own within a bounded time. Since it
+// only returns after wg.Wait(), a return also proves both pumps joined.
+func (h *sessionHarness) wait(t *testing.T) error {
+	t.Helper()
+	select {
+	case err := <-h.result:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("StartSession did not return; a pump is still parked")
+		return nil
+	}
+}
+
+func TestStartSessionTearsDownOtherPump(t *testing.T) {
+	const serverID = 1
+
+	svc, pool := startSeededTerminalService(t, serverID)
+	h := beginSession(t, svc, serverID)
+
+	// Abrupt disconnect: the browser goes away while the SSH shell stays parked
+	// in stdout.Read and never emits EOF. Before the fix this hung forever.
+	if err := h.ws.Close(); err != nil {
+		t.Fatalf("close websocket: %v", err)
+	}
+	if err := h.wait(t); err != nil {
+		t.Fatalf("StartSession = %v, want nil", err)
+	}
+
+	// Accounting: the slot was freed and the torn-down connection was
+	// discarded, so Get hands out no cached client.
+	client, err := pool.Get(serverID)
+	if err != nil {
+		t.Fatalf("Get after torn-down session = %v, want the slot to be free", err)
+	}
+	if client != nil {
+		pool.Release(serverID, client)
+		t.Fatal("connection was released back into the pool, want discarded")
+	}
+	pool.Release(serverID, nil)
+}
+
+func TestStartSessionCleanCloseReleasesConnection(t *testing.T) {
+	const serverID = 1
+
+	svc, pool := startSeededTerminalService(t, serverID)
+	h := beginSession(t, svc, serverID)
+
+	// A clean close (the frontend calling ws.close()) must keep a healthy
+	// connection available for reuse.
+	err := h.ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	if err != nil {
+		t.Fatalf("write close frame: %v", err)
+	}
+	if err := h.wait(t); err != nil {
+		t.Fatalf("StartSession = %v, want nil", err)
+	}
+
+	client, err := pool.Get(serverID)
+	if err != nil {
+		t.Fatalf("Get after clean close = %v", err)
+	}
+	if client == nil {
+		t.Fatal("healthy connection was discarded after a clean close")
+	}
+	pool.Release(serverID, client)
+}
