@@ -2,7 +2,12 @@ import type { ApiError } from "../types/api";
 import i18n from "../i18n";
 import { clearAuthToken, getAuthToken } from "./auth";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+/**
+ * Prefix for API requests, empty when the UI is served by the backend itself.
+ * Exported so non-apiClient callers (e.g. the version check) hit the same
+ * origin as every other request when the two are deployed separately.
+ */
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 class ApiClientError extends Error {
   status: number;
@@ -27,7 +32,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
   });

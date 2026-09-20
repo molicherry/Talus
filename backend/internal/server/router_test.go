@@ -147,6 +147,14 @@ func TestSPAFallbackServesIndexForRoutesOnly(t *testing.T) {
 			wantStatus: http.StatusNotFound, wantMediaType: "text/plain",
 			wantCacheControl: "", wantBodyHas: "404",
 		},
+		{
+			// Regression: /assets/ with no extension used to fall back to
+			// index.html and then inherit the immutable /assets/ policy, so the
+			// entry document was cached for a year under a bogus URL.
+			name: "extensionless miss under /assets 404s", path: "/assets/nonexistent",
+			wantStatus: http.StatusNotFound, wantMediaType: "text/plain",
+			wantCacheControl: "", wantBodyHas: "404",
+		},
 	}
 
 	for _, tc := range cases {

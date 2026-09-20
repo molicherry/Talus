@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { API_BASE_URL } from "../lib/api-client";
 import { usePageVisibility } from "./use-page-visibility";
 
 /** Version baked into this bundle at build time (the release tag, or "dev"). */
@@ -12,6 +13,13 @@ const POLL_INTERVAL_MS = 10 * 60 * 1000;
  * Nothing to compare against in dev, or when the tag was not baked in. Skipping
  * the check keeps a local `npm run dev` against a deployed backend from sitting
  * under a permanent "new version" banner.
+ *
+ * The cost is that a source build (`docker compose`, which defaults to
+ * VERSION=dev) never shows the banner either: two such builds are
+ * indistinguishable, so dropping the guard would only produce false prompts.
+ * Set VERSION to something that changes per release — e.g.
+ * `VERSION=$(git rev-parse --short HEAD)` — and both images get the same
+ * identifier, which is what this comparison needs.
  */
 function canDetect(): boolean {
   return !import.meta.env.DEV && !!BUILD_VERSION && BUILD_VERSION !== "dev";
@@ -20,7 +28,7 @@ function canDetect(): boolean {
 /** `null` when unknown (offline, non-2xx) — the next tick tries again. */
 async function fetchDeployedVersion(): Promise<string | null> {
   try {
-    const res = await fetch("/api/v1/version", { cache: "no-store" });
+    const res = await fetch(`${API_BASE_URL}/api/v1/version`, { cache: "no-store" });
     if (!res.ok) return null;
     const json = (await res.json()) as { data?: { version?: string } };
     const version = json?.data?.version;

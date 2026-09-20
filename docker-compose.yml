@@ -31,6 +31,11 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        # Baked into both the binary and the UI bundle, and surfaced at
+        # /api/v1/version. The UI compares the two to offer a "new version"
+        # prompt, so a source build only gets that prompt if this changes per
+        # release — e.g. VERSION=$(git rev-parse --short HEAD). Left at the
+        # default, both sides report an identical "dev" and the check is off.
         VERSION: ${VERSION:-dev}
     ports:
       - "${PORT:-8080}:8080"

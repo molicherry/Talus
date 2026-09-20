@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -208,21 +209,35 @@ func setStaticCacheControl(w http.ResponseWriter, urlPath string) {
 	w.Header().Set("Cache-Control", revalidateCacheControl)
 }
 
+// isSPARoute reports whether a missing path may be answered with the entry
+// document. Anything under /assets/ is build output addressed by file name, so
+// a miss there is a genuine 404 rather than a client-side route. Other paths
+// count as routes only when they carry no file extension.
+func isSPARoute(urlPath string) bool {
+	if strings.HasPrefix(urlPath, "/assets/") {
+		return false
+	}
+	return path.Ext(urlPath) == ""
+}
+
 func spaFallback(staticDir string) http.HandlerFunc {
 	fs := http.FileServer(http.Dir(staticDir))
 	indexPath := filepath.Join(staticDir, "index.html")
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := filepath.Join(staticDir, filepath.Clean(r.URL.Path))
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			// Only extensionless paths are SPA routes and may fall back to
-			// index.html. A missing hashed asset must 404: answering with HTML
-			// makes a client holding a stale index.html fail on a confusing
-			// MIME-type error instead of simply refetching the entry document.
-			if filepath.Ext(path) != "" {
+			// A miss that is not a route must 404 rather than receive HTML:
+			// answering with the entry document makes a client holding a stale
+			// index.html fail on a confusing MIME-type error instead of simply
+			// refetching what it actually asked for.
+			if !isSPARoute(r.URL.Path) {
 				http.NotFound(w, r)
 				return
 			}
-			setStaticCacheControl(w, r.URL.Path)
+			// The entry document is always revalidated, whichever path it was
+			// reached through: it is what names the current chunk files, so a
+			// long-lived copy is precisely what breaks a redeploy.
+			w.Header().Set("Cache-Control", revalidateCacheControl)
 			http.ServeFile(w, r, indexPath)
 			return
 		}
