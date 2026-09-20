@@ -5,9 +5,122 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Talus</title>
+    <!--
+      Boot layer: rendered without React so a slow or failed entry script still
+      has something on screen. It is removed once the app commits (see the
+      MutationObserver below). Colours are inlined because no stylesheet has
+      loaded yet.
+    -->
+    <style>
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #fafbfc;
+        color: #111827;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      #boot .spinner {
+        width: 24px;
+        height: 24px;
+        border: 2px solid #d1d5db;
+        border-top-color: #2563eb;
+        border-radius: 50%;
+        animation: boot-spin 0.7s linear infinite;
+      }
+      #boot .error {
+        display: none;
+        max-width: 24rem;
+        padding: 1rem;
+        text-align: center;
+      }
+      #boot[data-state="error"] .loading {
+        display: none;
+      }
+      #boot[data-state="error"] .error {
+        display: block;
+      }
+      #boot button {
+        margin-top: 0.75rem;
+        padding: 0.5rem 1rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.5rem;
+        background: #fff;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot" data-state="loading">
+      <div class="loading"><div class="spinner"></div></div>
+      <div class="error">
+        <p><strong id="boot-title">Failed to load the app</strong></p>
+        <p id="boot-message">
+          The application files could not be downloaded. Check your connection and try again.
+        </p>
+        <button type="button" id="boot-retry" onclick="window.location.reload()">Reload</button>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var boot = document.getElementById("boot");
+        var root = document.getElementById("root");
+
+        // Localise without any bundle, then keep the loading state. There is
+        // deliberately NO timeout: a slow network must not look like a failure.
+        if (boot) {
+          var zh = (navigator.language || "").toLowerCase().indexOf("zh") === 0;
+          var title = boot.querySelector("#boot-title");
+          var message = boot.querySelector("#boot-message");
+          var retry = boot.querySelector("#boot-retry");
+          if (zh) {
+            if (title) title.textContent = "应用加载失败";
+            if (message) message.textContent = "无法下载应用文件，请检查网络后重试。";
+            if (retry) retry.textContent = "重新加载";
+          }
+        }
+
+        // Only an explicit script-load error flips to the failure state; other
+        // runtime errors are left to the React error boundary.
+        var failed = false;
+        window.addEventListener(
+          "error",
+          function (event) {
+            if (failed) return;
+            var target = event.target;
+            if (!target || target.tagName !== "SCRIPT") return;
+            failed = true;
+            if (boot) boot.setAttribute("data-state", "error");
+          },
+          true,
+        );
+
+        // Drop the overlay as soon as React has committed real content. This
+        // also covers the "already mounted" case for a cached load.
+        if (!boot || !root) return;
+        if (root.childElementCount > 0) {
+          boot.remove();
+          return;
+        }
+        var observer = new MutationObserver(function () {
+          if (root.childElementCount > 0) {
+            observer.disconnect();
+            boot.remove();
+          }
+        });
+        observer.observe(root, { childList: true });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

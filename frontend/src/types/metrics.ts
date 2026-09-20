@@ -30,3 +30,12 @@ export const TIME_RANGE_INTERVALS: Record<TimeRange, string> = {
   "24h": "15m",
   "7d": "1h",
 };
+
+// Same intervals in milliseconds, used to align chart buckets to the same
+// grid the backend's time_bucket() produces.
+export const TIME_RANGE_INTERVAL_MS: Record<TimeRange, number> = {
+  "1h": 60_000,
+  "6h": 300_000,
+  "24h": 900_000,
+  "7d": 3_600_000,
+};

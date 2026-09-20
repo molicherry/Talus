@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Card } from "../../../components/ui/card";
 import { useTranslation } from "../../../i18n";
@@ -10,8 +10,9 @@ import {
   percentLevel,
 } from "../../../lib/metric-level";
 import { cn } from "../../../lib/utils";
-import type { MetricPoint, TimeRange } from "../../../types/metrics";
+import type { TimeRange } from "../../../types/metrics";
 import { useMetrics } from "../hooks/use-metrics";
+import { buildAlignedSeries } from "../lib/series";
 import { EmptyState } from "./empty-state";
 import { ErrorState } from "./error-state";
 import { LoadingSkeleton } from "./loading-skeleton";
@@ -39,12 +40,20 @@ const SERIES_COLOR = {
   write: "var(--color-success)",
 } as const;
 
-function column(data: MetricPoint[], field: keyof MetricPoint): Nullable[] {
-  return data.map((point) => {
-    const value = point[field];
-    return typeof value === "number" && Number.isFinite(value) ? value : null;
-  });
-}
+// Fields aligned onto the bucket grid for the cards and charts below.
+const SERIES_FIELDS = [
+  "cpu_percent",
+  "memory_percent",
+  "disk_percent",
+  "swap_percent",
+  "net_recv_rate",
+  "net_sent_rate",
+  "disk_read_rate",
+  "disk_write_rate",
+  "load_1",
+  "load_5",
+  "load_15",
+] as const;
 
 /** Most recent collected sample (skips trailing buckets with no data). */
 function latestOf(values: Nullable[]): number | null {
@@ -230,18 +239,40 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
   );
 
   const formatTime = makeTimeFormatter(timeRange);
-  const times = (data ?? []).map((point) => point.time);
-  const lastCollected = times.length > 0 ? times[times.length - 1] : null;
+  // `data.points`/`data.window` keep a stable reference between renders, so the
+  // alignment below only recomputes when a fetch actually returns new data.
+  const points = data?.points;
+  const window = data?.window;
 
-  const cpu = column(data ?? [], "cpu_percent");
-  const memory = column(data ?? [], "memory_percent");
-  const disk = column(data ?? [], "disk_percent");
-  const swap = column(data ?? [], "swap_percent");
-  const netRecv = column(data ?? [], "net_recv_rate");
-  const netSent = column(data ?? [], "net_sent_rate");
-  const diskRead = column(data ?? [], "disk_read_rate");
-  const diskWrite = column(data ?? [], "disk_write_rate");
+  // Rebuild the full bucket grid for the requested window: the backend only
+  // returns buckets that hold samples, which would compress gaps when plotted.
+  const aligned = useMemo(
+    () =>
+      window
+        ? buildAlignedSeries(points ?? [], window, SERIES_FIELDS)
+        : {
+            times: [] as string[],
+            series: {} as Record<string, Nullable[]>,
+            lastSampleTime: null,
+          },
+    [points, window],
+  );
 
+  const times = aligned.times;
+  // Last collected comes from real samples — never a filled empty bucket.
+  const lastCollected = aligned.lastSampleTime;
+
+  const cpu = aligned.series.cpu_percent ?? [];
+  const memory = aligned.series.memory_percent ?? [];
+  const disk = aligned.series.disk_percent ?? [];
+  const swap = aligned.series.swap_percent ?? [];
+  const netRecv = aligned.series.net_recv_rate ?? [];
+  const netSent = aligned.series.net_sent_rate ?? [];
+  const diskRead = aligned.series.disk_read_rate ?? [];
+  const diskWrite = aligned.series.disk_write_rate ?? [];
+  const load1 = aligned.series.load_1 ?? [];
+  const load5 = aligned.series.load_5 ?? [];
+  const load15 = aligned.series.load_15 ?? [];
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -265,11 +296,11 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
         />
       )}
 
-      {data && data.length === 0 && !isLoading && !isError && (
+      {data && (points?.length ?? 0) === 0 && !isLoading && !isError && (
         <EmptyState message={t("monitoring.emptyState")} />
       )}
 
-      {data && data.length > 0 && (
+      {data && (points?.length ?? 0) > 0 && (
         <>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <MetricStat
@@ -349,9 +380,9 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <LoadAvgCard
-              load1={latestOf(column(data, "load_1"))}
-              load5={latestOf(column(data, "load_5"))}
-              load15={latestOf(column(data, "load_15"))}
+              load1={latestOf(load1)}
+              load5={latestOf(load5)}
+              load15={latestOf(load15)}
             />
           </div>
 

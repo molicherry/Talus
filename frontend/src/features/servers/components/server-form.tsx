@@ -1,15 +1,22 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Plus } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { Button } from "../../../components/ui/button";
+import { Dialog } from "../../../components/ui/dialog";
 import { Field, Input, Label, Select, Textarea } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
 import { ApiClientError } from "../../../lib/api-client";
 import { toast } from "../../../lib/toast";
-import { type Server, ServerFormSchema, type ServerFormValues } from "../../../types/models";
+import {
+  type Server,
+  ServerFormSchema,
+  type ServerFormValues,
+  type SSHCredential,
+} from "../../../types/models";
+import { CredentialForm } from "../../credentials/components/credential-form";
 import { useCredentials } from "../../credentials/hooks/use-credentials";
 import { useCreateServer, useUpdateServer } from "../hooks/use-servers";
 
@@ -60,6 +67,42 @@ export function ServerForm({ server }: ServerFormProps) {
     // Drop the nav state so a manual refresh does not re-apply the selection.
     navigate(location.pathname, { replace: true, state: null });
   }, [createdCredentialId, setValue, navigate, location.pathname]);
+
+  const [showCredentialDialog, setShowCredentialDialog] = useState(false);
+  // True while a credential create request is in flight. The dialog locks
+  // Cancel/Esc/backdrop/close then, so it cannot be dismissed mid-request and
+  // a late response cannot land on a newer dialog session.
+  const [credentialPending, setCredentialPending] = useState(false);
+  // Held as a temporary dropdown option until the invalidated credential list
+  // comes back with it, so the new selection never blinks out.
+  const [createdCredential, setCreatedCredential] = useState<SSHCredential | null>(null);
+
+  useEffect(() => {
+    if (createdCredential && credentials?.some((c) => c.id === createdCredential.id)) {
+      setCreatedCredential(null);
+    }
+  }, [credentials, createdCredential]);
+
+  const credentialOptions = (() => {
+    const list = credentials ?? [];
+    if (createdCredential && !list.some((c) => c.id === createdCredential.id)) {
+      return [...list, createdCredential];
+    }
+    return list;
+  })();
+
+  const handleCredentialCreated = (created: SSHCredential) => {
+    setCreatedCredential(created);
+    setShowCredentialDialog(false);
+  };
+
+  // Run after the render that first includes the temporary option: setting the
+  // value earlier leaves the <select> empty because the option is not in the
+  // DOM yet, so the browser cannot select it.
+  useEffect(() => {
+    if (!createdCredential) return;
+    setValue("credential_id", createdCredential.id, { shouldValidate: true });
+  }, [createdCredential, setValue]);
 
   const onSubmit = (data: ServerFormValues) => {
     if (isEdit && server) {
@@ -155,14 +198,17 @@ export function ServerForm({ server }: ServerFormProps) {
           <Label htmlFor="credential_id" className="mb-0">
             {t("server.credential")}
           </Label>
-          <Link
-            to={`/credentials/new?returnTo=${encodeURIComponent(location.pathname)}`}
-            className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary-hover"
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowCredentialDialog(true)}
             title={t("service.newCredentialHint")}
+            className="h-auto gap-1 px-1.5 text-xs font-medium text-primary hover:bg-primary-subtle"
           >
             <Plus className="h-3.5 w-3.5" />
             {t("service.newCredential")}
-          </Link>
+          </Button>
         </div>
         <Select
           id="credential_id"
@@ -171,7 +217,7 @@ export function ServerForm({ server }: ServerFormProps) {
           })}
         >
           <option value="">{t("server.noCredential")}</option>
-          {(credentials ?? []).map((c) => (
+          {credentialOptions.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name || `#${c.id}`} ({c.username}@{c.auth_type})
             </option>
@@ -194,6 +240,18 @@ export function ServerForm({ server }: ServerFormProps) {
           {t("common.cancel")}
         </Button>
       </div>
+      <Dialog
+        open={showCredentialDialog}
+        onClose={() => setShowCredentialDialog(false)}
+        dismissible={!credentialPending}
+        title={t("credential.add")}
+      >
+        <CredentialForm
+          onCreated={handleCredentialCreated}
+          onCancel={() => setShowCredentialDialog(false)}
+          onPendingChange={setCredentialPending}
+        />
+      </Dialog>
     </form>
   );
 }

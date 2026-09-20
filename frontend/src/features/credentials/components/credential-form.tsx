@@ -1,22 +1,35 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Copy, Eye, EyeOff, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "../../../components/ui/button";
 import { Field, Input, Label, Textarea } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
 import { ApiClientError } from "../../../lib/api-client";
 import { toast } from "../../../lib/toast";
-import { CredentialFormSchema, type CredentialFormValues } from "../../../types/models";
+import {
+  CredentialFormSchema,
+  type CredentialFormValues,
+  type SSHCredential,
+} from "../../../types/models";
 import { useCreateCredential } from "../hooks/use-credentials";
 
-export function CredentialForm() {
+interface CredentialFormProps {
+  /** Called with the created credential; the caller decides where to go. */
+  onCreated: (credential: SSHCredential) => void;
+  onCancel: () => void;
+  /** Reports the in-flight state so a host can lock dismissal mid-request. */
+  onPendingChange?: (pending: boolean) => void;
+}
+
+/**
+ * Credential create form. Deliberately navigation-free so it can be embedded
+ * both in the standalone `/credentials/new` route and inside a dialog on the
+ * server form (where leaving the page would discard unsaved server input).
+ */
+export function CredentialForm({ onCreated, onCancel, onPendingChange }: CredentialFormProps) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [searchParams] = useSearchParams();
   const createMutation = useCreateCredential();
 
   const [showPassword, setShowPassword] = useState(false);
@@ -38,10 +51,11 @@ export function CredentialForm() {
 
   const authType = watch("auth_type");
 
-  // When opened from the server form, return there and let it auto-select the
-  // credential we just created.
-  const returnTo = searchParams.get("returnTo") ?? location.state?.returnTo ?? null;
-  const cancelTarget = returnTo ?? "/credentials";
+  // Let the host dialog lock Cancel/Esc/backdrop while a create is in flight,
+  // so a late response can never target a newer dialog session.
+  useEffect(() => {
+    onPendingChange?.(createMutation.isPending);
+  }, [createMutation.isPending, onPendingChange]);
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -67,11 +81,7 @@ export function CredentialForm() {
     createMutation.mutate(data, {
       onSuccess: (created) => {
         toast.success(t("credential.toast.created"));
-        if (returnTo) {
-          navigate(returnTo, { state: { newCredentialId: created.id } });
-        } else {
-          navigate("/credentials");
-        }
+        onCreated(created);
       },
       onError: () => {
         toast.error(t("credential.toast.createFailed"));
@@ -87,16 +97,25 @@ export function CredentialForm() {
         : null;
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="max-w-lg space-y-4">
+    <form
+      onSubmit={(event) => {
+        // The outer server form is an ancestor in the React tree even though
+        // this form sits outside it in the DOM (portal), so stop the synthetic
+        // submit from bubbling into it.
+        event.stopPropagation();
+        void handleSubmit(onSubmit)(event);
+      }}
+      className="space-y-4"
+    >
       {errorMessage && (
         <div className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger">
           {errorMessage}
         </div>
       )}
 
-      <Field label={t("credential.name")} htmlFor="name">
+      <Field label={t("credential.name")} htmlFor="credential-name">
         <Input
-          id="name"
+          id="credential-name"
           type="text"
           {...register("name")}
           placeholder={t("credential.namePlaceholder")}
@@ -128,9 +147,13 @@ export function CredentialForm() {
         {errors.auth_type && <p className="mt-1 text-xs text-danger">{errors.auth_type.message}</p>}
       </div>
 
-      <Field label={t("credential.username")} htmlFor="username" error={errors.username?.message}>
+      <Field
+        label={t("credential.username")}
+        htmlFor="credential-username"
+        error={errors.username?.message}
+      >
         <Input
-          id="username"
+          id="credential-username"
           type="text"
           {...register("username")}
           placeholder={t("credential.usernamePlaceholder")}
@@ -138,10 +161,14 @@ export function CredentialForm() {
       </Field>
 
       {authType === "password" && (
-        <Field label={t("credential.password")} htmlFor="password" error={errors.password?.message}>
+        <Field
+          label={t("credential.password")}
+          htmlFor="credential-password"
+          error={errors.password?.message}
+        >
           <div className="relative">
             <Input
-              id="password"
+              id="credential-password"
               type={showPassword ? "text" : "password"}
               {...register("password")}
               className="pr-16"
@@ -174,7 +201,7 @@ export function CredentialForm() {
       {authType === "private_key" && (
         <Field
           label={t("credential.privateKey")}
-          htmlFor="private_key"
+          htmlFor="credential-private-key"
           // The schema's "credential required" refinement reports on `password`
           // for both auth types, so surface it here when the key field is shown.
           error={errors.password?.message}
@@ -182,7 +209,7 @@ export function CredentialForm() {
           <div className="relative">
             {showPrivateKey ? (
               <Textarea
-                id="private_key"
+                id="credential-private-key"
                 {...register("private_key")}
                 rows={6}
                 className="pr-16 font-mono text-xs"
@@ -190,7 +217,7 @@ export function CredentialForm() {
               />
             ) : (
               <Input
-                id="private_key"
+                id="credential-private-key"
                 type="password"
                 {...register("private_key")}
                 className="pr-16"
@@ -229,7 +256,12 @@ export function CredentialForm() {
           {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
           {createMutation.isPending ? t("common.creating") : t("credential.create")}
         </Button>
-        <Button type="button" variant="secondary" onClick={() => navigate(cancelTarget)}>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={onCancel}
+          disabled={createMutation.isPending}
+        >
           {t("common.cancel")}
         </Button>
       </div>
