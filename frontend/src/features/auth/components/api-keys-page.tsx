@@ -1,15 +1,21 @@
-import { Copy, Key, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Copy, Key, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useState } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
 import { Field, Input } from "../../../components/ui/field";
 import { TBody, Table, TableCard, Td, Th, THead } from "../../../components/ui/table";
 import { useTranslation } from "../../../i18n";
-import { cn } from "../../../lib/utils";
 import { toast } from "../../../lib/toast";
-
-const API_BASE = "";
+import { cn } from "../../../lib/utils";
+import { useServers } from "../../servers/hooks/use-servers";
+import { apiKeyErrorKind } from "../lib/api-key-error";
+import {
+  useAPIKeys,
+  useCreateAPIKey,
+  useDeleteAPIKey,
+  useRevealAPIKey,
+} from "../hooks/use-api-keys";
 
 const ALL_SCOPES = [
   "servers:read",
@@ -56,71 +62,44 @@ function detectPreset(scopes: readonly string[]): PresetID {
   return "custom";
 }
 
-interface APIKeyItem {
-  id: number;
-  name: string;
-  key_prefix: string;
-  scopes: string[];
-  server_ids?: number[];
-  created_at: string;
-}
-
-interface ServerItem {
-  id: number;
-  name: string;
-}
-
 export function ApiKeysPage() {
   const { t } = useTranslation();
-  const [keys, setKeys] = useState<APIKeyItem[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  const keysQuery = useAPIKeys();
+  const serversQuery = useServers();
+  const createMutation = useCreateAPIKey();
+  const deleteMutation = useDeleteAPIKey();
+  const revealMutation = useRevealAPIKey();
+
+  const keys = keysQuery.data;
+
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newScopes, setNewScopes] = useState<Scope[]>([...PRESET_OPS]);
-  const [servers, setServers] = useState<ServerItem[]>([]);
   const [serverMode, setServerMode] = useState<"all" | "specific">("all");
   const [newServerIDs, setNewServerIDs] = useState<number[]>([]);
   const [newKey, setNewKey] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<APIKeyItem | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
 
-  const token = localStorage.getItem("auth_token");
+  const servers = serversQuery.data ?? [];
 
-  const fetchKeys = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/api-keys`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Failed to load API keys");
-      const json = await res.json();
-      setKeys(json.data ?? []);
-    } catch {
-      toast.error(t("common.loadError"));
+  const errorText = (error: unknown): string => {
+    switch (apiKeyErrorKind(error)) {
+      case "unauthorized":
+        return t("apiKeys.errorUnauthorized");
+      case "forbidden":
+        return t("apiKeys.errorForbidden");
+      case "rateLimited":
+        return t("apiKeys.errorRateLimited");
+      case "server":
+        return t("apiKeys.errorServer");
+      case "network":
+        return t("apiKeys.errorNetwork");
+      default:
+        return t("common.error");
     }
-    setLoading(false);
-  }, [token, t]);
-
-  useEffect(() => {
-    fetchKeys();
-  }, [fetchKeys]);
-
-  useEffect(() => {
-    const fetchServers = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/v1/servers`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) return;
-        const json = await res.json();
-        setServers(json.data ?? []);
-      } catch {
-        /* ignore — the server selector simply stays empty */
-      }
-    };
-    fetchServers();
-  }, [token]);
+  };
 
   const toggleScope = (scope: Scope) => {
     setNewScopes((prev) =>
@@ -142,57 +121,56 @@ export function ApiKeysPage() {
     setNewScopes([...PRESET_OPS]);
     setServerMode("all");
     setNewServerIDs([]);
+    setCreateError(null);
   };
 
-  const handleCreate = async () => {
-    setCreating(true);
-    try {
-      const body: Record<string, unknown> = { name: newName };
-      if (newScopes.length > 0) body.scopes = newScopes;
-      if (serverMode === "specific" && newServerIDs.length > 0) body.server_ids = newServerIDs;
-      const res = await fetch(`${API_BASE}/api/v1/api-keys`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error("Failed");
-      const json = await res.json();
-      setNewKey(json.data.key);
-      resetCreateForm();
-      fetchKeys();
-    } catch {
-      toast.error(t("common.error"));
-    }
-    setCreating(false);
+  // "Specific servers" needs a usable selection: while the options are
+  // unknown or still loading we must not submit, or the request would silently
+  // mean "all servers".
+  const serversReady =
+    serverMode === "all" ||
+    (!serversQuery.isLoading && !serversQuery.isError && newServerIDs.length > 0);
+  const canCreate = newName.trim() !== "" && !createMutation.isPending && serversReady;
+
+  const handleCreate = () => {
+    setCreateError(null);
+    const input = {
+      name: newName,
+      scopes: newScopes,
+      ...(serverMode === "specific" ? { server_ids: newServerIDs } : {}),
+    };
+    createMutation.mutate(input, {
+      onSuccess: (result) => {
+        setNewKey(result.key);
+        resetCreateForm();
+      },
+      onError: (error) => setCreateError(errorText(error)),
+    });
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!deleteTarget) return;
-    const id = deleteTarget.id;
-    setDeleting(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/api-keys/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Failed");
-      await fetchKeys();
-      toast.success(t("common.deleted"));
-    } catch {
-      toast.error(t("apiKeys.deleteFailed"));
-    }
-    // Close either way, matching the server/service/credential lists.
-    setDeleteTarget(null);
-    setDeleting(false);
+    const { id } = deleteTarget;
+    deleteMutation.mutate(id, {
+      onSuccess: () => {
+        toast.success(t("common.deleted"));
+        setDeleteTarget(null);
+      },
+      onError: (error) => {
+        // Keep the row: nothing was removed server-side.
+        toast.error(errorText(error));
+        setDeleteTarget(null);
+      },
+    });
   };
 
-  const copyKey = async (key: string) => {
+  const copyToClipboard = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(key);
+      await navigator.clipboard.writeText(text);
       toast.success(t("common.copied"));
     } catch {
       const el = document.createElement("textarea");
-      el.value = key;
+      el.value = text;
       el.style.position = "fixed";
       el.style.opacity = "0";
       document.body.appendChild(el);
@@ -203,21 +181,21 @@ export function ApiKeysPage() {
     }
   };
 
-  const revealKey = async (id: number) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/api-keys/${id}/reveal`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Failed");
-      const json = await res.json();
-      if (json.data) copyKey(json.data);
-    } catch {
-      toast.error(t("common.error"));
-    }
+  const handleReveal = (id: number) => {
+    revealMutation.mutate(id, {
+      onSuccess: (raw) => {
+        if (raw) void copyToClipboard(raw);
+      },
+      onError: (error) => toast.error(errorText(error)),
+    });
   };
 
   const scopeLabel = (scope: string) => t(`apiKeys.scopes.${scope.replace(":", "_")}`, scope);
   const activePreset = detectPreset(newScopes);
+
+  const showFirstLoadError = keysQuery.isError && keys === undefined && !keysQuery.isLoading;
+  const showRefreshError = keysQuery.isError && keys !== undefined;
+  const showEmpty = keys !== undefined && keys.length === 0 && !keysQuery.isError;
 
   return (
     <div>
@@ -231,6 +209,7 @@ export function ApiKeysPage() {
           onClick={() => {
             setShowCreate(true);
             setNewKey(null);
+            setCreateError(null);
           }}
         >
           <Plus className="h-4 w-4" />
@@ -247,13 +226,16 @@ export function ApiKeysPage() {
                 <code className="flex-1 break-all rounded-lg bg-muted px-3 py-2 font-mono text-sm text-foreground">
                   {newKey}
                 </code>
-                <Button type="button" variant="ghost" size="icon" onClick={() => copyKey(newKey)}>
+                <Button type="button" variant="ghost" size="icon" onClick={() => copyToClipboard(newKey)}>
                   <Copy className="h-4 w-4" />
                 </Button>
               </div>
               <button
                 type="button"
-                onClick={() => setShowCreate(false)}
+                onClick={() => {
+                  setShowCreate(false);
+                  setNewKey(null);
+                }}
                 className="mt-3 text-sm text-primary hover:text-primary-hover"
               >
                 {t("common.close")}
@@ -261,6 +243,12 @@ export function ApiKeysPage() {
             </div>
           ) : (
             <div className="space-y-5">
+              {createError && (
+                <div className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger">
+                  {createError}
+                </div>
+              )}
+
               <Field label={t("apiKeys.name")} htmlFor="api-key-name">
                 <Input
                   id="api-key-name"
@@ -365,9 +353,21 @@ export function ApiKeysPage() {
                   ))}
                 </div>
                 {serverMode === "all" ? (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("apiKeys.serversAllHint")}
-                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">{t("apiKeys.serversAllHint")}</p>
+                ) : serversQuery.isLoading ? (
+                  <p className="mt-1 text-xs text-muted-foreground">{t("common.loading")}</p>
+                ) : serversQuery.isError ? (
+                  <div className="mt-1 flex items-center gap-2 text-xs text-danger">
+                    <span>{t("apiKeys.serversLoadFailed")}</span>
+                    <button
+                      type="button"
+                      onClick={() => serversQuery.refetch()}
+                      className="inline-flex items-center gap-1 font-medium text-primary hover:text-primary-hover"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      {t("common.retry")}
+                    </button>
+                  </div>
                 ) : servers.length === 0 ? (
                   <p className="mt-1 text-xs text-muted-foreground">{t("apiKeys.empty")}</p>
                 ) : (
@@ -436,14 +436,17 @@ export function ApiKeysPage() {
               </div>
 
               <div className="flex gap-3">
+                <Button type="button" onClick={handleCreate} disabled={!canCreate}>
+                  {createMutation.isPending ? t("common.creating") : t("apiKeys.generate")}
+                </Button>
                 <Button
                   type="button"
-                  onClick={handleCreate}
-                  disabled={creating || newName.trim() === ""}
+                  variant="ghost"
+                  onClick={() => {
+                    setShowCreate(false);
+                    setCreateError(null);
+                  }}
                 >
-                  {creating ? t("common.creating") : t("apiKeys.generate")}
-                </Button>
-                <Button type="button" variant="ghost" onClick={() => setShowCreate(false)}>
                   {t("common.cancel")}
                 </Button>
               </div>
@@ -452,87 +455,123 @@ export function ApiKeysPage() {
         </div>
       )}
 
-      {loading ? (
+      {keysQuery.isLoading && keys === undefined ? (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-14 animate-pulse rounded-xl bg-muted/60" />
           ))}
         </div>
-      ) : keys.length === 0 ? (
+      ) : showFirstLoadError ? (
+        <div className="rounded-2xl border border-danger/30 bg-danger-subtle p-8 text-center">
+          <p className="text-sm text-danger">{t("apiKeys.loadFailed")}</p>
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-3"
+            onClick={() => keysQuery.refetch()}
+            disabled={keysQuery.isFetching}
+          >
+            {keysQuery.isFetching ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            {t("common.retry")}
+          </Button>
+        </div>
+      ) : showEmpty ? (
         <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
           <p className="text-muted-foreground">{t("apiKeys.empty")}</p>
         </div>
-      ) : (
-        <TableCard>
-          <Table>
-            <THead>
-              <tr>
-                <Th>{t("apiKeys.name")}</Th>
-                <Th>{t("apiKeys.scopesLabel")}</Th>
-                <Th>{t("apiKeys.serversLabel")}</Th>
-                <Th>{t("apiKeys.prefix")}</Th>
-                <Th>{t("common.created")}</Th>
-                <Th align="right">{t("common.actions")}</Th>
-              </tr>
-            </THead>
-            <TBody>
-              {keys.map((k) => (
-                <tr key={k.id} className="transition-colors hover:bg-muted/40">
-                  <Td className="font-medium text-foreground">{k.name || `#${k.id}`}</Td>
-                  <Td>
-                    <div className="flex flex-wrap gap-1">
-                      {(k.scopes ?? []).map((scope) => (
-                        <span
-                          key={scope}
-                          className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground"
-                        >
-                          {scopeLabel(scope)}
-                        </span>
-                      ))}
-                    </div>
-                  </Td>
-                  <Td className="text-muted-foreground">
-                    {k.server_ids && k.server_ids.length > 0
-                      ? t("apiKeys.serversCount", { count: k.server_ids.length })
-                      : t("apiKeys.serversAll")}
-                  </Td>
-                  <Td className="font-mono text-muted-foreground">{k.key_prefix}...</Td>
-                  <Td className="text-muted-foreground">
-                    {new Date(k.created_at).toLocaleDateString()}
-                  </Td>
-                  <Td>
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        type="button"
-                        onClick={() => revealKey(k.id)}
-                        className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                        aria-label={t("common.copy")}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteTarget(k)}
-                        className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-danger-subtle hover:text-danger"
-                        aria-label={t("common.delete")}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </Td>
+      ) : keys ? (
+        <>
+          {showRefreshError && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning-subtle px-4 py-2 text-sm text-warning">
+              <span>{t("apiKeys.refreshFailed")}</span>
+              <button
+                type="button"
+                onClick={() => keysQuery.refetch()}
+                className="inline-flex items-center gap-1 font-medium hover:underline"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                {t("common.retry")}
+              </button>
+            </div>
+          )}
+          <TableCard>
+            <Table>
+              <THead>
+                <tr>
+                  <Th>{t("apiKeys.name")}</Th>
+                  <Th>{t("apiKeys.scopesLabel")}</Th>
+                  <Th>{t("apiKeys.serversLabel")}</Th>
+                  <Th>{t("apiKeys.prefix")}</Th>
+                  <Th>{t("common.created")}</Th>
+                  <Th align="right">{t("common.actions")}</Th>
                 </tr>
-              ))}
-            </TBody>
-          </Table>
-        </TableCard>
-      )}
+              </THead>
+              <TBody>
+                {keys.map((k) => (
+                  <tr key={k.id} className="transition-colors hover:bg-muted/40">
+                    <Td className="font-medium text-foreground">{k.name || `#${k.id}`}</Td>
+                    <Td>
+                      <div className="flex flex-wrap gap-1">
+                        {(k.scopes ?? []).map((scope) => (
+                          <span
+                            key={scope}
+                            className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground"
+                          >
+                            {scopeLabel(scope)}
+                          </span>
+                        ))}
+                      </div>
+                    </Td>
+                    <Td className="text-muted-foreground">
+                      {k.server_ids && k.server_ids.length > 0
+                        ? t("apiKeys.serversCount", { count: k.server_ids.length })
+                        : t("apiKeys.serversAll")}
+                    </Td>
+                    <Td className="font-mono text-muted-foreground">{k.key_prefix}...</Td>
+                    <Td className="text-muted-foreground">
+                      {new Date(k.created_at).toLocaleDateString()}
+                    </Td>
+                    <Td>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleReveal(k.id)}
+                          disabled={revealMutation.isPending}
+                          className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                          aria-label={t("common.copy")}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteTarget({ id: k.id, name: k.name })}
+                          className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-danger-subtle hover:text-danger"
+                          aria-label={t("common.delete")}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </Td>
+                  </tr>
+                ))}
+              </TBody>
+            </Table>
+          </TableCard>
+        </>
+      ) : null}
 
       <ConfirmDialog
         open={deleteTarget !== null}
         title={t("apiKeys.deleteTitle")}
-        message={t("apiKeys.deleteMessage", { name: deleteTarget?.name || `#${deleteTarget?.id}` })}
+        message={t("apiKeys.deleteMessage", {
+          name: deleteTarget?.name || `#${deleteTarget?.id}`,
+        })}
         confirmLabel={t("common.delete")}
-        isPending={deleting}
+        isPending={deleteMutation.isPending}
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
       />
