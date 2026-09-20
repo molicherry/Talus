@@ -64,7 +64,7 @@ export function useTerminal(serverId: number): UseTerminalReturn {
       ws.onmessage = null;
       ws.onerror = null;
       ws.onopen = null;
-      ws.close();
+      ws.close(1000);
     }
     termInstanceRef.current?.dispose();
     termInstanceRef.current = null;
@@ -98,7 +98,7 @@ export function useTerminal(serverId: number): UseTerminalReturn {
       oldWs.onmessage = null;
       oldWs.onerror = null;
       oldWs.onopen = null;
-      oldWs.close();
+      oldWs.close(1000);
     }
     // Only a fresh (manual/initial) connect resets the retry counter; a
     // reconnect scheduled by scheduleRetry must keep counting so the
