@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -99,16 +100,10 @@ var terminalTestUpgrader = websocket.Upgrader{
 	CheckOrigin: func(*http.Request) bool { return true },
 }
 
-// startSeededTerminalService builds a TerminalService whose pool already holds
-// a live SSH client for serverID, so StartSession never dials and the test
-// needs no server repository or credential service.
-func startSeededTerminalService(t *testing.T, serverID uint) (*TerminalService, *sshpool.Pool) {
+// dialTestSSH opens a client to a test SSH server — or to a proxy in front of
+// one, for the unresponsive-peer case.
+func dialTestSSH(t *testing.T, addr string, hostKey ssh.PublicKey) *ssh.Client {
 	t.Helper()
-
-	addr, hostKey := startTestSSHServer(t)
-
-	pool := sshpool.NewPool(time.Minute, 1, time.Second)
-	t.Cleanup(pool.Close)
 
 	client, err := ssh.Dial("tcp", addr, &ssh.ClientConfig{
 		User:            "test",
@@ -118,13 +113,38 @@ func startSeededTerminalService(t *testing.T, serverID uint) (*TerminalService, 
 	if err != nil {
 		t.Fatalf("dial test ssh server: %v", err)
 	}
+	return client
+}
 
-	// Acquire the single slot first so the client can be handed to the pool
-	// without Release's slot accounting blocking on an unacquired slot.
+// newTestPool returns a pool that allows one session per server.
+func newTestPool(t *testing.T) *sshpool.Pool {
+	t.Helper()
+
+	pool := sshpool.NewPool(time.Minute, 1, time.Second)
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+// seedPool hands a live client to the pool for serverID. It takes the single
+// slot first so Release's slot accounting does not block on an unacquired slot.
+func seedPool(t *testing.T, pool *sshpool.Pool, serverID uint, client *ssh.Client) {
+	t.Helper()
+
 	if got, err := pool.Get(serverID); err != nil || got != nil {
 		t.Fatalf("seed pool Get = (%v, %v), want (nil, nil)", got, err)
 	}
 	pool.Release(serverID, client)
+}
+
+// startSeededTerminalService builds a TerminalService whose pool already holds
+// a live SSH client for serverID, so StartSession never dials and the test
+// needs no server repository or credential service.
+func startSeededTerminalService(t *testing.T, serverID uint) (*TerminalService, *sshpool.Pool) {
+	t.Helper()
+
+	addr, hostKey := startTestSSHServer(t)
+	pool := newTestPool(t)
+	seedPool(t, pool, serverID, dialTestSSH(t, addr, hostKey))
 
 	// nil repository and credential service are safe here: the cached client
 	// means GetClient takes the pool hit and never dereferences them.
@@ -232,8 +252,8 @@ func TestStartSessionCleanCloseReleasesConnection(t *testing.T) {
 	svc, pool := startSeededTerminalService(t, serverID)
 	h := beginSession(t, svc, serverID)
 
-	// A clean close (the frontend calling ws.close()) must keep a healthy
-	// connection available for reuse.
+	// A close carrying an explicit 1000 must keep a healthy connection
+	// available for reuse; the bare ws.close() (1005) case is covered below.
 	err := h.ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	if err != nil {
 		t.Fatalf("write close frame: %v", err)
@@ -250,4 +270,149 @@ func TestStartSessionCleanCloseReleasesConnection(t *testing.T) {
 		t.Fatal("healthy connection was discarded after a clean close")
 	}
 	pool.Release(serverID, client)
+}
+
+// TestStartSessionEmptyCloseFrameReleasesConnection covers the frontend's
+// actual disconnect: a bare ws.close() sends an empty close frame, which
+// gorilla reports as 1005 (CloseNoStatusReceived). That is a clean disconnect,
+// so it must not cost a healthy pooled connection.
+func TestStartSessionEmptyCloseFrameReleasesConnection(t *testing.T) {
+	const serverID = 1
+
+	svc, pool := startSeededTerminalService(t, serverID)
+	h := beginSession(t, svc, serverID)
+
+	// FormatCloseMessage(CloseNoStatusReceived, "") is exactly the empty
+	// payload a browser sends for ws.close().
+	data := websocket.FormatCloseMessage(websocket.CloseNoStatusReceived, "")
+	if err := h.ws.WriteMessage(websocket.CloseMessage, data); err != nil {
+		t.Fatalf("write close frame: %v", err)
+	}
+	if err := h.wait(t); err != nil {
+		t.Fatalf("StartSession = %v, want nil", err)
+	}
+
+	client, err := pool.Get(serverID)
+	if err != nil {
+		t.Fatalf("Get after bare ws.close() = %v", err)
+	}
+	if client == nil {
+		t.Fatal("connection was discarded for a bare ws.close(), want reused")
+	}
+	pool.Release(serverID, client)
+}
+
+// freezeProxy forwards TCP traffic to the test SSH server and can be frozen, so
+// the peer never sees — and therefore never answers — the channel close. That is
+// the "SSH side is alive but unresponsive" case that session.Close() alone
+// cannot recover from.
+type freezeProxy struct {
+	addr string
+
+	mu     sync.Mutex
+	frozen bool
+}
+
+func startFreezeProxy(t *testing.T, target string) *freezeProxy {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("proxy listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	p := &freezeProxy{addr: ln.Addr().String()}
+	go func() {
+		for {
+			downstream, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			upstream, err := net.Dial("tcp", target)
+			if err != nil {
+				_ = downstream.Close()
+				continue
+			}
+			go p.pipe(downstream, upstream)
+			go p.pipe(upstream, downstream)
+		}
+	}()
+	return p
+}
+
+func (p *freezeProxy) freeze() {
+	p.mu.Lock()
+	p.frozen = true
+	p.mu.Unlock()
+}
+
+func (p *freezeProxy) isFrozen() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.frozen
+}
+
+// pipe copies src to dst, dropping whatever it reads while frozen. The
+// connection stays open, so the peer's parked read simply never wakes.
+func (p *freezeProxy) pipe(dst, src net.Conn) {
+	defer dst.Close()
+
+	buf := make([]byte, 4096)
+	for {
+		n, err := src.Read(buf)
+		if err != nil {
+			return
+		}
+		if p.isFrozen() {
+			continue
+		}
+		if _, err := dst.Write(buf[:n]); err != nil {
+			return
+		}
+	}
+}
+
+// TestStartSessionClosesTransportWhenPeerNeverAnswers pins the fallback: since
+// session.Close() only asks the peer to close the channel, an unresponsive peer
+// must not be able to hold the session and its pool slot forever.
+func TestStartSessionClosesTransportWhenPeerNeverAnswers(t *testing.T) {
+	const serverID = 1
+
+	oldGrace := sessionTeardownGrace
+	sessionTeardownGrace = 200 * time.Millisecond
+	t.Cleanup(func() { sessionTeardownGrace = oldGrace })
+
+	sshAddr, hostKey := startTestSSHServer(t)
+	proxy := startFreezeProxy(t, sshAddr)
+
+	pool := newTestPool(t)
+	seedPool(t, pool, serverID, dialTestSSH(t, proxy.addr, hostKey))
+	svc := NewTerminalService(NewSSHService(pool, nil, nil, time.Second, time.Second))
+
+	h := beginSession(t, svc, serverID)
+
+	// From here the peer stops answering: the channel close never reaches the
+	// SSH server, so only closing the transport underneath can unwind the
+	// session. Before the fallback this hung and held the slot.
+	proxy.freeze()
+	if err := h.ws.Close(); err != nil {
+		t.Fatalf("close websocket: %v", err)
+	}
+
+	if err := h.wait(t); err != nil {
+		t.Fatalf("StartSession = %v, want nil", err)
+	}
+
+	// A forced teardown means the client is not reusable: discarded, with the
+	// slot released exactly once.
+	client, err := pool.Get(serverID)
+	if err != nil {
+		t.Fatalf("Get after forced teardown = %v, want the slot to be free", err)
+	}
+	if client != nil {
+		pool.Release(serverID, client)
+		t.Fatal("unresponsive client was released back into the pool, want discarded")
+	}
+	pool.Release(serverID, nil)
 }
