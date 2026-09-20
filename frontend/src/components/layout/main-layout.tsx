@@ -3,7 +3,7 @@ import { Suspense, useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 
 import { prefetchRoutes } from "../../lib/prefetch-routes";
-import { ErrorBoundary } from "../ui/error-boundary";
+import { RouteErrorBoundary } from "../ui/error-boundary";
 import { Header } from "./header";
 import { UpdateBanner } from "./update-banner";
 import { Sidebar } from "./sidebar";
@@ -29,7 +29,7 @@ export function MainLayout() {
         <Header onOpenSidebar={() => setSidebarOpen(true)} />
         <UpdateBanner />
         <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
-          <ErrorBoundary>
+          <RouteErrorBoundary>
             <Suspense
               fallback={
                 <div className="flex h-full items-center justify-center py-12">
@@ -39,7 +39,7 @@ export function MainLayout() {
             >
               <Outlet />
             </Suspense>
-          </ErrorBoundary>
+          </RouteErrorBoundary>
         </main>
       </div>
     </div>
