@@ -84,9 +84,10 @@ export function Dialog({
           </h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={dismissible ? onClose : undefined}
+            disabled={!dismissible}
             aria-label={t("common.closeDialog")}
-            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
           >
             <X className="h-4 w-4" />
           </button>

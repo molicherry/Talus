@@ -69,6 +69,10 @@ export function ServerForm({ server }: ServerFormProps) {
   }, [createdCredentialId, setValue, navigate, location.pathname]);
 
   const [showCredentialDialog, setShowCredentialDialog] = useState(false);
+  // True while a credential create request is in flight. The dialog locks
+  // Cancel/Esc/backdrop/close then, so it cannot be dismissed mid-request and
+  // a late response cannot land on a newer dialog session.
+  const [credentialPending, setCredentialPending] = useState(false);
   // Held as a temporary dropdown option until the invalidated credential list
   // comes back with it, so the new selection never blinks out.
   const [createdCredential, setCreatedCredential] = useState<SSHCredential | null>(null);
@@ -239,11 +243,13 @@ export function ServerForm({ server }: ServerFormProps) {
       <Dialog
         open={showCredentialDialog}
         onClose={() => setShowCredentialDialog(false)}
+        dismissible={!credentialPending}
         title={t("credential.add")}
       >
         <CredentialForm
           onCreated={handleCredentialCreated}
           onCancel={() => setShowCredentialDialog(false)}
+          onPendingChange={setCredentialPending}
         />
       </Dialog>
     </form>

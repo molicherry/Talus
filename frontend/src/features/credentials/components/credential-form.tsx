@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Copy, Eye, EyeOff, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 
 import { Button } from "../../../components/ui/button";
@@ -19,6 +19,8 @@ interface CredentialFormProps {
   /** Called with the created credential; the caller decides where to go. */
   onCreated: (credential: SSHCredential) => void;
   onCancel: () => void;
+  /** Reports the in-flight state so a host can lock dismissal mid-request. */
+  onPendingChange?: (pending: boolean) => void;
 }
 
 /**
@@ -26,7 +28,7 @@ interface CredentialFormProps {
  * both in the standalone `/credentials/new` route and inside a dialog on the
  * server form (where leaving the page would discard unsaved server input).
  */
-export function CredentialForm({ onCreated, onCancel }: CredentialFormProps) {
+export function CredentialForm({ onCreated, onCancel, onPendingChange }: CredentialFormProps) {
   const { t } = useTranslation();
   const createMutation = useCreateCredential();
 
@@ -48,6 +50,12 @@ export function CredentialForm({ onCreated, onCancel }: CredentialFormProps) {
   });
 
   const authType = watch("auth_type");
+
+  // Let the host dialog lock Cancel/Esc/backdrop while a create is in flight,
+  // so a late response can never target a newer dialog session.
+  useEffect(() => {
+    onPendingChange?.(createMutation.isPending);
+  }, [createMutation.isPending, onPendingChange]);
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -248,7 +256,12 @@ export function CredentialForm({ onCreated, onCancel }: CredentialFormProps) {
           {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
           {createMutation.isPending ? t("common.creating") : t("credential.create")}
         </Button>
-        <Button type="button" variant="secondary" onClick={onCancel}>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={onCancel}
+          disabled={createMutation.isPending}
+        >
           {t("common.cancel")}
         </Button>
       </div>
