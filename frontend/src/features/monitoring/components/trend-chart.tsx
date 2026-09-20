@@ -69,6 +69,11 @@ export function TrendChart({
   const count = times.length;
   const plotW = Math.max(10, width - PAD.left - PAD.right);
   const plotH = Math.max(10, height - PAD.top - PAD.bottom);
+  // Bucket timestamps drive every x position (see xAtMs below).
+  const timeMs = useMemo(() => times.map((t) => Date.parse(t)), [times]);
+  const startMs = count > 0 ? timeMs[0] : 0;
+  const endMs = count > 0 ? timeMs[count - 1] : 0;
+  const spanMs = endMs - startMs;
 
   const resolvedMax = useMemo(() => {
     if (yMax !== undefined && yMax !== null) return yMax;
@@ -81,8 +86,13 @@ export function TrendChart({
     return niceMax(max);
   }, [series, yMax]);
 
-  const xAt = (index: number) =>
-    count <= 1 ? PAD.left + plotW / 2 : PAD.left + (index / (count - 1)) * plotW;
+  // Every x position comes from the bucket's real timestamp, so the plot stays
+  // proportional to time. Scaling by index would silently compress gaps.
+  const xAtMs = (ms: number) =>
+    count <= 1 || spanMs <= 0
+      ? PAD.left + plotW / 2
+      : PAD.left + ((ms - startMs) / spanMs) * plotW;
+  const xAt = (index: number) => xAtMs(timeMs[index]);
   const yAt = (value: number) => PAD.top + plotH - (Math.max(0, value) / resolvedMax) * plotH;
 
   const gridValues = [1, 0.75, 0.5, 0.25, 0];
@@ -90,13 +100,24 @@ export function TrendChart({
   const xTicks = useMemo(() => {
     if (count === 0) return [] as number[];
     if (count === 1) return [0];
-    const wanted = Math.min(5, count);
-    const ticks = new Set<number>();
+    // Even steps across the time span, snapped to the nearest bucket.
+    const wanted = 5;
+    const ticks: number[] = [];
     for (let i = 0; i < wanted; i++) {
-      ticks.add(Math.round((i / (wanted - 1)) * (count - 1)));
+      const targetMs = startMs + (i / (wanted - 1)) * spanMs;
+      let best = 0;
+      let bestDist = Infinity;
+      for (let j = 0; j < count; j++) {
+        const dist = Math.abs(timeMs[j] - targetMs);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = j;
+        }
+      }
+      if (!ticks.includes(best)) ticks.push(best);
     }
-    return [...ticks].sort((a, b) => a - b);
-  }, [count]);
+    return ticks.sort((a, b) => a - b);
+  }, [count, timeMs, startMs, spanMs]);
 
   /** Contiguous non-null runs, so gaps show as a break rather than a drop to 0. */
   const paths = useMemo(
@@ -118,15 +139,24 @@ export function TrendChart({
       }),
     // xAt/yAt are pure derivations of width/count/series/resolvedMax
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [series, width, count, resolvedMax, plotH],
+    [series, width, count, resolvedMax, plotH, timeMs, spanMs],
   );
 
   const handleMove = (event: MouseEvent<SVGRectElement>) => {
     if (count === 0) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const ratio = (event.clientX - rect.left) / rect.width;
-    const index = Math.round(ratio * (count - 1));
-    setHoverIndex(Math.max(0, Math.min(count - 1, index)));
+    const targetMs = startMs + Math.min(1, Math.max(0, ratio)) * spanMs;
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < count; i++) {
+      const dist = Math.abs(timeMs[i] - targetMs);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    setHoverIndex(best);
   };
 
   const legend = (

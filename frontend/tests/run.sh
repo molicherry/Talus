@@ -1,19 +1,33 @@
 #!/bin/bash
-# Compile the query layer (TS) to a temp module and run all committed tests.
-# Zero new dependencies: uses the project's own tsc + node.
+# Compile the modules under test (TS) to runnable .mjs, then run all committed
+# tests. Zero new dependencies: uses the project's own tsc + node.
 set -euo pipefail
 cd "$(dirname "$0")/.."   # frontend/
 
-# 1. Compile src/lib/query.ts to a runnable .mjs (gitignored).
-OUT="tests/.compiled-query.mjs"
-rm -rf /tmp/pi-query-compile
-env -u NODE_ENV npx tsc src/lib/query.ts \
-  --ignoreConfig --outDir /tmp/pi-query-compile \
-  --module nodenext --moduleResolution nodenext --target es2022 \
-  --skipLibCheck --esModuleInterop >/dev/null 2>&1
-cp /tmp/pi-query-compile/query.js "$OUT"
+# 1. Compile every source that has tests. Adding a test file alone does NOT
+#    wire up its module — add a `compile <src> <name>` line here too, otherwise
+#    the test silently fails to import and the suite never exercises it.
+compile() { # <src> <outName>
+  local src="$1" out="$2" tmp outfile
+  tmp="$(mktemp -d)"
+  if ! env -u NODE_ENV npx tsc "$src" \
+    --ignoreConfig --outDir "$tmp" \
+    --module nodenext --moduleResolution nodenext --target es2022 \
+    --skipLibCheck --esModuleInterop 2>"$tmp/tsc.log"; then
+    echo "✗ tsc failed for $src"
+    cat "$tmp/tsc.log"
+    rm -rf "$tmp"
+    exit 1
+  fi
+  outfile="$tmp/$(basename "${src%.ts}").js"
+  cp "$outfile" "tests/.compiled-$out.mjs"
+  rm -rf "$tmp"
+}
 
-# 2. Run every test file under tests/ (skip this runner + the compiled artifact).
+compile src/lib/query.ts query
+compile src/features/monitoring/lib/series.ts series
+
+# 2. Run every test file under tests/ (skip this runner + compiled artifacts).
 FAIL=0
 for test in tests/*.test.mjs; do
   echo "▶ $test"
@@ -25,5 +39,5 @@ for test in tests/*.test.mjs; do
   fi
 done
 
-rm -f "$OUT"
+rm -f tests/.compiled-*.mjs
 exit $FAIL
