@@ -1,9 +1,10 @@
-import { Loader2, ShieldCheck } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "../../../i18n";
 import { useMutation } from "../../../lib/query";
 import { Navigate, useNavigate } from "react-router-dom";
 import { Button } from "../../../components/ui/button";
+import { Logo } from "../../../components/ui/logo";
 import { ApiClientError, apiClient } from "../../../lib/api-client";
 import { setAuthToken } from "../../../lib/auth";
 import type { LoginResponse } from "../../../types/api";
@@ -75,7 +76,7 @@ export function SetupPage() {
         <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-elevated">
           <div className="mb-8 text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary-subtle text-primary">
-              <ShieldCheck className="h-6 w-6" />
+              <Logo className="h-6.5 w-6.5" />
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">
               {t("app.name")}

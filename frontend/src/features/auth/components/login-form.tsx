@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "../../../i18n";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../../components/ui/button";
+import { Logo } from "../../../components/ui/logo";
 import { ApiClientError } from "../../../lib/api-client";
 import { useLogin } from "../hooks/use-login";
 
@@ -52,7 +53,7 @@ export function LoginPage() {
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-elevated">
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-            <Loader2 className="h-6 w-6" />
+            <Logo className="h-6.5 w-6.5" />
           </div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("app.name")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("auth.signInSubtitle")}</p>

@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 
 import { useTranslation } from "../../i18n";
 import { cn } from "../../lib/utils";
+import { Logo } from "../ui/logo";
 
 const VERSION = import.meta.env.VITE_APP_VERSION || "dev";
 
@@ -43,7 +44,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-6">
           <div className="flex items-center">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
-              <Server className="h-4 w-4" />
+              <Logo className="h-4 w-4" />
             </div>
             <span className="ml-3 text-sm font-semibold text-sidebar-foreground">
               {t("app.name")}
