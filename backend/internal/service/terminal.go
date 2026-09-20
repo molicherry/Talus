@@ -161,8 +161,13 @@ func (s *TerminalService) StartSession(ctx context.Context, serverID uint, wsCon
 	// readFromWS: reads WebSocket messages and forwards to SSH stdin.
 	go func() {
 		defer wg.Done()
-		defer teardown()
+		// stdin.Close() sends a channel close over the SSH transport, so it can
+		// block on a wedged connection. teardown must therefore run *first*, so
+		// the grace timer that force-closes the transport is already armed by the
+		// time anything can block here. Deferred calls run LIFO: last registered,
+		// first executed.
 		defer stdin.Close()
+		defer teardown()
 		for {
 			var msg wsMessage
 			if readErr := wsConn.ReadJSON(&msg); readErr != nil {

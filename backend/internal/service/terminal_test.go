@@ -416,3 +416,111 @@ func TestStartSessionClosesTransportWhenPeerNeverAnswers(t *testing.T) {
 	}
 	pool.Release(serverID, nil)
 }
+
+// gatedConn is a net.Conn whose writes can be parked on demand, which makes the
+// SSH transport's send path block deterministically — no need to fill kernel
+// socket buffers. Closing it releases a parked write, like a real connection.
+type gatedConn struct {
+	net.Conn
+
+	mu    sync.Mutex
+	gate  chan struct{}
+	block bool
+}
+
+func (c *gatedConn) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	block, gate := c.block, c.gate
+	c.mu.Unlock()
+
+	if block {
+		<-gate
+	}
+	return c.Conn.Write(p)
+}
+
+func (c *gatedConn) Close() error {
+	c.mu.Lock()
+	if c.gate != nil {
+		close(c.gate)
+		c.gate = nil
+	}
+	c.block = false
+	c.mu.Unlock()
+
+	return c.Conn.Close()
+}
+
+// blockWrites parks every subsequent Write until the connection is closed.
+func (c *gatedConn) blockWrites() {
+	c.mu.Lock()
+	if c.gate == nil {
+		c.gate = make(chan struct{})
+	}
+	c.block = true
+	c.mu.Unlock()
+}
+
+// dialGatedSSH opens a client over a connection whose writes can be parked.
+func dialGatedSSH(t *testing.T, addr string, hostKey ssh.PublicKey) (*ssh.Client, *gatedConn) {
+	t.Helper()
+
+	raw, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial test ssh server: %v", err)
+	}
+	conn := &gatedConn{Conn: raw}
+	s, chans, reqs, err := ssh.NewClientConn(conn, addr, &ssh.ClientConfig{
+		User:            "test",
+		HostKeyCallback: ssh.FixedHostKey(hostKey),
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		_ = conn.Close()
+		t.Fatalf("ssh handshake: %v", err)
+	}
+	return ssh.NewClient(s, chans, reqs), conn
+}
+
+// TestStartSessionUnwindsWhenTheSSHWritePathIsWedged pins the order of the
+// deferred calls in readFromWS. stdin.Close() is itself a write to the SSH
+// transport, so on a wedged connection it blocks; teardown() must run first or
+// teardownStarted never fires, the grace timer never starts, and the pool slot
+// stays held.
+func TestStartSessionUnwindsWhenTheSSHWritePathIsWedged(t *testing.T) {
+	const serverID = 1
+
+	oldGrace := sessionTeardownGrace
+	sessionTeardownGrace = 200 * time.Millisecond
+	t.Cleanup(func() { sessionTeardownGrace = oldGrace })
+
+	addr, hostKey := startTestSSHServer(t)
+	client, conn := dialGatedSSH(t, addr, hostKey)
+
+	pool := newTestPool(t)
+	seedPool(t, pool, serverID, client)
+	svc := NewTerminalService(NewSSHService(pool, nil, nil, time.Second, time.Second))
+
+	h := beginSession(t, svc, serverID)
+
+	// Every SSH write from here on parks, so the channel close that would
+	// normally unblock the other pump never leaves the process.
+	conn.blockWrites()
+	if err := h.ws.Close(); err != nil {
+		t.Fatalf("close websocket: %v", err)
+	}
+
+	if err := h.wait(t); err != nil {
+		t.Fatalf("StartSession = %v, want nil", err)
+	}
+
+	got, err := pool.Get(serverID)
+	if err != nil {
+		t.Fatalf("Get after wedged transport = %v, want the slot to be free", err)
+	}
+	if got != nil {
+		pool.Release(serverID, got)
+		t.Fatal("client on a wedged transport was released, want discarded")
+	}
+	pool.Release(serverID, nil)
+}
