@@ -1,0 +1,42 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 288 320"
+  width="288"
+  height="320"
+>
+  <!-- Brand blue follows the app theme: #2563EB in light, #3B82F6 in dark. -->
+  <style>
+    .lock {
+      fill: #2563eb;
+    }
+    .bar {
+      stroke: #2563eb;
+    }
+    @media (prefers-color-scheme: dark) {
+      .lock {
+        fill: #3b82f6;
+      }
+      .bar {
+        stroke: #3b82f6;
+      }
+    }
+  </style>
+
+  <!-- 小型锁梁 -->
+  <path
+    class="bar"
+    d="M70 94V54C70 28 101 14 144 14C187 14 218 28 218 54V94"
+    fill="none"
+    stroke-width="28"
+    stroke-linecap="round"
+  />
+
+  <!-- 锁体 -->
+  <path
+    class="lock"
+    d="M36 80H252A36 36 0 0 1 288 116V284A36 36 0 0 1 252 320H36A36 36 0 0 1 0 284V116A36 36 0 0 1 36 80Z"
+  />
+
+  <!-- 白色 T -->
+  <path d="M56 140H232V180H175V274H113V180H56Z" fill="#FFFFFF" />
+</svg>
