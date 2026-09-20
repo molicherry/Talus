@@ -92,3 +92,33 @@ export function buildAlignedSeries<T extends { time: string }>(
     lastSampleTime: lastSampleMs === null ? null : new Date(lastSampleMs).toISOString(),
   };
 }
+
+/**
+ * Indices of values that are valid but isolated — a run of exactly one
+ * sample surrounded by gaps.
+ *
+ * A single point cannot be drawn as a line segment (`M` with no `L`), so the
+ * chart must render it as a dot instead, or the sample looks like it is
+ * missing even though the value is real.
+ */
+export function isolatedIndices(
+  values: readonly (number | null | undefined)[],
+): number[] {
+  const isolated: number[] = [];
+  let runStart = -1;
+
+  for (let i = 0; i <= values.length; i++) {
+    const value = i < values.length ? values[i] : null;
+    const present = typeof value === "number" && Number.isFinite(value);
+    if (present) {
+      if (runStart === -1) runStart = i;
+      continue;
+    }
+    if (runStart !== -1) {
+      if (i - runStart === 1) isolated.push(runStart);
+      runStart = -1;
+    }
+  }
+
+  return isolated;
+}

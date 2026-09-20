@@ -1,6 +1,7 @@
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { METRIC_MISSING_LABEL } from "../../../lib/metric-level";
+import { isolatedIndices } from "../lib/series";
 import { cn } from "../../../lib/utils";
 
 export interface TrendSeries {
@@ -142,6 +143,23 @@ export function TrendChart({
     [series, width, count, resolvedMax, plotH, timeMs, spanMs],
   );
 
+  // A run of exactly one sample cannot be drawn as a line segment (M without
+  // L), so those points are rendered as always-visible dots. Without this an
+  // isolated real sample looks empty even though the card shows a value.
+  const isolated = useMemo(
+    () =>
+      series.map((s) => ({
+        key: s.key,
+        color: s.color,
+        points: isolatedIndices(s.values).map((index) => ({
+          x: xAt(index),
+          y: yAt(s.values[index] as number),
+        })),
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [series, width, count, resolvedMax, plotH, timeMs, spanMs],
+  );
+
   const handleMove = (event: MouseEvent<SVGRectElement>) => {
     if (count === 0) return;
     const rect = event.currentTarget.getBoundingClientRect();
@@ -257,6 +275,18 @@ export function TrendChart({
               strokeLinecap="round"
             />
           ))}
+
+          {isolated.map((s) =>
+            s.points.map((point, index) => (
+              <circle
+                key={`${s.key}-isolated-${index}`}
+                cx={point.x}
+                cy={point.y}
+                r={2.5}
+                fill={s.color}
+              />
+            )),
+          )}
 
           {hoverIndex !== null &&
             series.map((s) => {

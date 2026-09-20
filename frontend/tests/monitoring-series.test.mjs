@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 
-import { buildAlignedSeries } from "./.compiled-series.mjs";
+import { buildAlignedSeries, isolatedIndices } from "./.compiled-series.mjs";
 
 let failures = 0;
 function check(name, fn) {
@@ -162,6 +162,36 @@ check("a degenerate window returns an empty grid instead of NaN", () => {
   ]);
   assert.deepEqual(out.times, []);
   assert.equal(out.lastSampleTime, null);
+});
+
+check("isolatedIndices finds no isolated runs in contiguous data", () => {
+  assert.deepEqual(isolatedIndices([1, 2, 3]), []);
+  assert.deepEqual(isolatedIndices([]), []);
+});
+
+check("isolatedIndices returns a run of exactly one", () => {
+  assert.deepEqual(isolatedIndices([1]), [0]);
+  assert.deepEqual(isolatedIndices([null, 1, null]), [1]);
+  assert.deepEqual(isolatedIndices([1, null, 2]), [0, 2]);
+});
+
+check("isolatedIndices keeps runs of two or more as line segments", () => {
+  assert.deepEqual(isolatedIndices([1, 2]), []);
+  assert.deepEqual(isolatedIndices([1, 2, null, 3]), [3]);
+});
+
+check("isolatedIndices handles leading and trailing isolated points", () => {
+  assert.deepEqual(isolatedIndices([5, null, 6, 7]), [0]);
+  assert.deepEqual(isolatedIndices([6, 7, null, 5]), [3]);
+});
+
+check("isolatedIndices ignores undefined and non-finite values", () => {
+  assert.deepEqual(isolatedIndices([undefined, Number.NaN, 4, undefined]), [2]);
+});
+
+check("isolatedIndices on a filled grid with one gap bucket", () => {
+  // A real sample at each end, nothing in between: both ends are isolated.
+  assert.deepEqual(isolatedIndices([1, null, null, 2]), [0, 3]);
 });
 
 console.log(failures === 0 ? "\nmonitoring-series: ALL PASS" : `\nmonitoring-series: ${failures} FAILED`);
