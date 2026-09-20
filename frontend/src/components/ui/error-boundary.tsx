@@ -3,14 +3,15 @@ import { Component, type ErrorInfo, type ReactNode, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 
 import { useTranslation } from "../../i18n";
-import { isRecentChunkError } from "../../lib/chunk-error";
+import { isChunkError } from "../../lib/chunk-error";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
   /**
-   * When this value changes (e.g. the route pathname), a *render* error state
-   * is cleared so navigating away recovers. Chunk errors are kept, because the
-   * rejected module import is cached and only a reload can fix it.
+   * When this value changes (e.g. the route pathname), the page-boundary error
+   * state is cleared — including a chunk error: a failed lazy import is cached
+   * only for that component, so it must not block other routes from rendering.
+   * Staying on the failed page and pressing retry still reloads.
    */
   resetKey?: unknown;
   /** `root` renders a full-screen fallback outside the app shell. */
@@ -36,30 +37,27 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   /**
-   * Reset a recoverable render error when the caller's key changes. Doing it
-   * here (rather than setState in componentDidUpdate) avoids a second render
-   * pass and the associated layout thrash.
+   * Adopt the caller's key and clear any page-boundary error.
+   *
+   * Doing it here (rather than setState in componentDidUpdate) avoids a second
+   * render pass. Chunk errors are cleared too: the rejected import is cached
+   * per component, so a broken page must not keep other routes broken. Still
+   * on the same failed page, `reset()` reloads (see below).
    */
   static getDerivedStateFromProps(
     props: ErrorBoundaryProps,
     state: ErrorBoundaryState,
   ): Partial<ErrorBoundaryState> | null {
     if (Object.is(props.resetKey, state.seenResetKey)) return null;
-    return {
-      seenResetKey: props.resetKey,
-      ...(state.hasError && !state.isChunkError ? { hasError: false, isChunkError: false } : {}),
-    };
+    return { seenResetKey: props.resetKey, hasError: false, isChunkError: false };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[ErrorBoundary]", error, info);
-    // Prefer the explicit signal from main.tsx (vite:preloadError). The message
-    // regex stays as a fallback for other bundlers/browsers, not the primary
-    // classifier: a network failure must not be misread as "new version".
-    const isChunkError =
-      isRecentChunkError() ||
-      /imported module|ChunkLoadError|loading chunk|dynamically imported/i.test(error?.message ?? "");
-    if (isChunkError) {
+    // Identity signal from main.tsx (vite:preloadError) first; the message
+    // regex is only a fallback for other bundlers/browsers. A network failure
+    // must not be misread as "new version".
+    if (isChunkError(error)) {
       this.setState({ isChunkError: true });
     }
   }

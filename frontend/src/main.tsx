@@ -12,8 +12,11 @@ import "./index.css";
 // path without parsing the error message. Deliberately NOT calling
 // preventDefault: the import rejection must still reach the boundary, instead
 // of being swallowed into a blank page.
-window.addEventListener("vite:preloadError", () => {
-  markChunkError();
+window.addEventListener("vite:preloadError", (event) => {
+  // Vite exposes the original import error as the event's `payload`; mark that
+  // exact object so the boundary classifies it by identity, not by a time
+  // window that could catch an unrelated error.
+  markChunkError(event.payload);
 });
 
 const rootElement = document.getElementById("root");
