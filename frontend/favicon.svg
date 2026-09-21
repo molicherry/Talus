@@ -1,24 +1,25 @@
 <svg
   xmlns="http://www.w3.org/2000/svg"
-  viewBox="0 0 258 320"
-  width="258"
+  viewBox="0 0 320 320"
+  width="320"
   height="320"
 >
-  <!-- 小型锁梁 -->
-  <path
-    d="M62 94V54C62 28 91 14 129 14C167 14 196 28 196 54V94"
-    fill="none"
-    stroke="#55BFF2"
-    stroke-width="28"
-    stroke-linecap="round"
-  />
+  <!-- 圆角底：与登录页瓷片同款（bg-primary #2563EB + 25% 圆角） -->
+  <rect width="320" height="320" rx="80" fill="#2563EB" />
 
-  <!-- 锁体 -->
-  <path
-    d="M36 80H222A36 36 0 0 1 258 116V284A36 36 0 0 1 222 320H36A36 36 0 0 1 0 284V116A36 36 0 0 1 36 80Z"
-    fill="#55BFF2"
-  />
-
-  <!-- 白色 T -->
-  <path d="M50 140H208V180H157V274H101V180H50Z" fill="#FFFFFF" />
+  <!-- 白锁：与 App 内 logo 同一套几何（258x320），按 70% 缩放居中，T 挖空露出底色 -->
+  <g transform="translate(69.7 48.0) scale(0.7)">
+    <path
+      d="M62 94V54C62 28 91 14 129 14C167 14 196 28 196 54V94"
+      fill="none"
+      stroke="#FFFFFF"
+      stroke-width="28"
+      stroke-linecap="round"
+    />
+    <path
+      d="M36 80H222A36 36 0 0 1 258 116V284A36 36 0 0 1 222 320H36A36 36 0 0 1 0 284V116A36 36 0 0 1 36 80ZM50 140H208V180H157V274H101V180H50Z"
+      fill="#FFFFFF"
+      fill-rule="evenodd"
+    />
+  </g>
 </svg>
