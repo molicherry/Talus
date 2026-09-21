@@ -7,9 +7,9 @@
   <!-- 圆角底：与登录页瓷片同款（bg-primary #55BFF2，圆角 37.5% = 18/48，取自 radius-xl token） -->
   <rect width="320" height="320" rx="120" fill="#55BFF2" />
 
-  <!-- 白锁：与 App 内 logo 同一套几何（258x320），占瓷片 54%（= 登录页 26/48），
+  <!-- 白锁：与 App 内 logo 同一套几何（258x320），小尺寸专用 65% 占比，
        居中，T 挖空露出底色 -->
-  <g transform="translate(90.34 73.6) scale(0.54)">
+  <g transform="translate(76.15 56) scale(0.65)">
     <path
       d="M62 94V54C62 28 91 14 129 14C167 14 196 28 196 54V94"
       fill="none"
