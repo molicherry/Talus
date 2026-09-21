@@ -26,7 +26,7 @@ check("no '--' inside any XML comment", badComments.length === 0, JSON.stringify
 
 // 2. the tile + the shared mark geometry
 check("viewBox is the square tile", /viewBox="0 0 320 320"/.test(favicon));
-check("has the rounded tile background", /<rect[^>]*rx="120"[^>]*fill="#55BFF2"/.test(favicon));
+check("has the rounded tile background", /<rect[^>]*rx="120"[^>]*fill="#2563EB"/.test(favicon));
 
 // 3. the two mark paths are shared verbatim with the in-app logo
 const paths = [...favicon.matchAll(/\sd="([^"]+)"/g)].map((m) => m[1]);

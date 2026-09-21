@@ -236,7 +236,7 @@ export function ApiKeysPage() {
                   setShowCreate(false);
                   setNewKey(null);
                 }}
-                className="mt-3 text-sm text-primary-strong hover:text-primary-strong-hover"
+                className="mt-3 text-sm text-primary hover:text-primary-hover"
               >
                 {t("common.close")}
               </button>
@@ -280,7 +280,7 @@ export function ApiKeysPage() {
                         className={cn(
                           "rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
                           active
-                            ? "border-primary bg-primary-subtle text-primary-strong"
+                            ? "border-primary bg-primary-subtle text-primary"
                             : "border-border bg-card text-muted-foreground hover:border-border-hover",
                           preset === "custom" && "cursor-default",
                         )}
@@ -312,7 +312,7 @@ export function ApiKeysPage() {
                         className={cn(
                           "inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors",
                           selected
-                            ? "border-primary bg-primary-subtle text-primary-strong"
+                            ? "border-primary bg-primary-subtle text-primary"
                             : "border-border bg-card text-muted-foreground hover:border-border-hover",
                         )}
                       >
@@ -342,7 +342,7 @@ export function ApiKeysPage() {
                       className={cn(
                         "rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
                         serverMode === mode
-                          ? "border-primary bg-primary-subtle text-primary-strong"
+                          ? "border-primary bg-primary-subtle text-primary"
                           : "border-border bg-card text-muted-foreground hover:border-border-hover",
                       )}
                     >
@@ -364,7 +364,7 @@ export function ApiKeysPage() {
                     <button
                       type="button"
                       onClick={() => serversQuery.refetch()}
-                      className="inline-flex items-center gap-1 font-medium text-primary-strong hover:text-primary-strong-hover"
+                      className="inline-flex items-center gap-1 font-medium text-primary hover:text-primary-hover"
                     >
                       <RefreshCw className="h-3 w-3" />
                       {t("common.retry")}
@@ -383,7 +383,7 @@ export function ApiKeysPage() {
                             className={cn(
                               "inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors",
                               selected
-                                ? "border-primary bg-primary-subtle text-primary-strong"
+                                ? "border-primary bg-primary-subtle text-primary"
                                 : "border-border bg-card text-muted-foreground hover:border-border-hover",
                             )}
                           >
