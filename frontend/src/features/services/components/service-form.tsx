@@ -4,10 +4,10 @@ import { type ReactNode, useEffect, useState } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
 
+import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { Field, Input, Label, Select, Textarea } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
-import { ApiClientError } from "../../../lib/api-client";
 import { toast } from "../../../lib/toast";
 import { type Service, ServiceFormSchema, type ServiceFormValues } from "../../../types/models";
 import { useServers } from "../../servers/hooks/use-servers";
@@ -118,12 +118,7 @@ export function ServiceForm({ service }: ServiceFormProps) {
     }
   };
 
-  const errorMessage =
-    activeMutation.error instanceof ApiClientError
-      ? activeMutation.error.message
-      : activeMutation.error
-        ? t("common.unexpectedError")
-        : null;
+  const errorMessage = activeMutation.error ? translateApiError(activeMutation.error, t) : null;
 
   const isPending = activeMutation.isPending;
 

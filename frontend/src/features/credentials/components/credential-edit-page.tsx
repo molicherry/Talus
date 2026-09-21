@@ -5,10 +5,10 @@ import { useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
 
+import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { Field, Input, Label, Textarea } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
-import { ApiClientError } from "../../../lib/api-client";
 import { cn } from "../../../lib/utils";
 import { toast } from "../../../lib/toast";
 import { useServers } from "../../servers/hooks/use-servers";
@@ -136,12 +136,7 @@ export function CredentialEditPage() {
     );
   }
 
-  const errorMessage =
-    updateMutation.error instanceof ApiClientError
-      ? updateMutation.error.message
-      : updateMutation.error
-        ? t("common.unexpectedError")
-        : null;
+  const errorMessage = updateMutation.error ? translateApiError(updateMutation.error, t) : null;
 
   return (
     <div>

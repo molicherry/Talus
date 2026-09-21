@@ -43,22 +43,22 @@ func NewCredentialHandler(svc *service.CredentialService, auditRepo *repository.
 func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateCredentialRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
 
 	var details []server.ErrorDetail
 	if req.AuthType == "" {
-		details = append(details, server.ErrorDetail{Field: "auth_type", Message: "auth_type is required"})
+		details = append(details, server.NewErrorDetail("auth_type", server.ReasonRequired, nil))
 	}
 	if req.Username == "" {
-		details = append(details, server.ErrorDetail{Field: "username", Message: "username is required"})
+		details = append(details, server.NewErrorDetail("username", server.ReasonRequired, nil))
 	}
 	if req.AuthType == "password" && req.Password == "" {
-		details = append(details, server.ErrorDetail{Field: "password", Message: "password is required for auth_type 'password'"})
+		details = append(details, server.NewErrorDetail("password", server.ReasonPasswordAuth, nil))
 	}
 	if req.AuthType == "private_key" && req.PrivateKey == "" {
-		details = append(details, server.ErrorDetail{Field: "private_key", Message: "private_key is required for auth_type 'private_key'"})
+		details = append(details, server.NewErrorDetail("private_key", server.ReasonPrivateKeyAuth, nil))
 	}
 	if len(details) > 0 {
 		server.WriteError(w, r, server.NewValidationError(details))
@@ -95,13 +95,13 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid credential id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidCredentialID))
 		return
 	}
 
 	var req UpdateCredentialRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
 
@@ -123,7 +123,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid credential id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidCredentialID))
 		return
 	}
 
@@ -138,7 +138,7 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 func (h *CredentialHandler) Reveal(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid credential id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidCredentialID))
 		return
 	}
 	result, err := h.svc.Reveal(r.Context(), id)

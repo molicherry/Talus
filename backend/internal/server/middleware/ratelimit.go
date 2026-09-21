@@ -62,7 +62,7 @@ func (rl *RateLimiter) Limit(next http.Handler) http.Handler {
 		if !rl.Allow(claims.UserID) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":{"code":429,"message":"too many requests"}}`))
+			_, _ = w.Write([]byte(`{"error":{"code":429,"reason":"rate_limited","message":"too many requests"}}`))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -135,7 +135,7 @@ func (rl *IPRateLimiter) Limit(next http.Handler) http.Handler {
 		if !rl.Allow(clientIP(r, rl.trustProxy)) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":{"code":429,"message":"too many requests"}}`))
+			_, _ = w.Write([]byte(`{"error":{"code":429,"reason":"rate_limited","message":"too many requests"}}`))
 			return
 		}
 		next.ServeHTTP(w, r)

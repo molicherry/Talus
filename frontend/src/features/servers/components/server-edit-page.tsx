@@ -1,4 +1,5 @@
 import { Loader2 } from "lucide-react";
+import { translateApiError } from "../../../lib/api-error";
 import { useTranslation } from "../../../i18n";
 import { useParams } from "react-router-dom";
 import { useServer } from "../hooks/use-servers";
@@ -22,7 +23,7 @@ export function ServerEditPage() {
     return (
       <div className="rounded-2xl border border-danger/30 bg-danger-subtle p-6 text-center">
         <p className="text-sm text-danger">
-          {error instanceof Error ? error.message : t("server.notFound")}
+          {translateApiError(error, t, t("server.notFound"))}
         </p>
       </div>
     );

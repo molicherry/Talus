@@ -24,19 +24,19 @@ func NewMetricsHandler(metricRepo *repository.MetricRepo) *MetricsHandler {
 func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	serverID, err := parseIDParam(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid server id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServerID))
 		return
 	}
 
 	claims := mw.GetUserClaims(r.Context())
 	if !mw.CheckServerAccess(claims, serverID) {
-		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to this server"))
+		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServerDenied))
 		return
 	}
 
 	from, to, pgInterval, err := parseMetricParams(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, err.Error()))
+		server.WriteError(w, r, server.NewAppErrorParams(http.StatusBadRequest, server.ReasonInvalidQuery, map[string]any{"detail": err.Error()}))
 		return
 	}
 

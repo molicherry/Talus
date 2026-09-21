@@ -39,6 +39,11 @@ function lookup(key: string, dict: Dict): string | undefined {
   return typeof val === "string" ? val : undefined;
 }
 
+/** True when a key resolves in the active locale or the English fallback. */
+function has(key: string): boolean {
+  return lookup(key, currentDict) !== undefined || lookup(key, resources.en) !== undefined;
+}
+
 function translate(
   key: string,
   params?: Record<string, string | number> | string,
@@ -76,6 +81,7 @@ export const i18n = {
     return language;
   },
   t: translate,
+  has,
   changeLanguage,
   subscribe(listener: () => void): () => void {
     listeners.add(listener);

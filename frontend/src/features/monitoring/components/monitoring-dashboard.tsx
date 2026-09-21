@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 
+import { translateApiError } from "../../../lib/api-error";
 import { Card } from "../../../components/ui/card";
 import { useTranslation } from "../../../i18n";
 import {
@@ -291,7 +292,7 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
 
       {isError && (
         <ErrorState
-          message={error instanceof Error ? error.message : t("monitoring.loadError")}
+          message={translateApiError(error, t, t("monitoring.loadError"))}
           onRetry={() => refetch()}
         />
       )}

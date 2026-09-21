@@ -152,7 +152,7 @@ func (s *ServiceRelayService) Get(ctx context.Context, id uint) (*model.Service,
 	svc, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, server.NewAppError(http.StatusNotFound, "service not found")
+			return nil, server.NewAppError(http.StatusNotFound, server.ReasonServiceNotFound)
 		}
 		return nil, fmt.Errorf("get service %d: %w", id, err)
 	}
@@ -164,7 +164,7 @@ func (s *ServiceRelayService) GetCredentials(ctx context.Context, id uint) (map[
 	svc, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, server.NewAppError(http.StatusNotFound, "service not found")
+			return nil, server.NewAppError(http.StatusNotFound, server.ReasonServiceNotFound)
 		}
 		return nil, fmt.Errorf("get credentials %d: %w", id, err)
 	}
@@ -173,7 +173,7 @@ func (s *ServiceRelayService) GetCredentials(ctx context.Context, id uint) (map[
 	for k, v := range svc.EncryptedCredentials {
 		plain, err := crypto.Decrypt(v, key)
 		if err != nil {
-			return nil, fmt.Errorf("decrypt credential '%s': %w", k, server.NewAppError(http.StatusInternalServerError, "credential decryption failed"))
+			return nil, fmt.Errorf("decrypt credential '%s': %w", k, server.NewAppError(http.StatusInternalServerError, server.ReasonCredentialDecrypt))
 		}
 		creds[k] = string(plain)
 	}
@@ -185,7 +185,7 @@ func (s *ServiceRelayService) Update(ctx context.Context, id uint, input CreateS
 	existing, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, server.NewAppError(http.StatusNotFound, "service not found")
+			return nil, server.NewAppError(http.StatusNotFound, server.ReasonServiceNotFound)
 		}
 		return nil, fmt.Errorf("update service %d: %w", id, err)
 	}
@@ -221,7 +221,7 @@ func (s *ServiceRelayService) Update(ctx context.Context, id uint, input CreateS
 func (s *ServiceRelayService) Delete(ctx context.Context, id uint) error {
 	if _, err := s.repo.FindByID(ctx, id); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return server.NewAppError(http.StatusNotFound, "service not found")
+			return server.NewAppError(http.StatusNotFound, server.ReasonServiceNotFound)
 		}
 		return fmt.Errorf("delete service %d: %w", id, err)
 	}
@@ -255,12 +255,12 @@ func (s *ServiceRelayService) List(ctx context.Context, serverID *uint) ([]model
 // Relay decrypts service credentials, substitutes placeholders, and proxies the request.
 func (s *ServiceRelayService) Relay(ctx context.Context, serviceID uint, input RelayInput, w http.ResponseWriter) error {
 	if input.Method == "" {
-		return server.NewAppError(http.StatusBadRequest, "method is required")
+		return server.NewAppError(http.StatusBadRequest, server.ReasonMethodRequired)
 	}
 
 	svc, err := s.repo.FindByID(ctx, serviceID)
 	if err != nil {
-		return server.NewAppError(http.StatusNotFound, "service not found")
+		return server.NewAppError(http.StatusNotFound, server.ReasonServiceNotFound)
 	}
 
 	// Decrypt all credentials.
@@ -269,7 +269,7 @@ func (s *ServiceRelayService) Relay(ctx context.Context, serviceID uint, input R
 	for k, v := range svc.EncryptedCredentials {
 		plain, err := crypto.Decrypt(v, key)
 		if err != nil {
-			return fmt.Errorf("decrypt credential '%s': %w", k, server.NewAppError(http.StatusInternalServerError, "credential decryption failed"))
+			return fmt.Errorf("decrypt credential '%s': %w", k, server.NewAppError(http.StatusInternalServerError, server.ReasonCredentialDecrypt))
 		}
 		creds[k] = string(plain)
 	}
@@ -280,7 +280,7 @@ func (s *ServiceRelayService) Relay(ctx context.Context, serviceID uint, input R
 	// all arguments via ?input=...).
 	targetURL, err := buildTargetURL(svc.BaseURL, input.Path)
 	if err != nil {
-		return fmt.Errorf("build target url: %w", server.NewAppError(http.StatusBadRequest, "invalid relay path"))
+		return fmt.Errorf("build target url: %w", server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRelayPath))
 	}
 
 	// Substitute placeholders in path.
@@ -295,7 +295,7 @@ func (s *ServiceRelayService) Relay(ctx context.Context, serviceID uint, input R
 
 	req, err := http.NewRequestWithContext(ctx, input.Method, targetURL, bodyReader)
 	if err != nil {
-		return fmt.Errorf("build relay request: %w", server.NewAppError(http.StatusBadRequest, "invalid relay request"))
+		return fmt.Errorf("build relay request: %w", server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRelayRequest))
 	}
 
 	// Set headers with placeholder substitution.
@@ -309,9 +309,9 @@ func (s *ServiceRelayService) Relay(ctx context.Context, serviceID uint, input R
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		if isTimeout(err) {
-			return server.NewAppError(http.StatusGatewayTimeout, "target service timeout")
+			return server.NewAppError(http.StatusGatewayTimeout, server.ReasonRelayTimeout)
 		}
-		return server.NewAppError(http.StatusBadGateway, fmt.Sprintf("target service unreachable: %v", err))
+		return server.NewAppErrorParams(http.StatusBadGateway, server.ReasonRelayUnreachable, map[string]any{"detail": err.Error()})
 	}
 	defer resp.Body.Close()
 

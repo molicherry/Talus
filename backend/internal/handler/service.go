@@ -22,16 +22,16 @@ const maxUsageGuideRunes = 20000
 func validateServiceRequest(req createServiceRequest) []server.ErrorDetail {
 	var details []server.ErrorDetail
 	if req.Name == "" {
-		details = append(details, server.ErrorDetail{Field: "name", Message: "name is required"})
+		details = append(details, server.NewErrorDetail("name", server.ReasonRequired, nil))
 	}
 	if req.BaseURL == "" {
-		details = append(details, server.ErrorDetail{Field: "base_url", Message: "base_url is required"})
+		details = append(details, server.NewErrorDetail("base_url", server.ReasonRequired, nil))
 	}
 	if len(req.Credentials) == 0 {
-		details = append(details, server.ErrorDetail{Field: "credentials", Message: "at least one credential is required"})
+		details = append(details, server.NewErrorDetail("credentials", server.ReasonAtLeastOne, nil))
 	}
 	if req.UsageGuide != nil && len([]rune(*req.UsageGuide)) > maxUsageGuideRunes {
-		details = append(details, server.ErrorDetail{Field: "usage_guide", Message: "usage_guide must be at most 20000 characters"})
+		details = append(details, server.NewErrorDetail("usage_guide", server.ReasonMaxLength, map[string]any{"max": 20000}))
 	}
 	return details
 }
@@ -69,7 +69,7 @@ func NewServiceHandler(svc *service.ServiceRelayService, auditRepo *repository.A
 func (h *ServiceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createServiceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
 
@@ -103,7 +103,7 @@ func (h *ServiceHandler) List(w http.ResponseWriter, r *http.Request) {
 	if sidStr := r.URL.Query().Get("server_id"); sidStr != "" {
 		sid, err := strconv.ParseUint(sidStr, 10, 64)
 		if err != nil {
-			server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid server_id"))
+			server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServerID))
 			return
 		}
 		uid := uint(sid)
@@ -133,7 +133,7 @@ func (h *ServiceHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid service id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServiceID))
 		return
 	}
 
@@ -141,14 +141,14 @@ func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 	svc, getErr := h.svc.Get(r.Context(), uint(id))
 	if getErr == nil && svc.ServerID != nil {
 		if !mw.CheckServerAccess(claims, *svc.ServerID) {
-			server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to the server this service is bound to"))
+			server.WriteError(w, r, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServiceDenied))
 			return
 		}
 	}
 
 	var req relayRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
 
@@ -167,7 +167,7 @@ func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 func (h *ServiceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id, err := parseServiceID(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid service id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServiceID))
 		return
 	}
 
@@ -179,7 +179,7 @@ func (h *ServiceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if svc.ServerID != nil {
 		claims := mw.GetUserClaims(r.Context())
 		if !mw.CheckServerAccess(claims, *svc.ServerID) {
-			server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to the server this service is bound to"))
+			server.WriteError(w, r, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServiceDenied))
 			return
 		}
 	}
@@ -190,7 +190,7 @@ func (h *ServiceHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *ServiceHandler) GetCredentials(w http.ResponseWriter, r *http.Request) {
 	id, err := parseServiceID(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid service id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServiceID))
 		return
 	}
 	creds, err := h.svc.GetCredentials(r.Context(), id)
@@ -224,13 +224,13 @@ func (h *ServiceHandler) GetCredentials(w http.ResponseWriter, r *http.Request) 
 func (h *ServiceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := parseServiceID(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid service id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServiceID))
 		return
 	}
 
 	var req createServiceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
 
@@ -262,7 +262,7 @@ func (h *ServiceHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *ServiceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := parseServiceID(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid service id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServiceID))
 		return
 	}
 

@@ -2,6 +2,7 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
 import { StatusIndicator } from "../../../components/ui/status-indicator";
@@ -46,7 +47,7 @@ export function ServerList() {
     return (
       <div className="rounded-2xl border border-danger/20 bg-danger-subtle p-8 text-center">
         <p className="text-sm text-danger">
-          {error instanceof Error ? error.message : t("server.loadError")}
+          {translateApiError(error, t, t("server.loadError"))}
         </p>
         <Button type="button" variant="outline" onClick={() => refetch()} className="mt-4">
           {t("common.retry")}

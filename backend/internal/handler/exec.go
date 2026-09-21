@@ -30,24 +30,24 @@ func NewExecHandler(sshSvc *service.SSHService) *ExecHandler {
 func (h *ExecHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid server id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServerID))
 		return
 	}
 
 	claims := mw.GetUserClaims(r.Context())
 	if !mw.CheckServerAccess(claims, id) {
-		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to this server"))
+		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServerDenied))
 		return
 	}
 
 	var req execRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
 
 	if req.Command == "" {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "command is required"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonCommandRequired))
 		return
 	}
 

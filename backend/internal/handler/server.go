@@ -81,13 +81,13 @@ func (h *ServerHandler) ListSummaries(w http.ResponseWriter, r *http.Request) {
 func (h *ServerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid server id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServerID))
 		return
 	}
 
 	claims := mw.GetUserClaims(r.Context())
 	if !mw.CheckServerAccess(claims, id) {
-		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to this server"))
+		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServerDenied))
 		return
 	}
 
@@ -103,16 +103,16 @@ func (h *ServerHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *ServerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
 
 	var details []server.ErrorDetail
 	if req.Name == "" {
-		details = append(details, server.ErrorDetail{Field: "name", Message: "name is required"})
+		details = append(details, server.NewErrorDetail("name", server.ReasonRequired, nil))
 	}
 	if req.Host == "" {
-		details = append(details, server.ErrorDetail{Field: "host", Message: "host is required"})
+		details = append(details, server.NewErrorDetail("host", server.ReasonRequired, nil))
 	}
 	if len(details) > 0 {
 		server.WriteError(w, r, server.NewValidationError(details))
@@ -145,19 +145,19 @@ func (h *ServerHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *ServerHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid server id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServerID))
 		return
 	}
 
 	claims := mw.GetUserClaims(r.Context())
 	if !mw.CheckServerAccess(claims, id) {
-		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, "access denied: api key does not have access to this server"))
+		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServerDenied))
 		return
 	}
 
 	var req UpdateServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
 
@@ -193,7 +193,7 @@ func (h *ServerHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *ServerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid server id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServerID))
 		return
 	}
 

@@ -1,3 +1,4 @@
+import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { useTranslation } from "../../../i18n";
 import type { Server } from "../../../types/models";
@@ -38,7 +39,7 @@ export function DashboardGrid({ servers, isLoading, isError, error, refetch }: D
     return (
       <div className="rounded-2xl border border-danger/20 bg-danger-subtle p-8 text-center">
         <p className="text-sm text-danger">
-          {error instanceof Error ? error.message : t("server.loadError")}
+          {translateApiError(error, t, t("server.loadError"))}
         </p>
         <Button type="button" variant="outline" onClick={() => refetch()} className="mt-4">
           {t("common.retry")}
