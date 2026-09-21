@@ -43,8 +43,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       >
         <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-6">
           <div className="flex items-center">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
-              <Logo className="h-4 w-4" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white shadow-sm">
+              <Logo className="h-4.5 w-4.5" />
             </div>
             <span className="ml-3 text-sm font-semibold text-sidebar-foreground">
               {t("app.name")}
