@@ -89,7 +89,7 @@ export function ServerList() {
                   <button
                     type="button"
                     onClick={() => navigate(`/servers/${server.id}`)}
-                    className="text-sm font-medium text-primary-strong transition-colors hover:text-primary-strong-hover hover:underline"
+                    className="text-sm font-medium text-primary transition-colors hover:text-primary-hover hover:underline"
                   >
                     {server.name}
                   </button>
