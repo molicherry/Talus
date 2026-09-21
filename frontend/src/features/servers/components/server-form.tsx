@@ -204,7 +204,7 @@ export function ServerForm({ server }: ServerFormProps) {
             size="sm"
             onClick={() => setShowCredentialDialog(true)}
             title={t("service.newCredentialHint")}
-            className="h-auto gap-1 px-1.5 text-xs font-medium text-primary hover:bg-primary-subtle"
+            className="h-auto gap-1 px-1.5 text-xs font-medium text-primary-strong hover:bg-primary-subtle"
           >
             <Plus className="h-3.5 w-3.5" />
             {t("service.newCredential")}

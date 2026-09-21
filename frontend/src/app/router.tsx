@@ -48,7 +48,7 @@ function NotFoundPage() {
         <p className="mt-4 text-muted-foreground">{t("notFound.message")}</p>
         <a
           href="/"
-          className="mt-6 inline-block font-medium text-primary hover:text-primary-hover"
+          className="mt-6 inline-block font-medium text-primary-strong hover:text-primary-strong-hover"
         >
           {t("notFound.goHome")}
         </a>

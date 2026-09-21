@@ -241,7 +241,7 @@ export function ServiceForm({ service }: ServiceFormProps) {
               <button
                 type="button"
                 onClick={() => setShowGuidePreview((v) => !v)}
-                className="text-xs font-medium text-primary transition-colors hover:text-primary-hover"
+                className="text-xs font-medium text-primary-strong transition-colors hover:text-primary-strong-hover"
               >
                 {showGuidePreview ? t("service.usageGuideEdit") : t("service.usageGuidePreview")}
               </button>
