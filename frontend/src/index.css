@@ -23,16 +23,10 @@
   --color-card-foreground: #111827;
   --color-card-elevated: #FFFFFF;
 
-  /* Brand blue is the light #55BFF2. It is a *background* colour: on it, text
-     and icons need a dark navy (white would be 2.1:1). Anything that draws the
-     brand colour AS TEXT on a light surface uses --color-primary-strong, which
-     is the same hue taken dark enough to stay readable (4.9:1 on white). */
-  --color-primary: #55BFF2;
-  --color-primary-foreground: #0A2E4D;
-  --color-primary-hover: #3AAEE8;
-  --color-primary-subtle: #E8F7FD;
-  --color-primary-strong: #1878B4;
-  --color-primary-strong-hover: #105F92;
+  --color-primary: #2563EB;
+  --color-primary-foreground: #FFFFFF;
+  --color-primary-hover: #1D4ED8;
+  --color-primary-subtle: #EFF6FF;
 
   --color-secondary: #F3F4F6;
   --color-secondary-foreground: #374151;
@@ -43,7 +37,7 @@
   --color-border: #E5E7EB;
   --color-border-hover: #D1D5DB;
   --color-input: #E5E7EB;
-  --color-ring: #1878B4;
+  --color-ring: #2563EB;
 
   --color-success: #059669;
   --color-success-subtle: #D1FAE5;
@@ -54,8 +48,8 @@
 
   --color-sidebar: #FFFFFF;
   --color-sidebar-foreground: #374151;
-  --color-sidebar-active: #E8F7FD;
-  --color-sidebar-active-foreground: #0A2E4D;
+  --color-sidebar-active: #EFF6FF;
+  --color-sidebar-active-foreground: #1E40AF;
   --color-sidebar-border: #E5E7EB;
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
@@ -70,12 +64,10 @@
   --color-card-foreground: #F3F4F6;
   --color-card-elevated: #1F2128;
 
-  --color-primary: #55BFF2;
-  --color-primary-foreground: #062A45;
-  --color-primary-hover: #7ED2F8;
-  --color-primary-subtle: #10344C;
-  --color-primary-strong: #7ED2F8;
-  --color-primary-strong-hover: #A5E1FA;
+  --color-primary: #3B82F6;
+  --color-primary-foreground: #FFFFFF;
+  --color-primary-hover: #60A5FA;
+  --color-primary-subtle: #1E3A8A;
 
   --color-secondary: #272A30;
   --color-secondary-foreground: #D1D5DB;
@@ -86,7 +78,7 @@
   --color-border: #272A30;
   --color-border-hover: #374151;
   --color-input: #272A30;
-  --color-ring: #55BFF2;
+  --color-ring: #3B82F6;
 
   --color-success: #10B981;
   --color-success-subtle: #064E3B;
@@ -97,8 +89,8 @@
 
   --color-sidebar: #181A20;
   --color-sidebar-foreground: #D1D5DB;
-  --color-sidebar-active: #123A5C;
-  --color-sidebar-active-foreground: #BFE7FB;
+  --color-sidebar-active: #1E3A8A;
+  --color-sidebar-active-foreground: #BFDBFE;
   --color-sidebar-border: #272A30;
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.24), 0 1px 3px rgba(0, 0, 0, 0.18);
@@ -117,8 +109,6 @@
   --color-primary-foreground: var(--color-primary-foreground);
   --color-primary-hover: var(--color-primary-hover);
   --color-primary-subtle: var(--color-primary-subtle);
-  --color-primary-strong: var(--color-primary-strong);
-  --color-primary-strong-hover: var(--color-primary-strong-hover);
   --color-secondary: var(--color-secondary);
   --color-secondary-foreground: var(--color-secondary-foreground);
   --color-muted: var(--color-muted);

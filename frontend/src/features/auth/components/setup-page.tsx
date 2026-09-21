@@ -75,7 +75,7 @@ export function SetupPage() {
       ) : (
         <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-elevated">
           <div className="mb-8 text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary-subtle text-primary">
               <Logo className="h-6.5 w-6.5" />
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">
