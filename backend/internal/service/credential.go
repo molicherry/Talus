@@ -233,7 +233,7 @@ func (s *CredentialService) Reveal(ctx context.Context, id uint) (*RevealCredent
 	cred, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, server.NewAppError(http.StatusNotFound, "credential not found")
+			return nil, server.NewAppError(http.StatusNotFound, server.ReasonCredentialNotFound)
 		}
 		return nil, fmt.Errorf("reveal credential %d: %w", id, err)
 	}

@@ -57,5 +57,27 @@ check("a non-numeric status is not coerced into a server error", () => {
   assert.equal(apiKeyErrorKind({ status: null }), "network");
 });
 
+// The backend now sends a stable `reason`; it must win over the status class.
+const withReason = (reason, status) => ({ reason, status });
+
+check("api_key_server_denied is forbidden, not unauthorized", () => {
+  assert.equal(apiKeyErrorKind(withReason("api_key_server_denied", 403)), "forbidden");
+});
+check("invalid_credentials is unauthorized", () => {
+  assert.equal(apiKeyErrorKind(withReason("invalid_credentials", 401)), "unauthorized");
+});
+check("rate_limited reason wins over a 5xx status", () => {
+  assert.equal(apiKeyErrorKind(withReason("rate_limited", 503)), "rateLimited");
+});
+check("internal_error is server", () => {
+  assert.equal(apiKeyErrorKind(withReason("internal_error", 500)), "server");
+});
+check("an unknown reason falls back to the status", () => {
+  assert.equal(apiKeyErrorKind(withReason("something_new", 403)), "forbidden");
+});
+check("reason without status is not a network error", () => {
+  assert.equal(apiKeyErrorKind(withReason("forbidden", undefined)), "forbidden");
+});
+
 console.log(failures === 0 ? "\napi-key-error: ALL PASS" : `\napi-key-error: ${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

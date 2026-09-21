@@ -38,8 +38,7 @@ func (s *APIKeyService) Create(ctx context.Context, name string, scopes []string
 	}
 
 	if invalid := mw.ValidateScopes(scopes); len(invalid) > 0 {
-		return nil, server.NewAppError(http.StatusBadRequest,
-			fmt.Sprintf("invalid scopes: %v", invalid))
+		return nil, server.NewAppErrorParams(http.StatusBadRequest, server.ReasonInvalidScopes, map[string]any{"scopes": invalid})
 	}
 
 	if len(serverIDs) > 0 {
@@ -58,8 +57,7 @@ func (s *APIKeyService) Create(ctx context.Context, name string, scopes []string
 					missing = append(missing, id)
 				}
 			}
-			return nil, server.NewAppError(http.StatusBadRequest,
-				fmt.Sprintf("invalid server_ids: servers not found: %v", missing))
+			return nil, server.NewAppErrorParams(http.StatusBadRequest, server.ReasonServersNotFound, map[string]any{"servers": missing})
 		}
 	}
 
@@ -112,12 +110,12 @@ func (s *APIKeyService) Reveal(ctx context.Context, id uint) (string, error) {
 	k, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", server.NewAppError(http.StatusNotFound, "api key not found")
+			return "", server.NewAppError(http.StatusNotFound, server.ReasonAPIKeyNotFound)
 		}
 		return "", fmt.Errorf("reveal key %d: %w", id, err)
 	}
 	if k.EncryptedRawKey == "" {
-		return "", server.NewAppError(http.StatusNotFound, "raw key not available")
+		return "", server.NewAppError(http.StatusNotFound, server.ReasonRawKeyUnavailable)
 	}
 	key := s.masterKey.DeriveKey(k.Salt)
 	plain, err := crypto.Decrypt(k.EncryptedRawKey, key)

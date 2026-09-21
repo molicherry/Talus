@@ -106,13 +106,13 @@ func (s *AuthService) authenticateExisting(ctx context.Context, username, passwo
 	user, err := s.userRepo.FindByUsername(ctx, username)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", fmt.Errorf("login: invalid credentials: %w", server.ErrUnauthorized)
+			return "", fmt.Errorf("login: invalid credentials: %w", server.ErrInvalidCredentials)
 		}
 		return "", fmt.Errorf("login: %w", err)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
-		return "", fmt.Errorf("login: invalid credentials: %w", server.ErrUnauthorized)
+		return "", fmt.Errorf("login: invalid credentials: %w", server.ErrInvalidCredentials)
 	}
 
 	return s.jwtSvc.GenerateToken(user.ID, user.Username, user.Role)
@@ -125,7 +125,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uint, currentPa
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
-		return fmt.Errorf("current password is incorrect: %w", server.ErrUnauthorized)
+		return fmt.Errorf("current password is incorrect: %w", server.ErrWrongCurrentPassword)
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)

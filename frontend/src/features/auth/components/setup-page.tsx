@@ -1,11 +1,12 @@
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { translateApiError, apiFieldErrors } from "../../../lib/api-error";
 import { useTranslation } from "../../../i18n";
 import { useMutation } from "../../../lib/query";
 import { Navigate, useNavigate } from "react-router-dom";
 import { Button } from "../../../components/ui/button";
 import { Logo } from "../../../components/ui/logo";
-import { ApiClientError, apiClient } from "../../../lib/api-client";
+import { apiClient } from "../../../lib/api-client";
 import { setAuthToken } from "../../../lib/auth";
 import type { LoginResponse } from "../../../types/api";
 
@@ -59,12 +60,15 @@ export function SetupPage() {
     setupMutation.mutate({ username, password });
   };
 
-  const errorMessage =
-    setupMutation.error instanceof ApiClientError
-      ? setupMutation.error.message
-      : setupMutation.error instanceof Error
-        ? setupMutation.error.message
-        : null;
+  const errorMessage = setupMutation.error ? translateApiError(setupMutation.error, t) : null;
+
+  // Field-level reasons from a 422 land under the matching input, translated.
+  useEffect(() => {
+    const fieldErrors = apiFieldErrors(setupMutation.error, t);
+    if (Object.keys(fieldErrors).length > 0) {
+      setErrors((prev) => ({ ...prev, ...fieldErrors }));
+    }
+  }, [setupMutation.error, t]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">

@@ -30,7 +30,7 @@ type createAPIKeyRequest struct {
 func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createAPIKeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
 	result, err := h.svc.Create(r.Context(), req.Name, req.Scopes, req.ServerIDs)
@@ -53,7 +53,7 @@ func (h *APIKeyHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *APIKeyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid key id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidKeyID))
 		return
 	}
 	if err := h.svc.Delete(r.Context(), id); err != nil {
@@ -66,7 +66,7 @@ func (h *APIKeyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 func (h *APIKeyHandler) Reveal(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid key id"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidKeyID))
 		return
 	}
 	rawKey, err := h.svc.Reveal(r.Context(), id)

@@ -1,6 +1,7 @@
 import { Loader2, Play, RotateCw, Terminal } from "lucide-react";
 import { type FormEvent, useCallback, useRef, useState } from "react";
 
+import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
@@ -101,7 +102,7 @@ export function ExecPanel({ serverId }: ExecPanelProps) {
       {execMutation.isError && !result && (
         <div className="rounded-lg border border-danger/30 bg-danger-subtle p-4">
           <p className="text-sm text-danger">
-            {execMutation.error instanceof Error ? execMutation.error.message : t("exec.failed")}
+            {translateApiError(execMutation.error, t, t("exec.failed"))}
           </p>
         </div>
       )}

@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useLocation, useNavigate } from "react-router-dom";
 
+import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { Dialog } from "../../../components/ui/dialog";
 import { Field, Input, Label, Select, Textarea } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
-import { ApiClientError } from "../../../lib/api-client";
 import { toast } from "../../../lib/toast";
 import {
   type Server,
@@ -131,12 +131,7 @@ export function ServerForm({ server }: ServerFormProps) {
     }
   };
 
-  const errorMessage =
-    activeMutation.error instanceof ApiClientError
-      ? activeMutation.error.message
-      : activeMutation.error
-        ? t("common.unexpectedError")
-        : null;
+  const errorMessage = activeMutation.error ? translateApiError(activeMutation.error, t) : null;
 
   const isPending = activeMutation.isPending;
 

@@ -3,10 +3,10 @@ import { Copy, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 
+import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { Field, Input, Label, Textarea } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
-import { ApiClientError } from "../../../lib/api-client";
 import { toast } from "../../../lib/toast";
 import {
   CredentialFormSchema,
@@ -89,12 +89,7 @@ export function CredentialForm({ onCreated, onCancel, onPendingChange }: Credent
     });
   };
 
-  const errorMessage =
-    createMutation.error instanceof ApiClientError
-      ? createMutation.error.message
-      : createMutation.error
-        ? t("common.unexpectedError")
-        : null;
+  const errorMessage = createMutation.error ? translateApiError(createMutation.error, t) : null;
 
   return (
     <form

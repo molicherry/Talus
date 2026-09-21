@@ -1,10 +1,10 @@
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { translateApiError, apiFieldErrors } from "../../../lib/api-error";
 import { useTranslation } from "../../../i18n";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../../components/ui/button";
 import { Logo } from "../../../components/ui/logo";
-import { ApiClientError } from "../../../lib/api-client";
 import { useLogin } from "../hooks/use-login";
 
 interface LoginErrors {
@@ -39,14 +39,16 @@ export function LoginPage() {
     loginMutation.mutate({ username, password });
   };
 
-  const errorMessage =
-    loginMutation.error instanceof ApiClientError
-      ? loginMutation.error.message
-      : loginMutation.error instanceof Error
-        ? loginMutation.error.message
-        : loginMutation.error
-          ? t("common.unexpectedError")
-          : null;
+  const errorMessage = loginMutation.error ? translateApiError(loginMutation.error, t) : null;
+
+  // A 422 carries per-field reasons; fold them into the same state the local
+  // checks use so the message lands under the right input, translated.
+  useEffect(() => {
+    const fieldErrors = apiFieldErrors(loginMutation.error, t);
+    if (Object.keys(fieldErrors).length > 0) {
+      setErrors((prev) => ({ ...prev, ...fieldErrors }));
+    }
+  }, [loginMutation.error, t]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">

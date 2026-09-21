@@ -53,16 +53,16 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
 
 	var details []server.ErrorDetail
 	if len(req.Username) < 3 || len(req.Username) > 64 {
-		details = append(details, server.ErrorDetail{Field: "username", Message: "must be between 3 and 64 characters"})
+		details = append(details, server.NewErrorDetail("username", server.ReasonLength, map[string]any{"min": 3, "max": 64}))
 	}
 	if len(req.Password) < 8 || len(req.Password) > 64 {
-		details = append(details, server.ErrorDetail{Field: "password", Message: "must be between 8 and 64 characters"})
+		details = append(details, server.NewErrorDetail("password", server.ReasonLength, map[string]any{"min": 8, "max": 64}))
 	}
 	if len(details) > 0 {
 		server.WriteError(w, r, server.NewValidationError(details))
@@ -94,7 +94,7 @@ func (h *AuthHandler) Profile(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	var req ChangePasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, "invalid request body"))
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
 
