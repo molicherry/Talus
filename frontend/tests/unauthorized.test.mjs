@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 
-import { isCredentialRejection } from "./.compiled-unauthorized.mjs";
+import { classifyUnauthorized, isCredentialRejection, isLoginRoute } from "./.compiled-unauthorized.mjs";
 
 let failures = 0;
 function check(name, fn) {
@@ -31,6 +31,24 @@ check("an unknown reason redirects", () =>
   assert.equal(isCredentialRejection("something_new"), false));
 check("a non-string reason redirects", () =>
   assert.equal(isCredentialRejection(401), false));
+
+// --- classifyUnauthorized: the whole 401 decision in one place ---
+check("a login-page setup 401 must NOT navigate (it would reload forever)", () =>
+  assert.equal(classifyUnauthorized(undefined, "/login"), "clear-token"));
+check("a login-page 401 with a trailing slash is still the login route", () =>
+  assert.equal(classifyUnauthorized(undefined, "/login/"), "clear-token"));
+check("a 401 elsewhere clears the token and redirects", () =>
+  assert.equal(classifyUnauthorized(undefined, "/servers"), "clear-token-and-redirect"));
+check("an expired session in the change-password dialog redirects", () =>
+  assert.equal(classifyUnauthorized("unauthorized", "/"), "clear-token-and-redirect"));
+check("a mistyped password stays inline", () =>
+  assert.equal(classifyUnauthorized("invalid_credentials", "/login"), "inline"));
+check("a mistyped current password stays inline", () =>
+  assert.equal(classifyUnauthorized("current_password_incorrect", "/"), "inline"));
+check("isLoginRoute ignores a base path", () => {
+  assert.equal(isLoginRoute("/talus/login"), true);
+  assert.equal(isLoginRoute("/notlogin"), false);
+});
 
 console.log(failures === 0 ? "\nunauthorized: ALL PASS" : `\nunauthorized: ${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

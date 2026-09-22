@@ -1,7 +1,7 @@
 import type { ApiError, ApiErrorDetail } from "../types/api";
 import i18n from "../i18n";
 import { clearAuthToken, getAuthToken } from "./auth";
-import { isCredentialRejection } from "./unauthorized";
+import { classifyUnauthorized } from "./unauthorized";
 
 /**
  * Prefix for API requests, empty when the UI is served by the backend itself.
@@ -73,13 +73,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (response.status === 401) {
     const error = await errorFromResponse(response);
-    // A credential rejection belongs on the form that asked for it; any other
-    // 401 means the session is gone (this also covers a 401 with no reason, e.g.
-    // a proxy error page), so clear the token and go to the login page.
-    if (!isCredentialRejection(error.reason)) {
-      clearAuthToken();
-      window.location.href = "/login";
-    }
+    // The decision (inline / clear the token / also navigate) lives in
+    // lib/unauthorized.ts so it can be unit tested — in particular that a 401
+    // while already on /login must NOT navigate, or the setup probe on that page
+    // would reload it forever.
+    const action = classifyUnauthorized(error.reason, window.location.pathname);
+    if (action !== "inline") clearAuthToken();
+    if (action === "clear-token-and-redirect") window.location.replace("/login");
     throw error;
   }
 
