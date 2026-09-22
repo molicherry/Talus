@@ -99,7 +99,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(req.NewPassword) < 8 || len(req.NewPassword) > 64 {
-		server.WriteError(w, r, server.NewValidationError([]server.ErrorDetail{{Field: "new_password", Message: "must be between 8 and 64 characters"}}))
+		server.WriteError(w, r, server.NewValidationError([]server.ErrorDetail{server.NewErrorDetail("new_password", server.ReasonLength, map[string]any{"min": 8, "max": 64})}))
 		return
 	}
 

@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
 
+import { apiClient } from "../../../lib/api-client";
 import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { Field, Input, Label, Select, Textarea } from "../../../components/ui/field";
@@ -68,14 +69,11 @@ export function ServiceForm({ service }: ServiceFormProps) {
 
   useEffect(() => {
     if (!service) return;
-    const token = localStorage.getItem("auth_token");
-    fetch(`/api/v1/services/${service.id}/credentials`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.data && typeof data.data === "object") {
-          const creds = data.data as Record<string, string>;
+    // Through the api client: token + VITE_API_BASE_URL handled for us.
+    apiClient
+      .get<Record<string, string>>(`/api/v1/services/${service.id}/credentials`)
+      .then((creds) => {
+        if (creds && typeof creds === "object") {
           reset({
             name: service.name,
             display_name: service.display_name,

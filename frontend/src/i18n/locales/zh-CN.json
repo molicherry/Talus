@@ -109,7 +109,12 @@
     "currentPassword": "当前密码",
     "newPassword": "新密码",
     "wrongPassword": "当前密码错误",
-    "passwordChanged": "密码修改成功"
+    "passwordChanged": "密码修改成功",
+    "setupSubtitle": "创建管理员账号",
+    "confirmPassword": "确认密码",
+    "confirmPasswordPlaceholder": "再次输入密码",
+    "passwordMismatch": "两次输入的密码不一致",
+    "createAccount": "创建管理员账号"
   },
   "dashboard": {
     "title": "仪表盘",
@@ -281,7 +286,9 @@
     "usernameRequired": "用户名为必填项",
     "passwordRequired": "密码为必填项",
     "credentialRequired": "需要填写密码或私钥",
-    "usageGuideTooLong": "使用指南最多 20000 个字符"
+    "usageGuideTooLong": "使用指南最多 20000 个字符",
+    "usernameTooShort": "用户名至少 3 位",
+    "passwordTooShort": "密码至少 8 位"
   },
   "language": {
     "switch": "EN"

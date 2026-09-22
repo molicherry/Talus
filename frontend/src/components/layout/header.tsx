@@ -4,7 +4,9 @@ import { useTranslation } from "../../i18n";
 import { useAuth } from "../../hooks/use-auth";
 import type { Theme } from "../../hooks/use-theme";
 import { useTheme } from "../../hooks/use-theme";
-import { clearAuthToken, getAuthToken } from "../../lib/auth";
+import { apiClient } from "../../lib/api-client";
+import { apiFieldErrors, translateApiError } from "../../lib/api-error";
+import { clearAuthToken } from "../../lib/auth";
 import { Button } from "../ui/button";
 
 const themeIcons: Record<Theme, typeof Sun> = {
@@ -47,17 +49,12 @@ export function Header({ onOpenSidebar }: HeaderProps) {
   const handleChangePassword = async () => {
     setPwError("");
     try {
-      const token = getAuthToken();
-      const res = await fetch("/api/v1/auth/password", {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ current_password: currentPw, new_password: newPw }),
+      // Through the api client: it carries the token, honours VITE_API_BASE_URL,
+      // and surfaces the backend's `reason` for translation.
+      await apiClient.put("/api/v1/auth/password", {
+        current_password: currentPw,
+        new_password: newPw,
       });
-      if (!res.ok) {
-        if (res.status === 401) setPwError(t("auth.wrongPassword"));
-        else setPwError(t("common.error"));
-        return;
-      }
       setPwOk(true);
       setTimeout(() => {
         setShowPasswordModal(false);
@@ -65,8 +62,12 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         setCurrentPw("");
         setNewPw("");
       }, 1500);
-    } catch {
-      setPwError(t("common.error"));
+    } catch (err) {
+      // A server-side length error lands under the new-password field; anything
+      // else (wrong current password, expired session, outage) is localized by
+      // its reason — a bare 401 no longer reads as "wrong password".
+      const fieldErrors = apiFieldErrors(err, t);
+      setPwError(fieldErrors.new_password ?? translateApiError(err, t, "common.error"));
     }
   };
 

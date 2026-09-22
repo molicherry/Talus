@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
 
+import { apiClient } from "../../../lib/api-client";
 import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { Field, Input, Label, Textarea } from "../../../components/ui/field";
@@ -73,19 +74,17 @@ export function CredentialEditPage() {
 
   useEffect(() => {
     if (!credential) return;
-    const token = localStorage.getItem("auth_token");
-    fetch(`/api/v1/credentials/${credential.id}/reveal`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => (r.ok ? r.json() : null))
+    // Through the api client: it attaches the token and honours
+    // VITE_API_BASE_URL (a bare relative fetch breaks split deployments).
+    apiClient
+      .get<{ password?: string; private_key?: string }>(`/api/v1/credentials/${credential.id}/reveal`)
       .then((d) => {
-        if (d?.data) {
-          reset({
-            username: credential.username,
-            password: d.data.password || "",
-            private_key: d.data.private_key || "",
-          });
-        }
+        if (!d) return;
+        reset({
+          username: credential.username,
+          password: d.password || "",
+          private_key: d.private_key || "",
+        });
       })
       .catch(() => {});
   }, [credential, reset]);
