@@ -19,3 +19,28 @@ const CREDENTIAL_REASONS = new Set(["invalid_credentials", "current_password_inc
 export function isCredentialRejection(reason: unknown): boolean {
   return typeof reason === "string" && CREDENTIAL_REASONS.has(reason);
 }
+
+/**
+ * What to do about a 401.
+ *
+ * - `inline`                    the user just mistyped a credential: keep the
+ *                               form and its message, and do not touch the token
+ * - `clear-token`               the session is gone, but we are already on the
+ *                               login route. Clearing is enough — navigating
+ *                               there again reloads the page, and /login probes
+ *                               `/api/v1/auth/setup` on every load, so a proxy
+ *                               that keeps answering 401 on that path would
+ *                               reload the login page forever
+ * - `clear-token-and-redirect`  the session is gone somewhere else
+ */
+export type UnauthorizedAction = "inline" | "clear-token" | "clear-token-and-redirect";
+
+/** True when the given pathname is the login route (leading base paths and a trailing slash are fine). */
+export function isLoginRoute(pathname: string): boolean {
+  return pathname.replace(/\/+$/, "").endsWith("/login");
+}
+
+export function classifyUnauthorized(reason: unknown, pathname: string): UnauthorizedAction {
+  if (isCredentialRejection(reason)) return "inline";
+  return isLoginRoute(pathname) ? "clear-token" : "clear-token-and-redirect";
+}
