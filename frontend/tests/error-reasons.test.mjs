@@ -18,6 +18,19 @@ const go = readFileSync(new URL("../../backend/internal/server/errors.go", impor
 const reasons = [...go.matchAll(/^\tReason\w+\s+=\s+"([^"]+)"/gm)].map((m) => m[1]);
 check("backend declares reasons", reasons.length > 20, `found ${reasons.length}`);
 
+// The auth middleware cannot import the server package, so it duplicates the
+// unauthorized/forbidden strings. A typo there would silently stop translating
+// real 401s, so the duplicates must exist in the canonical set.
+const mw = readFileSync(
+  new URL("../../backend/internal/server/middleware/auth.go", import.meta.url),
+  "utf8",
+);
+const mwReasons = [...mw.matchAll(/^\treason\w+\s+=\s+"([^"]+)"/gm)].map((m) => m[1]);
+check("middleware declares its reasons", mwReasons.length > 0, JSON.stringify(mwReasons));
+for (const r of mwReasons) {
+  check(`middleware reason "${r}" exists in errors.go`, reasons.includes(r));
+}
+
 const locales = ["en", "zh-CN"].map((loc) => [
   loc,
   JSON.parse(readFileSync(new URL(`../src/i18n/locales/${loc}.json`, import.meta.url), "utf8")),

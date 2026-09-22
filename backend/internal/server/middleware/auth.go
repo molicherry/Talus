@@ -113,13 +113,30 @@ func extractBearerToken(r *http.Request) (string, bool) {
 	return token, true
 }
 
-// writeAuthError sends a structured JSON error response.
+// Reason identifiers, mirrored from internal/server/errors.go. The middleware
+// cannot import that package (the server imports the middleware), so the strings
+// are duplicated here; TestAuthMiddlewareReasons drives this middleware for real
+// and asserts the responses carry the same values the server package declares.
+const (
+	reasonUnauthorized = "unauthorized"
+	reasonForbidden    = "forbidden"
+)
+
+// writeAuthError sends the same error envelope the rest of the API uses, with a
+// stable reason. Without it a 401 reached the UI as a bare message and every
+// translation fell back to a generic "request failed with status 401".
 func writeAuthError(w http.ResponseWriter, statusCode int, message string) {
+	reason := reasonUnauthorized
+	if statusCode == http.StatusForbidden {
+		reason = reasonForbidden
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	body, _ := json.Marshal(map[string]interface{}{
 		"error": map[string]interface{}{
 			"code":    statusCode,
+			"reason":  reason,
 			"message": message,
 		},
 	})
