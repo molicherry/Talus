@@ -108,7 +108,7 @@ export const ServiceFormSchema = z.object({
   base_url: z.string().min(1).max(512),
   credentials: z
     .record(z.string(), z.string().min(1))
-    .refine((v) => Object.keys(v).length > 0, { message: i18n.t("validation.credentialRequired") }),
+    .refine((v) => Object.keys(v).length > 0, { message: i18n.t("service.keyErrors.empty") }),
   credential_hints: z.record(z.string(), z.string()).optional(),
   description: z.string().max(500).optional(),
   usage_guide: z

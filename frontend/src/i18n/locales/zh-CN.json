@@ -24,7 +24,10 @@
     "close": "关闭",
     "save": "保存",
     "copy": "复制",
-    "networkError": "网络错误，请检查连接"
+    "networkError": "网络错误，请检查连接",
+    "loadingSecret": "正在加载已保存的凭据…",
+    "secretLoadFailed": "无法加载已保存的凭据，请重试后再保存。",
+    "refreshFailed": "刷新失败，当前显示上次加载的数据。"
   },
   "errors": {
     "api_key_not_found": "API Key 不存在",
@@ -269,7 +272,10 @@
     "rx": "接收",
     "tx": "发送",
     "read": "读取",
-    "write": "写入"
+    "write": "写入",
+    "timeRange": "时间范围",
+    "chartHelp": "点按或横向拖动查看数据；方向键逐点移动，Home/End 跳至首尾，Esc 关闭提示。",
+    "noSample": "无采样数据"
   },
   "timeRange": {
     "1h": "1 小时",
@@ -344,7 +350,13 @@
     "newCredentialHint": "新建 SSH 凭据，创建后返回此处选择。",
     "usageGuideEmpty": "暂无使用指南。",
     "usageGuidePreview": "预览",
-    "usageGuideEdit": "编辑"
+    "usageGuideEdit": "编辑",
+    "keyErrors": {
+      "empty": "请至少添加一项服务凭据。",
+      "missingKey": "请填写凭据键名。",
+      "missingValue": "请填写该凭据的值。",
+      "duplicateKey": "凭据键名不能重复。"
+    }
   },
   "apiKeys": {
     "loadFailed": "加载 API Key 失败",

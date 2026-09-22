@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { type ReactNode, type RefObject, useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import { useTranslation } from "../../i18n";
@@ -11,6 +11,10 @@ interface DialogProps {
   title: string;
   children: ReactNode;
   className?: string;
+  id?: string;
+  contentClassName?: string;
+  initialFocusRef?: RefObject<HTMLElement | null>;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   /**
    * When false, Esc and backdrop clicks no longer close the dialog. Callers
    * set this while a request is in flight so every dismiss affordance obeys
@@ -34,6 +38,10 @@ export function Dialog({
   title,
   children,
   className,
+  id,
+  contentClassName,
+  initialFocusRef,
+  returnFocusRef,
   dismissible = true,
 }: DialogProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
@@ -44,10 +52,12 @@ export function Dialog({
     const dialog = dialogRef.current;
     if (!dialog) return;
 
-    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const previouslyFocused =
+      returnFocusRef?.current ?? (document.activeElement as HTMLElement | null);
     const previousOverflow = document.body.style.overflow;
 
     if (!dialog.open) dialog.showModal();
+    initialFocusRef?.current?.focus();
     document.body.style.overflow = "hidden";
 
     return () => {
@@ -55,12 +65,13 @@ export function Dialog({
       if (dialog.open) dialog.close();
       previouslyFocused?.focus?.();
     };
-  }, [open]);
+  }, [open, initialFocusRef, returnFocusRef]);
 
   if (!open) return null;
 
   return createPortal(
     <dialog
+      id={id}
       ref={dialogRef}
       aria-labelledby={titleId}
       className={cn(
@@ -72,12 +83,49 @@ export function Dialog({
         event.preventDefault();
         if (dismissible) onClose();
       }}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab" || event.defaultPrevented) return;
+        const dialog = dialogRef.current;
+        if (!dialog) return;
+        // Native modality makes the page inert; loop Tab here as well instead
+        // of allowing the browser to move focus to its own chrome at the ends.
+        const targets = Array.from(
+          dialog.querySelectorAll<HTMLElement>(
+            "a[href], button, input, select, textarea, [tabindex]",
+          ),
+        ).filter(
+          (element) =>
+            element.tabIndex >= 0 &&
+            !element.matches(":disabled") &&
+            !element.closest("[inert]") &&
+            element.getClientRects().length > 0 &&
+            getComputedStyle(element).visibility !== "hidden",
+        );
+        const first = targets[0];
+        const last = targets.at(-1);
+        if (!first || !last) {
+          event.preventDefault();
+          dialog.focus();
+        } else if (
+          event.shiftKey &&
+          (document.activeElement === first || document.activeElement === dialog)
+        ) {
+          event.preventDefault();
+          last.focus();
+        } else if (
+          !event.shiftKey &&
+          (document.activeElement === last || document.activeElement === dialog)
+        ) {
+          event.preventDefault();
+          first.focus();
+        }
+      }}
       onClick={(event) => {
         // A click landing on the dialog element itself is the backdrop.
         if (dismissible && event.target === dialogRef.current) onClose();
       }}
     >
-      <div className="p-6">
+      <div className={cn("p-6", contentClassName)}>
         <div className="mb-4 flex items-start justify-between gap-4">
           <h2 id={titleId} className="text-lg font-semibold text-foreground">
             {title}
@@ -87,7 +135,7 @@ export function Dialog({
             onClick={dismissible ? onClose : undefined}
             disabled={!dismissible}
             aria-label={t("common.closeDialog")}
-            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            className="touch-target inline-flex items-center justify-center rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
           >
             <X className="h-4 w-4" />
           </button>

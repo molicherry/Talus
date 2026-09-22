@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "bash tests/run.sh"
+    "test": "bash tests/run.sh",
+    "test:ui": "npm run build && node tests/ui-regressions.browser.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",

@@ -1,10 +1,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
+import { z } from "zod";
 
-import { apiClient } from "../../../lib/api-client";
+import { useSecret } from "../../../lib/use-secret";
+import { SecretLoadState } from "../../../components/ui/secret-load-state";
 import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { Field, Input, Label, Select, Textarea } from "../../../components/ui/field";
@@ -14,6 +16,16 @@ import { type Service, ServiceFormSchema, type ServiceFormValues } from "../../.
 import { useServers } from "../../servers/hooks/use-servers";
 import { useCreateService, useUpdateService } from "../hooks/use-services";
 import { ServiceKeyInput } from "./service-key-input";
+import {
+  credentialRowsFromValues,
+  credentialRowsToValues,
+  type CredentialRow,
+  type CredentialRowsError,
+} from "../lib/credential-rows";
+
+const MetadataSchema = ServiceFormSchema.omit({ credentials: true, credential_hints: true });
+const SecretSchema = z.record(z.string(), z.string());
+type MetadataValues = z.infer<typeof MetadataSchema>;
 
 interface ServiceFormProps {
   service?: Service;
@@ -21,7 +33,9 @@ interface ServiceFormProps {
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
-    <h3 className="border-b border-border pb-2 text-sm font-semibold text-foreground">{children}</h3>
+    <h3 className="border-b border-border pb-2 text-sm font-semibold text-foreground">
+      {children}
+    </h3>
   );
 }
 
@@ -37,16 +51,23 @@ export function ServiceForm({ service }: ServiceFormProps) {
 
   const [showGuide, setShowGuide] = useState(!!service?.usage_guide);
   const [showGuidePreview, setShowGuidePreview] = useState(false);
+  // The keyed editor keeps its initial snapshot when metadata is refetched.
+  const [initialHints] = useState(service?.credential_hints ?? {});
+  const [rows, setRows] = useState<CredentialRow[]>([]);
+  const [rowsError, setRowsError] = useState<CredentialRowsError | null>(null);
+  const secrets = useSecret(
+    service ? `/api/v1/services/${service.id}/credentials` : null,
+    SecretSchema.parse,
+  );
+  const secretsReady = !service || secrets.data !== undefined;
 
   const {
     register,
     handleSubmit,
     control,
-    reset,
-    setValue,
     formState: { errors },
-  } = useForm<ServiceFormValues>({
-    resolver: zodResolver(ServiceFormSchema),
+  } = useForm<MetadataValues>({
+    resolver: zodResolver(MetadataSchema),
     defaultValues: service
       ? {
           name: service.name,
@@ -55,41 +76,35 @@ export function ServiceForm({ service }: ServiceFormProps) {
           description: service.description ?? "",
           usage_guide: service.usage_guide ?? "",
           server_id: service.server_id ?? undefined,
-          credentials: {},
-          credential_hints: service.credential_hints ?? {},
         }
-      : {
-          credentials: {},
-          credential_hints: {},
-        },
+      : {},
   });
 
-  const hints = useWatch({ control, name: "credential_hints" }) ?? {};
   const guideValue = useWatch({ control, name: "usage_guide" }) ?? "";
 
   useEffect(() => {
-    if (!service) return;
-    // Through the api client: token + VITE_API_BASE_URL handled for us.
-    apiClient
-      .get<Record<string, string>>(`/api/v1/services/${service.id}/credentials`)
-      .then((creds) => {
-        if (creds && typeof creds === "object") {
-          reset({
-            name: service.name,
-            display_name: service.display_name,
-            base_url: service.base_url,
-            description: service.description ?? "",
-            usage_guide: service.usage_guide ?? "",
-            server_id: service.server_id ?? undefined,
-            credentials: creds,
-            credential_hints: service.credential_hints ?? {},
-          });
-        }
-      })
-      .catch(() => {});
-  }, [service, reset]);
+    if (secrets.data) setRows(credentialRowsFromValues(secrets.data, initialHints));
+  }, [secrets.data, initialHints]);
 
-  const onSubmit = (data: ServiceFormValues) => {
+  const onSubmit = (metadata: MetadataValues) => {
+    if (!secretsReady || activeMutation.isPending) return;
+    const result = credentialRowsToValues(rows);
+    if (!result.ok) {
+      setRowsError(result.error);
+      if (result.error.rowId)
+        document
+          .getElementById(
+            `${result.error.rowId}-${result.error.code === "missingValue" ? "value" : "key"}`,
+          )
+          ?.focus();
+      else document.getElementById("service-add-key")?.focus();
+      return;
+    }
+    const data: ServiceFormValues = {
+      ...metadata,
+      credentials: result.credentials,
+      credential_hints: result.credential_hints,
+    };
     if (isEdit && service) {
       updateMutation.mutate(
         { id: service.id, data },
@@ -157,7 +172,11 @@ export function ServiceForm({ service }: ServiceFormProps) {
           />
         </Field>
 
-        <Field label={t("service.description")} htmlFor="description" error={errors.description?.message}>
+        <Field
+          label={t("service.description")}
+          htmlFor="description"
+          error={errors.description?.message}
+        >
           <Textarea id="description" {...register("description")} rows={3} />
         </Field>
       </section>
@@ -183,31 +202,26 @@ export function ServiceForm({ service }: ServiceFormProps) {
 
         <div>
           <Label>{t("service.credentials")}</Label>
-          <Controller
-            name="credentials"
-            control={control}
-            render={({ field }) => (
-              <ServiceKeyInput
-                value={{
-                  credentials: (field.value ?? {}) as Record<string, string>,
-                  hints: hints as Record<string, string>,
-                }}
-                onChange={(v) => {
-                  field.onChange(v.credentials);
-                  setValue("credential_hints", v.hints as Record<string, string>);
-                }}
-              />
-            )}
+          <SecretLoadState
+            isLoading={secrets.isLoading}
+            error={secrets.error}
+            onRetry={secrets.retry}
+          />
+          <ServiceKeyInput
+            rows={rows}
+            disabled={!secretsReady || isPending}
+            error={rowsError}
+            onChange={(next) => {
+              setRows(next);
+              setRowsError(null);
+            }}
           />
           {isEdit && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("service.credentialsEditNote")}
-            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("service.credentialsEditNote")}</p>
           )}
-          {errors.credentials && (
-            <p className="mt-1 text-xs text-danger">
-              {(errors.credentials as { message?: string; root?: { message?: string } }).message ||
-                ""}
+          {rowsError && (
+            <p id="service-credentials-error" role="alert" className="mt-1 text-xs text-danger">
+              {t(`service.keyErrors.${rowsError.code}`)}
             </p>
           )}
         </div>
@@ -234,7 +248,7 @@ export function ServiceForm({ service }: ServiceFormProps) {
               <button
                 type="button"
                 onClick={() => setShowGuidePreview((v) => !v)}
-                className="text-xs font-medium text-primary transition-colors hover:text-primary-hover"
+                className="text-xs font-medium text-link transition-colors hover:text-link-hover"
               >
                 {showGuidePreview ? t("service.usageGuideEdit") : t("service.usageGuidePreview")}
               </button>
@@ -260,7 +274,7 @@ export function ServiceForm({ service }: ServiceFormProps) {
       </section>
 
       <div className="flex gap-3">
-        <Button type="submit" disabled={isPending}>
+        <Button type="submit" disabled={isPending || !secretsReady}>
           {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
           {isPending
             ? isEdit

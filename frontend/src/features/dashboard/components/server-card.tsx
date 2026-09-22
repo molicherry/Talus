@@ -55,7 +55,7 @@ export function ServerCard({ server }: ServerCardProps) {
         {/* …while this shortcut stays clickable on top of the stretched link. */}
         <Link
           to={`/servers/${server.id}/terminal`}
-          className="relative z-10 inline-flex shrink-0 items-center gap-1 font-medium text-primary transition-colors hover:text-primary-hover"
+          className="relative z-10 inline-flex shrink-0 items-center gap-1 font-medium text-link transition-colors hover:text-link-hover"
         >
           <Terminal className="h-3.5 w-3.5" />
           {t("server.terminal")}

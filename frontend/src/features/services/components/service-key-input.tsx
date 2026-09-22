@@ -4,34 +4,17 @@ import { useState } from "react";
 import { Input } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
 import { toast } from "../../../lib/toast";
-
-interface KeyValueHint {
-  key: string;
-  value: string;
-  hint: string;
-}
+import {
+  createCredentialRow,
+  type CredentialRow,
+  type CredentialRowsError,
+} from "../lib/credential-rows";
 
 interface ServiceKeyInputProps {
-  value: { credentials: Record<string, string>; hints: Record<string, string> };
-  onChange: (value: { credentials: Record<string, string>; hints: Record<string, string> }) => void;
-}
-
-function toRows(value: { credentials: Record<string, string>; hints: Record<string, string> }): KeyValueHint[] {
-  const rows: KeyValueHint[] = [];
-  for (const key of Object.keys(value.credentials)) {
-    rows.push({ key, value: value.credentials[key] || "", hint: value.hints[key] || "" });
-  }
-  return rows;
-}
-
-function fromRows(rows: KeyValueHint[]): { credentials: Record<string, string>; hints: Record<string, string> } {
-  const credentials: Record<string, string> = {};
-  const hints: Record<string, string> = {};
-  for (const row of rows) {
-    credentials[row.key] = row.value;
-    hints[row.key] = row.hint;
-  }
-  return { credentials, hints };
+  rows: CredentialRow[];
+  onChange: (rows: CredentialRow[]) => void;
+  disabled?: boolean;
+  error?: CredentialRowsError | null;
 }
 
 const copyToClipboard = async (text: string): Promise<void> => {
@@ -51,26 +34,24 @@ const copyToClipboard = async (text: string): Promise<void> => {
 
 const ROW_GRID = "grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]";
 
-export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
+export function ServiceKeyInput({ rows, onChange, disabled, error }: ServiceKeyInputProps) {
   const { t } = useTranslation();
-  const [visibleValues, setVisibleValues] = useState<Record<number, boolean>>({});
-  const rows = toRows(value);
+  const [visibleValues, setVisibleValues] = useState<Record<string, boolean>>({});
 
-  const updateRow = (index: number, field: "key" | "value" | "hint", newVal: string) => {
-    const updated = rows.map((r, i) => (i === index ? { ...r, [field]: newVal } : r));
-    onChange(fromRows(updated));
+  const updateRow = (id: string, field: "key" | "value" | "hint", newVal: string) => {
+    onChange(rows.map((r) => (r.id === id ? { ...r, [field]: newVal } : r)));
   };
 
   const addRow = () => {
-    onChange(fromRows([...rows, { key: "", value: "", hint: "" }]));
+    onChange([...rows, createCredentialRow()]);
   };
 
-  const removeRow = (index: number) => {
-    onChange(fromRows(rows.filter((_, i) => i !== index)));
+  const removeRow = (id: string) => {
+    onChange(rows.filter((r) => r.id !== id));
   };
 
-  const toggleVisible = (index: number) => {
-    setVisibleValues((prev) => ({ ...prev, [index]: !prev[index] }));
+  const toggleVisible = (id: string) => {
+    setVisibleValues((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
   const handleCopy = async (text: string) => {
@@ -79,7 +60,11 @@ export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
   };
 
   return (
-    <div className="space-y-3">
+    <fieldset
+      disabled={disabled}
+      aria-label={t("service.credentials")}
+      className="min-w-0 space-y-3 disabled:opacity-50"
+    >
       {rows.length > 0 && (
         <div className={`${ROW_GRID} hidden text-xs font-medium text-muted-foreground sm:grid`}>
           <span>{t("service.key")}</span>
@@ -89,37 +74,45 @@ export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
         </div>
       )}
       {rows.map((row, index) => (
-        <div key={index} className={ROW_GRID}>
+        <div key={row.id} className={ROW_GRID}>
           <Input
+            id={`${row.id}-key`}
             type="text"
             value={row.key}
-            onChange={(e) => updateRow(index, "key", e.target.value)}
+            aria-label={`${t("service.key")} ${index + 1}`}
+            aria-invalid={(error?.rowId === row.id && error.code !== "missingValue") || undefined}
+            aria-describedby={error?.rowId === row.id ? "service-credentials-error" : undefined}
+            onChange={(e) => updateRow(row.id, "key", e.target.value)}
             placeholder="token"
           />
           <div className="relative">
             <Input
-              type={visibleValues[index] ? "text" : "password"}
+              id={`${row.id}-value`}
+              type={visibleValues[row.id] ? "text" : "password"}
               value={row.value}
-              onChange={(e) => updateRow(index, "value", e.target.value)}
+              aria-label={`${t("service.value")} ${index + 1}`}
+              aria-invalid={(error?.rowId === row.id && error.code === "missingValue") || undefined}
+              aria-describedby={error?.rowId === row.id ? "service-credentials-error" : undefined}
+              onChange={(e) => updateRow(row.id, "value", e.target.value)}
               placeholder="ptr_xxx"
-              className="pr-16"
+              className="min-h-11 pr-24 sm:min-h-0 sm:pr-16"
             />
             <div className="absolute right-0 top-0 flex h-full items-center gap-0.5 pr-1">
               <button
                 type="button"
                 onClick={() => handleCopy(row.value)}
-                className="cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                className="touch-target inline-flex items-center justify-center cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                 aria-label={t("common.copy")}
               >
                 <Copy className="h-3.5 w-3.5" />
               </button>
               <button
                 type="button"
-                onClick={() => toggleVisible(index)}
-                className="cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                aria-label={visibleValues[index] ? t("service.hide") : t("service.show")}
+                onClick={() => toggleVisible(row.id)}
+                className="touch-target inline-flex items-center justify-center cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                aria-label={visibleValues[row.id] ? t("service.hide") : t("service.show")}
               >
-                {visibleValues[index] ? (
+                {visibleValues[row.id] ? (
                   <EyeOff className="h-3.5 w-3.5" />
                 ) : (
                   <Eye className="h-3.5 w-3.5" />
@@ -130,13 +123,14 @@ export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
           <Input
             type="text"
             value={row.hint}
-            onChange={(e) => updateRow(index, "hint", e.target.value)}
+            aria-label={`${t("service.hint")} ${index + 1}`}
+            onChange={(e) => updateRow(row.id, "hint", e.target.value)}
             placeholder={t("service.hintPlaceholder")}
           />
           <button
             type="button"
-            onClick={() => removeRow(index)}
-            className="cursor-pointer justify-self-end rounded p-2 text-muted-foreground transition-colors hover:bg-danger-subtle hover:text-danger"
+            onClick={() => removeRow(row.id)}
+            className="touch-target inline-flex items-center justify-center cursor-pointer justify-self-end rounded p-2 text-muted-foreground transition-colors hover:bg-danger-subtle hover:text-danger"
             aria-label={t("service.removeKey")}
           >
             <Trash2 className="h-4 w-4" />
@@ -144,13 +138,15 @@ export function ServiceKeyInput({ value, onChange }: ServiceKeyInputProps) {
         </div>
       ))}
       <button
+        id="service-add-key"
         type="button"
         onClick={addRow}
-        className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-primary-subtle hover:text-primary"
+        aria-describedby={error?.code === "empty" ? "service-credentials-error" : undefined}
+        className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-primary-subtle hover:text-link"
       >
         <Plus className="h-4 w-4" />
         {t("service.addKey")}
       </button>
-    </div>
+    </fieldset>
   );
 }
