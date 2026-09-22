@@ -1,8 +1,11 @@
 package server
 
 import (
+	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -82,5 +85,31 @@ func TestValidationDetailCarriesReasonAndParams(t *testing.T) {
 		if !regexp.MustCompile(regexp.QuoteMeta(want)).MatchString(body) {
 			t.Errorf("%s missing from %s", want, body)
 		}
+	}
+}
+
+// A hand-built ErrorDetail literal (ErrorDetail{Field: ...}) compiles fine but
+// silently ships an empty Reason — the exact gap that made the change-password
+// 422 untranslatable. Only the constructor is allowed to build one.
+func TestNoHandBuiltErrorDetails(t *testing.T) {
+	literal := regexp.MustCompile(`ErrorDetail\{+\s*Field:`)
+	err := filepath.WalkDir("..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		if filepath.Base(path) == "errors.go" {
+			return nil
+		}
+		src, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if m := literal.Find(src); m != nil {
+			t.Errorf("%s builds an ErrorDetail literal (%s); use NewErrorDetail(field, reason, params)", path, m)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
 	}
 }

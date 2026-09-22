@@ -27,10 +27,11 @@ export function SetupPage() {
   const [errors, setErrors] = useState<SetupErrors>({});
 
   useEffect(() => {
-    fetch("/api/v1/auth/setup")
-      .then((res) => res.json())
+    // Via the api client so a split deployment honours VITE_API_BASE_URL.
+    apiClient
+      .get<{ needed: boolean }>("/api/v1/auth/setup")
       .then((data) => {
-        if (!data.data?.needed) {
+        if (!data?.needed) {
           navigate("/login", { replace: true });
         } else {
           setSetupNeeded(true);
@@ -52,9 +53,10 @@ export function SetupPage() {
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const next: SetupErrors = {};
-    if (username.length < 3) next.username = t("validation.usernameRequired");
-    if (password.length < 4) next.password = t("validation.passwordRequired");
-    if (password !== confirm) next.confirm = "Passwords do not match";
+    if (username.length < 3) next.username = t("validation.usernameTooShort");
+    // Keep in step with the backend, which requires 8–64 (handler/auth.go).
+    if (password.length < 8) next.password = t("validation.passwordTooShort");
+    if (password !== confirm) next.confirm = t("auth.passwordMismatch");
     setErrors(next);
     if (next.username || next.password || next.confirm) return;
     setupMutation.mutate({ username, password });
@@ -85,7 +87,7 @@ export function SetupPage() {
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">
               {t("app.name")}
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground">Create your admin account</p>
+            <p className="mt-1 text-sm text-muted-foreground">{t("auth.setupSubtitle")}</p>
           </div>
 
           <form onSubmit={onSubmit} className="space-y-4" noValidate>
@@ -145,7 +147,7 @@ export function SetupPage() {
 
             <div>
               <label htmlFor="confirm" className="mb-1.5 block text-sm font-medium text-foreground">
-                Confirm Password
+                {t("auth.confirmPassword")}
               </label>
               <input
                 id="confirm"
@@ -157,7 +159,7 @@ export function SetupPage() {
                   if (errors.confirm) setErrors((prev) => ({ ...prev, confirm: undefined }));
                 }}
                 className="w-full rounded-lg border border-input bg-card px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
-                placeholder="Re-enter your password"
+                placeholder={t("auth.confirmPasswordPlaceholder")}
               />
               {errors.confirm && (
                 <p className="mt-1.5 text-xs text-danger">{errors.confirm}</p>
@@ -166,7 +168,7 @@ export function SetupPage() {
 
             <Button type="submit" disabled={setupMutation.isPending} className="w-full">
               {setupMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {setupMutation.isPending ? "Creating..." : "Create Admin Account"}
+              {setupMutation.isPending ? t("common.creating") : t("auth.createAccount")}
             </Button>
           </form>
         </div>

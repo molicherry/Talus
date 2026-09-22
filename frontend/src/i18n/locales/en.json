@@ -109,7 +109,12 @@
     "currentPassword": "Current Password",
     "newPassword": "New Password",
     "wrongPassword": "Current password is incorrect",
-    "passwordChanged": "Password changed successfully"
+    "passwordChanged": "Password changed successfully",
+    "setupSubtitle": "Create your admin account",
+    "confirmPassword": "Confirm Password",
+    "confirmPasswordPlaceholder": "Re-enter your password",
+    "passwordMismatch": "Passwords do not match",
+    "createAccount": "Create Admin Account"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -281,7 +286,9 @@
     "usernameRequired": "Username is required",
     "passwordRequired": "Password is required",
     "credentialRequired": "Either password or private key is required",
-    "usageGuideTooLong": "Usage guide must be at most 20000 characters"
+    "usageGuideTooLong": "Usage guide must be at most 20000 characters",
+    "usernameTooShort": "Username must be at least 3 characters",
+    "passwordTooShort": "Password must be at least 8 characters"
   },
   "language": {
     "switch": "中文"

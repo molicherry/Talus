@@ -4,6 +4,7 @@ import { translateApiError, apiFieldErrors } from "../../../lib/api-error";
 import { useTranslation } from "../../../i18n";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../../components/ui/button";
+import { apiClient } from "../../../lib/api-client";
 import { Logo } from "../../../components/ui/logo";
 import { useLogin } from "../hooks/use-login";
 
@@ -21,10 +22,11 @@ export function LoginPage() {
   const [errors, setErrors] = useState<LoginErrors>({});
 
   useEffect(() => {
-    fetch("/api/v1/auth/setup")
-      .then((r) => r.json())
+    // Via the api client so a split deployment honours VITE_API_BASE_URL.
+    apiClient
+      .get<{ needed: boolean }>("/api/v1/auth/setup")
       .then((d) => {
-        if (d.data?.needed) navigate("/setup", { replace: true });
+        if (d?.needed) navigate("/setup", { replace: true });
       })
       .catch(() => {});
   }, [navigate]);
