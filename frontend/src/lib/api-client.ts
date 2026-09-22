@@ -1,6 +1,7 @@
 import type { ApiError, ApiErrorDetail } from "../types/api";
 import i18n from "../i18n";
 import { clearAuthToken, getAuthToken } from "./auth";
+import { isCredentialRejection } from "./unauthorized";
 
 /**
  * Prefix for API requests, empty when the UI is served by the backend itself.
@@ -71,14 +72,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
 
   if (response.status === 401) {
-    // Don't redirect for login/register endpoints — the error should be shown inline
-    if (!path.startsWith("/api/v1/auth/")) {
+    const error = await errorFromResponse(response);
+    // A credential rejection belongs on the form that asked for it; any other
+    // 401 means the session is gone (this also covers a 401 with no reason, e.g.
+    // a proxy error page), so clear the token and go to the login page.
+    if (!isCredentialRejection(error.reason)) {
       clearAuthToken();
       window.location.href = "/login";
     }
-    // Read the envelope rather than inventing a message, so the reason
-    // (invalid_credentials vs an expired session) reaches the UI.
-    throw await errorFromResponse(response);
+    throw error;
   }
 
   if (!response.ok) {
