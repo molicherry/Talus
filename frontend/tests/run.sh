@@ -28,6 +28,7 @@ compile src/lib/query.ts query
 compile src/features/monitoring/lib/series.ts series
 compile src/features/auth/lib/api-key-error.ts api-key-error
 compile src/lib/unauthorized.ts unauthorized
+compile src/features/services/lib/credential-rows.ts credential-rows
 
 # 2. Run every test file under tests/ (skip this runner + compiled artifacts).
 FAIL=0

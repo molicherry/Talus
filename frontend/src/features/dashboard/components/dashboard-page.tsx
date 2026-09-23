@@ -3,7 +3,7 @@ import { useDashboardData } from "../hooks/use-dashboard";
 import { DashboardGrid } from "./dashboard-grid";
 
 export function DashboardPage() {
-  const { data: servers, isLoading, isError, error, refetch } = useDashboardData();
+  const { data: servers, isLoading, isError, error, isFetching, refetch } = useDashboardData();
   const { t } = useTranslation();
 
   return (
@@ -22,6 +22,7 @@ export function DashboardPage() {
         servers={servers}
         isLoading={isLoading}
         isError={isError}
+        isFetching={isFetching}
         error={error}
         refetch={refetch}
       />

@@ -1,3 +1,4 @@
+import { RefreshError } from "../../../components/ui/refresh-error";
 import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -13,13 +14,13 @@ import { useCredentials, useDeleteCredential } from "../hooks/use-credentials";
 
 export function CredentialList() {
   const { t } = useTranslation();
-  const { data: credentials, isLoading, isError, error, refetch } = useCredentials();
+  const { data: credentials, isLoading, isError, error, isFetching, refetch } = useCredentials();
   const deleteMutation = useDeleteCredential();
 
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
   const handleDelete = () => {
-    if (deleteId === null) return;
+    if (deleteId === null || deleteMutation.isPending) return;
     deleteMutation.mutate(deleteId, {
       onSuccess: () => {
         toast.success(t("credential.toast.deleted"));
@@ -42,7 +43,7 @@ export function CredentialList() {
     );
   }
 
-  if (isError) {
+  if (isError && credentials === undefined) {
     return (
       <div className="rounded-2xl border border-danger/20 bg-danger-subtle p-8 text-center">
         <p className="text-sm text-danger">
@@ -55,16 +56,24 @@ export function CredentialList() {
     );
   }
 
+  const refreshError = (
+    <RefreshError error={error} isFetching={isFetching} onRetry={() => refetch()} />
+  );
+
   if (!credentials || credentials.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
-        <p className="text-muted-foreground">{t("credential.emptyState")}</p>
-      </div>
+      <>
+        {refreshError}
+        <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
+          <p className="text-muted-foreground">{t("credential.emptyState")}</p>
+        </div>
+      </>
     );
   }
 
   return (
     <>
+      {refreshError}
       <TableCard>
         <Table>
           <THead>
@@ -73,7 +82,9 @@ export function CredentialList() {
               <Th>{t("credential.authType")}</Th>
               <Th>{t("credential.username")}</Th>
               <Th>{t("credential.fingerprint")}</Th>
-              <Th align="right">{t("common.actions")}</Th>
+              <Th align="right" className="sticky right-0 z-10 bg-muted sm:static">
+                {t("common.actions")}
+              </Th>
             </tr>
           </THead>
           <TBody>
@@ -98,11 +109,11 @@ export function CredentialList() {
                 </Td>
                 <Td className="text-foreground">{credential.username}</Td>
                 <Td className="text-muted-foreground">{credential.key_fingerprint ?? "—"}</Td>
-                <Td>
+                <Td className="sticky right-0 bg-card sm:static">
                   <div className="flex items-center justify-end gap-1">
                     <Link
                       to={`/credentials/${credential.id}/edit`}
-                      className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                      className="touch-target inline-flex items-center justify-center rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                       aria-label={t("credential.ariaEdit")}
                     >
                       <Pencil className="h-4 w-4" />
@@ -110,7 +121,7 @@ export function CredentialList() {
                     <button
                       type="button"
                       onClick={() => setDeleteId(credential.id)}
-                      className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-danger-subtle hover:text-danger"
+                      className="touch-target inline-flex items-center justify-center rounded-lg p-2 text-muted-foreground transition-colors hover:bg-danger-subtle hover:text-danger"
                       aria-label={t("credential.ariaDelete")}
                     >
                       <Trash2 className="h-4 w-4" />

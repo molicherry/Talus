@@ -27,6 +27,8 @@
   --color-primary-foreground: #0A2E4D;
   --color-primary-hover: #3AAEE8;
   --color-primary-subtle: #EFF6FF;
+  --color-link: #0369A1;
+  --color-link-hover: #075985;
 
   --color-secondary: #F3F4F6;
   --color-secondary-foreground: #374151;
@@ -37,7 +39,7 @@
   --color-border: #E5E7EB;
   --color-border-hover: #D1D5DB;
   --color-input: #E5E7EB;
-  --color-ring: #55BFF2;
+  --color-ring: #0369A1;
 
   --color-success: #059669;
   --color-success-subtle: #D1FAE5;
@@ -68,6 +70,8 @@
   --color-primary-foreground: #0A2E4D;
   --color-primary-hover: #7ED2F8;
   --color-primary-subtle: #1E3A8A;
+  --color-link: #7ED2F8;
+  --color-link-hover: #BAE6FD;
 
   --color-secondary: #272A30;
   --color-secondary-foreground: #D1D5DB;
@@ -78,7 +82,7 @@
   --color-border: #272A30;
   --color-border-hover: #374151;
   --color-input: #272A30;
-  --color-ring: #55BFF2;
+  --color-ring: #7ED2F8;
 
   --color-success: #10B981;
   --color-success-subtle: #064E3B;
@@ -109,6 +113,8 @@
   --color-primary-foreground: var(--color-primary-foreground);
   --color-primary-hover: var(--color-primary-hover);
   --color-primary-subtle: var(--color-primary-subtle);
+  --color-link: var(--color-link);
+  --color-link-hover: var(--color-link-hover);
   --color-secondary: var(--color-secondary);
   --color-secondary-foreground: var(--color-secondary-foreground);
   --color-muted: var(--color-muted);
@@ -157,5 +163,18 @@ body {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Keep the brand fill light; links and focus indicators use their own contrast. */
+:where(a, button, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+@media (max-width: 639px) {
+  .touch-target {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
   }
 }

@@ -24,7 +24,10 @@
     "close": "Close",
     "save": "Save",
     "copy": "Copy",
-    "networkError": "Network error — please check your connection"
+    "networkError": "Network error — please check your connection",
+    "loadingSecret": "Loading saved credentials...",
+    "secretLoadFailed": "Could not load saved credentials. Retry before saving.",
+    "refreshFailed": "Refresh failed. Showing previously loaded data."
   },
   "errors": {
     "api_key_not_found": "API key not found",
@@ -269,7 +272,10 @@
     "rx": "RX",
     "tx": "TX",
     "read": "Read",
-    "write": "Write"
+    "write": "Write",
+    "timeRange": "Time range",
+    "chartHelp": "Tap or drag horizontally to inspect data. Use arrow keys to move, Home/End to jump, and Escape to dismiss.",
+    "noSample": "No sample"
   },
   "timeRange": {
     "1h": "1 Hour",
@@ -344,7 +350,13 @@
     "newCredentialHint": "Create a new SSH credential, then return to select it.",
     "usageGuideEmpty": "No usage guide yet.",
     "usageGuidePreview": "Preview",
-    "usageGuideEdit": "Edit"
+    "usageGuideEdit": "Edit",
+    "keyErrors": {
+      "empty": "Add at least one credential.",
+      "missingKey": "Enter a key name.",
+      "missingValue": "Enter a value for this credential.",
+      "duplicateKey": "Key names must be unique."
+    }
   },
   "apiKeys": {
     "loadFailed": "Failed to load API keys",

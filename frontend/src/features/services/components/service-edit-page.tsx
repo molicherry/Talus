@@ -32,7 +32,7 @@ export function ServiceEditPage() {
   return (
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-foreground">{t("service.edit")}</h1>
-      <ServiceForm service={service} />
+      <ServiceForm key={service.id} service={service} />
     </div>
   );
 }

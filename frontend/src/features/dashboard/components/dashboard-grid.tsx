@@ -1,3 +1,4 @@
+import { RefreshError } from "../../../components/ui/refresh-error";
 import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { useTranslation } from "../../../i18n";
@@ -11,11 +12,12 @@ interface DashboardGridProps {
   servers: Server[] | undefined;
   isLoading: boolean;
   isError: boolean;
+  isFetching: boolean;
   error: Error | null;
   refetch: () => void;
 }
 
-export function DashboardGrid({ servers, isLoading, isError, error, refetch }: DashboardGridProps) {
+export function DashboardGrid({ servers, isLoading, isError, isFetching, error, refetch }: DashboardGridProps) {
   const { t } = useTranslation();
 
   if (isLoading) {
@@ -35,7 +37,7 @@ export function DashboardGrid({ servers, isLoading, isError, error, refetch }: D
     );
   }
 
-  if (isError) {
+  if (isError && servers === undefined) {
     return (
       <div className="rounded-2xl border border-danger/20 bg-danger-subtle p-8 text-center">
         <p className="text-sm text-danger">
@@ -48,12 +50,15 @@ export function DashboardGrid({ servers, isLoading, isError, error, refetch }: D
     );
   }
 
+  const refreshError = <RefreshError error={error} isFetching={isFetching} onRetry={refetch} />;
+
   if (!servers || servers.length === 0) {
-    return <DashboardEmpty />;
+    return <>{refreshError}<DashboardEmpty /></>;
   }
 
   return (
     <>
+      {refreshError}
       <DashboardSummary servers={servers} />
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {servers.map((server) => (

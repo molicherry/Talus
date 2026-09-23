@@ -1,4 +1,13 @@
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type PointerEvent,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useTranslation } from "../../../i18n";
 
 import { METRIC_MISSING_LABEL } from "../../../lib/metric-level";
 import { isolatedIndices } from "../lib/series";
@@ -54,7 +63,12 @@ export function TrendChart({
 }: TrendChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(640);
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const { t } = useTranslation();
+  const helpId = useId();
+  // Preserve selection by timestamp when polling shifts or replaces the grid.
+  const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const selectedIndex = selectedTime === null ? -1 : times.indexOf(selectedTime);
+  const hoverIndex = selectedIndex < 0 ? null : selectedIndex;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -90,9 +104,7 @@ export function TrendChart({
   // Every x position comes from the bucket's real timestamp, so the plot stays
   // proportional to time. Scaling by index would silently compress gaps.
   const xAtMs = (ms: number) =>
-    count <= 1 || spanMs <= 0
-      ? PAD.left + plotW / 2
-      : PAD.left + ((ms - startMs) / spanMs) * plotW;
+    count <= 1 || spanMs <= 0 ? PAD.left + plotW / 2 : PAD.left + ((ms - startMs) / spanMs) * plotW;
   const xAt = (index: number) => xAtMs(timeMs[index]);
   const yAt = (value: number) => PAD.top + plotH - (Math.max(0, value) / resolvedMax) * plotH;
 
@@ -132,7 +144,9 @@ export function TrendChart({
             current = [];
             return;
           }
-          current.push(`${current.length === 0 ? "M" : "L"} ${xAt(index).toFixed(1)} ${yAt(value).toFixed(1)}`);
+          current.push(
+            `${current.length === 0 ? "M" : "L"} ${xAt(index).toFixed(1)} ${yAt(value).toFixed(1)}`,
+          );
         });
         if (current.length > 0) segments.push(current.join(" "));
         return { key: s.key, color: s.color, d: segments.join(" ") };
@@ -160,7 +174,37 @@ export function TrendChart({
     [series, width, count, resolvedMax, plotH, timeMs, spanMs],
   );
 
-  const handleMove = (event: MouseEvent<SVGRectElement>) => {
+  const selectIndex = (index: number) => {
+    if (count > 0) setSelectedTime(times[Math.min(count - 1, Math.max(0, index))]);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const current = hoverIndex ?? count - 1;
+    switch (event.key) {
+      case "ArrowLeft":
+      case "ArrowDown":
+        selectIndex(current - 1);
+        break;
+      case "ArrowRight":
+      case "ArrowUp":
+        selectIndex(current + 1);
+        break;
+      case "Home":
+        selectIndex(0);
+        break;
+      case "End":
+        selectIndex(count - 1);
+        break;
+      case "Escape":
+        setSelectedTime(null);
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+  };
+
+  const handleMove = (event: PointerEvent<SVGRectElement>) => {
     if (count === 0) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const ratio = (event.clientX - rect.left) / rect.width;
@@ -174,13 +218,16 @@ export function TrendChart({
         best = i;
       }
     }
-    setHoverIndex(best);
+    selectIndex(best);
   };
 
   const legend = (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
       {series.map((s) => (
-        <span key={s.key} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span
+          key={s.key}
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+        >
           <span
             className="h-2 w-2 rounded-full"
             style={{ backgroundColor: s.color }}
@@ -194,7 +241,12 @@ export function TrendChart({
 
   if (count === 0) {
     return (
-      <div className={cn("flex h-32 items-center justify-center text-sm text-muted-foreground", className)}>
+      <div
+        className={cn(
+          "flex h-32 items-center justify-center text-sm text-muted-foreground",
+          className,
+        )}
+      >
         {METRIC_MISSING_LABEL}
       </div>
     );
@@ -202,17 +254,45 @@ export function TrendChart({
 
   const hoverX = hoverIndex === null ? 0 : xAt(hoverIndex);
   const tooltipOnLeft = hoverX > PAD.left + plotW * 0.6;
+  const tooltipWidth = Math.min(224, Math.max(1, width - 16));
+  const currentIndex = hoverIndex ?? count - 1;
+  const valueText = [
+    formatTime(times[currentIndex]),
+    ...series.map((s) => {
+      const value = s.values[currentIndex];
+      return `${s.label}: ${value == null || !Number.isFinite(value) ? t("monitoring.noSample") : formatValue(value)}`;
+    }),
+  ].join("; ");
 
   return (
     <div className={cn("w-full", className)}>
       {legend}
-      <div ref={containerRef} className="relative mt-2 w-full">
+      <p id={helpId} className="sr-only">
+        {t("monitoring.chartHelp")}
+      </p>
+      <div
+        ref={containerRef}
+        className="relative mt-2 w-full rounded-md"
+        role="slider"
+        tabIndex={0}
+        aria-label={ariaLabel ?? t("monitoring.title")}
+        aria-describedby={helpId}
+        aria-orientation="horizontal"
+        aria-valuemin={0}
+        aria-valuemax={count - 1}
+        aria-valuenow={currentIndex}
+        aria-valuetext={valueText}
+        onKeyDown={handleKeyDown}
+        onFocus={() => {
+          if (hoverIndex === null) selectIndex(count - 1);
+        }}
+        onBlur={() => setSelectedTime(null)}
+      >
         <svg
           width="100%"
           height={height}
           viewBox={`0 0 ${Math.max(1, width)} ${height}`}
-          role="img"
-          aria-label={ariaLabel}
+          aria-hidden="true"
         >
           {gridValues.map((ratio) => {
             const y = PAD.top + plotH - ratio * plotH;
@@ -311,19 +391,48 @@ export function TrendChart({
             width={plotW}
             height={plotH}
             fill="transparent"
-            onMouseMove={handleMove}
-            onMouseLeave={() => setHoverIndex(null)}
+            style={{ touchAction: "pan-y" }}
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId);
+              containerRef.current?.focus({ preventScroll: true });
+              handleMove(event);
+            }}
+            onPointerMove={(event) => {
+              if (
+                event.pointerType === "mouse" ||
+                event.currentTarget.hasPointerCapture(event.pointerId)
+              )
+                handleMove(event);
+            }}
+            onPointerUp={(event) => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId))
+                event.currentTarget.releasePointerCapture(event.pointerId);
+            }}
+            onPointerCancel={() => setSelectedTime(null)}
+            onPointerLeave={(event) => {
+              if (
+                event.pointerType === "mouse" &&
+                !event.currentTarget.hasPointerCapture(event.pointerId) &&
+                document.activeElement !== containerRef.current
+              )
+                setSelectedTime(null);
+            }}
           />
         </svg>
 
         {hoverIndex !== null && (
           <div
-            className="pointer-events-none absolute top-2 z-10 min-w-[9rem] rounded-lg border border-border bg-card-elevated px-3 py-2 text-xs shadow-dropdown"
-            style={
-              tooltipOnLeft
-                ? { right: width - hoverX + 12 }
-                : { left: hoverX + 12 }
-            }
+            className="pointer-events-none absolute top-2 z-10 break-words rounded-lg border border-border bg-card-elevated px-3 py-2 text-xs shadow-dropdown"
+            style={{
+              width: tooltipWidth,
+              left: Math.max(
+                8,
+                Math.min(
+                  width - tooltipWidth - 8,
+                  hoverX + (tooltipOnLeft ? -tooltipWidth - 12 : 12),
+                ),
+              ),
+            }}
           >
             <p className="font-medium text-foreground">{formatTime(times[hoverIndex])}</p>
             <div className="mt-1 space-y-0.5">

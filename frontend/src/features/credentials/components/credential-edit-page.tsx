@@ -1,11 +1,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Copy, Eye, EyeOff, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
 
-import { apiClient } from "../../../lib/api-client";
+import { useSecret } from "../../../lib/use-secret";
+import { SecretLoadState } from "../../../components/ui/secret-load-state";
 import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { Field, Input, Label, Textarea } from "../../../components/ui/field";
@@ -22,14 +23,26 @@ const EditFormSchema = z.object({
 });
 
 type EditFormValues = z.infer<typeof EditFormSchema>;
+const SecretSchema = z.object({
+  password: z.string().optional(),
+  private_key: z.string().optional(),
+});
 
 export function CredentialEditPage() {
+  const { id } = useParams<{ id: string }>();
+  return <CredentialEditor key={id} credentialId={Number(id)} />;
+}
+
+function CredentialEditor({ credentialId }: { credentialId: number }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { id } = useParams<{ id: string }>();
-  const credentialId = Number(id);
 
-  const { data: credentials, isLoading: credentialsLoading } = useCredentials();
+  const {
+    data: credentials,
+    isLoading: credentialsLoading,
+    error: credentialsError,
+    refetch,
+  } = useCredentials();
   const { data: servers } = useServers();
   const updateMutation = useUpdateCredential();
 
@@ -38,6 +51,12 @@ export function CredentialEditPage() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [showPrivateKey, setShowPrivateKey] = useState(false);
+  const usernameInitialized = useRef(false);
+  const secrets = useSecret(
+    credential ? `/api/v1/credentials/${credential.id}/reveal` : null,
+    SecretSchema.parse,
+  );
+  const secretsReady = secrets.data !== undefined;
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -60,36 +79,35 @@ export function CredentialEditPage() {
     register,
     handleSubmit,
     watch,
-    reset,
+    setValue,
     formState: { errors },
   } = useForm<EditFormValues>({
     resolver: zodResolver(EditFormSchema),
     defaultValues: {
-      username: credential?.username ?? "",
+      username: "",
+      password: "",
+      private_key: "",
     },
-    values: credential ? { username: credential.username } : undefined,
   });
 
   const passwordValue = watch("password");
 
   useEffect(() => {
-    if (!credential) return;
-    // Through the api client: it attaches the token and honours
-    // VITE_API_BASE_URL (a bare relative fetch breaks split deployments).
-    apiClient
-      .get<{ password?: string; private_key?: string }>(`/api/v1/credentials/${credential.id}/reveal`)
-      .then((d) => {
-        if (!d) return;
-        reset({
-          username: credential.username,
-          password: d.password || "",
-          private_key: d.private_key || "",
-        });
-      })
-      .catch(() => {});
-  }, [credential, reset]);
+    if (credential && !usernameInitialized.current) {
+      setValue("username", credential.username);
+      usernameInitialized.current = true;
+    }
+  }, [credential, setValue]);
+
+  useEffect(() => {
+    if (!secrets.data) return;
+    // Only the disabled secret fields are hydrated; keep any username edits.
+    setValue("password", secrets.data.password ?? "");
+    setValue("private_key", secrets.data.private_key ?? "");
+  }, [secrets.data, setValue]);
 
   const onSubmit = (data: EditFormValues) => {
+    if (!secretsReady || updateMutation.isPending) return;
     const payload: { username?: string; password?: string; private_key?: string } = {};
 
     if (data.username !== credential?.username) {
@@ -127,8 +145,22 @@ export function CredentialEditPage() {
   if (!credential) {
     return (
       <div className="rounded-2xl border border-danger/30 bg-danger-subtle p-6 text-center">
-        <p className="text-sm text-danger">{t("credential.notFound")}</p>
-        <Button type="button" variant="outline" onClick={() => navigate("/credentials")} className="mt-3">
+        <p role="alert" className="text-sm text-danger">
+          {credentialsError && credentials === undefined
+            ? translateApiError(credentialsError, t)
+            : t("credential.notFound")}
+        </p>
+        {credentialsError && credentials === undefined && (
+          <Button type="button" variant="outline" onClick={() => refetch()} className="mt-3">
+            {t("common.retry")}
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => navigate("/credentials")}
+          className="mt-3"
+        >
           {t("common.cancel")}
         </Button>
       </div>
@@ -177,93 +209,106 @@ export function CredentialEditPage() {
           <Input id="username" type="text" {...register("username")} />
         </Field>
 
-        {credential.auth_type === "password" && (
-          <Field label={t("credential.password")} htmlFor="password" error={errors.password?.message}>
-            <div className="relative">
-              <Input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                {...register("password")}
-                className="pr-16"
-                placeholder={t("credential.passwordPlaceholderNew")}
-              />
-              <div className="absolute right-0 top-0 flex h-full items-center gap-0.5 pr-1">
-                <button
-                  type="button"
-                  onClick={() => passwordValue && copyToClipboard(passwordValue)}
-                  className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
-                  aria-label={t("common.copy")}
-                >
-                  <Copy className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
-                  aria-label={
-                    showPassword ? t("credential.hidePassword") : t("credential.showPassword")
-                  }
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-          </Field>
-        )}
-
-        {credential.auth_type === "private_key" && (
-          <Field
-            label={t("credential.privateKey")}
-            htmlFor="private_key"
-            error={errors.private_key?.message}
-          >
-            <div className="relative">
-              {showPrivateKey ? (
-                <Textarea
-                  id="private_key"
-                  {...register("private_key")}
-                  rows={6}
-                  className="pr-16 font-mono text-xs"
-                  placeholder={t("credential.privateKeyPlaceholderNew")}
-                />
-              ) : (
+        <SecretLoadState
+          isLoading={secrets.isLoading}
+          error={secrets.error}
+          onRetry={secrets.retry}
+        />
+        <fieldset
+          disabled={!secretsReady || updateMutation.isPending}
+          className="min-w-0 space-y-4 disabled:opacity-50"
+        >
+          {credential.auth_type === "password" && (
+            <Field
+              label={t("credential.password")}
+              htmlFor="password"
+              error={errors.password?.message}
+            >
+              <div className="relative">
                 <Input
-                  id="private_key"
-                  type="password"
-                  {...register("private_key")}
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  {...register("password")}
                   className="pr-16"
-                  placeholder={t("credential.privateKeyPlaceholderNew")}
+                  placeholder={t("credential.passwordPlaceholderNew")}
                 />
-              )}
-              <div className="absolute right-0 top-1.5 flex gap-0.5 pr-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const value = watch("private_key");
-                    if (value) copyToClipboard(value);
-                  }}
-                  className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
-                  aria-label={t("common.copy")}
-                >
-                  <Copy className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowPrivateKey(!showPrivateKey)}
-                  className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
-                  aria-label={
-                    showPrivateKey ? t("credential.hidePassword") : t("credential.showPassword")
-                  }
-                >
-                  {showPrivateKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+                <div className="absolute right-0 top-0 flex h-full items-center gap-0.5 pr-1">
+                  <button
+                    type="button"
+                    onClick={() => passwordValue && copyToClipboard(passwordValue)}
+                    className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    aria-label={t("common.copy")}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    aria-label={
+                      showPassword ? t("credential.hidePassword") : t("credential.showPassword")
+                    }
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
-            </div>
-          </Field>
-        )}
+            </Field>
+          )}
 
+          {credential.auth_type === "private_key" && (
+            <Field
+              label={t("credential.privateKey")}
+              htmlFor="private_key"
+              error={errors.private_key?.message}
+            >
+              <div className="relative">
+                {showPrivateKey ? (
+                  <Textarea
+                    id="private_key"
+                    {...register("private_key")}
+                    rows={6}
+                    className="pr-16 font-mono text-xs"
+                    placeholder={t("credential.privateKeyPlaceholderNew")}
+                  />
+                ) : (
+                  <Input
+                    id="private_key"
+                    type="password"
+                    {...register("private_key")}
+                    className="pr-16"
+                    placeholder={t("credential.privateKeyPlaceholderNew")}
+                  />
+                )}
+                <div className="absolute right-0 top-1.5 flex gap-0.5 pr-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const value = watch("private_key");
+                      if (value) copyToClipboard(value);
+                    }}
+                    className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    aria-label={t("common.copy")}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowPrivateKey(!showPrivateKey)}
+                    className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    aria-label={
+                      showPrivateKey ? t("credential.hidePassword") : t("credential.showPassword")
+                    }
+                  >
+                    {showPrivateKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+            </Field>
+          )}
+        </fieldset>
         <div className="flex gap-3">
-          <Button type="submit" disabled={updateMutation.isPending}>
+          <Button type="submit" disabled={updateMutation.isPending || !secretsReady}>
             {updateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
             {updateMutation.isPending ? t("common.updating") : t("credential.update")}
           </Button>

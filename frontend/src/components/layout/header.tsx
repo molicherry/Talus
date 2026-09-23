@@ -1,11 +1,10 @@
 import { Key, LogOut, Menu, Monitor, Moon, Sun, User } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../../i18n";
 import { useAuth } from "../../hooks/use-auth";
 import type { Theme } from "../../hooks/use-theme";
 import { useTheme } from "../../hooks/use-theme";
-import { apiClient } from "../../lib/api-client";
-import { apiFieldErrors, translateApiError } from "../../lib/api-error";
+import { ChangePasswordDialog } from "../../features/auth/components/change-password-dialog";
 import { clearAuthToken } from "../../lib/auth";
 import { Button } from "../ui/button";
 
@@ -23,18 +22,28 @@ const themeNext: Record<Theme, Theme> = {
 
 interface HeaderProps {
   onOpenSidebar: () => void;
+  sidebarOpen: boolean;
 }
 
-export function Header({ onOpenSidebar }: HeaderProps) {
+export function Header({ onOpenSidebar, sidebarOpen }: HeaderProps) {
   const { user } = useAuth();
   const { t, i18n } = useTranslation();
   const { theme, setTheme } = useTheme();
   const [showDropdown, setShowDropdown] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [currentPw, setCurrentPw] = useState("");
-  const [newPw, setNewPw] = useState("");
-  const [pwError, setPwError] = useState("");
-  const [pwOk, setPwOk] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!showDropdown) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowDropdown(false);
+        menuButton.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [showDropdown]);
 
   const handleLogout = () => {
     clearAuthToken();
@@ -46,31 +55,6 @@ export function Header({ onOpenSidebar }: HeaderProps) {
     i18n.changeLanguage(next);
   };
 
-  const handleChangePassword = async () => {
-    setPwError("");
-    try {
-      // Through the api client: it carries the token, honours VITE_API_BASE_URL,
-      // and surfaces the backend's `reason` for translation.
-      await apiClient.put("/api/v1/auth/password", {
-        current_password: currentPw,
-        new_password: newPw,
-      });
-      setPwOk(true);
-      setTimeout(() => {
-        setShowPasswordModal(false);
-        setPwOk(false);
-        setCurrentPw("");
-        setNewPw("");
-      }, 1500);
-    } catch (err) {
-      // A server-side length error lands under the new-password field; anything
-      // else (wrong current password, expired session, outage) is localized by
-      // its reason — a bare 401 no longer reads as "wrong password".
-      const fieldErrors = apiFieldErrors(err, t);
-      setPwError(fieldErrors.new_password ?? translateApiError(err, t, "common.error"));
-    }
-  };
-
   const ThemeIcon = themeIcons[theme];
 
   return (
@@ -80,6 +64,8 @@ export function Header({ onOpenSidebar }: HeaderProps) {
           type="button"
           onClick={onOpenSidebar}
           aria-label={t("header.openMenu")}
+          aria-expanded={sidebarOpen}
+          aria-controls="mobile-navigation"
           className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground lg:hidden"
         >
           <Menu className="h-5 w-5" />
@@ -105,18 +91,25 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         {user && (
           <div className="relative">
             <Button
+              ref={menuButton}
+              aria-expanded={showDropdown}
+              aria-controls="user-actions"
               type="button"
               variant="ghost"
               onClick={() => setShowDropdown(!showDropdown)}
+              aria-label={user.username}
               className="gap-2"
             >
               <User className="h-4 w-4" />
-              <span className="max-w-[10rem] truncate">{user.username}</span>
+              <span className="hidden max-w-[10rem] truncate sm:inline">{user.username}</span>
             </Button>
             {showDropdown && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowDropdown(false)} />
-                <div className="absolute right-0 z-20 mt-2 w-52 rounded-xl border border-border bg-card-elevated p-1 shadow-dropdown">
+                <div
+                  id="user-actions"
+                  className="absolute right-0 z-20 mt-2 w-52 rounded-xl border border-border bg-card-elevated p-1 shadow-dropdown"
+                >
                   <button
                     type="button"
                     onClick={() => {
@@ -144,45 +137,10 @@ export function Header({ onOpenSidebar }: HeaderProps) {
       </div>
 
       {showPasswordModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-elevated">
-            <h2 className="text-lg font-semibold text-foreground">{t("auth.changePassword")}</h2>
-            {pwOk ? (
-              <p className="mt-4 text-sm text-success">{t("auth.passwordChanged")}</p>
-            ) : (
-              <div className="mt-4 space-y-3">
-                <input
-                  type="password"
-                  value={currentPw}
-                  onChange={(e) => setCurrentPw(e.target.value)}
-                  className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
-                  placeholder={t("auth.currentPassword")}
-                />
-                <input
-                  type="password"
-                  value={newPw}
-                  onChange={(e) => setNewPw(e.target.value)}
-                  className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
-                  placeholder={t("auth.newPassword")}
-                />
-                {pwError && <p className="text-xs text-danger">{pwError}</p>}
-                <div className="flex gap-3 pt-1">
-                  <Button type="button" onClick={handleChangePassword} className="flex-1">
-                    {t("common.save")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setShowPasswordModal(false)}
-                    className="flex-1"
-                  >
-                    {t("common.cancel")}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <ChangePasswordDialog
+          onClose={() => setShowPasswordModal(false)}
+          returnFocusRef={menuButton}
+        />
       )}
     </header>
   );
