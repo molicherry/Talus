@@ -105,14 +105,16 @@ func main() {
 	}
 	slog.Info("auto-migrate complete")
 
-	// 4.5 Backfill services:read scope onto existing API keys (was fail-open).
-	// Preserves current behavior (every key could list services) while making the
-	// scope revocable per key. Idempotent via jsonb containment check.
-	if err := db.Exec(`UPDATE api_keys SET scopes = scopes || '["services:read"]'::jsonb WHERE scopes IS NOT NULL AND NOT scopes @> '["services:read"]'::jsonb`).Error; err != nil {
+	// 4.5 One-time backfill: API keys created before services:read existed (the
+	// API used to be fail-open) get the scope once. Recorded in schema_migrations
+	// so it is not re-applied on every start to keys that deliberately omit it.
+	const servicesReadBackfill = `UPDATE api_keys SET scopes = scopes || '["services:read"]'::jsonb WHERE scopes IS NOT NULL AND NOT scopes @> '["services:read"]'::jsonb`
+	if applied, err := repository.ApplyOnce(db, "2026-09-24-services-read-scope", servicesReadBackfill); err != nil {
 		slog.Error("failed to backfill services:read scope", "error", err)
 		os.Exit(1)
+	} else if applied {
+		slog.Info("services:read scope backfill applied")
 	}
-	slog.Info("services:read scope backfill complete")
 
 	// 4. Create TimescaleDB hypertable for metrics
 	if err := db.Exec("SELECT create_hypertable('metrics', 'time', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE)").Error; err != nil {

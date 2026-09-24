@@ -130,7 +130,8 @@ export function ApiKeysPage() {
   const serversReady =
     serverMode === "all" ||
     (!serversQuery.isLoading && !serversQuery.isError && newServerIDs.length > 0);
-  const canCreate = newName.trim() !== "" && !createMutation.isPending && serversReady;
+  const canCreate =
+    newName.trim() !== "" && newScopes.length > 0 && !createMutation.isPending && serversReady;
 
   const handleCreate = () => {
     setCreateError(null);
@@ -327,6 +328,11 @@ export function ApiKeysPage() {
                     );
                   })}
                 </div>
+                {newScopes.length === 0 && (
+                  <p role="alert" className="mt-1 text-xs text-danger">
+                    {t("errors.scopes_required")}
+                  </p>
+                )}
               </div>
 
               <div>

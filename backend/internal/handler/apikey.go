@@ -22,9 +22,11 @@ func NewAPIKeyHandler(svc *service.APIKeyService, auditRepo *repository.AuditEve
 }
 
 type createAPIKeyRequest struct {
-	Name      string   `json:"name,omitempty"`
-	Scopes    []string `json:"scopes,omitempty"`
-	ServerIDs []uint   `json:"server_ids,omitempty"`
+	Name string `json:"name,omitempty"`
+	// Scopes is a pointer so an omitted field (nil → default scopes) is
+	// distinguishable from an explicit empty list (→ rejected).
+	Scopes    *[]string `json:"scopes"`
+	ServerIDs []uint    `json:"server_ids,omitempty"`
 }
 
 func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
