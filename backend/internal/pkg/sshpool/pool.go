@@ -33,9 +33,13 @@ type Pool struct {
 
 // connEntry tracks a single cached SSH client and its usage.
 type connEntry struct {
-	client   *ssh.Client
-	lastUsed time.Time
-	sem      chan struct{} // concurrency limiter per server
+	client *ssh.Client
+	// fingerprint identifies the connection parameters the cached client was
+	// dialed with (host, port, credential revision). It is compared on every
+	// Get so a cached client can never be used for different parameters.
+	fingerprint string
+	lastUsed    time.Time
+	sem         chan struct{} // concurrency limiter per server
 }
 
 // NewPool creates a connection pool that evicts idle connections after maxIdle
@@ -60,14 +64,27 @@ func NewPool(maxIdle time.Duration, maxConns int, slotTimeout time.Duration) *Po
 // and pass it to Release when finished.
 // Blocks up to slotTimeout if maxConns sessions are already active for this
 // server, then returns ErrSlotTimeout instead of hanging the caller forever.
-func (p *Pool) Get(serverID uint) (*ssh.Client, error) {
+//
+// fingerprint describes the dial parameters (host, port, credential revision).
+// A cached client dialed with a different fingerprint is closed and dropped:
+// reusing it would send commands to the previous host or authenticate with the
+// previous credential. Callers compute it from current server state, so a
+// reconfigured or deleted server can never hit a stale cache entry.
+func (p *Pool) Get(serverID uint, fingerprint string) (*ssh.Client, error) {
 	p.mu.Lock()
 	entry, ok := p.conns[serverID]
 	if !ok {
 		entry = &connEntry{
-			sem: make(chan struct{}, p.maxConns),
+			fingerprint: fingerprint,
+			sem:         make(chan struct{}, p.maxConns),
 		}
 		p.conns[serverID] = entry
+	} else if entry.fingerprint != fingerprint {
+		if entry.client != nil {
+			entry.client.Close()
+			entry.client = nil
+		}
+		entry.fingerprint = fingerprint
 	}
 	p.mu.Unlock()
 
@@ -141,6 +158,27 @@ func (p *Pool) Discard(serverID uint, client *ssh.Client) {
 	if ok {
 		<-entry.sem // release concurrency slot
 	}
+}
+
+// Invalidate drops any cached connection for the server. Call it when the
+// server's connection parameters change (host/port/credential) or it is
+// deleted, so the next Get cannot reuse a connection dialed with the old
+// parameters. Safe to call for an unknown server.
+func (p *Pool) Invalidate(serverID uint) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	entry, ok := p.conns[serverID]
+	if !ok {
+		return
+	}
+	if entry.client != nil {
+		entry.client.Close()
+		entry.client = nil
+	}
+	// Clearing the fingerprint makes any client returned by an in-flight
+	// session stale too: the next Get passes the current fingerprint and
+	// closes whatever it finds (a stale release included).
+	entry.fingerprint = ""
 }
 
 // Close shuts down the eviction goroutine and closes all cached connections.

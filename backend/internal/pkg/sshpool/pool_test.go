@@ -59,10 +59,10 @@ func TestGetDropsDeadConnection(t *testing.T) {
 	// Simulate a cached connection: insert a fake client directly.
 	fake := newTestClient(t)
 	p.mu.Lock()
-	p.conns[1] = &connEntry{client: fake, sem: make(chan struct{}, 1), lastUsed: time.Now()}
+	p.conns[1] = &connEntry{client: fake, fingerprint: "fp", sem: make(chan struct{}, 1), lastUsed: time.Now()}
 	p.mu.Unlock()
 
-	got, gerr := p.Get(1)
+	got, gerr := p.Get(1, "fp")
 	if gerr != nil {
 		t.Fatalf("Get: %v", gerr)
 	}
@@ -85,10 +85,10 @@ func TestGetReturnsLiveConnection(t *testing.T) {
 
 	fake := newTestClient(t)
 	p.mu.Lock()
-	p.conns[1] = &connEntry{client: fake, sem: make(chan struct{}, 1), lastUsed: time.Now()}
+	p.conns[1] = &connEntry{client: fake, fingerprint: "fp", sem: make(chan struct{}, 1), lastUsed: time.Now()}
 	p.mu.Unlock()
 
-	got, gerr := p.Get(1)
+	got, gerr := p.Get(1, "fp")
 	if gerr != nil {
 		t.Fatalf("Get: %v", gerr)
 	}
@@ -110,11 +110,11 @@ func TestDiscardDoesNotCache(t *testing.T) {
 
 	fake := newTestClient(t)
 	p.mu.Lock()
-	p.conns[1] = &connEntry{client: fake, sem: make(chan struct{}, 1), lastUsed: time.Now()}
+	p.conns[1] = &connEntry{client: fake, fingerprint: "fp", sem: make(chan struct{}, 1), lastUsed: time.Now()}
 	p.mu.Unlock()
 
 	// Take it out, then discard instead of release.
-	got, gerr := p.Get(1)
+	got, gerr := p.Get(1, "fp")
 	if gerr != nil {
 		t.Fatalf("Get: %v", gerr)
 	}
@@ -137,10 +137,10 @@ func TestReleaseCachesConnection(t *testing.T) {
 
 	fake := newTestClient(t)
 	p.mu.Lock()
-	p.conns[1] = &connEntry{client: fake, sem: make(chan struct{}, 1), lastUsed: time.Now()}
+	p.conns[1] = &connEntry{client: fake, fingerprint: "fp", sem: make(chan struct{}, 1), lastUsed: time.Now()}
 	p.mu.Unlock()
 
-	got, gerr := p.Get(1)
+	got, gerr := p.Get(1, "fp")
 	if gerr != nil {
 		t.Fatalf("Get: %v", gerr)
 	}
@@ -160,7 +160,7 @@ func TestEvictRemovesIdleEntry(t *testing.T) {
 
 	// Create the entry by calling Get (returns nil since nothing cached).
 	// Then release nothing — the entry stays with no cached client.
-	_, _ = p.Get(2)
+	_, _ = p.Get(2, "fp")
 	// Entry now exists with client == nil and one held sem slot; release the
 	// slot by Discard with nil.
 	p.Discard(2, nil)
@@ -186,17 +186,17 @@ func TestGetSlotTimeout(t *testing.T) {
 	// Acquire both slots without releasing.
 	fake := newTestClient(t)
 	p.mu.Lock()
-	p.conns[1] = &connEntry{client: fake, sem: make(chan struct{}, 2), lastUsed: time.Now()}
+	p.conns[1] = &connEntry{client: fake, fingerprint: "fp", sem: make(chan struct{}, 2), lastUsed: time.Now()}
 	p.mu.Unlock()
 	for i := 0; i < 2; i++ {
-		if _, err := p.Get(1); err != nil {
+		if _, err := p.Get(1, "fp"); err != nil {
 			t.Fatalf("Get %d: %v", i, err)
 		}
 	}
 
 	// Third acquire must time out instead of blocking forever.
 	start := time.Now()
-	got, err := p.Get(1)
+	got, err := p.Get(1, "fp")
 	if err == nil {
 		t.Fatalf("expected ErrSlotTimeout, got client %v", got)
 	}
@@ -205,5 +205,80 @@ func TestGetSlotTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("Get blocked too long: %v", elapsed)
+	}
+}
+
+func TestGetInvalidatesOnFingerprintChange(t *testing.T) {
+	p := NewPool(time.Minute, 1, time.Second)
+	p.probe = func(*ssh.Client) bool { return true }
+
+	fake := newTestClient(t)
+	p.mu.Lock()
+	p.conns[1] = &connEntry{client: fake, fingerprint: "old", sem: make(chan struct{}, 1), lastUsed: time.Now()}
+	p.mu.Unlock()
+
+	// A different fingerprint (host/port/credential changed) must not hand back
+	// the connection dialed with the old parameters.
+	got, err := p.Get(1, "new")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected the stale connection to be dropped, got %v", got)
+	}
+	p.mu.Lock()
+	entry := p.conns[1]
+	p.mu.Unlock()
+	if entry == nil || entry.client != nil {
+		t.Fatal("stale connection was not cleared")
+	}
+	if entry.fingerprint != "new" {
+		t.Fatalf("fingerprint = %q, want new", entry.fingerprint)
+	}
+}
+
+func TestInvalidateDropsCachedConnection(t *testing.T) {
+	p := NewPool(time.Minute, 1, time.Second)
+	p.probe = func(*ssh.Client) bool { return true }
+
+	fake := newTestClient(t)
+	p.mu.Lock()
+	p.conns[1] = &connEntry{client: fake, fingerprint: "fp", sem: make(chan struct{}, 1), lastUsed: time.Now()}
+	p.mu.Unlock()
+
+	p.Invalidate(1)
+
+	p.mu.Lock()
+	entry := p.conns[1]
+	p.mu.Unlock()
+	if entry == nil || entry.client != nil {
+		t.Fatal("Invalidate must drop the cached client")
+	}
+}
+
+func TestInvalidateMakesInFlightReleaseUnusable(t *testing.T) {
+	// A connection handed out before an invalidation must not be reused after it
+	// is released: the next Get sees a fingerprint mismatch and drops it.
+	p := NewPool(time.Minute, 1, time.Second)
+	p.probe = func(*ssh.Client) bool { return true }
+
+	fake := newTestClient(t)
+	p.mu.Lock()
+	p.conns[1] = &connEntry{client: fake, fingerprint: "fp", sem: make(chan struct{}, 1), lastUsed: time.Now()}
+	p.mu.Unlock()
+
+	got, err := p.Get(1, "fp")
+	if err != nil || got == nil {
+		t.Fatalf("Get = (%v, %v), want a live client", got, err)
+	}
+	p.Invalidate(1)   // server changed while the connection is in use
+	p.Release(1, got) // the in-flight client comes back
+
+	again, err := p.Get(1, "fp2")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if again != nil {
+		t.Fatal("a connection released after Invalidate was reused")
 	}
 }

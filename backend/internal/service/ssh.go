@@ -11,24 +11,31 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
-	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
 
+// serverSource is the subset of repository.ServerRepo the SSH service needs.
+// An interface keeps the dial path testable without a database.
+type serverSource interface {
+	FindByID(ctx context.Context, id uint) (*model.Server, error)
+	SetHostKeyIfUnchanged(ctx context.Context, id uint, host string, port int, hostKey []byte) (bool, error)
+}
+
 // SSHService provides SSH command execution and connection management.
 type SSHService struct {
 	pool               *sshpool.Pool
-	serverRepo         *repository.ServerRepo
+	serverRepo         serverSource
 	credSvc            *CredentialService
 	sshDialTimeout     time.Duration
 	execDefaultTimeout time.Duration
 }
 
 // NewSSHService creates an SSHService with the given dependencies.
-func NewSSHService(pool *sshpool.Pool, serverRepo *repository.ServerRepo, credSvc *CredentialService, sshDialTimeout, execDefaultTimeout time.Duration) *SSHService {
+func NewSSHService(pool *sshpool.Pool, serverRepo serverSource, credSvc *CredentialService, sshDialTimeout, execDefaultTimeout time.Duration) *SSHService {
 	return &SSHService{
 		pool:               pool,
 		serverRepo:         serverRepo,
@@ -80,7 +87,18 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 // GetClient returns a pooled SSH client for the given server, dialing a new
 // connection if none is cached. The caller must call pool.Release when done.
 func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client, error) {
-	client, err := s.pool.Get(serverID)
+	// Always read current server state, even on a cache hit: a pooled client is
+	// only valid for the host/port/credential it was dialed with, and a deleted
+	// server must not stay reachable through a stale connection.
+	srv, err := s.serverRepo.FindByID(ctx, serverID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, server.ErrNotFound)
+		}
+		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
+	}
+
+	client, err := s.pool.Get(serverID, serverFingerprint(srv))
 	if err != nil {
 		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
 	}
@@ -89,15 +107,6 @@ func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client,
 	}
 
 	// Pool returned nil — dial a new connection.
-	srv, err := s.serverRepo.FindByID(ctx, serverID)
-	if err != nil {
-		s.pool.Release(serverID, nil)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, server.ErrNotFound)
-		}
-		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
-	}
-
 	if srv.CredentialID == nil {
 		s.pool.Release(serverID, nil)
 		return nil, fmt.Errorf("get ssh client for server %d: no credential configured", serverID)
@@ -126,15 +135,35 @@ func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client,
 		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, wrapSSHError(err))
 	}
 
-	// Save host key on first connection.
+	// Persist the host key on first connection. A conditional update (keyed on
+	// the host/port that was dialed) avoids a full-row save reverting a
+	// concurrent edit — the row was read before the dial, which can take seconds.
 	if len(knownHostKey) == 0 && len(capturedKey) > 0 {
-		srv.HostKey = &capturedKey
-		if updateErr := s.serverRepo.Update(ctx, srv); updateErr != nil {
+		updated, updateErr := s.serverRepo.SetHostKeyIfUnchanged(ctx, srv.ID, srv.Host, srv.Port, capturedKey)
+		if updateErr != nil {
 			slog.Warn("failed to persist host key", "server_id", serverID, "error", updateErr)
+		} else if !updated {
+			slog.Warn("host key not persisted: server changed during dial", "server_id", serverID)
 		}
 	}
 
 	return client, nil
+}
+
+// serverFingerprint identifies everything a pooled SSH connection depends on.
+// Two calls with the same fingerprint may reuse a connection; any change (host,
+// port, credential id or credential revision) must miss the cache.
+func serverFingerprint(srv *model.Server) string {
+	credential := "none"
+	if srv.CredentialID != nil {
+		credential = fmt.Sprintf("%d", *srv.CredentialID)
+		if srv.Credential != nil {
+			credential = fmt.Sprintf("%d@%d", *srv.CredentialID, srv.Credential.UpdatedAt.UnixNano())
+		} else {
+			credential = fmt.Sprintf("%d@missing", *srv.CredentialID)
+		}
+	}
+	return fmt.Sprintf("%s:%d:%s", srv.Host, srv.Port, credential)
 }
 
 // runCommand executes a command on an SSH session with timeout support.

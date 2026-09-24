@@ -16,15 +16,19 @@ import (
 
 // CredentialService provides business logic for SSH credential management.
 type CredentialService struct {
-	repo      *repository.CredentialRepo
-	masterKey *crypto.MasterKey
+	repo       *repository.CredentialRepo
+	serverRepo *repository.ServerRepo
+	masterKey  *crypto.MasterKey
+	pool       ConnectionInvalidator
 }
 
 // NewCredentialService creates a CredentialService with the given dependencies.
-func NewCredentialService(repo *repository.CredentialRepo, masterKey *crypto.MasterKey) *CredentialService {
+func NewCredentialService(repo *repository.CredentialRepo, serverRepo *repository.ServerRepo, masterKey *crypto.MasterKey, pool ConnectionInvalidator) *CredentialService {
 	return &CredentialService{
-		repo:      repo,
-		masterKey: masterKey,
+		repo:       repo,
+		serverRepo: serverRepo,
+		masterKey:  masterKey,
+		pool:       pool,
 	}
 }
 
@@ -211,15 +215,43 @@ func (s *CredentialService) Update(ctx context.Context, id uint, input UpdateCre
 	if err := s.repo.Update(ctx, cred); err != nil {
 		return nil, fmt.Errorf("credential %d: %w", id, err)
 	}
+	// Cached connections authenticated with the previous secret; drop them so
+	// the next call re-dials with the new one.
+	s.invalidateServers(ctx, id)
 	return cred, nil
 }
 
-// Delete soft-deletes a credential by id.
+// Delete soft-deletes a credential, unbinds it from every server, and drops
+// those servers' cached SSH connections (which authenticated with it).
 func (s *CredentialService) Delete(ctx context.Context, id uint) error {
-	if err := s.repo.Delete(ctx, id); err != nil {
+	// Collect the affected servers before the delete clears their bindings.
+	serverIDs, err := s.serverRepo.FindIDsByCredentialID(ctx, id)
+	if err != nil {
 		return fmt.Errorf("credential %d: %w", id, err)
 	}
+	if err := s.repo.DeleteAndUnbind(ctx, id); err != nil {
+		return fmt.Errorf("credential %d: %w", id, err)
+	}
+	for _, serverID := range serverIDs {
+		s.invalidate(serverID)
+	}
 	return nil
+}
+
+func (s *CredentialService) invalidateServers(ctx context.Context, credentialID uint) {
+	serverIDs, err := s.serverRepo.FindIDsByCredentialID(ctx, credentialID)
+	if err != nil {
+		return
+	}
+	for _, serverID := range serverIDs {
+		s.invalidate(serverID)
+	}
+}
+
+func (s *CredentialService) invalidate(serverID uint) {
+	if s.pool != nil {
+		s.pool.Invalidate(serverID)
+	}
 }
 
 // RevealCredential contains the decrypted credential values.

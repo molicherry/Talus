@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"golang.org/x/crypto/ssh"
 )
@@ -130,7 +132,7 @@ func newTestPool(t *testing.T) *sshpool.Pool {
 func seedPool(t *testing.T, pool *sshpool.Pool, serverID uint, client *ssh.Client) {
 	t.Helper()
 
-	if got, err := pool.Get(serverID); err != nil || got != nil {
+	if got, err := pool.Get(serverID, testFP(serverID)); err != nil || got != nil {
 		t.Fatalf("seed pool Get = (%v, %v), want (nil, nil)", got, err)
 	}
 	pool.Release(serverID, client)
@@ -148,7 +150,7 @@ func startSeededTerminalService(t *testing.T, serverID uint) (*TerminalService, 
 
 	// nil repository and credential service are safe here: the cached client
 	// means GetClient takes the pool hit and never dereferences them.
-	return NewTerminalService(NewSSHService(pool, nil, nil, time.Second, time.Second)), pool
+	return NewTerminalService(NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)), pool
 }
 
 // sessionHarness is one StartSession call in flight over a real WebSocket.
@@ -235,7 +237,7 @@ func TestStartSessionTearsDownOtherPump(t *testing.T) {
 
 	// Accounting: the slot was freed and the torn-down connection was
 	// discarded, so Get hands out no cached client.
-	client, err := pool.Get(serverID)
+	client, err := pool.Get(serverID, testFP(serverID))
 	if err != nil {
 		t.Fatalf("Get after torn-down session = %v, want the slot to be free", err)
 	}
@@ -262,7 +264,7 @@ func TestStartSessionCleanCloseReleasesConnection(t *testing.T) {
 		t.Fatalf("StartSession = %v, want nil", err)
 	}
 
-	client, err := pool.Get(serverID)
+	client, err := pool.Get(serverID, testFP(serverID))
 	if err != nil {
 		t.Fatalf("Get after clean close = %v", err)
 	}
@@ -292,7 +294,7 @@ func TestStartSessionEmptyCloseFrameReleasesConnection(t *testing.T) {
 		t.Fatalf("StartSession = %v, want nil", err)
 	}
 
-	client, err := pool.Get(serverID)
+	client, err := pool.Get(serverID, testFP(serverID))
 	if err != nil {
 		t.Fatalf("Get after bare ws.close() = %v", err)
 	}
@@ -388,7 +390,7 @@ func TestStartSessionClosesTransportWhenPeerNeverAnswers(t *testing.T) {
 
 	pool := newTestPool(t)
 	seedPool(t, pool, serverID, dialTestSSH(t, proxy.addr, hostKey))
-	svc := NewTerminalService(NewSSHService(pool, nil, nil, time.Second, time.Second))
+	svc := NewTerminalService(NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second))
 
 	h := beginSession(t, svc, serverID)
 
@@ -406,7 +408,7 @@ func TestStartSessionClosesTransportWhenPeerNeverAnswers(t *testing.T) {
 
 	// A forced teardown means the client is not reusable: discarded, with the
 	// slot released exactly once.
-	client, err := pool.Get(serverID)
+	client, err := pool.Get(serverID, testFP(serverID))
 	if err != nil {
 		t.Fatalf("Get after forced teardown = %v, want the slot to be free", err)
 	}
@@ -499,7 +501,7 @@ func TestStartSessionUnwindsWhenTheSSHWritePathIsWedged(t *testing.T) {
 
 	pool := newTestPool(t)
 	seedPool(t, pool, serverID, client)
-	svc := NewTerminalService(NewSSHService(pool, nil, nil, time.Second, time.Second))
+	svc := NewTerminalService(NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second))
 
 	h := beginSession(t, svc, serverID)
 
@@ -514,7 +516,7 @@ func TestStartSessionUnwindsWhenTheSSHWritePathIsWedged(t *testing.T) {
 		t.Fatalf("StartSession = %v, want nil", err)
 	}
 
-	got, err := pool.Get(serverID)
+	got, err := pool.Get(serverID, testFP(serverID))
 	if err != nil {
 		t.Fatalf("Get after wedged transport = %v, want the slot to be free", err)
 	}
@@ -524,3 +526,24 @@ func TestStartSessionUnwindsWhenTheSSHWritePathIsWedged(t *testing.T) {
 	}
 	pool.Release(serverID, nil)
 }
+
+// staticServerSource satisfies serverSource for tests that seed the pool: it
+// reports a server whose fingerprint matches testFP, so GetClient can load
+// "current" state without a database, and it never persists a host key.
+type staticServerSource struct{}
+
+func (staticServerSource) FindByID(_ context.Context, id uint) (*model.Server, error) {
+	return testServerFor(id), nil
+}
+
+func (staticServerSource) SetHostKeyIfUnchanged(context.Context, uint, string, int, []byte) (bool, error) {
+	return false, nil
+}
+
+// testServerFor is the server the fake source reports; testFP derives the
+// fingerprint seedPool must seed the pool with so GetClient hits the cache.
+func testServerFor(id uint) *model.Server {
+	return &model.Server{BaseModel: model.BaseModel{ID: id}, Host: "test-host", Port: 22}
+}
+
+func testFP(id uint) string { return serverFingerprint(testServerFor(id)) }

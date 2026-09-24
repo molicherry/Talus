@@ -67,6 +67,27 @@ func (r *ServerRepo) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&model.Server{}, id).Error
 }
 
+// SetHostKeyIfUnchanged stores a TOFU host key only when the row still has the
+// host and port that were dialed and no key yet. The dial happens before the
+// write, so a full-row save would revert a concurrent edit; this updates one
+// column and reports whether it applied.
+func (r *ServerRepo) SetHostKeyIfUnchanged(ctx context.Context, id uint, host string, port int, hostKey []byte) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Server{}).
+		Where("id = ? AND host = ? AND port = ? AND (host_key IS NULL OR octet_length(host_key) = 0)", id, host, port).
+		Update("host_key", hostKey)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
+// FindIDsByCredentialID returns the ids of servers bound to a credential.
+func (r *ServerRepo) FindIDsByCredentialID(ctx context.Context, credentialID uint) ([]uint, error) {
+	var ids []uint
+	err := r.db.WithContext(ctx).Model(&model.Server{}).Where("credential_id = ?", credentialID).Pluck("id", &ids).Error
+	return ids, err
+}
+
 // FindByIDs returns servers whose IDs are in the given slice, ordered by name.
 func (r *ServerRepo) FindByIDs(ctx context.Context, ids []uint) ([]model.Server, error) {
 	var servers []model.Server
