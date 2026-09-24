@@ -107,3 +107,41 @@ func TestCredentialDeleteAndUnbind(t *testing.T) {
 		t.Fatal("credential was not soft-deleted")
 	}
 }
+
+// TestServerRepoUpdateClearsCredential guards the other half of the binding
+// contract: a nil CredentialID must actually clear the column (the update path
+// omits the association, not the column).
+func TestServerRepoUpdateClearsCredential(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.AutoMigrate(&model.Server{}, &model.SSHCredential{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := NewServerRepo(db)
+	ctx := context.Background()
+
+	cred := &model.SSHCredential{Name: "cred", AuthType: "password", Username: "root"}
+	if err := db.Create(cred).Error; err != nil {
+		t.Fatalf("create credential: %v", err)
+	}
+	srv := &model.Server{Name: "srv", Host: "h", Port: 22, OwnerID: 1, CredentialID: &cred.ID}
+	if err := repo.Create(ctx, srv); err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+
+	loaded, err := repo.FindByID(ctx, srv.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	loaded.CredentialID = nil
+	if err := repo.Update(ctx, loaded); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	after, err := repo.FindByID(ctx, srv.ID)
+	if err != nil {
+		t.Fatalf("reload after update: %v", err)
+	}
+	if after.CredentialID != nil {
+		t.Fatalf("credential binding not cleared: %d", *after.CredentialID)
+	}
+}

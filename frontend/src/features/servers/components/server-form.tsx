@@ -208,7 +208,10 @@ export function ServerForm({ server }: ServerFormProps) {
         <Select
           id="credential_id"
           {...register("credential_id", {
-            setValueAs: (v: string) => (v === "" ? undefined : Number(v)),
+            // Explicit null (not undefined): JSON.stringify drops undefined, so
+            // the API could not tell "clear the binding" from "leave it" and
+            // "No credential" never persisted.
+            setValueAs: (v: string) => (v === "" ? null : Number(v)),
           })}
         >
           <option value="">{t("server.noCredential")}</option>
