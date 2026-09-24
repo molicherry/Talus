@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/vpsmanager/backend/internal/model"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -39,12 +41,11 @@ func TestServerRepoUpdateSwitchesCredential(t *testing.T) {
 	// Scope every table this test creates to a dedicated schema. The public
 	// schema is never touched: no DROP TABLE, no writes, only our own objects.
 	schema := fmt.Sprintf("talus_test_%d", time.Now().UnixNano())
-	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
+	adminCfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		t.Fatalf("open admin connection: %v", err)
+		t.Fatalf("parse dsn: %v", err)
 	}
+	admin := openGorm(t, adminCfg)
 	if err := admin.Exec("CREATE SCHEMA " + schema).Error; err != nil {
 		t.Fatalf("create schema: %v", err)
 	}
@@ -52,17 +53,24 @@ func TestServerRepoUpdateSwitchesCredential(t *testing.T) {
 		if err := admin.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE").Error; err != nil {
 			t.Errorf("drop schema %s: %v", schema, err)
 		}
+		closeGorm(admin)
 	})
 
-	// search_path is a per-connection pgx runtime parameter, so every pooled
-	// connection resolved from this DSN sees only the test schema.
-	db, err := gorm.Open(postgres.Open(dsn+" search_path="+schema), &gorm.Config{
-		DisableForeignKeyConstraintWhenMigrating: true,
-		Logger:                                   logger.Default.LogMode(logger.Silent),
-	})
+	// search_path is set as a pgx runtime parameter, not appended to the DSN.
+	// Appending (`dsn + " search_path=" + schema`) only works for the key=value
+	// DSN form; with a postgres:// URL it lands inside the last query parameter
+	// (e.g. application_name) and search_path is never applied, so the tables
+	// would be created in public and the cleanup below would not remove them.
+	scopedCfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		t.Fatalf("open scoped connection: %v", err)
+		t.Fatalf("parse dsn: %v", err)
 	}
+	if scopedCfg.RuntimeParams == nil {
+		scopedCfg.RuntimeParams = map[string]string{}
+	}
+	scopedCfg.RuntimeParams["search_path"] = schema
+	db := openGorm(t, scopedCfg)
+	t.Cleanup(func() { closeGorm(db) })
 	if err := db.AutoMigrate(&model.Server{}, &model.SSHCredential{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -108,5 +116,25 @@ func TestServerRepoUpdateSwitchesCredential(t *testing.T) {
 	}
 	if after.CredentialID == nil || *after.CredentialID != credB.ID {
 		t.Fatalf("credential_id = %s after switching to %d", got, credB.ID)
+	}
+}
+
+// openGorm opens GORM over a pgx connection config so per-connection runtime
+// parameters (search_path) are honoured for every pooled connection.
+func openGorm(t *testing.T, cfg *pgx.ConnConfig) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: stdlib.OpenDB(*cfg)}), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+		Logger:                                   logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	return db
+}
+
+func closeGorm(db *gorm.DB) {
+	if sqlDB, err := db.DB(); err == nil {
+		_ = sqlDB.Close()
 	}
 }
