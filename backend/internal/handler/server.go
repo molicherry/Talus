@@ -22,14 +22,36 @@ type CreateServerRequest struct {
 	CredentialID *uint   `json:"credential_id,omitempty"`
 }
 
+// nullableUint distinguishes an absent JSON field from an explicit null:
+// absent means "leave unchanged", null means "clear". A plain *uint cannot
+// tell them apart, which made clearing a server's credential impossible.
+type nullableUint struct {
+	set   bool
+	value *uint
+}
+
+func (n *nullableUint) UnmarshalJSON(data []byte) error {
+	n.set = true
+	if string(data) == "null" {
+		n.value = nil
+		return nil
+	}
+	var v uint
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	n.value = &v
+	return nil
+}
+
 // UpdateServerRequest is the JSON body for updating a server.
 type UpdateServerRequest struct {
-	Name         *string `json:"name,omitempty"`
-	Host         *string `json:"host,omitempty"`
-	Port         *int    `json:"port,omitempty"`
-	Description  *string `json:"description,omitempty"`
-	Notes        *string `json:"notes,omitempty"`
-	CredentialID *uint   `json:"credential_id,omitempty"`
+	Name         *string      `json:"name,omitempty"`
+	Host         *string      `json:"host,omitempty"`
+	Port         *int         `json:"port,omitempty"`
+	Description  *string      `json:"description,omitempty"`
+	Notes        *string      `json:"notes,omitempty"`
+	CredentialID nullableUint `json:"credential_id"`
 }
 
 // ServerHandler exposes the server CRUD endpoints.
@@ -162,6 +184,7 @@ func (h *ServerHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	input := &model.Server{}
+	clearCredential := false
 	if req.Name != nil {
 		input.Name = *req.Name
 	}
@@ -177,11 +200,15 @@ func (h *ServerHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Notes != nil {
 		input.Notes = req.Notes
 	}
-	if req.CredentialID != nil {
-		input.CredentialID = req.CredentialID
+	if req.CredentialID.set {
+		if req.CredentialID.value == nil {
+			clearCredential = true
+		} else {
+			input.CredentialID = req.CredentialID.value
+		}
 	}
 
-	updated, err := h.svc.Update(r.Context(), id, input)
+	updated, err := h.svc.Update(r.Context(), id, input, clearCredential)
 	if err != nil {
 		server.WriteError(w, r, err)
 		return

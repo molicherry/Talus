@@ -287,7 +287,9 @@ func (s *ServerService) Create(ctx context.Context, server *model.Server) (*mode
 
 // Update applies partial updates to an existing server.
 // Only non-zero fields from input are applied.
-func (s *ServerService) Update(ctx context.Context, id uint, input *model.Server) (*model.Server, error) {
+// clearCredential distinguishes an explicit "credential_id": null (unbind)
+// from an absent field (leave the binding unchanged).
+func (s *ServerService) Update(ctx context.Context, id uint, input *model.Server, clearCredential bool) (*model.Server, error) {
 	existing, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -319,9 +321,7 @@ func (s *ServerService) Update(ctx context.Context, id uint, input *model.Server
 	if input.Notes != nil {
 		existing.Notes = input.Notes
 	}
-	if input.CredentialID != nil {
-		existing.CredentialID = input.CredentialID
-	}
+	existing.CredentialID = resolveCredentialBinding(existing.CredentialID, input.CredentialID, clearCredential)
 
 	if err := s.repo.Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("server %d: %w", id, err)
@@ -331,6 +331,19 @@ func (s *ServerService) Update(ctx context.Context, id uint, input *model.Server
 	// here closes it immediately instead of leaving it idle.
 	s.invalidate(id)
 	return s.Get(ctx, id)
+}
+
+// resolveCredentialBinding applies a partial credential-binding update: an
+// explicit clear wins, then an explicit value, otherwise the current binding is
+// kept. It exists so "absent" and "null" cannot collapse into one case.
+func resolveCredentialBinding(current, input *uint, clear bool) *uint {
+	if clear {
+		return nil
+	}
+	if input != nil {
+		return input
+	}
+	return current
 }
 
 // Delete soft-deletes a server by id.
