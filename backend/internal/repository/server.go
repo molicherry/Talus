@@ -52,8 +52,14 @@ func (r *ServerRepo) Create(ctx context.Context, server *model.Server) error {
 }
 
 // Update saves all fields of an existing server record.
+//
+// The Credential association is omitted on purpose: FindByID preloads it, and
+// GORM's Save re-derives the belongs-to foreign key from a populated
+// association — which would silently write a credential_id change back to the
+// previously loaded credential. A server update never writes the credential
+// row itself.
 func (r *ServerRepo) Update(ctx context.Context, server *model.Server) error {
-	return r.db.WithContext(ctx).Save(server).Error
+	return r.db.WithContext(ctx).Omit("Credential").Save(server).Error
 }
 
 // Delete performs a soft delete of the server with the given id.
