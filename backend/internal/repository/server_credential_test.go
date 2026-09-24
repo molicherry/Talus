@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
 	"gorm.io/driver/postgres"
@@ -18,11 +19,10 @@ import (
 // back to the credential that was loaded. ServerRepo.Update therefore has to
 // Omit the association.
 //
-// Opt-in integration test: it needs a throwaway Postgres and is skipped
-// otherwise, e.g.
+// Opt-in integration test. It only touches its own throwaway schema (created
+// and dropped via t.Cleanup) and is skipped when TEST_DATABASE_URL is unset,
+// so it can safely point at any Postgres, including a development one:
 //
-//	docker run -d --rm -e POSTGRES_PASSWORD=repro -e POSTGRES_USER=repro \
-//	  -e POSTGRES_DB=repro -p 127.0.0.1:55432:5432 postgres:16-alpine
 //	TEST_DATABASE_URL='host=127.0.0.1 port=55432 user=repro password=repro dbname=repro sslmode=disable' \
 //	  go test ./internal/repository -run TestServerRepoUpdateSwitchesCredential -v
 func TestServerRepoUpdateSwitchesCredential(t *testing.T) {
@@ -30,15 +30,33 @@ func TestServerRepoUpdateSwitchesCredential(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set TEST_DATABASE_URL to run this integration test")
 	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+
+	// Scope every table this test creates to a dedicated schema. The public
+	// schema is never touched: no DROP TABLE, no writes, only our own objects.
+	schema := fmt.Sprintf("talus_test_%d", time.Now().UnixNano())
+	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open admin connection: %v", err)
+	}
+	if err := admin.Exec("CREATE SCHEMA " + schema).Error; err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := admin.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE").Error; err != nil {
+			t.Errorf("drop schema %s: %v", schema, err)
+		}
+	})
+
+	// search_path is a per-connection pgx runtime parameter, so every pooled
+	// connection resolved from this DSN sees only the test schema.
+	db, err := gorm.Open(postgres.Open(dsn+" search_path="+schema), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 		Logger:                                   logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
-	if err := db.Exec("DROP TABLE IF EXISTS ssh_credentials, servers CASCADE").Error; err != nil {
-		t.Fatalf("reset tables: %v", err)
+		t.Fatalf("open scoped connection: %v", err)
 	}
 	if err := db.AutoMigrate(&model.Server{}, &model.SSHCredential{}); err != nil {
 		t.Fatalf("migrate: %v", err)
