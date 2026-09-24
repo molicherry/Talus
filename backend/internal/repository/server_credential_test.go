@@ -28,6 +28,11 @@ import (
 func TestServerRepoUpdateSwitchesCredential(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
+		// Never let a missing database turn into a silent skip on CI: the whole
+		// point of the service in the workflow is to exercise this regression.
+		if os.Getenv("CI") != "" {
+			t.Fatal("TEST_DATABASE_URL must be set in CI (see .github/workflows/ci.yml)")
+		}
 		t.Skip("set TEST_DATABASE_URL to run this integration test")
 	}
 
