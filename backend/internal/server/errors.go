@@ -34,6 +34,7 @@ const (
 	ReasonInvalidRelayRequest  = "invalid_relay_request"
 	ReasonInvalidRelayPath     = "invalid_relay_path"
 	ReasonInvalidScopes        = "invalid_scopes"
+	ReasonScopesRequired       = "scopes_required"
 	ReasonServersNotFound      = "servers_not_found"
 	ReasonMethodRequired       = "method_required"
 	ReasonCommandRequired      = "command_required"
@@ -82,6 +83,7 @@ var reasonMessages = map[string]string{
 	ReasonInvalidRelayRequest:  "invalid relay request",
 	ReasonInvalidRelayPath:     "invalid relay path",
 	ReasonInvalidScopes:        "invalid scopes: {{scopes}}",
+	ReasonScopesRequired:       "at least one scope is required",
 	ReasonServersNotFound:      "unknown server ids: {{servers}}",
 	ReasonMethodRequired:       "method is required",
 	ReasonCommandRequired:      "command is required",

@@ -32,12 +32,27 @@ type CreateAPIKeyResult struct {
 	APIKey *model.APIKey `json:"api_key"`
 }
 
-func (s *APIKeyService) Create(ctx context.Context, name string, scopes []string, serverIDs []uint) (*CreateAPIKeyResult, error) {
-	if len(scopes) == 0 {
-		scopes = model.AllScopeGatedScopes
+// resolveScopes decides what a create request means. A nil slice means the
+// caller omitted `scopes` entirely (backwards-compatible default set); an
+// explicit empty list is a client error, because silently granting the default
+// scopes — which include exec and terminal — is the opposite of the request.
+func resolveScopes(scopes *[]string) ([]string, error) {
+	if scopes == nil {
+		return append([]string(nil), model.AllScopeGatedScopes...), nil
+	}
+	if len(*scopes) == 0 {
+		return nil, server.NewAppError(http.StatusBadRequest, server.ReasonScopesRequired)
+	}
+	return *scopes, nil
+}
+
+func (s *APIKeyService) Create(ctx context.Context, name string, scopes *[]string, serverIDs []uint) (*CreateAPIKeyResult, error) {
+	resolved, err := resolveScopes(scopes)
+	if err != nil {
+		return nil, err
 	}
 
-	if invalid := mw.ValidateScopes(scopes); len(invalid) > 0 {
+	if invalid := mw.ValidateScopes(resolved); len(invalid) > 0 {
 		return nil, server.NewAppErrorParams(http.StatusBadRequest, server.ReasonInvalidScopes, map[string]any{"scopes": invalid})
 	}
 
@@ -85,7 +100,7 @@ func (s *APIKeyService) Create(ctx context.Context, name string, scopes []string
 		Name:            name,
 		KeyHash:         hashStr,
 		KeyPrefix:       prefix,
-		Scopes:          scopes,
+		Scopes:          resolved,
 		ServerIDs:       serverIDs,
 		EncryptedRawKey: encryptedRaw,
 		Salt:            salt,

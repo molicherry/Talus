@@ -49,6 +49,7 @@
     "invalid_relay_request": "代理请求不合法",
     "invalid_request": "请求格式不正确",
     "invalid_scopes": "API Key 权限范围不合法：{{scopes}}",
+    "scopes_required": "请至少选择一项权限",
     "invalid_server_id": "服务器 ID 不合法",
     "invalid_service_id": "服务 ID 不合法",
     "length": "{{field}}长度必须在 {{min}}–{{max}} 之间",

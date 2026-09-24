@@ -49,6 +49,7 @@
     "invalid_relay_request": "Invalid relay request",
     "invalid_request": "Invalid request",
     "invalid_scopes": "Invalid API key scopes: {{scopes}}",
+    "scopes_required": "Select at least one scope",
     "invalid_server_id": "Invalid server id",
     "invalid_service_id": "Invalid service id",
     "length": "{{field}} must be between {{min}} and {{max}} characters",
