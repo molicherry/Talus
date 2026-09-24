@@ -62,6 +62,19 @@ func (r *CredentialRepo) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&model.SSHCredential{}, id).Error
 }
 
+// DeleteAndUnbind soft-deletes a credential and clears every server reference
+// to it in one transaction. Soft delete never fires the FK's ON DELETE SET
+// NULL, so without this a server keeps a credential_id that can no longer be
+// loaded, breaking its SSH connection.
+func (r *CredentialRepo) DeleteAndUnbind(ctx context.Context, id uint) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.Server{}).Where("credential_id = ?", id).Update("credential_id", nil).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&model.SSHCredential{}, id).Error
+	})
+}
+
 // DeleteByServerID performs a soft delete of credentials for the given server.
 func (r *CredentialRepo) DeleteByServerID(ctx context.Context, serverID uint) error {
 	return r.db.WithContext(ctx).Where("server_id = ?", serverID).Delete(&model.SSHCredential{}).Error

@@ -13,15 +13,22 @@ import (
 	"gorm.io/gorm"
 )
 
+// ConnectionInvalidator drops cached SSH connections for a server. Implemented
+// by *sshpool.Pool; a nil value is tolerated (the pool is optional in tests).
+type ConnectionInvalidator interface {
+	Invalidate(serverID uint)
+}
+
 // ServerService provides business logic for server management.
 type ServerService struct {
 	repo       *repository.ServerRepo
 	metricRepo *repository.MetricRepo
+	pool       ConnectionInvalidator
 }
 
 // NewServerService creates a ServerService with the given repositories.
-func NewServerService(repo *repository.ServerRepo, metricRepo *repository.MetricRepo) *ServerService {
-	return &ServerService{repo: repo, metricRepo: metricRepo}
+func NewServerService(repo *repository.ServerRepo, metricRepo *repository.MetricRepo, pool ConnectionInvalidator) *ServerService {
+	return &ServerService{repo: repo, metricRepo: metricRepo, pool: pool}
 }
 
 // statusThreshold is the cutoff for considering a server "online"
@@ -289,6 +296,14 @@ func (s *ServerService) Update(ctx context.Context, id uint, input *model.Server
 		return nil, fmt.Errorf("server %d: %w", id, err)
 	}
 
+	// A different host may present a different key; the old TOFU key would
+	// reject it (or worse, pin the wrong host), so drop it and re-learn.
+	connectionChanged := (input.Host != "" && input.Host != existing.Host) ||
+		(input.Port > 0 && input.Port != existing.Port)
+	if connectionChanged {
+		existing.HostKey = nil
+	}
+
 	if input.Name != "" {
 		existing.Name = input.Name
 	}
@@ -311,6 +326,10 @@ func (s *ServerService) Update(ctx context.Context, id uint, input *model.Server
 	if err := s.repo.Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("server %d: %w", id, err)
 	}
+	// Drop any pooled connection dialed with the previous parameters. The
+	// fingerprint check would also catch this on the next Get; invalidating
+	// here closes it immediately instead of leaving it idle.
+	s.invalidate(id)
 	return s.Get(ctx, id)
 }
 
@@ -319,5 +338,12 @@ func (s *ServerService) Delete(ctx context.Context, id uint) error {
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return fmt.Errorf("server %d: %w", id, err)
 	}
+	s.invalidate(id)
 	return nil
+}
+
+func (s *ServerService) invalidate(serverID uint) {
+	if s.pool != nil {
+		s.pool.Invalidate(serverID)
+	}
 }

@@ -128,10 +128,20 @@ func main() {
 	authSvc := service.NewAuthService(userRepo, jwtSvc, db)
 	authHandler := handler.NewAuthHandler(authSvc)
 
+	// Dependency chain — SSH pool. Created before the server/credential services
+	// so they can invalidate cached connections when a server or credential
+	// changes. The SSH service itself is wired after the credential service.
+	sshPool := sshpool.NewPool(
+		time.Duration(cfg.SSHMaxIdle)*time.Second,
+		3,
+		time.Duration(cfg.SSHTimeout)*time.Second,
+	)
+	defer sshPool.Close()
+
 	// Dependency chain — Servers (needed before API Keys for server ID validation)
 	serverRepo := repository.NewServerRepo(db)
 	metricRepo := repository.NewMetricRepo(db)
-	serverSvc := service.NewServerService(serverRepo, metricRepo)
+	serverSvc := service.NewServerService(serverRepo, metricRepo, sshPool)
 
 	// Dependency chain — API Keys
 	apiKeyRepo := repository.NewAPIKeyRepo(db)
@@ -142,7 +152,7 @@ func main() {
 
 	// Dependency chain — Credentials
 	credRepo := repository.NewCredentialRepo(db)
-	credSvc := service.NewCredentialService(credRepo, masterKey)
+	credSvc := service.NewCredentialService(credRepo, serverRepo, masterKey, sshPool)
 	credHandler := handler.NewCredentialHandler(credSvc, auditRepo)
 
 	// Dependency chain — Services
@@ -151,12 +161,6 @@ func main() {
 	serviceHandler := handler.NewServiceHandler(serviceSvc, auditRepo)
 
 	// Dependency chain — SSH
-	sshPool := sshpool.NewPool(
-		time.Duration(cfg.SSHMaxIdle)*time.Second,
-		3,
-		time.Duration(cfg.SSHTimeout)*time.Second,
-	)
-	defer sshPool.Close()
 
 	sshDialTimeout := time.Duration(cfg.SSHTimeout) * time.Second
 	execDefaultTimeout := time.Duration(cfg.ExecTimeout) * time.Second
