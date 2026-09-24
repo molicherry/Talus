@@ -156,7 +156,6 @@ func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client,
 func serverFingerprint(srv *model.Server) string {
 	credential := "none"
 	if srv.CredentialID != nil {
-		credential = fmt.Sprintf("%d", *srv.CredentialID)
 		if srv.Credential != nil {
 			credential = fmt.Sprintf("%d@%d", *srv.CredentialID, srv.Credential.UpdatedAt.UnixNano())
 		} else {
