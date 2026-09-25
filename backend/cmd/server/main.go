@@ -110,8 +110,9 @@ func main() {
 	// so it is not re-applied on every start to keys that deliberately omit it.
 	const servicesReadBackfill = `UPDATE api_keys SET scopes = scopes || '["services:read"]'::jsonb WHERE scopes IS NOT NULL AND NOT scopes @> '["services:read"]'::jsonb`
 	if applied, err := repository.ApplyOnce(db, "2026-09-24-services-read-scope", servicesReadBackfill); err != nil {
-		slog.Error("failed to backfill services:read scope", "error", err)
-		os.Exit(1)
+		// Bookkeeping for a scope default must not take the whole service down.
+		// ApplyOnce returns before applying when it cannot check the marker.
+		slog.Error("services:read scope backfill skipped", "error", err)
 	} else if applied {
 		slog.Info("services:read scope backfill applied")
 	}
