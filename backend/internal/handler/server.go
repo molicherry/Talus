@@ -233,6 +233,12 @@ func (h *ServerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // TrustHostKey re-pins the host key a server last presented, after the
 // operator has verified the new fingerprint out of band.
+// trustHostKeyRequest carries the exact fingerprint the operator verified, so
+// the backend can refuse to trust a key that changed since it was displayed.
+type trustHostKeyRequest struct {
+	Fingerprint string `json:"fingerprint"`
+}
+
 func (h *ServerHandler) TrustHostKey(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
@@ -246,7 +252,13 @@ func (h *ServerHandler) TrustHostKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := h.svc.TrustHostKey(r.Context(), id)
+	var req trustHostKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Fingerprint == "" {
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
+		return
+	}
+
+	updated, err := h.svc.TrustHostKey(r.Context(), id, req.Fingerprint)
 	if err != nil {
 		server.WriteError(w, r, err)
 		return

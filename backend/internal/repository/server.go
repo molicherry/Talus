@@ -92,11 +92,21 @@ func (r *ServerRepo) FindIDsByCredentialID(ctx context.Context, credentialID uin
 // RecordHostKeyMismatch stores the host key a server just presented when it did
 // not match the pinned one, so the UI can show the new fingerprint and let the
 // operator decide whether to trust it.
-func (r *ServerRepo) RecordHostKeyMismatch(ctx context.Context, id uint, seen []byte) error {
-	return r.db.WithContext(ctx).Model(&model.Server{}).Where("id = ?", id).Updates(map[string]any{
-		"host_key_seen":        seen,
-		"host_key_mismatch_at": time.Now().UTC(),
-	}).Error
+//
+// The write is conditional on the host/port that was dialed: the dial can take
+// seconds, and a concurrent edit must not have the old host's result recorded
+// against the new one. Returns whether a row was updated.
+func (r *ServerRepo) RecordHostKeyMismatch(ctx context.Context, id uint, host string, port int, seen []byte) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Server{}).
+		Where("id = ? AND host = ? AND port = ?", id, host, port).
+		Updates(map[string]any{
+			"host_key_seen":        seen,
+			"host_key_mismatch_at": time.Now().UTC(),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 // ClearHostKeyMismatch drops a recorded mismatch after a connection succeeds.
@@ -108,13 +118,21 @@ func (r *ServerRepo) ClearHostKeyMismatch(ctx context.Context, id uint) error {
 }
 
 // TrustHostKey pins the presented key as the new host key and clears the
-// pending-mismatch state.
-func (r *ServerRepo) TrustHostKey(ctx context.Context, id uint, seen []byte) error {
-	return r.db.WithContext(ctx).Model(&model.Server{}).Where("id = ?", id).Updates(map[string]any{
-		"host_key":             seen,
-		"host_key_seen":        nil,
-		"host_key_mismatch_at": nil,
-	}).Error
+// pending-mismatch state. The update only applies while host_key_seen still
+// equals the key the caller verified, so a key that changed in the meantime
+// cannot be trusted by accident. Returns whether a row was updated.
+func (r *ServerRepo) TrustHostKey(ctx context.Context, id uint, seen []byte) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Server{}).
+		Where("id = ? AND host_key_seen = ?", id, seen).
+		Updates(map[string]any{
+			"host_key":             seen,
+			"host_key_seen":        nil,
+			"host_key_mismatch_at": nil,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 // FindByIDs returns servers whose IDs are in the given slice, ordered by name.

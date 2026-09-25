@@ -69,6 +69,10 @@ func TestHasScope(t *testing.T) {
 		{"empty scopes denied", "GET", "/api/v1/servers", []string{}, false, "servers:read"},
 		{"list services without scope", "GET", "/api/v1/services", []string{}, false, "services:read"},
 		{"get service without scope", "GET", "/api/v1/services/3", []string{"servers:read"}, false, "services:read"},
+		{"trust host key needs write", "POST", "/api/v1/servers/1/host-key/trust", []string{"servers:read"}, false, "servers:write"},
+
+		// Scope-gated: granted (host key trust)
+		{"trust host key with write", "POST", "/api/v1/servers/1/host-key/trust", []string{"servers:write"}, true, ""},
 
 		// JWT-only: always denied
 		{"jwt-only delete server", "DELETE", "/api/v1/servers/1", []string{"servers:write"}, false, ""},
@@ -147,5 +151,15 @@ func TestCheckServerAccess(t *testing.T) {
 					tt.claims, tt.serverID, allowed, tt.wantAllow)
 			}
 		})
+	}
+}
+
+func TestTrustRouteIsRegistered(t *testing.T) {
+	normalized := normalizePath("POST", "/api/v1/servers/9/host-key/trust")
+	if normalized != "POST /api/v1/servers/{id}/host-key/trust" {
+		t.Fatalf("normalizePath = %q", normalized)
+	}
+	if !IsRouteRegistered(normalized) {
+		t.Fatal("trust host-key route is not registered: any API key could reach it")
 	}
 }

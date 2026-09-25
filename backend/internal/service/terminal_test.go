@@ -540,8 +540,8 @@ func (staticServerSource) SetHostKeyIfUnchanged(context.Context, uint, string, i
 	return false, nil
 }
 
-func (staticServerSource) RecordHostKeyMismatch(context.Context, uint, []byte) error {
-	return nil
+func (staticServerSource) RecordHostKeyMismatch(context.Context, uint, string, int, []byte) (bool, error) {
+	return true, nil
 }
 
 func (staticServerSource) ClearHostKeyMismatch(context.Context, uint) error {

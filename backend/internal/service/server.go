@@ -158,6 +158,9 @@ func (s *ServerService) ListFiltered(ctx context.Context, serverIDs []uint) ([]m
 	if err != nil {
 		return nil, fmt.Errorf("list filtered servers: %w", err)
 	}
+	for i := range servers {
+		decorateHostKey(&servers[i])
+	}
 
 	if len(servers) == 0 {
 		return servers, nil
@@ -308,11 +311,16 @@ func (s *ServerService) Update(ctx context.Context, id uint, input *model.Server
 	}
 
 	// A different host may present a different key; the old TOFU key would
-	// reject it (or worse, pin the wrong host), so drop it and re-learn.
+	// reject it (or worse, pin the wrong host), so drop it and re-learn. The
+	// pending-mismatch state belongs to the old host too — keeping it would
+	// show the old host's alert for the new address and let "trust" pin the
+	// old host's key.
 	connectionChanged := (input.Host != "" && input.Host != existing.Host) ||
 		(input.Port > 0 && input.Port != existing.Port)
 	if connectionChanged {
 		existing.HostKey = nil
+		existing.HostKeySeen = nil
+		existing.HostKeyMismatchAt = nil
 	}
 
 	if input.Name != "" {
@@ -370,10 +378,13 @@ func (s *ServerService) invalidate(serverID uint) {
 	}
 }
 
-// TrustHostKey re-pins the host key a server last presented when it changed. The
-// operator is expected to have verified HostKeySeenFingerprint out of band; this
-// only records that decision.
-func (s *ServerService) TrustHostKey(ctx context.Context, id uint) (*model.Server, error) {
+// TrustHostKey re-pins the host key a server last presented when it changed.
+//
+// fingerprint is the exact fingerprint the operator verified. It must still
+// match the recorded pending key: the background monitor may have recorded a
+// newer one since the UI rendered, and trusting that by accident would defeat
+// the point of asking the user to verify. A stale request gets 409.
+func (s *ServerService) TrustHostKey(ctx context.Context, id uint, fingerprint string) (*model.Server, error) {
 	srv, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -381,11 +392,18 @@ func (s *ServerService) TrustHostKey(ctx context.Context, id uint) (*model.Serve
 		}
 		return nil, fmt.Errorf("server %d: %w", id, err)
 	}
-	if srv.HostKeySeen == nil {
+	if srv.HostKeySeen == nil || srv.HostKeyMismatchAt == nil {
 		return nil, server.NewAppError(http.StatusConflict, server.ReasonNoHostKeyMismatch)
 	}
-	if err := s.repo.TrustHostKey(ctx, id, *srv.HostKeySeen); err != nil {
+	if fingerprint == "" || fingerprint != sshpool.Fingerprint(*srv.HostKeySeen) {
+		return nil, server.NewAppError(http.StatusConflict, server.ReasonHostKeyChanged)
+	}
+	// Conditional on the pending key still being the verified one, so a monitor
+	// write between the read above and this update cannot slip a different key in.
+	if updated, err := s.repo.TrustHostKey(ctx, id, *srv.HostKeySeen); err != nil {
 		return nil, fmt.Errorf("server %d: trust host key: %w", id, err)
+	} else if !updated {
+		return nil, server.NewAppError(http.StatusConflict, server.ReasonHostKeyChanged)
 	}
 	s.invalidate(id)
 	return s.Get(ctx, id)

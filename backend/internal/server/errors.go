@@ -53,6 +53,7 @@ const (
 	ReasonSSHTimeout           = "ssh_timeout"
 	ReasonSSHHostKeyMismatch   = "ssh_host_key_mismatch"
 	ReasonNoHostKeyMismatch    = "no_host_key_mismatch"
+	ReasonHostKeyChanged       = "host_key_changed"
 
 	// Field-level validation reasons. These render through {{params}} on both
 	// sides so the numbers live in one place.
@@ -104,6 +105,7 @@ var reasonMessages = map[string]string{
 	ReasonSSHTimeout:           "ssh command timed out",
 	ReasonSSHHostKeyMismatch:   "ssh host key changed: verify the new fingerprint before trusting it",
 	ReasonNoHostKeyMismatch:    "no pending host key change to trust",
+	ReasonHostKeyChanged:       "the pending host key changed again: re-verify the new fingerprint",
 
 	ReasonRequired:       "{{field}} is required",
 	ReasonLength:         "must be between {{min}} and {{max}} characters",

@@ -70,6 +70,7 @@
     "ssh_timeout": "SSH 命令超时",
     "ssh_host_key_mismatch": "SSH host key 已变更，请核对新指纹后再信任",
     "no_host_key_mismatch": "没有待确认的 host key 变更",
+    "host_key_changed": "待确认的 host key 又变了，请重新核对新指纹后再信任",
     "unauthorized": "登录已过期，请重新登录",
     "validation_failed": "输入不合法"
   },

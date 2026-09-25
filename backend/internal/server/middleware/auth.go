@@ -4,10 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/vpsmanager/backend/internal/pkg/token"
 )
+
+// terminalPathPattern matches GET /api/v1/servers/{id}/terminal, the only route
+// allowed to complete authentication after the WebSocket handshake.
+var terminalPathPattern = regexp.MustCompile(`^/api/v1/servers/\d+/terminal/?$`)
+
+// isTerminalWebSocketHandshake reports whether this request is a WebSocket
+// handshake for the terminal route. The middleware only skips auth for that
+// exact route, so an unauthenticated client cannot reach other endpoints by
+// setting `Upgrade: websocket`.
+func isTerminalWebSocketHandshake(r *http.Request) bool {
+	return r.Method == http.MethodGet &&
+		r.Header.Get("Upgrade") == "websocket" &&
+		terminalPathPattern.MatchString(r.URL.Path)
+}
 
 // contextUserKey is a private context key for storing authenticated claims.
 type contextUserKey string
@@ -59,13 +74,11 @@ func Auth(jwtSvc *token.JWTService, keyValidator APIKeyValidator) func(http.Hand
 				return
 			}
 
-			// Also try WebSocket token from query param (browsers can't set WS headers)
 			// WebSocket handshakes: browsers cannot set custom headers, so the
 			// terminal endpoint authenticates via the first WebSocket message
-			// (see TerminalHandler). If an API key header was present it was
-			// already validated above; otherwise pass the handshake through with
-			// nil claims and let the handler verify the first message.
-			if r.Header.Get("Upgrade") == "websocket" {
+			// (see TerminalHandler). Restrict this pass-through to that one route:
+			// a bare `Upgrade: websocket` header must never disable auth elsewhere.
+			if isTerminalWebSocketHandshake(r) {
 				next.ServeHTTP(w, r)
 				return
 			}

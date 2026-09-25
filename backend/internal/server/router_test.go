@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/vpsmanager/backend/internal/pkg/token"
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
 )
@@ -182,5 +184,38 @@ func TestSPAFallbackServesIndexForRoutesOnly(t *testing.T) {
 				t.Fatalf("Cache-Control = %q, want %q", cc, tc.wantCacheControl)
 			}
 		})
+	}
+}
+
+// TestEveryAuthedRouteIsRegistered guards the API-key scope map against
+// fail-open: hasScope allows any route that is not registered, so an
+// authenticated endpoint added without a scope or a jwt-only rule would be
+// reachable by every API key. Walk the real router and require each route to be
+// registered, or explicitly listed as public.
+func TestEveryAuthedRouteIsRegistered(t *testing.T) {
+	public := map[string]bool{
+		"GET /healthz":            true,
+		"GET /api/v1":             true,
+		"GET /api/v1/version":     true,
+		"POST /api/v1/auth/login": true,
+		"GET /api/v1/auth/setup":  true,
+	}
+
+	router := NewRouter(RouteConfig{})
+
+	var unregistered []string
+	err := chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		normalized := mw.NormalizeRoutePattern(method, route)
+		if public[normalized] || mw.IsRouteRegistered(normalized) {
+			return nil
+		}
+		unregistered = append(unregistered, method+" "+route)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk routes: %v", err)
+	}
+	if len(unregistered) > 0 {
+		t.Fatalf("routes reachable by any API key without a scope: %v", unregistered)
 	}
 }
