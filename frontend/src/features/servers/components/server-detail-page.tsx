@@ -4,6 +4,7 @@ import { useTranslation } from "../../../i18n";
 import { useParams } from "react-router-dom";
 import { MonitoringDashboard } from "../../monitoring/components/monitoring-dashboard";
 import { useServer } from "../hooks/use-servers";
+import { HostKeyWarning } from "./host-key-warning";
 import { ServerInfoBar } from "./server-info-bar";
 
 export function ServerDetailPage() {
@@ -32,6 +33,7 @@ export function ServerDetailPage() {
 
   return (
     <div>
+      <HostKeyWarning server={server} />
       <ServerInfoBar server={server} />
       <MonitoringDashboard serverId={serverId} />
     </div>

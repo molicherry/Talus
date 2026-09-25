@@ -231,6 +231,29 @@ func (h *ServerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// TrustHostKey re-pins the host key a server last presented, after the
+// operator has verified the new fingerprint out of band.
+func (h *ServerHandler) TrustHostKey(w http.ResponseWriter, r *http.Request) {
+	id, err := parseIDParam(r)
+	if err != nil {
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServerID))
+		return
+	}
+
+	claims := mw.GetUserClaims(r.Context())
+	if !mw.CheckServerAccess(claims, id) {
+		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServerDenied))
+		return
+	}
+
+	updated, err := h.svc.TrustHostKey(r.Context(), id)
+	if err != nil {
+		server.WriteError(w, r, err)
+		return
+	}
+	server.WriteJSON(w, http.StatusOK, updated)
+}
+
 // parseIDParam extracts a uint path parameter named "id" from the request URL.
 func parseIDParam(r *http.Request) (uint, error) {
 	idStr := chi.URLParam(r, "id")

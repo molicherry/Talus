@@ -68,6 +68,8 @@
     "ssh_authentication_failed": "SSH authentication failed",
     "ssh_connection_failed": "SSH connection failed",
     "ssh_timeout": "SSH command timed out",
+    "ssh_host_key_mismatch": "SSH host key changed: verify the new fingerprint before trusting it",
+    "no_host_key_mismatch": "No pending host key change to trust",
     "unauthorized": "Your session has expired — please sign in again",
     "validation_failed": "Invalid input"
   },
@@ -175,6 +177,15 @@
     "deleteMessageNamed": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
     "ariaEdit": "Edit {{name}}",
     "ariaDelete": "Delete {{name}}",
+    "hostKey": {
+      "badge": "Host key changed",
+      "title": "SSH host key has changed",
+      "body": "This server presented a different SSH host key than the one recorded. The connection stays blocked until you verify the new fingerprint on a trusted network (for example with ssh-keyscan) and trust it.",
+      "recorded": "Recorded:",
+      "presented": "Presented:",
+      "trust": "Trust new host key",
+      "toastTrusted": "Host key trusted"
+    },
     "toast": {
       "created": "Server created",
       "createFailed": "Failed to create server",

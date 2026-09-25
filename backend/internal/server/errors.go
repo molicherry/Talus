@@ -51,6 +51,8 @@ const (
 	ReasonSSHConnection        = "ssh_connection_failed"
 	ReasonSSHAuth              = "ssh_authentication_failed"
 	ReasonSSHTimeout           = "ssh_timeout"
+	ReasonSSHHostKeyMismatch   = "ssh_host_key_mismatch"
+	ReasonNoHostKeyMismatch    = "no_host_key_mismatch"
 
 	// Field-level validation reasons. These render through {{params}} on both
 	// sides so the numbers live in one place.
@@ -100,6 +102,8 @@ var reasonMessages = map[string]string{
 	ReasonSSHConnection:        "ssh connection failed",
 	ReasonSSHAuth:              "ssh authentication failed",
 	ReasonSSHTimeout:           "ssh command timed out",
+	ReasonSSHHostKeyMismatch:   "ssh host key changed: verify the new fingerprint before trusting it",
+	ReasonNoHostKeyMismatch:    "no pending host key change to trust",
 
 	ReasonRequired:       "{{field}} is required",
 	ReasonLength:         "must be between {{min}} and {{max}} characters",
@@ -195,6 +199,7 @@ var (
 	ErrSSHConnection        = &AppError{Code: http.StatusBadGateway, Reason: ReasonSSHConnection, Message: reasonMessages[ReasonSSHConnection]}
 	ErrSSHAuth              = &AppError{Code: http.StatusBadGateway, Reason: ReasonSSHAuth, Message: reasonMessages[ReasonSSHAuth]}
 	ErrSSHTimeout           = &AppError{Code: http.StatusGatewayTimeout, Reason: ReasonSSHTimeout, Message: reasonMessages[ReasonSSHTimeout]}
+	ErrSSHHostKeyMismatch   = &AppError{Code: http.StatusBadGateway, Reason: ReasonSSHHostKeyMismatch, Message: reasonMessages[ReasonSSHHostKeyMismatch]}
 )
 
 // NewAppError creates an AppError for the given status and reason. The message

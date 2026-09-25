@@ -1,5 +1,5 @@
 import { RefreshError } from "../../../components/ui/refresh-error";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -103,6 +103,12 @@ export function ServerList() {
                   >
                     {server.name}
                   </button>
+                  {server.host_key_mismatch && (
+                    <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-warning-subtle px-2 py-0.5 align-middle text-[11px] font-medium text-warning">
+                      <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                      {t("server.hostKey.badge")}
+                    </span>
+                  )}
                 </Td>
                 <Td className="text-muted-foreground">{server.host}</Td>
                 <Td>

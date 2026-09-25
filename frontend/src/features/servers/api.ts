@@ -36,6 +36,13 @@ export async function deleteServer(id: number): Promise<void> {
   await apiClient.delete(`/api/v1/servers/${id}`);
 }
 
+// trustHostKey re-pins the host key a server last presented, after the operator
+// verified the new fingerprint out of band.
+export async function trustHostKey(id: number): Promise<Server> {
+  const res = await apiClient.post<Server>(`/api/v1/servers/${id}/host-key/trust`, {});
+  return ServerSchema.parse(res);
+}
+
 export async function execCommand(
   serverId: number,
   command: string,
