@@ -37,9 +37,10 @@ export async function deleteServer(id: number): Promise<void> {
 }
 
 // trustHostKey re-pins the host key a server last presented, after the operator
-// verified the new fingerprint out of band.
-export async function trustHostKey(id: number): Promise<Server> {
-  const res = await apiClient.post<Server>(`/api/v1/servers/${id}/host-key/trust`, {});
+// verified the new fingerprint out of band. The verified fingerprint is sent so
+// the backend can refuse (409) if the pending key changed since it was shown.
+export async function trustHostKey(id: number, fingerprint: string): Promise<Server> {
+  const res = await apiClient.post<Server>(`/api/v1/servers/${id}/host-key/trust`, { fingerprint });
   return ServerSchema.parse(res);
 }
 

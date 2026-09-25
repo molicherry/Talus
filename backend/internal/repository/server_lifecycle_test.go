@@ -167,8 +167,8 @@ func TestHostKeyMismatchStateLifecycle(t *testing.T) {
 	}
 
 	seen := []byte("presented-key")
-	if err := repo.RecordHostKeyMismatch(ctx, srv.ID, seen); err != nil {
-		t.Fatalf("record mismatch: %v", err)
+	if ok, err := repo.RecordHostKeyMismatch(ctx, srv.ID, "h", 22, seen); err != nil || !ok {
+		t.Fatalf("record mismatch: ok=%v err=%v", ok, err)
 	}
 	loaded, err := repo.FindByID(ctx, srv.ID)
 	if err != nil {
@@ -184,6 +184,12 @@ func TestHostKeyMismatchStateLifecycle(t *testing.T) {
 		t.Fatal("recording a mismatch must not change the pin")
 	}
 
+	// The async record is keyed on the dialed host/port: a result for a host
+	// the row no longer points at must not be recorded.
+	if ok, err := repo.RecordHostKeyMismatch(ctx, srv.ID, "other-host", 22, seen); err != nil || ok {
+		t.Fatalf("mismatch recorded for the wrong host: ok=%v err=%v", ok, err)
+	}
+
 	if err := repo.ClearHostKeyMismatch(ctx, srv.ID); err != nil {
 		t.Fatalf("clear mismatch: %v", err)
 	}
@@ -192,11 +198,15 @@ func TestHostKeyMismatchStateLifecycle(t *testing.T) {
 		t.Fatal("clear did not drop the pending mismatch")
 	}
 
-	if err := repo.RecordHostKeyMismatch(ctx, srv.ID, seen); err != nil {
-		t.Fatalf("record mismatch: %v", err)
+	if ok, err := repo.RecordHostKeyMismatch(ctx, srv.ID, "h", 22, seen); err != nil || !ok {
+		t.Fatalf("record mismatch: ok=%v err=%v", ok, err)
 	}
-	if err := repo.TrustHostKey(ctx, srv.ID, seen); err != nil {
-		t.Fatalf("trust host key: %v", err)
+	// Trusting a key that is no longer the pending one must not apply.
+	if ok, err := repo.TrustHostKey(ctx, srv.ID, []byte("some-other-key")); err != nil || ok {
+		t.Fatalf("trusted a key that is not pending: ok=%v err=%v", ok, err)
+	}
+	if ok, err := repo.TrustHostKey(ctx, srv.ID, seen); err != nil || !ok {
+		t.Fatalf("trust host key: ok=%v err=%v", ok, err)
 	}
 	loaded, _ = repo.FindByID(ctx, srv.ID)
 	if loaded.HostKey == nil || string(*loaded.HostKey) != "presented-key" {
@@ -204,5 +214,47 @@ func TestHostKeyMismatchStateLifecycle(t *testing.T) {
 	}
 	if loaded.HostKeySeen != nil || loaded.HostKeyMismatchAt != nil {
 		t.Fatal("trust did not clear the pending mismatch")
+	}
+}
+
+// TestServerRepoUpdateClearsPendingHostKey covers the host-change path: the
+// service nils these fields, and the full-row save must persist the NULLs so an
+// old host's pending alert does not follow the server to its new address.
+func TestServerRepoUpdateClearsPendingHostKey(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.AutoMigrate(&model.Server{}, &model.SSHCredential{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := NewServerRepo(db)
+	ctx := context.Background()
+
+	srv := &model.Server{Name: "srv", Host: "h", Port: 22, OwnerID: 1}
+	if err := repo.Create(ctx, srv); err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	seen := []byte("presented-key")
+	if ok, err := repo.RecordHostKeyMismatch(ctx, srv.ID, "h", 22, seen); err != nil || !ok {
+		t.Fatalf("record mismatch: ok=%v err=%v", ok, err)
+	}
+
+	loaded, err := repo.FindByID(ctx, srv.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	loaded.Host = "new-host"
+	loaded.HostKey = nil
+	loaded.HostKeySeen = nil
+	loaded.HostKeyMismatchAt = nil
+	if err := repo.Update(ctx, loaded); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	after, err := repo.FindByID(ctx, srv.ID)
+	if err != nil {
+		t.Fatalf("reload after update: %v", err)
+	}
+	if after.HostKeySeen != nil || after.HostKeyMismatchAt != nil || after.HostKey != nil {
+		t.Fatalf("pending host key state not cleared: seen=%v at=%v key=%v",
+			after.HostKeySeen, after.HostKeyMismatchAt, after.HostKey)
 	}
 }

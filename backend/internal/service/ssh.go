@@ -23,7 +23,7 @@ import (
 type serverSource interface {
 	FindByID(ctx context.Context, id uint) (*model.Server, error)
 	SetHostKeyIfUnchanged(ctx context.Context, id uint, host string, port int, hostKey []byte) (bool, error)
-	RecordHostKeyMismatch(ctx context.Context, id uint, seen []byte) error
+	RecordHostKeyMismatch(ctx context.Context, id uint, host string, port int, seen []byte) (bool, error)
 	ClearHostKeyMismatch(ctx context.Context, id uint) error
 }
 
@@ -139,8 +139,10 @@ func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client,
 		// decide whether to trust it.
 		var mismatch *sshpool.HostKeyMismatchError
 		if errors.As(err, &mismatch) {
-			if recErr := s.serverRepo.RecordHostKeyMismatch(ctx, srv.ID, mismatch.Presented); recErr != nil {
+			if updated, recErr := s.serverRepo.RecordHostKeyMismatch(ctx, srv.ID, srv.Host, srv.Port, mismatch.Presented); recErr != nil {
 				slog.Warn("failed to record host key mismatch", "server_id", serverID, "error", recErr)
+			} else if !updated {
+				slog.Warn("host key mismatch not recorded: server changed during dial", "server_id", serverID)
 			}
 			return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, server.ErrSSHHostKeyMismatch)
 		}

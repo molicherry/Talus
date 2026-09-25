@@ -66,7 +66,8 @@ export function useDeleteServer() {
 
 export function useTrustHostKey() {
   return useMutation({
-    mutationFn: trustHostKey,
+    mutationFn: ({ id, fingerprint }: { id: number; fingerprint: string }) =>
+      trustHostKey(id, fingerprint),
     onSuccess: (server) => {
       invalidateQueries(["servers"]);
       invalidateQueries(["servers", server.id]);

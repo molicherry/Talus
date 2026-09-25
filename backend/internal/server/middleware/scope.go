@@ -8,18 +8,19 @@ import (
 
 // routeScopes maps normalized "METHOD /api/v1/..." patterns to required scopes.
 var routeScopes = map[string]string{
-	"GET /api/v1/servers":               "servers:read",
-	"GET /api/v1/servers/summary":       "servers:read",
-	"POST /api/v1/servers":              "servers:write",
-	"GET /api/v1/servers/{id}":          "servers:read",
-	"PUT /api/v1/servers/{id}":          "servers:write",
-	"POST /api/v1/servers/{id}/exec":    "servers:exec",
-	"GET /api/v1/servers/{id}/terminal": "servers:terminal",
-	"GET /api/v1/servers/{id}/metrics":  "metrics:read",
-	"GET /api/v1/credentials":           "credentials:read",
-	"GET /api/v1/services":              "services:read",
-	"GET /api/v1/services/{id}":         "services:read",
-	"POST /api/v1/services/{id}/relay":  "services:relay",
+	"GET /api/v1/servers":                      "servers:read",
+	"GET /api/v1/servers/summary":              "servers:read",
+	"POST /api/v1/servers":                     "servers:write",
+	"GET /api/v1/servers/{id}":                 "servers:read",
+	"PUT /api/v1/servers/{id}":                 "servers:write",
+	"POST /api/v1/servers/{id}/exec":           "servers:exec",
+	"GET /api/v1/servers/{id}/terminal":        "servers:terminal",
+	"POST /api/v1/servers/{id}/host-key/trust": "servers:write",
+	"GET /api/v1/servers/{id}/metrics":         "metrics:read",
+	"GET /api/v1/credentials":                  "credentials:read",
+	"GET /api/v1/services":                     "services:read",
+	"GET /api/v1/services/{id}":                "services:read",
+	"POST /api/v1/services/{id}/relay":         "services:relay",
 }
 
 // jwtOnlyRoutes defines routes where API keys are always rejected.
@@ -65,6 +66,23 @@ func hasScope(method, path string, userScopes []string) (bool, string) {
 		}
 	}
 	return false, required
+}
+
+// NormalizeRoutePattern converts a chi route pattern into the key form used by
+// routeScopes and jwtOnlyRoutes ("METHOD /api/v1/...").
+func NormalizeRoutePattern(method, pattern string) string {
+	return normalizePath(method, pattern)
+}
+
+// IsRouteRegistered reports whether a normalized route has an explicit scope or
+// a jwt-only rule. Unregistered routes are reachable by ANY API key (hasScope
+// returns allow), so every authenticated route must be registered deliberately.
+func IsRouteRegistered(normalized string) bool {
+	if jwtOnlyRoutes[normalized] {
+		return true
+	}
+	_, ok := routeScopes[normalized]
+	return ok
 }
 
 // normalizePath converts a real request path into a pattern string by

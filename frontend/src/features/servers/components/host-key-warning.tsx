@@ -3,6 +3,7 @@ import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { useTranslation } from "../../../i18n";
 import { toast } from "../../../lib/toast";
+import { invalidateQueries } from "../../../lib/query";
 import type { Server } from "../../../types/models";
 import { useTrustHostKey } from "../hooks/use-servers";
 
@@ -16,13 +17,25 @@ export function HostKeyWarning({ server }: { server: Server }) {
   const { t } = useTranslation();
   const trustMutation = useTrustHostKey();
 
-  if (!server.host_key_mismatch) return null;
+  const fingerprint = server.host_key_seen_fingerprint;
+  if (!server.host_key_mismatch || !fingerprint) return null;
+  const serverId = server.id;
 
   const handleTrust = () => {
-    trustMutation.mutate(server.id, {
-      onSuccess: () => toast.success(t("server.hostKey.toastTrusted")),
-      onError: (error: unknown) => toast.error(translateApiError(error, t, t("common.error"))),
-    });
+    // Send the fingerprint we displayed. If the monitor recorded a newer key
+    // since then the backend answers 409 and we refresh instead of trusting a
+    // key the operator never saw.
+    trustMutation.mutate(
+      { id: serverId, fingerprint },
+      {
+        onSuccess: () => toast.success(t("server.hostKey.toastTrusted")),
+        onError: (error: unknown) => {
+          toast.error(translateApiError(error, t, t("common.error")));
+          invalidateQueries(["servers"]);
+          invalidateQueries(["servers", serverId]);
+        },
+      },
+    );
   };
 
   return (
