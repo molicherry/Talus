@@ -24,6 +24,13 @@ export const ServerSchema = z.object({
   os: z.string().nullable().optional(),
   cpu_model: z.string().nullable().optional(),
   uptime_seconds: z.number().nullable().optional(),
+  // A pending host-key change: the server presented a key different from the
+  // recorded one. The operator verifies host_key_seen_fingerprint out of band
+  // and can then trust it.
+  host_key_mismatch: z.boolean().optional(),
+  host_key_mismatch_at: z.string().nullable().optional(),
+  host_key_fingerprint: z.string().nullable().optional(),
+  host_key_seen_fingerprint: z.string().nullable().optional(),
   credential_id: z.number().nullable().optional(),
   credential: z
     .object({
@@ -46,6 +53,7 @@ export const ServerSummarySchema = z.object({
   host: z.string(),
   credential_id: z.number().nullable(),
   status: z.enum(["online", "offline", "checking", "unknown"]),
+  host_key_mismatch: z.boolean().optional(),
 });
 export type ServerSummary = z.infer<typeof ServerSummarySchema>;
 

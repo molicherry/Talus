@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
+	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
 	"gorm.io/gorm"
@@ -40,6 +42,9 @@ func (s *ServerService) List(ctx context.Context) ([]model.Server, error) {
 	servers, err := s.repo.FindAll(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list servers: %w", err)
+	}
+	for i := range servers {
+		decorateHostKey(&servers[i])
 	}
 
 	if len(servers) == 0 {
@@ -102,6 +107,7 @@ func (s *ServerService) Get(ctx context.Context, id uint) (*model.Server, error)
 		}
 		return nil, fmt.Errorf("server %d: %w", id, err)
 	}
+	decorateHostKey(srv)
 
 	latest, err := s.metricRepo.FindLatestByServerIDs(ctx, []uint{id})
 	if err != nil {
@@ -233,6 +239,9 @@ func (s *ServerService) applyStatus(ctx context.Context, summaries []model.Serve
 	if len(summaries) == 0 {
 		return summaries, nil
 	}
+	for i := range summaries {
+		summaries[i].HostKeyMismatch = summaries[i].HostKeyMismatchAt != nil
+	}
 
 	ids := make([]uint, len(summaries))
 	for i, srv := range summaries {
@@ -358,5 +367,40 @@ func (s *ServerService) Delete(ctx context.Context, id uint) error {
 func (s *ServerService) invalidate(serverID uint) {
 	if s.pool != nil {
 		s.pool.Invalidate(serverID)
+	}
+}
+
+// TrustHostKey re-pins the host key a server last presented when it changed. The
+// operator is expected to have verified HostKeySeenFingerprint out of band; this
+// only records that decision.
+func (s *ServerService) TrustHostKey(ctx context.Context, id uint) (*model.Server, error) {
+	srv, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("server %d: %w", id, server.ErrNotFound)
+		}
+		return nil, fmt.Errorf("server %d: %w", id, err)
+	}
+	if srv.HostKeySeen == nil {
+		return nil, server.NewAppError(http.StatusConflict, server.ReasonNoHostKeyMismatch)
+	}
+	if err := s.repo.TrustHostKey(ctx, id, *srv.HostKeySeen); err != nil {
+		return nil, fmt.Errorf("server %d: trust host key: %w", id, err)
+	}
+	s.invalidate(id)
+	return s.Get(ctx, id)
+}
+
+// decorateHostKey fills the transient host-key fields a client needs to show a
+// pending host-key change: the flag, and both fingerprints for comparison.
+func decorateHostKey(srv *model.Server) {
+	srv.HostKeyMismatch = srv.HostKeyMismatchAt != nil
+	if srv.HostKey != nil {
+		fp := sshpool.Fingerprint(*srv.HostKey)
+		srv.HostKeyFingerprint = &fp
+	}
+	if srv.HostKeySeen != nil {
+		fp := sshpool.Fingerprint(*srv.HostKeySeen)
+		srv.HostKeySeenFingerprint = &fp
 	}
 }

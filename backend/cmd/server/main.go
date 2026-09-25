@@ -201,6 +201,7 @@ func main() {
 		GetServerHandler:           serverHandler.Get,
 		UpdateServerHandler:        serverHandler.Update,
 		DeleteServerHandler:        serverHandler.Delete,
+		TrustServerHostKeyHandler:  serverHandler.TrustHostKey,
 		// Credentials
 		ListCredentialsHandler:  credHandler.List,
 		CreateCredentialHandler: credHandler.Create,

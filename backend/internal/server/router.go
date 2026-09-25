@@ -35,6 +35,7 @@ type RouteConfig struct {
 	GetServerHandler           http.HandlerFunc
 	UpdateServerHandler        http.HandlerFunc
 	DeleteServerHandler        http.HandlerFunc
+	TrustServerHostKeyHandler  http.HandlerFunc
 
 	// Credentials
 	ListCredentialsHandler  http.HandlerFunc
@@ -122,6 +123,7 @@ func NewRouter(cfg RouteConfig) chi.Router {
 				r.Get("/", cfg.GetServerHandler)
 				r.Put("/", cfg.UpdateServerHandler)
 				r.Delete("/", cfg.DeleteServerHandler)
+				r.Post("/host-key/trust", cfg.TrustServerHostKeyHandler)
 				r.Post("/exec", cfg.ExecHandler)
 				r.Get("/metrics", cfg.MetricsHandler)
 				r.Get("/terminal", cfg.TerminalHandler)

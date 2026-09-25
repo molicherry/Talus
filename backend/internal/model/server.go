@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 // Server represents a managed VPS or bare-metal host.
 type Server struct {
 	BaseModel
@@ -11,6 +13,13 @@ type Server struct {
 	OwnerID      uint    `gorm:"not null;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"owner_id"`
 	CredentialID *uint   `gorm:"index;constraint:OnUpdate:CASCADE,OnDelete:SET NULL" json:"credential_id,omitempty"`
 	HostKey      *[]byte `gorm:"type:bytea" json:"-"`
+	// HostKeySeen is the host key the server presented when it did not match the
+	// pinned HostKey. Persisted so the operator can see the new fingerprint and
+	// decide whether to trust it, instead of the connection just failing silently.
+	HostKeySeen *[]byte `gorm:"type:bytea" json:"-"`
+	// HostKeyMismatchAt is set when the last mismatch was detected, cleared once
+	// the operator trusts the key or a connection succeeds.
+	HostKeyMismatchAt *time.Time `gorm:"index" json:"host_key_mismatch_at,omitempty"`
 
 	// Transient fields — populated by service layer, never persisted.
 	Status        string         `gorm:"-" json:"status,omitempty"`
@@ -19,6 +28,10 @@ type Server struct {
 	OS            *string        `gorm:"-" json:"os,omitempty"`
 	CPUModel      *string        `gorm:"-" json:"cpu_model,omitempty"`
 	UptimeSeconds *int64         `gorm:"-" json:"uptime_seconds,omitempty"`
+	// HostKeyMismatch marks a pending host-key change awaiting the operator.
+	HostKeyMismatch        bool    `gorm:"-" json:"host_key_mismatch"`
+	HostKeyFingerprint     *string `gorm:"-" json:"host_key_fingerprint,omitempty"`
+	HostKeySeenFingerprint *string `gorm:"-" json:"host_key_seen_fingerprint,omitempty"`
 
 	Credential *SSHCredential `gorm:"foreignKey:CredentialID" json:"credential,omitempty"`
 }
@@ -33,6 +46,10 @@ type ServerSummary struct {
 	Host         string  `json:"host"`
 	CredentialID *uint   `json:"credential_id"`
 	Status       string  `gorm:"-" json:"status"`
+	// HostKeyMismatchAt is read from the column; the service turns it into the
+	// HostKeyMismatch flag so the list can flag a server whose key changed.
+	HostKeyMismatchAt *time.Time `json:"-"`
+	HostKeyMismatch   bool       `gorm:"-" json:"host_key_mismatch"`
 }
 
 // LatestMetrics holds the most recent snapshot of key metrics for a server.

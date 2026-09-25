@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
 	"gorm.io/gorm"
@@ -86,6 +87,34 @@ func (r *ServerRepo) FindIDsByCredentialID(ctx context.Context, credentialID uin
 	var ids []uint
 	err := r.db.WithContext(ctx).Model(&model.Server{}).Where("credential_id = ?", credentialID).Pluck("id", &ids).Error
 	return ids, err
+}
+
+// RecordHostKeyMismatch stores the host key a server just presented when it did
+// not match the pinned one, so the UI can show the new fingerprint and let the
+// operator decide whether to trust it.
+func (r *ServerRepo) RecordHostKeyMismatch(ctx context.Context, id uint, seen []byte) error {
+	return r.db.WithContext(ctx).Model(&model.Server{}).Where("id = ?", id).Updates(map[string]any{
+		"host_key_seen":        seen,
+		"host_key_mismatch_at": time.Now().UTC(),
+	}).Error
+}
+
+// ClearHostKeyMismatch drops a recorded mismatch after a connection succeeds.
+func (r *ServerRepo) ClearHostKeyMismatch(ctx context.Context, id uint) error {
+	return r.db.WithContext(ctx).Model(&model.Server{}).Where("id = ?", id).Updates(map[string]any{
+		"host_key_seen":        nil,
+		"host_key_mismatch_at": nil,
+	}).Error
+}
+
+// TrustHostKey pins the presented key as the new host key and clears the
+// pending-mismatch state.
+func (r *ServerRepo) TrustHostKey(ctx context.Context, id uint, seen []byte) error {
+	return r.db.WithContext(ctx).Model(&model.Server{}).Where("id = ?", id).Updates(map[string]any{
+		"host_key":             seen,
+		"host_key_seen":        nil,
+		"host_key_mismatch_at": nil,
+	}).Error
 }
 
 // FindByIDs returns servers whose IDs are in the given slice, ordered by name.

@@ -68,6 +68,8 @@
     "ssh_authentication_failed": "SSH 认证失败",
     "ssh_connection_failed": "SSH 连接失败",
     "ssh_timeout": "SSH 命令超时",
+    "ssh_host_key_mismatch": "SSH host key 已变更，请核对新指纹后再信任",
+    "no_host_key_mismatch": "没有待确认的 host key 变更",
     "unauthorized": "登录已过期，请重新登录",
     "validation_failed": "输入不合法"
   },
@@ -175,6 +177,15 @@
     "deleteMessageNamed": "确定要删除 \"{{name}}\" 吗？此操作不可撤销。",
     "ariaEdit": "编辑 {{name}}",
     "ariaDelete": "删除 {{name}}",
+    "hostKey": {
+      "badge": "Host key 已变更",
+      "title": "SSH host key 已变更",
+      "body": "该服务器出示的 SSH host key 与已记录的不一致。在你于可信网络中核对新指纹（例如用 ssh-keyscan）并确认信任之前，连接会被阻止。",
+      "recorded": "已记录：",
+      "presented": "新出示：",
+      "trust": "信任新的 host key",
+      "toastTrusted": "已信任新的 host key"
+    },
     "toast": {
       "created": "服务器创建成功",
       "createFailed": "创建服务器失败",

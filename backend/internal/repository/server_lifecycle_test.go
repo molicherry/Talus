@@ -145,3 +145,64 @@ func TestServerRepoUpdateClearsCredential(t *testing.T) {
 		t.Fatalf("credential binding not cleared: %d", *after.CredentialID)
 	}
 }
+
+// TestHostKeyMismatchStateLifecycle guards the UI-visible host-key state: a
+// mismatch records the presented key without touching the pin, a successful
+// connection clears it, and trusting it re-pins.
+func TestHostKeyMismatchStateLifecycle(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.AutoMigrate(&model.Server{}, &model.SSHCredential{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := NewServerRepo(db)
+	ctx := context.Background()
+
+	srv := &model.Server{Name: "srv", Host: "h", Port: 22, OwnerID: 1}
+	if err := repo.Create(ctx, srv); err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	pinned := []byte("pinned-key")
+	if ok, err := repo.SetHostKeyIfUnchanged(ctx, srv.ID, "h", 22, pinned); err != nil || !ok {
+		t.Fatalf("pin host key: ok=%v err=%v", ok, err)
+	}
+
+	seen := []byte("presented-key")
+	if err := repo.RecordHostKeyMismatch(ctx, srv.ID, seen); err != nil {
+		t.Fatalf("record mismatch: %v", err)
+	}
+	loaded, err := repo.FindByID(ctx, srv.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if loaded.HostKeyMismatchAt == nil {
+		t.Fatal("mismatch timestamp not recorded")
+	}
+	if loaded.HostKeySeen == nil || string(*loaded.HostKeySeen) != "presented-key" {
+		t.Fatalf("host_key_seen = %v, want presented-key", loaded.HostKeySeen)
+	}
+	if loaded.HostKey == nil || string(*loaded.HostKey) != "pinned-key" {
+		t.Fatal("recording a mismatch must not change the pin")
+	}
+
+	if err := repo.ClearHostKeyMismatch(ctx, srv.ID); err != nil {
+		t.Fatalf("clear mismatch: %v", err)
+	}
+	loaded, _ = repo.FindByID(ctx, srv.ID)
+	if loaded.HostKeyMismatchAt != nil || loaded.HostKeySeen != nil {
+		t.Fatal("clear did not drop the pending mismatch")
+	}
+
+	if err := repo.RecordHostKeyMismatch(ctx, srv.ID, seen); err != nil {
+		t.Fatalf("record mismatch: %v", err)
+	}
+	if err := repo.TrustHostKey(ctx, srv.ID, seen); err != nil {
+		t.Fatalf("trust host key: %v", err)
+	}
+	loaded, _ = repo.FindByID(ctx, srv.ID)
+	if loaded.HostKey == nil || string(*loaded.HostKey) != "presented-key" {
+		t.Fatalf("pin not updated: %v", loaded.HostKey)
+	}
+	if loaded.HostKeySeen != nil || loaded.HostKeyMismatchAt != nil {
+		t.Fatal("trust did not clear the pending mismatch")
+	}
+}

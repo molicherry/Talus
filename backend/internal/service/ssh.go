@@ -23,6 +23,8 @@ import (
 type serverSource interface {
 	FindByID(ctx context.Context, id uint) (*model.Server, error)
 	SetHostKeyIfUnchanged(ctx context.Context, id uint, host string, port int, hostKey []byte) (bool, error)
+	RecordHostKeyMismatch(ctx context.Context, id uint, seen []byte) error
+	ClearHostKeyMismatch(ctx context.Context, id uint) error
 }
 
 // SSHService provides SSH command execution and connection management.
@@ -132,6 +134,16 @@ func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client,
 	client, capturedKey, err := sshpool.DialSSH(srv.Host, srv.Port, username, authMethod, knownHostKey, s.sshDialTimeout)
 	if err != nil {
 		s.pool.Release(serverID, nil)
+		// A host key change is fail-closed but must not be silent: record the
+		// presented key so the UI can show its fingerprint and let the operator
+		// decide whether to trust it.
+		var mismatch *sshpool.HostKeyMismatchError
+		if errors.As(err, &mismatch) {
+			if recErr := s.serverRepo.RecordHostKeyMismatch(ctx, srv.ID, mismatch.Presented); recErr != nil {
+				slog.Warn("failed to record host key mismatch", "server_id", serverID, "error", recErr)
+			}
+			return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, server.ErrSSHHostKeyMismatch)
+		}
 		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, wrapSSHError(err))
 	}
 
@@ -144,6 +156,12 @@ func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client,
 			slog.Warn("failed to persist host key", "server_id", serverID, "error", updateErr)
 		} else if !updated {
 			slog.Warn("host key not persisted: server changed during dial", "server_id", serverID)
+		}
+	}
+	// The connection succeeds, so any pending mismatch is resolved.
+	if srv.HostKeyMismatchAt != nil {
+		if clrErr := s.serverRepo.ClearHostKeyMismatch(ctx, srv.ID); clrErr != nil {
+			slog.Warn("failed to clear host key mismatch", "server_id", serverID, "error", clrErr)
 		}
 	}
 

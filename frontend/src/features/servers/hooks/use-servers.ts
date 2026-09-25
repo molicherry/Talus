@@ -1,5 +1,12 @@
 import { invalidateQueries, useMutation, useQuery } from "../../../lib/query";
-import { createServer, deleteServer, getServer, getServerSummaries, updateServer } from "../api";
+import {
+  createServer,
+  deleteServer,
+  getServer,
+  getServerSummaries,
+  trustHostKey,
+  updateServer,
+} from "../api";
 
 export function useServers() {
   return useQuery({
@@ -53,6 +60,16 @@ export function useDeleteServer() {
     mutationFn: deleteServer,
     onSuccess: () => {
       invalidateQueries(["servers"]);
+    },
+  });
+}
+
+export function useTrustHostKey() {
+  return useMutation({
+    mutationFn: trustHostKey,
+    onSuccess: (server) => {
+      invalidateQueries(["servers"]);
+      invalidateQueries(["servers", server.id]);
     },
   });
 }

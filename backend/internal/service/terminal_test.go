@@ -540,6 +540,14 @@ func (staticServerSource) SetHostKeyIfUnchanged(context.Context, uint, string, i
 	return false, nil
 }
 
+func (staticServerSource) RecordHostKeyMismatch(context.Context, uint, []byte) error {
+	return nil
+}
+
+func (staticServerSource) ClearHostKeyMismatch(context.Context, uint) error {
+	return nil
+}
+
 // testServerFor is the server the fake source reports; testFP derives the
 // fingerprint seedPool must seed the pool with so GetClient hits the cache.
 func testServerFor(id uint) *model.Server {
