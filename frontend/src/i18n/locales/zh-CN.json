@@ -1,6 +1,7 @@
 {
   "app": {
-    "name": "Talus"
+    "name": "Talus",
+    "githubRepository": "打开 Talus GitHub 仓库（新标签页）"
   },
   "common": {
     "cancel": "取消",
