@@ -33,6 +33,13 @@ type Config struct {
 	// Rate Limiting
 	LoginRateLimit int
 	TrustProxy     bool
+
+	DBMaxOpenConnections        int
+	UsageWriteConcurrency       int
+	UsageActiveLimit            int
+	UsageRetentionDays          int
+	UsageSensitiveRetentionDays int
+	UsageLegacyWritersDrained   bool
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -55,6 +62,15 @@ func Load() *Config {
 	cfg.ExecTimeout = getEnvIntOrDefault("EXEC_TIMEOUT", 30)
 	cfg.LoginRateLimit = getEnvIntOrDefault("LOGIN_RATE_LIMIT", 10)
 	cfg.TrustProxy = getEnvBool("TRUST_PROXY")
+	cfg.DBMaxOpenConnections = getEnvIntOrDefault("DB_MAX_OPEN_CONNECTIONS", 32)
+	if cfg.DBMaxOpenConnections < 12 {
+		cfg.DBMaxOpenConnections = 12
+	}
+	cfg.UsageWriteConcurrency = getEnvIntOrDefault("USAGE_LOG_WRITE_CONCURRENCY", 4)
+	cfg.UsageActiveLimit = getEnvIntOrDefault("USAGE_LOG_ACTIVE_LIMIT", 4096)
+	cfg.UsageRetentionDays = getEnvIntOrDefault("USAGE_LOG_RETENTION_DAYS", 30)
+	cfg.UsageSensitiveRetentionDays = getEnvIntOrDefault("USAGE_LOG_SENSITIVE_RETENTION_DAYS", 90)
+	cfg.UsageLegacyWritersDrained = getEnvBool("USAGE_LOG_LEGACY_WRITERS_DRAINED")
 
 	return cfg
 }

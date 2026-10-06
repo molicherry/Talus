@@ -85,6 +85,12 @@ On first login, enter any username and a password of at least 8 characters — t
 3. Optionally assign the service to a server for SSH-tunneled access
 4. Use the relay API to proxy requests through Talus — credentials are injected automatically, `{{key}}` placeholders are substituted
 
+### 6. View Usage Logs
+
+Administrators can open **Usage Logs** for filtered operation history and details. Logs cover resource changes, sensitive reveals, SSH exec, service relay and terminal sessions, without recording secrets, commands or stream content. API keys cannot query this history.
+
+See the [v2 design](docs/usage-logs-design.zh-CN.md) and [upgrade instructions](docs/usage-logs-deployment.zh-CN.md) for retention, failure recovery and the coordinated legacy audit backfill.
+
 ## Production Deployment (GHCR images)
 
 Pre-built images are published to [GHCR](https://github.com/molicherry/Talus/pkgs/container/talus)
@@ -119,6 +125,12 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       PORT: 8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_MAX_OPEN_CONNECTIONS: ${DB_MAX_OPEN_CONNECTIONS:-32}
+      USAGE_LOG_WRITE_CONCURRENCY: ${USAGE_LOG_WRITE_CONCURRENCY:-4}
+      USAGE_LOG_ACTIVE_LIMIT: ${USAGE_LOG_ACTIVE_LIMIT:-4096}
+      USAGE_LOG_RETENTION_DAYS: ${USAGE_LOG_RETENTION_DAYS:-30}
+      USAGE_LOG_SENSITIVE_RETENTION_DAYS: ${USAGE_LOG_SENSITIVE_RETENTION_DAYS:-90}
+      USAGE_LOG_LEGACY_WRITERS_DRAINED: ${USAGE_LOG_LEGACY_WRITERS_DRAINED:-false}
       MONITOR_INTERVAL: ${MONITOR_INTERVAL:-60}
       SSH_TIMEOUT: ${SSH_TIMEOUT:-10}
       EXEC_TIMEOUT: ${EXEC_TIMEOUT:-30}

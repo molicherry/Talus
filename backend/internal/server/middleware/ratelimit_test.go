@@ -5,7 +5,35 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/vpsmanager/backend/internal/usage"
 )
+
+func TestRevealLimiterSeparatesKeysFromOwnerAndUsers(t *testing.T) {
+	rl := NewRateLimiter(time.Minute, 1)
+	owner, key1, key2 := uint(10), uint(10), uint(11)
+	check := func(p usage.Principal) int {
+		r := httptest.NewRequest("GET", "/api/v1/credentials/1/reveal", nil)
+		r = r.WithContext(WithPrincipal(r.Context(), p))
+		w := httptest.NewRecorder()
+		rl.Limit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })).ServeHTTP(w, r)
+		return w.Code
+	}
+	first := usage.Principal{AuthType: "api_key", APIKeyID: &key1, UserID: &owner}
+	if check(first) != 200 || check(first) != 429 {
+		t.Fatal("key quota not enforced")
+	}
+	if check(usage.Principal{AuthType: "api_key", APIKeyID: &key2, UserID: &owner}) != 200 {
+		t.Fatal("keys sharing an owner must have separate quotas")
+	}
+	if check(usage.Principal{AuthType: "jwt", UserID: &owner}) != 200 {
+		t.Fatal("user and key numeric IDs must not collide")
+	}
+	unknownKey := uint(12)
+	if check(usage.Principal{AuthType: "api_key", APIKeyID: &unknownKey}) != 200 {
+		t.Fatal("legacy key owner must not collapse into user zero")
+	}
+}
 
 func TestClientIPNoTrustProxy(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)

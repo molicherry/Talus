@@ -602,14 +602,17 @@ try {
           touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }],
         });
       const y = box.y + box.height / 2;
-      await touch("touchStart", box.x + 10, y);
+      // A short interior drag exercises chart pointer capture without invoking
+      // Chromium's page-level history gesture (which returns to about:blank).
+      await touch("touchStart", box.x + box.width * 0.4, y);
       const before = Number(await chart.getAttribute("aria-valuenow"));
-      await touch("touchMove", box.x + box.width - 10, y);
+      await touch("touchMove", box.x + box.width * 0.6, y);
       await until(
         async () => Number(await chart.getAttribute("aria-valuenow")) > before,
         "touch drag changes selected timestamp",
       );
       await touch("touchEnd");
+      assert.equal(new URL(page.url()).pathname, "/servers/1", "chart drag must stay on the server page");
       const scrollBefore = await page.evaluate(() => scrollY);
       await touch("touchStart", box.x + 30, y);
       for (let i = 1; i <= 5; i++) await touch("touchMove", box.x + 30, y - i * 12);

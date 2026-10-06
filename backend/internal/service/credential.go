@@ -11,6 +11,7 @@ import (
 	"github.com/vpsmanager/backend/internal/pkg/crypto"
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
+	"github.com/vpsmanager/backend/internal/usage"
 	"gorm.io/gorm"
 )
 
@@ -238,6 +239,15 @@ func (s *CredentialService) Delete(ctx context.Context, id uint) error {
 	return nil
 }
 
+func (s *CredentialService) CaptureSnapshot(ctx context.Context, id uint) {
+	if usage.FromContext(ctx) == nil {
+		return
+	}
+	if cred, err := s.repo.FindByID(ctx, id); err == nil {
+		usage.FromContext(ctx).SetResource("credential", &id, cred.Name, nil)
+	}
+}
+
 func (s *CredentialService) invalidateServers(ctx context.Context, credentialID uint) {
 	serverIDs, err := s.serverRepo.FindIDsByCredentialID(ctx, credentialID)
 	if err != nil {
@@ -272,6 +282,7 @@ func (s *CredentialService) Reveal(ctx context.Context, id uint) (*RevealCredent
 
 	key := s.masterKey.DeriveKey(cred.Salt)
 	result := &RevealCredential{}
+	usage.FromContext(ctx).SetResource("credential", &id, cred.Name, nil)
 
 	if cred.EncryptedPassword != nil && *cred.EncryptedPassword != "" {
 		plain, err := crypto.Decrypt(*cred.EncryptedPassword, key)

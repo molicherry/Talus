@@ -14,6 +14,7 @@ import (
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/server"
+	"github.com/vpsmanager/backend/internal/usage"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
@@ -49,10 +50,11 @@ func NewSSHService(pool *sshpool.Pool, serverRepo serverSource, credSvc *Credent
 
 // ExecResult holds the output of a remote command execution.
 type ExecResult struct {
-	Stdout     string `json:"stdout"`
-	Stderr     string `json:"stderr"`
-	ExitCode   int    `json:"exit_code"`
-	DurationMs int64  `json:"duration_ms"`
+	Stdout          string `json:"stdout"`
+	Stderr          string `json:"stderr"`
+	ExitCode        int    `json:"exit_code"`
+	DurationMs      int64  `json:"duration_ms"`
+	transportClosed bool
 }
 
 // Exec runs a command on a target server via SSH.
@@ -68,7 +70,7 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 		return nil, err
 	}
 
-	result, err := s.runCommand(client, command, timeout)
+	result, err := s.runCommand(ctx, client, command, timeout)
 	duration := time.Since(start).Milliseconds()
 
 	if result != nil {
@@ -77,7 +79,7 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 
 	// Never cache a connection whose transport failed — reuse would
 	// immediately fail again on the next call.
-	if isConnectionError(err) {
+	if (result != nil && result.transportClosed) || isConnectionError(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, server.ErrSSHTimeout) {
 		s.pool.Discard(serverID, client)
 	} else {
 		s.pool.Release(serverID, client)
@@ -89,6 +91,9 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 // GetClient returns a pooled SSH client for the given server, dialing a new
 // connection if none is cached. The caller must call pool.Release when done.
 func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// Always read current server state, even on a cache hit: a pooled client is
 	// only valid for the host/port/credential it was dialed with, and a deleted
 	// server must not stay reachable through a stale connection.
@@ -99,10 +104,18 @@ func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client,
 		}
 		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	usage.FromContext(ctx).SetResource("server", &srv.ID, srv.Name, &srv.ID)
 
-	client, err := s.pool.Get(serverID, serverFingerprint(srv))
+	client, err := s.pool.GetContext(ctx, serverID, serverFingerprint(srv))
 	if err != nil {
 		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
+	}
+	if err := ctx.Err(); err != nil {
+		s.pool.Discard(serverID, client)
+		return nil, err
 	}
 	if client != nil {
 		return client, nil
@@ -131,7 +144,14 @@ func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client,
 		knownHostKey = *srv.HostKey
 	}
 
-	client, capturedKey, err := sshpool.DialSSH(srv.Host, srv.Port, username, authMethod, knownHostKey, s.sshDialTimeout)
+	client, capturedKey, err := sshpool.DialSSHContext(ctx, srv.Host, srv.Port, username, authMethod, knownHostKey, s.sshDialTimeout)
+	if contextErr := ctx.Err(); contextErr != nil {
+		if client != nil {
+			_ = client.Close()
+		}
+		s.pool.Release(serverID, nil)
+		return nil, contextErr
+	}
 	if err != nil {
 		s.pool.Release(serverID, nil)
 		// A host key change is fail-closed but must not be silent: record the
@@ -186,49 +206,65 @@ func serverFingerprint(srv *model.Server) string {
 }
 
 // runCommand executes a command on an SSH session with timeout support.
-func (s *SSHService) runCommand(client *ssh.Client, command string, timeout time.Duration) (*ExecResult, error) {
-	session, err := client.NewSession()
-	if err != nil {
-		return nil, fmt.Errorf("create session: %w", wrapSSHError(err))
-	}
-	defer session.Close()
-
+func (s *SSHService) runCommand(parent context.Context, client *ssh.Client, command string, timeout time.Duration) (*ExecResult, error) {
 	var stdout, stderr bytes.Buffer
-	session.Stdout = &stdout
-	session.Stderr = &stderr
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	done := make(chan error, 1)
+	joined := make(chan struct{})
 	go func() {
-		done <- session.Run(command)
+		defer close(joined)
+		session, err := client.NewSession()
+		if err != nil {
+			done <- err
+			return
+		}
+		defer session.Close()
+		session.Stdout = &stdout
+		session.Stderr = &stderr
+		usage.FromContext(parent).SetPhase("ready")
+		runErr := session.Run(command)
+		done <- runErr
 	}()
 
+	var runErr error
 	select {
-	case runErr := <-done:
-		if runErr != nil {
-			var exitErr *ssh.ExitError
-			if errors.As(runErr, &exitErr) {
-				return &ExecResult{
-					Stdout:   stdout.String(),
-					Stderr:   stderr.String(),
-					ExitCode: exitErr.ExitStatus(),
-				}, nil
-			}
-			return nil, fmt.Errorf("run command: %w", wrapSSHError(runErr))
-		}
-		return &ExecResult{
-			Stdout:   stdout.String(),
-			Stderr:   stderr.String(),
-			ExitCode: 0,
-		}, nil
+	case runErr = <-done:
 	case <-ctx.Done():
-		if err := session.Signal(ssh.SIGKILL); err != nil {
-			slog.Warn("failed to send SIGKILL to ssh session", "error", err)
+		// Prefer a known completion over a cancellation observed at the same
+		// instant. Otherwise close the owned transport, which also unblocks
+		// NewSession, a wedged channel write, and session.Run. Join before
+		// releasing its pool slot or reading buffers written by the worker.
+		select {
+		case runErr = <-done:
+		default:
+			_ = client.Close()
+			<-joined
+			if parent.Err() != nil {
+				return nil, fmt.Errorf("run command: %w", parent.Err())
+			}
+			return nil, fmt.Errorf("run command: %w", server.ErrSSHTimeout)
 		}
-		return nil, fmt.Errorf("run command: %w", server.ErrSSHTimeout)
 	}
+	// A known command exit remains a known exit even if cancellation is
+	// needed to release a wedged channel close after the command completed.
+	transportClosed := false
+	select {
+	case <-joined:
+	case <-ctx.Done():
+		transportClosed = true
+		_ = client.Close()
+		<-joined
+	}
+	if runErr != nil {
+		var exitErr *ssh.ExitError
+		if errors.As(runErr, &exitErr) {
+			return &ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: exitErr.ExitStatus(), transportClosed: transportClosed}, nil
+		}
+		return nil, fmt.Errorf("run command: %w", wrapSSHError(runErr))
+	}
+	return &ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: 0, transportClosed: transportClosed}, nil
 }
 
 // buildAuthMethod creates the appropriate ssh.AuthMethod from decrypted credentials.
@@ -267,6 +303,9 @@ func wrapSSHError(err error) error {
 func isConnectionError(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, server.ErrSSHConnection) {
+		return true
 	}
 	msg := err.Error()
 	for _, frag := range []string{

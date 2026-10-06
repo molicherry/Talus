@@ -19,6 +19,7 @@ import (
 	"github.com/vpsmanager/backend/internal/server"
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
+	"github.com/vpsmanager/backend/internal/usage"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -46,6 +47,13 @@ func main() {
 		slog.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		slog.Error("database pool unavailable")
+		os.Exit(1)
+	}
+	sqlDB.SetMaxOpenConns(cfg.DBMaxOpenConnections)
+	sqlDB.SetMaxIdleConns(cfg.DBMaxOpenConnections / 2)
 
 	// --- Database initialization (AutoMigrate replaces golang-migrate) ---
 
@@ -92,6 +100,9 @@ func main() {
 			&model.Metric{},
 			&model.Service{},
 			&model.AuditEvent{},
+			&model.UsageLogInstance{},
+			&model.UsageLog{},
+			&model.UsageLogBackfillState{},
 		)
 		if autoMigrateErr == nil {
 			break
@@ -148,6 +159,53 @@ func main() {
 	apiKeyRepo := repository.NewAPIKeyRepo(db)
 	apiKeySvc := service.NewAPIKeyService(apiKeyRepo, serverRepo, masterKey)
 	auditRepo := repository.NewAuditEventRepo(db)
+	usageRetention := time.Duration(cfg.UsageRetentionDays) * 24 * time.Hour
+	usageSensitiveRetention := time.Duration(cfg.UsageSensitiveRetentionDays) * 24 * time.Hour
+	usageRepo := repository.NewUsageLogRepo(db, repository.UsageLogRepoConfig{OrdinaryRetention: usageRetention, SensitiveRetention: usageSensitiveRetention})
+	usageRecorder := usage.NewRecorder(usageRepo, auditRepo, usage.Options{
+		DBMaxOpenConnections: cfg.DBMaxOpenConnections,
+		WriteConcurrency:     cfg.UsageWriteConcurrency,
+		ActiveLimit:          cfg.UsageActiveLimit,
+		OrdinaryRetention:    usageRetention,
+		SensitiveRetention:   usageSensitiveRetention,
+	})
+	usageCtx, stopUsage := context.WithCancel(context.Background())
+	defer stopUsage()
+	usageRecorder.Start(usageCtx)
+	defer usageRecorder.Close()
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-usageCtx.Done():
+				return
+			case <-ticker.C:
+				s := usageRecorder.Stats()
+				slog.Info("usage capture statistics",
+					"usage_capture_skipped_total", s.CaptureSkipped,
+					"usage_write_failed_total", s.WriteFailed,
+					"usage_finalization_retry_total", s.FinalizationRetry,
+					"usage_reconciled_total", s.Reconciled,
+					"audit_write_failed_total", s.AuditWriteFailed,
+					"audit_lost_total", s.AuditLost,
+					"usage_finalization_lost_total", s.FinalizationLost,
+					"active", s.Active, "pending", s.Pending, "pending_bytes", s.PendingBytes,
+					"audit_pending", s.AuditPending, "audit_pending_bytes", s.AuditPendingBytes,
+					"oldest_pending_ms", s.OldestPendingMS)
+			}
+		}
+	}()
+	usageHandler := handler.NewUsageLogHandler(usageRepo, cfg.JWTSecret)
+	if cfg.UsageLegacyWritersDrained {
+		go func() {
+			if err := usageRepo.Backfill(usageCtx); err != nil {
+				slog.Warn("legacy usage backfill paused", "reason", "backfill_unavailable")
+			}
+		}()
+	} else {
+		slog.Info("legacy usage backfill awaiting coordinated writer drain")
+	}
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeySvc, auditRepo)
 	serverHandler := handler.NewServerHandler(serverSvc)
 
@@ -177,19 +235,26 @@ func main() {
 
 	go monitorSvc.Start(context.Background())
 
-	apiKeyAuth := mw.APIKeyValidatorFunc(func(ctx context.Context, rawKey string) (uint, string, string, []string, []uint, error) {
+	apiKeyAuth := mw.APIKeyIdentityValidatorFunc(func(ctx context.Context, rawKey string) (usage.Principal, error) {
 		k, err := apiKeySvc.Validate(ctx, rawKey)
 		if err != nil {
-			return 0, "", "", nil, nil, err
+			return usage.Principal{}, err
 		}
-		return k.ID, k.Name, "admin", k.Scopes, k.ServerIDs, nil
+		p := usage.Principal{AuthType: "api_key", APIKeyID: &k.ID, APIKeyName: k.Name, APIKeyPrefix: k.KeyPrefix, Role: "admin", Scopes: k.Scopes, ServerIDs: k.ServerIDs}
+		if k.UserID != 0 {
+			p.UserID = &k.UserID
+		}
+		return p, nil
 	})
 
 	router := server.NewRouter(server.RouteConfig{
-		JWTService:    jwtSvc,
-		APIKeyAuth:    apiKeyAuth,
-		RevealLimiter: mw.NewRateLimiter(1*time.Minute, 5),
-		LoginLimiter:  mw.NewIPRateLimiter(1*time.Minute, cfg.LoginRateLimit, cfg.TrustProxy),
+		JWTService:           jwtSvc,
+		APIKeyAuth:           apiKeyAuth,
+		UsageRecorder:        usageRecorder,
+		ListUsageLogsHandler: usageHandler.List,
+		GetUsageLogHandler:   usageHandler.Get,
+		RevealLimiter:        mw.NewRateLimiter(1*time.Minute, 5),
+		LoginLimiter:         mw.NewIPRateLimiter(1*time.Minute, cfg.LoginRateLimit, cfg.TrustProxy),
 		// Auth
 		LoginHandler:          authHandler.Login,
 		SetupHandler:          authHandler.Setup,

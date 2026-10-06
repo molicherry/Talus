@@ -25,6 +25,8 @@ var routeScopes = map[string]string{
 
 // jwtOnlyRoutes defines routes where API keys are always rejected.
 var jwtOnlyRoutes = map[string]bool{
+	"GET /api/v1/usage-logs":                true,
+	"GET /api/v1/usage-logs/{id}":           true,
 	"DELETE /api/v1/servers/{id}":           true,
 	"POST /api/v1/credentials":              true,
 	"PUT /api/v1/credentials/{id}":          true,
@@ -100,7 +102,23 @@ func normalizePath(method, path string) string {
 			segments[i] = "{id}"
 		}
 	}
-	return method + " /" + strings.Join(segments, "/")
+	normalized := method + " /" + strings.Join(segments, "/")
+	if IsRouteRegistered(normalized) {
+		return normalized
+	}
+	// Chi's {id} also matches malformed IDs. Apply its endpoint permission
+	// before a handler parses that value, including JWT-only detail routes.
+	if len(segments) >= 4 && segments[0] == "api" && segments[1] == "v1" {
+		switch segments[2] {
+		case "servers", "credentials", "api-keys", "services", "usage-logs":
+			segments[3] = "{id}"
+			candidate := method + " /" + strings.Join(segments, "/")
+			if IsRouteRegistered(candidate) {
+				return candidate
+			}
+		}
+	}
+	return normalized
 }
 
 // isNumeric reports whether s consists entirely of decimal digits.

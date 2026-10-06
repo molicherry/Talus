@@ -44,3 +44,12 @@ export function classifyUnauthorized(reason: unknown, pathname: string): Unautho
   if (isCredentialRejection(reason)) return "inline";
   return isLoginRoute(pathname) ? "clear-token" : "clear-token-and-redirect";
 }
+
+/** Authorization responses belong only to the session that sent their request. */
+export function shouldApplyAuthorizationFailure(requestEpoch: number, currentEpoch: number, aborted = false): boolean {
+  return !aborted && requestEpoch === currentEpoch;
+}
+
+export function isUsageLogRequest(path: string): boolean {
+  return /^\/api\/v1\/usage-logs(?:\/|\?|$)/.test(path);
+}

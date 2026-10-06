@@ -57,3 +57,22 @@ Optional environment variables:
 - `UI_TEST_FILTER`: a regular expression selecting scenario names.
 - `UI_TEST_PORT`: the local preview port (default `4177`).
 - `UI_TEST_SCREENSHOTS`: a directory for optional inspection screenshots.
+
+## Usage log tests
+
+`npm test` also verifies filter normalization, exact string IDs and opaque
+cursors, the frozen page store, 20-page LRU, 100-page cursor history,
+changed-page rereads, update comparison, and the 50-entry/10-minute detail cache.
+
+The production-build browser suite uses mocked APIs and no backend:
+
+```bash
+npm run build
+node tests/usage-logs.browser.mjs
+```
+
+It supports the same optional Playwright/Chromium environment overrides as the
+main UI suite. It checks frozen time ranges and cached previous pages,
+URL-linked on-demand details, running/terminal polling, first-page update
+probes, current-session 403 cleanup, non-admin access, request filtering and
+mobile layout. The default preview port is 4178 (`UI_TEST_PORT` overrides it).

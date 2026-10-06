@@ -3,11 +3,13 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
 
 	"github.com/vpsmanager/backend/internal/pkg/token"
+	"github.com/vpsmanager/backend/internal/usage"
 )
 
 // terminalPathPattern matches GET /api/v1/servers/{id}/terminal, the only route
@@ -28,6 +30,20 @@ func isTerminalWebSocketHandshake(r *http.Request) bool {
 type contextUserKey string
 
 const userKey contextUserKey = "user"
+const principalKey contextUserKey = "principal"
+
+// APIKeyIdentityValidator keeps the authenticated key distinct from its owner.
+// Production wiring should use this interface; the legacy interface below is
+// supported for callers that do not yet expose owner information.
+type APIKeyIdentityValidator interface {
+	ValidateIdentity(ctx context.Context, rawKey string) (usage.Principal, error)
+}
+
+type APIKeyIdentityValidatorFunc func(context.Context, string) (usage.Principal, error)
+
+func (f APIKeyIdentityValidatorFunc) ValidateIdentity(ctx context.Context, rawKey string) (usage.Principal, error) {
+	return f(ctx, rawKey)
+}
 
 // APIKeyValidator validates raw API key strings.
 type APIKeyValidator interface {
@@ -42,35 +58,41 @@ func (f APIKeyValidatorFunc) Validate(ctx context.Context, rawKey string) (uint,
 }
 
 // Auth returns middleware that validates a JWT Bearer token or X-API-Key header.
-func Auth(jwtSvc *token.JWTService, keyValidator APIKeyValidator) func(http.Handler) http.Handler {
+func Auth(jwtSvc *token.JWTService, keyValidator any) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Try API key first
 			if apiKey := r.Header.Get("X-API-Key"); apiKey != "" {
-				uid, username, role, scopes, serverIDs, err := keyValidator.Validate(r.Context(), apiKey)
+				principal, err := validateAPIKeyIdentity(r.Context(), keyValidator, apiKey)
 				if err != nil {
-					writeAuthError(w, http.StatusUnauthorized, "invalid api key")
+					writeAuthError(w, r, http.StatusUnauthorized, "invalid api key")
 					return
 				}
 
-				allowed, required := hasScope(r.Method, r.URL.Path, scopes)
+				principal.AuthType = "api_key"
+				claims := &token.Claims{
+					Username:  principal.Username,
+					Role:      principal.Role,
+					ServerIDs: principal.ServerIDs,
+				}
+				if principal.UserID != nil {
+					claims.UserID = *principal.UserID
+				}
+				ctx := context.WithValue(r.Context(), userKey, claims)
+				ctx = WithPrincipal(ctx, principal)
+				r = r.WithContext(ctx)
+
+				allowed, required := hasScope(r.Method, r.URL.Path, principal.Scopes)
 				if !allowed {
 					msg := "api key not permitted on this endpoint"
 					if required != "" {
 						msg = "insufficient scope: requires " + required
 					}
-					writeAuthError(w, http.StatusForbidden, msg)
+					writeAuthError(w, r, http.StatusForbidden, msg)
 					return
 				}
 
-				claims := &token.Claims{
-					UserID:    uid,
-					Username:  username,
-					Role:      role,
-					ServerIDs: serverIDs,
-				}
-				ctx := context.WithValue(r.Context(), userKey, claims)
-				next.ServeHTTP(w, r.WithContext(ctx))
+				next.ServeHTTP(w, r)
 				return
 			}
 
@@ -85,20 +107,60 @@ func Auth(jwtSvc *token.JWTService, keyValidator APIKeyValidator) func(http.Hand
 
 			tokenStr, ok := extractBearerToken(r)
 			if !ok {
-				writeAuthError(w, http.StatusUnauthorized, "missing or invalid authorization header")
+				writeAuthError(w, r, http.StatusUnauthorized, "missing or invalid authorization header")
 				return
 			}
 
 			claims, err := jwtSvc.ValidateToken(tokenStr)
 			if err != nil {
-				writeAuthError(w, http.StatusUnauthorized, "invalid or expired token")
+				writeAuthError(w, r, http.StatusUnauthorized, "invalid or expired token")
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), userKey, claims)
+			ctx := WithUserClaims(r.Context(), claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func validateAPIKeyIdentity(ctx context.Context, validator any, raw string) (usage.Principal, error) {
+	if identity, ok := validator.(APIKeyIdentityValidator); ok {
+		return identity.ValidateIdentity(ctx, raw)
+	}
+	if legacy, ok := validator.(APIKeyValidator); ok {
+		id, name, role, scopes, serverIDs, err := legacy.Validate(ctx, raw)
+		return usage.Principal{AuthType: "api_key", APIKeyID: &id, APIKeyName: name, Role: role, Scopes: scopes, ServerIDs: serverIDs}, err
+	}
+	return usage.Principal{}, errors.New("api key validator unavailable")
+}
+
+func PrincipalFromClaims(claims *token.Claims) usage.Principal {
+	if claims == nil {
+		return usage.Principal{AuthType: "unauthenticated"}
+	}
+	uid := claims.UserID
+	return usage.Principal{AuthType: "jwt", UserID: &uid, Username: claims.Username, Role: claims.Role, ServerIDs: claims.ServerIDs}
+}
+
+// WithPrincipal stores a trusted identity in both request context and the shared
+// capture object, allowing an outer middleware to observe an inner auth denial.
+func WithPrincipal(ctx context.Context, principal usage.Principal) context.Context {
+	if op := usage.FromContext(ctx); op != nil {
+		op.SetPrincipal(principal)
+	}
+	return context.WithValue(ctx, principalKey, principal)
+}
+
+func WithUserClaims(ctx context.Context, claims *token.Claims) context.Context {
+	ctx = context.WithValue(ctx, userKey, claims)
+	return WithPrincipal(ctx, PrincipalFromClaims(claims))
+}
+
+func GetPrincipal(ctx context.Context) usage.Principal {
+	if principal, ok := ctx.Value(principalKey).(usage.Principal); ok {
+		return principal
+	}
+	return usage.Principal{AuthType: "unauthenticated"}
 }
 
 // GetUserClaims extracts the authenticated user's JWT claims from the context.
@@ -138,19 +200,23 @@ const (
 // writeAuthError sends the same error envelope the rest of the API uses, with a
 // stable reason. Without it a 401 reached the UI as a bare message and every
 // translation fell back to a generic "request failed with status 401".
-func writeAuthError(w http.ResponseWriter, statusCode int, message string) {
+func writeAuthError(w http.ResponseWriter, r *http.Request, statusCode int, message string) {
 	reason := reasonUnauthorized
 	if statusCode == http.StatusForbidden {
 		reason = reasonForbidden
+	}
+	if op := usage.FromContext(r.Context()); op != nil {
+		op.SetResult("rejected", reason)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	body, _ := json.Marshal(map[string]interface{}{
 		"error": map[string]interface{}{
-			"code":    statusCode,
-			"reason":  reason,
-			"message": message,
+			"code":       statusCode,
+			"reason":     reason,
+			"message":    message,
+			"request_id": GetRequestID(r.Context()),
 		},
 	})
 	_, _ = w.Write(body)

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/vpsmanager/backend/internal/server"
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
+	"github.com/vpsmanager/backend/internal/usage"
 )
 
 // maxUsageGuideRunes caps the length of a service usage guide (rune count).
@@ -94,6 +94,8 @@ func (h *ServiceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, err)
 		return
 	}
+	usageResource(r, "service", svc.ID, svc.Name, svc.ServerID)
+	usageCommitted(r)
 	server.WriteJSON(w, http.StatusCreated, svc)
 }
 
@@ -139,6 +141,11 @@ func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 
 	claims := mw.GetUserClaims(r.Context())
 	svc, getErr := h.svc.Get(r.Context(), uint(id))
+	if getErr != nil {
+		server.WriteError(w, r, getErr)
+		return
+	}
+	usageResource(r, "service", uint(id), svc.Name, svc.ServerID)
 	if getErr == nil && svc.ServerID != nil {
 		if !mw.CheckServerAccess(claims, *svc.ServerID) {
 			server.WriteError(w, r, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServiceDenied))
@@ -152,13 +159,22 @@ func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	relayErr := h.svc.Relay(r.Context(), uint(id), service.RelayInput{
+	op := usage.FromContext(r.Context())
+	op.SetMetadata("method", req.Method)
+	op.Begin()
+	result, relayErr := h.svc.RelayWithResult(r.Context(), uint(id), service.RelayInput{
 		Method:  req.Method,
 		Path:    req.Path,
 		Headers: req.Headers,
 		Body:    req.Body,
 	}, w)
-	if relayErr != nil {
+	if result.UpstreamStatus != 0 {
+		op.SetRelayResult(result.UpstreamStatus, result.BytesCopied)
+	}
+	if result.Outcome != "" {
+		op.SetResult(result.Outcome, result.Reason)
+	}
+	if relayErr != nil && !result.HeadersWritten {
 		server.WriteError(w, r, relayErr)
 	}
 }
@@ -193,29 +209,24 @@ func (h *ServiceHandler) GetCredentials(w http.ResponseWriter, r *http.Request) 
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServiceID))
 		return
 	}
+	snapshot, err := h.svc.Get(r.Context(), id)
+	if err != nil {
+		server.WriteError(w, r, err)
+		return
+	}
+	usageResource(r, "service", id, snapshot.Name, snapshot.ServerID)
+	if snapshot.ServerID != nil && !mw.CheckServerAccess(mw.GetUserClaims(r.Context()), *snapshot.ServerID) {
+		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServiceDenied))
+		return
+	}
 	creds, err := h.svc.GetCredentials(r.Context(), id)
 	if err != nil {
 		server.WriteError(w, r, err)
 		return
 	}
 
-	claims := mw.GetUserClaims(r.Context())
-	if claims != nil {
-		slog.Info("audit: service credentials revealed",
-			"user_id", claims.UserID,
-			"service_id", id,
-			"ip", r.RemoteAddr,
-		)
-
-		_ = h.auditRepo.Create(r.Context(), &model.AuditEvent{
-			UserID:       claims.UserID,
-			Username:     claims.Username,
-			Action:       "service.credentials",
-			ResourceType: "service",
-			ResourceID:   id,
-			IPAddress:    r.RemoteAddr,
-		})
-	}
+	writeRevealAudit(r, h.auditRepo, "service.credentials", "service", id)
+	usageCommitted(r)
 
 	server.WriteJSON(w, http.StatusOK, creds)
 }
@@ -255,6 +266,8 @@ func (h *ServiceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, err)
 		return
 	}
+	usageResource(r, "service", updated.ID, updated.Name, updated.ServerID)
+	usageCommitted(r)
 	server.WriteJSON(w, http.StatusOK, updated)
 }
 
@@ -266,10 +279,14 @@ func (h *ServiceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if snapshot, err := h.svc.Get(r.Context(), id); err == nil {
+		usageResource(r, "service", id, snapshot.Name, snapshot.ServerID)
+	}
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		server.WriteError(w, r, err)
 		return
 	}
+	usageCommitted(r)
 	w.WriteHeader(http.StatusNoContent)
 }
 

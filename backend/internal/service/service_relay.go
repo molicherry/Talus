@@ -254,22 +254,47 @@ func (s *ServiceRelayService) List(ctx context.Context, serverID *uint) ([]model
 
 // Relay decrypts service credentials, substitutes placeholders, and proxies the request.
 func (s *ServiceRelayService) Relay(ctx context.Context, serviceID uint, input RelayInput, w http.ResponseWriter) error {
+	_, err := s.RelayWithResult(ctx, serviceID, input, w)
+	return err
+}
+
+// RelayResult separates transport status from the operation outcome. CopyError
+// is returned to the caller only; its text must never enter usage metadata.
+type RelayResult struct {
+	UpstreamStatus int
+	BytesCopied    int64
+	HeadersWritten bool
+	CopyError      error
+	Outcome        string
+	Reason         string
+}
+
+func (s *ServiceRelayService) RelayWithResult(ctx context.Context, serviceID uint, input RelayInput, w http.ResponseWriter) (RelayResult, error) {
 	if input.Method == "" {
-		return server.NewAppError(http.StatusBadRequest, server.ReasonMethodRequired)
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonMethodRequired}, server.NewAppError(http.StatusBadRequest, server.ReasonMethodRequired)
 	}
 
 	svc, err := s.repo.FindByID(ctx, serviceID)
 	if err != nil {
-		return server.NewAppError(http.StatusNotFound, server.ReasonServiceNotFound)
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonServiceNotFound}, server.NewAppError(http.StatusNotFound, server.ReasonServiceNotFound)
 	}
+	return s.relayFromService(ctx, svc, input, w)
+}
+
+func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.Service, input RelayInput, w http.ResponseWriter) (RelayResult, error) {
+	result := RelayResult{Outcome: "failed"}
 
 	// Decrypt all credentials.
-	key := s.masterKey.DeriveKey(svc.Salt)
+	var key []byte
+	if len(svc.EncryptedCredentials) > 0 {
+		key = s.masterKey.DeriveKey(svc.Salt)
+	}
 	creds := make(map[string]string, len(svc.EncryptedCredentials))
 	for k, v := range svc.EncryptedCredentials {
 		plain, err := crypto.Decrypt(v, key)
 		if err != nil {
-			return fmt.Errorf("decrypt credential '%s': %w", k, server.NewAppError(http.StatusInternalServerError, server.ReasonCredentialDecrypt))
+			result.Reason = server.ReasonCredentialDecrypt
+			return result, server.NewAppError(http.StatusInternalServerError, server.ReasonCredentialDecrypt)
 		}
 		creds[k] = string(plain)
 	}
@@ -280,7 +305,8 @@ func (s *ServiceRelayService) Relay(ctx context.Context, serviceID uint, input R
 	// all arguments via ?input=...).
 	targetURL, err := buildTargetURL(svc.BaseURL, input.Path)
 	if err != nil {
-		return fmt.Errorf("build target url: %w", server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRelayPath))
+		result.Outcome, result.Reason = "rejected", server.ReasonInvalidRelayPath
+		return result, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRelayPath)
 	}
 
 	// Substitute placeholders in path.
@@ -295,7 +321,8 @@ func (s *ServiceRelayService) Relay(ctx context.Context, serviceID uint, input R
 
 	req, err := http.NewRequestWithContext(ctx, input.Method, targetURL, bodyReader)
 	if err != nil {
-		return fmt.Errorf("build relay request: %w", server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRelayRequest))
+		result.Outcome, result.Reason = "rejected", server.ReasonInvalidRelayRequest
+		return result, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRelayRequest)
 	}
 
 	// Set headers with placeholder substitution.
@@ -308,18 +335,61 @@ func (s *ServiceRelayService) Relay(ctx context.Context, serviceID uint, input R
 	// Execute request.
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		if isTimeout(err) {
-			return server.NewAppError(http.StatusGatewayTimeout, server.ReasonRelayTimeout)
+		if ctx.Err() != nil {
+			result.Outcome, result.Reason = "cancelled", "client_cancelled"
+			return result, ctx.Err()
 		}
-		return server.NewAppErrorParams(http.StatusBadGateway, server.ReasonRelayUnreachable, map[string]any{"detail": err.Error()})
+		if isTimeout(err) {
+			result.Reason = server.ReasonRelayTimeout
+			return result, server.NewAppError(http.StatusGatewayTimeout, server.ReasonRelayTimeout)
+		}
+		result.Reason = server.ReasonRelayUnreachable
+		return result, server.NewAppErrorParams(http.StatusBadGateway, server.ReasonRelayUnreachable, map[string]any{"detail": "connection failed"})
 	}
 	defer resp.Body.Close()
+	result.UpstreamStatus = resp.StatusCode
+	// This endpoint forwards response bodies, not bidirectional upgrades. A
+	// 101 cannot be advertised without implementing the upgraded transport.
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		result.Reason = server.ReasonRelayUnreachable
+		return result, server.NewAppErrorParams(http.StatusBadGateway, server.ReasonRelayUnreachable, map[string]any{"detail": "protocol upgrade unsupported"})
+	}
 
 	// Copy response — bypasses the WriteJSON envelope for raw passthrough.
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
-	return nil
+	result.HeadersWritten = true
+	// Flush the headers and each copied chunk. The bounded buffer preserves
+	// backpressure and lets a streaming response reach its client promptly.
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	result.BytesCopied, result.CopyError = io.CopyBuffer(relayFlushWriter{w}, resp.Body, make([]byte, 32*1024))
+	if result.CopyError != nil {
+		result.Reason = "relay_copy_failed"
+		if ctx.Err() != nil {
+			result.Outcome, result.Reason = "cancelled", "client_cancelled"
+		}
+		return result, result.CopyError
+	}
+	if resp.StatusCode >= 400 {
+		result.Reason = "relay_upstream_failed"
+		return result, nil
+	}
+	result.Outcome = "succeeded"
+	return result, nil
+}
+
+type relayFlushWriter struct{ writer http.ResponseWriter }
+
+func (w relayFlushWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	if n > 0 {
+		if f, ok := w.writer.(http.Flusher); ok {
+			f.Flush()
+		}
+	}
+	return n, err
 }
 
 // substitute replaces all {{key}} placeholders in the input string.

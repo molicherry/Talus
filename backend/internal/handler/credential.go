@@ -2,13 +2,10 @@ package handler
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 
-	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
-	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
 )
 
@@ -78,6 +75,8 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, err)
 		return
 	}
+	usageResource(r, "credential", cred.ID, cred.Name, nil)
+	usageCommitted(r)
 	server.WriteJSON(w, http.StatusCreated, cred)
 }
 
@@ -116,6 +115,8 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, err)
 		return
 	}
+	usageResource(r, "credential", cred.ID, cred.Name, nil)
+	usageCommitted(r)
 	server.WriteJSON(w, http.StatusOK, cred)
 }
 
@@ -127,10 +128,12 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.svc.CaptureSnapshot(r.Context(), id)
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		server.WriteError(w, r, err)
 		return
 	}
+	usageCommitted(r)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -147,23 +150,8 @@ func (h *CredentialHandler) Reveal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims := mw.GetUserClaims(r.Context())
-	if claims != nil {
-		slog.Info("audit: credential revealed",
-			"user_id", claims.UserID,
-			"credential_id", id,
-			"ip", r.RemoteAddr,
-		)
-
-		_ = h.auditRepo.Create(r.Context(), &model.AuditEvent{
-			UserID:       claims.UserID,
-			Username:     claims.Username,
-			Action:       "credential.reveal",
-			ResourceType: "credential",
-			ResourceID:   id,
-			IPAddress:    r.RemoteAddr,
-		})
-	}
+	writeRevealAudit(r, h.auditRepo, "credential.reveal", "credential", id)
+	usageCommitted(r)
 
 	server.WriteJSON(w, http.StatusOK, result)
 }
