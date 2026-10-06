@@ -1,6 +1,7 @@
 {
   "app": {
-    "name": "Talus"
+    "name": "Talus",
+    "githubRepository": "Open Talus GitHub repository (opens in a new tab)"
   },
   "common": {
     "cancel": "Cancel",
