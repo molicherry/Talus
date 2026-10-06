@@ -103,7 +103,7 @@ func (h *ServiceHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *ServiceHandler) List(w http.ResponseWriter, r *http.Request) {
 	var serverID *uint
 	if sidStr := r.URL.Query().Get("server_id"); sidStr != "" {
-		sid, err := strconv.ParseUint(sidStr, 10, 64)
+		sid, err := strconv.ParseUint(sidStr, 10, strconv.IntSize)
 		if err != nil {
 			server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServerID))
 			return
@@ -133,19 +133,19 @@ func (h *ServiceHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Relay handles POST /api/v1/services/{id}/relay.
 func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	id, err := parseServiceID(r)
 	if err != nil {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServiceID))
 		return
 	}
 
 	claims := mw.GetUserClaims(r.Context())
-	svc, getErr := h.svc.Get(r.Context(), uint(id))
+	svc, getErr := h.svc.Get(r.Context(), id)
 	if getErr != nil {
 		server.WriteError(w, r, getErr)
 		return
 	}
-	usageResource(r, "service", uint(id), svc.Name, svc.ServerID)
+	usageResource(r, "service", id, svc.Name, svc.ServerID)
 	if getErr == nil && svc.ServerID != nil {
 		if !mw.CheckServerAccess(claims, *svc.ServerID) {
 			server.WriteError(w, r, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServiceDenied))
@@ -162,7 +162,7 @@ func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 	op := usage.FromContext(r.Context())
 	op.SetMetadata("method", req.Method)
 	op.Begin()
-	result, relayErr := h.svc.RelayWithResult(r.Context(), uint(id), service.RelayInput{
+	result, relayErr := h.svc.RelayWithResult(r.Context(), id, service.RelayInput{
 		Method:  req.Method,
 		Path:    req.Path,
 		Headers: req.Headers,
@@ -293,7 +293,7 @@ func (h *ServiceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // parseServiceID extracts a uint path parameter named "id" from the request URL.
 func parseServiceID(r *http.Request) (uint, error) {
 	idStr := chi.URLParam(r, "id")
-	id, err := strconv.ParseUint(idStr, 10, 64)
+	id, err := strconv.ParseUint(idStr, 10, strconv.IntSize)
 	if err != nil {
 		return 0, err
 	}

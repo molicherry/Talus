@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/token"
 	"github.com/vpsmanager/backend/internal/repository"
@@ -35,9 +36,41 @@ func (s *usageReaderStub) List(_ context.Context, _ repository.UsageLogFilter, b
 	s.bound = b
 	return s.rows, nil
 }
-func (s *usageReaderStub) Get(_ context.Context, _ uint64) (*model.UsageLog, error) {
+func (s *usageReaderStub) Get(_ context.Context, id uint64) (*model.UsageLog, error) {
 	s.called++
+	s.lastID = id
 	return &s.rows[0], nil
+}
+
+func TestUsageDetailPreservesFullWidthIDs(t *testing.T) {
+	const id uint64 = 9007199254742000
+	s := &usageReaderStub{rows: []model.UsageLog{{ID: id}}}
+	h := NewUsageLogHandler(s, "secret")
+	r := usageTestRequest(url.Values{}, 1, "admin")
+	route := chi.NewRouteContext()
+	route.URLParams.Add("id", strconv.FormatUint(id, 10))
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+	w := httptest.NewRecorder()
+	h.Get(w, r)
+	if w.Code != http.StatusOK || s.lastID != id {
+		t.Fatalf("detail truncated log ID: status=%d id=%d", w.Code, s.lastID)
+	}
+}
+
+func TestResourceIDParsingRejectsNativeOverflow(t *testing.T) {
+	maxID := ^uint(0)
+	if got, err := parsePositiveID(strconv.FormatUint(uint64(maxID), 10)); err != nil || got != maxID {
+		t.Fatalf("maximum resource ID rejected: got=%d err=%v", got, err)
+	}
+	overflow := "18446744073709551616"
+	if strconv.IntSize == 32 {
+		overflow = "4294967296"
+	}
+	for _, input := range []string{overflow, "0", "-1", "+1", "1.0"} {
+		if _, err := parsePositiveID(input); err == nil {
+			t.Fatalf("invalid resource ID accepted: %s", input)
+		}
+	}
 }
 
 func usageTestRequest(q url.Values, user uint, role string) *http.Request {

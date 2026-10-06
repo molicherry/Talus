@@ -224,6 +224,10 @@ func (s *SSHService) runCommand(parent context.Context, client *ssh.Client, comm
 		session.Stdout = &stdout
 		session.Stderr = &stderr
 		usage.FromContext(parent).SetPhase("ready")
+		// Intentional remote shell execution: the exec route authenticates the
+		// caller, requires servers:exec for API keys, and checks target access.
+		// The caller supplies the complete command for the selected SSH server;
+		// it is never executed by a local shell on the Talus host.
 		runErr := session.Run(command)
 		done <- runErr
 	}()

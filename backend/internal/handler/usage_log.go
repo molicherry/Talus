@@ -154,14 +154,14 @@ func (h *UsageLogHandler) Get(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, server.ErrForbidden)
 		return
 	}
-	id, err := parsePositiveID(chi.URLParam(r, "id"))
+	id, err := parseUsageLogID(chi.URLParam(r, "id"))
 	if err != nil {
 		server.WriteError(w, r, server.NewAppError(400, server.ReasonInvalidQuery))
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	item, err := h.repo.Get(ctx, uint64(id))
+	item, err := h.repo.Get(ctx, id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		server.WriteError(w, r, server.ErrNotFound)
 		return
@@ -191,11 +191,23 @@ func parsePositiveID(s string) (uint, error) {
 	if s == "" || strings.Trim(s, "0123456789") != "" {
 		return 0, errors.New("invalid id")
 	}
-	n, err := strconv.ParseUint(s, 10, 64)
-	if err != nil || n == 0 || uint64(uint(n)) != n {
+	n, err := strconv.ParseUint(s, 10, strconv.IntSize)
+	if err != nil || n == 0 {
 		return 0, errors.New("invalid id")
 	}
 	return uint(n), nil
+}
+
+// Usage log IDs are uint64 regardless of the native size of resource IDs.
+func parseUsageLogID(s string) (uint64, error) {
+	if s == "" || strings.Trim(s, "0123456789") != "" {
+		return 0, errors.New("invalid id")
+	}
+	n, err := strconv.ParseUint(s, 10, 64)
+	if err != nil || n == 0 {
+		return 0, errors.New("invalid id")
+	}
+	return n, nil
 }
 
 func parseUsageQuery(v url.Values, now time.Time, continuation bool) (UsageLogQuery, repository.UsageLogFilter, string) {
