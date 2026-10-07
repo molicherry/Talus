@@ -561,6 +561,29 @@
       "credential": "Credential",
       "service": "Service",
       "api_key": "API key"
-    }
+    },
+    "identity": {
+      "labels": {
+        "server": "Server",
+        "user": "User",
+        "api_key": "API key"
+      },
+      "search": "Search by name or ID",
+      "clear": "Clear {{label}} filter",
+      "deleted": "Deleted",
+      "historicalID": "Historical ID #{{id}}",
+      "selectedID": "Selected #{{id}}",
+      "useID": "Use historical ID #{{id}}",
+      "manualHint": "Search by name, or enter a positive historical ID and press Enter.",
+      "resolving": "Looking up the selected name…",
+      "missingLabel": "No retained name was found for this ID. You can still filter by it.",
+      "labelFailed": "Could not look up the selected name. The ID remains selected.",
+      "noResults": "No matching names. You can still use a historical ID.",
+      "more": "More than 50 matches. Narrow your search.",
+      "matches": "{{count}} matches",
+      "toggle": "Choose {{label}}",
+      "invalidID": "IDs must be between 1 and 9223372036854775807; name search still works."
+    },
+    "requestIDHelp": "Correlates logs from the same HTTP request for troubleshooting."
   }
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -192,7 +193,7 @@ func parsePositiveID(s string) (uint, error) {
 		return 0, errors.New("invalid id")
 	}
 	n, err := strconv.ParseUint(s, 10, strconv.IntSize)
-	if err != nil || n == 0 {
+	if err != nil || n == 0 || n > math.MaxInt64 {
 		return 0, errors.New("invalid id")
 	}
 	return uint(n), nil

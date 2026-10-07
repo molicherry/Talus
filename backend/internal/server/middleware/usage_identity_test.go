@@ -114,7 +114,7 @@ func TestUsageRoutesRejectEveryAPIKey(t *testing.T) {
 		id := uint(91)
 		return usage.Principal{APIKeyID: &id, Role: "admin", Scopes: []string{"*"}}, nil
 	})
-	for _, path := range []string{"/api/v1/usage-logs", "/api/v1/usage-logs/123", "/api/v1/usage-logs/bad-id"} {
+	for _, path := range []string{"/api/v1/usage-logs", "/api/v1/usage-logs/filter-options", "/api/v1/usage-logs/123", "/api/v1/usage-logs/bad-id"} {
 		req := httptest.NewRequest("GET", path, nil)
 		req.Header.Set("X-API-Key", "raw-secret")
 		response := httptest.NewRecorder()

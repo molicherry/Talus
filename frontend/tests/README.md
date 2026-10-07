@@ -76,3 +76,9 @@ main UI suite. It checks frozen time ranges and cached previous pages,
 URL-linked on-demand details, running/terminal polling, first-page update
 probes, current-session 403 cleanup, non-admin access, request filtering and
 mobile layout. The default preview port is 4178 (`UI_TEST_PORT` overrides it).
+
+Identity-filter browser cases also cover name/prefix/deleted labels and URL
+restoration, precise IDs above JavaScript's integer range, historical manual
+IDs, PostgreSQL bigint bounds, numeric names, clearing and repeated selection,
+keyboard retry, late-search cancellation, account-switch cleanup and a pending
+label lookup superseded by a same-ID selection.

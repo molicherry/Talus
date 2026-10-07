@@ -201,7 +201,12 @@ func TestEveryAuthedRouteIsRegistered(t *testing.T) {
 		"GET /api/v1/auth/setup":  true,
 	}
 
-	router := NewRouter(RouteConfig{})
+	noop := func(http.ResponseWriter, *http.Request) {}
+	router := NewRouter(RouteConfig{
+		ListUsageLogsHandler:         noop,
+		GetUsageLogHandler:           noop,
+		FilterUsageLogOptionsHandler: noop,
+	})
 
 	var unregistered []string
 	err := chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {

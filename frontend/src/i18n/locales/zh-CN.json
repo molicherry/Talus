@@ -452,7 +452,7 @@
     "actor": "操作者",
     "resource": "资源",
     "duration": "耗时",
-    "requestID": "request_id",
+    "requestID": "请求 ID",
     "time": "开始时间",
     "pageSize": "每页条数",
     "apply": "应用筛选",
@@ -524,7 +524,7 @@
       "resource_type": "资源类型",
       "resource_id": "资源 ID",
       "server_id": "服务器 ID",
-      "request_id": "request_id"
+      "request_id": "请求 ID"
     },
     "metadata": {
       "timeout_seconds": "超时（秒）",
@@ -561,6 +561,29 @@
       "credential": "凭据",
       "service": "服务",
       "api_key": "API Key"
-    }
+    },
+    "identity": {
+      "labels": {
+        "server": "服务器",
+        "user": "用户",
+        "api_key": "API Key"
+      },
+      "search": "按名称或 ID 搜索",
+      "clear": "清除{{label}}筛选",
+      "deleted": "已删除",
+      "historicalID": "历史 ID #{{id}}",
+      "selectedID": "已选择 #{{id}}",
+      "useID": "使用历史 ID #{{id}}",
+      "manualHint": "按名称搜索，或输入正整数历史 ID 后按回车。",
+      "resolving": "正在查询已选名称…",
+      "missingLabel": "未找到此 ID 的保留名称，仍可按该 ID 筛选。",
+      "labelFailed": "查询已选名称失败，已选 ID 保持不变。",
+      "noResults": "未找到匹配名称，仍可使用历史 ID。",
+      "more": "匹配结果超过 50 条，请缩小搜索范围。",
+      "matches": "找到 {{count}} 个匹配结果",
+      "toggle": "选择{{label}}",
+      "invalidID": "ID 须为 1 至 9223372036854775807 的正整数，仍可按名称搜索。"
+    },
+    "requestIDHelp": "用于关联同一次 HTTP 请求的日志，方便排查问题。"
   }
 }

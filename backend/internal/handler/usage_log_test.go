@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -59,17 +60,46 @@ func TestUsageDetailPreservesFullWidthIDs(t *testing.T) {
 
 func TestResourceIDParsingRejectsNativeOverflow(t *testing.T) {
 	maxID := ^uint(0)
-	if got, err := parsePositiveID(strconv.FormatUint(uint64(maxID), 10)); err != nil || got != maxID {
+	maxValid := uint64(maxID)
+	if maxValid > math.MaxInt64 {
+		maxValid = math.MaxInt64
+	}
+	if got, err := parsePositiveID(strconv.FormatUint(maxValid, 10)); err != nil || uint64(got) != maxValid {
 		t.Fatalf("maximum resource ID rejected: got=%d err=%v", got, err)
 	}
 	overflow := "18446744073709551616"
 	if strconv.IntSize == 32 {
 		overflow = "4294967296"
 	}
-	for _, input := range []string{overflow, "0", "-1", "+1", "1.0"} {
+	for _, input := range []string{overflow, "9223372036854775808", "18446744073709551615", "0", "-1", "+1", "1.0"} {
 		if _, err := parsePositiveID(input); err == nil {
 			t.Fatalf("invalid resource ID accepted: %s", input)
 		}
+	}
+}
+
+func TestUsageResourceFiltersRejectDatabaseIDOverflowBeforeLookup(t *testing.T) {
+	maxValid := uint64(math.MaxInt64)
+	if strconv.IntSize == 32 {
+		maxValid = uint64(^uint(0))
+	}
+	for _, field := range []string{"user_id", "api_key_id", "resource_id", "server_id"} {
+		t.Run(field, func(t *testing.T) {
+			s := &usageReaderStub{}
+			h := NewUsageLogHandler(s, "secret")
+			for _, input := range []string{"9223372036854775808", "18446744073709551615", "18446744073709551616"} {
+				w := httptest.NewRecorder()
+				h.List(w, usageTestRequest(url.Values{field: {input}}, 1, "admin"))
+				if w.Code != http.StatusBadRequest || s.called != 0 {
+					t.Fatalf("database ID overflow reached lookup: %s=%s status=%d calls=%d", field, input, w.Code, s.called)
+				}
+			}
+			w := httptest.NewRecorder()
+			h.List(w, usageTestRequest(url.Values{field: {strconv.FormatUint(maxValid, 10)}}, 1, "admin"))
+			if w.Code != http.StatusOK || s.called != 1 {
+				t.Fatalf("maximum valid entity ID rejected: %s status=%d calls=%d body=%s", field, w.Code, s.called, w.Body)
+			}
+		})
 	}
 }
 

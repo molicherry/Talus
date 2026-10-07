@@ -197,6 +197,7 @@ func main() {
 		}
 	}()
 	usageHandler := handler.NewUsageLogHandler(usageRepo, cfg.JWTSecret)
+	usageFilterOptionsHandler := handler.NewUsageLogFilterOptionsHandler(usageRepo)
 	if cfg.UsageLegacyWritersDrained {
 		go func() {
 			if err := usageRepo.Backfill(usageCtx); err != nil {
@@ -248,13 +249,14 @@ func main() {
 	})
 
 	router := server.NewRouter(server.RouteConfig{
-		JWTService:           jwtSvc,
-		APIKeyAuth:           apiKeyAuth,
-		UsageRecorder:        usageRecorder,
-		ListUsageLogsHandler: usageHandler.List,
-		GetUsageLogHandler:   usageHandler.Get,
-		RevealLimiter:        mw.NewRateLimiter(1*time.Minute, 5),
-		LoginLimiter:         mw.NewIPRateLimiter(1*time.Minute, cfg.LoginRateLimit, cfg.TrustProxy),
+		JWTService:                   jwtSvc,
+		APIKeyAuth:                   apiKeyAuth,
+		UsageRecorder:                usageRecorder,
+		ListUsageLogsHandler:         usageHandler.List,
+		GetUsageLogHandler:           usageHandler.Get,
+		FilterUsageLogOptionsHandler: usageFilterOptionsHandler.List,
+		RevealLimiter:                mw.NewRateLimiter(1*time.Minute, 5),
+		LoginLimiter:                 mw.NewIPRateLimiter(1*time.Minute, cfg.LoginRateLimit, cfg.TrustProxy),
 		// Auth
 		LoginHandler:          authHandler.Login,
 		SetupHandler:          authHandler.Setup,

@@ -63,3 +63,15 @@ export interface UsageLogPage {
   consistency: "bounded_keyset";
 }
 export type TimePreset = "1h" | "24h" | "7d" | "custom";
+
+export type UsageIdentityKind = "server" | "user" | "api_key";
+export interface UsageIdentityOption {
+  id: string;
+  name: string;
+  prefix?: string;
+  deleted: boolean;
+}
+export interface UsageIdentityOptions {
+  items: UsageIdentityOption[];
+  has_more: boolean;
+}

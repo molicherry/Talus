@@ -26,6 +26,7 @@ var routeScopes = map[string]string{
 // jwtOnlyRoutes defines routes where API keys are always rejected.
 var jwtOnlyRoutes = map[string]bool{
 	"GET /api/v1/usage-logs":                true,
+	"GET /api/v1/usage-logs/filter-options": true,
 	"GET /api/v1/usage-logs/{id}":           true,
 	"DELETE /api/v1/servers/{id}":           true,
 	"POST /api/v1/credentials":              true,

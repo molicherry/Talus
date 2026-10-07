@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { canonicalFilters, DetailCache, filterKeys, filtersFromURL, filtersToURL, FrozenPages, HISTORY_LIMIT, IDLE_TTL, resolveRange, validFilters, visibleSignature } from "./.compiled-usage-session.mjs";
+import { canonicalFilters, DetailCache, filterKeys, filtersFromURL, filtersToURL, FrozenPages, HISTORY_LIMIT, IDLE_TTL, resolveRange, validEntityID, validFilters, visibleSignature } from "./.compiled-usage-session.mjs";
 
 const realNow = Date.now;
 Date.now = () => 0;
@@ -71,6 +71,8 @@ assert.ok(details.get("55", 2 * IDLE_TTL, true), "active readers stay pinned eve
 details.clear(); assert.equal(details.ids().length, 0);
 console.log("  ok: detail cache caps 50 entries, pins open detail, removes idle entries after 10 minutes");
 
+assert.equal(validEntityID("9223372036854775807"), true);
+for (const invalidID of ["9223372036854775808", "18446744073709551615", "0", "-1", "1.5"]) { assert.equal(validEntityID(invalidID), false); for (const key of ["user_id", "api_key_id", "server_id", "resource_id"]) assert.equal(validFilters({ ...query, [key]: invalidID }), false); }
 assert.equal(validFilters(query), true);
 assert.equal(validFilters({ ...query, request_id: "req:A_1.-" }), true);
 assert.equal(validFilters({ ...query, user_id: "9007199254741999" }), true);

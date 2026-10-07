@@ -13,10 +13,14 @@ export function resolveRange(preset: TimePreset, now = Date.now()): { from: stri
   const hours = preset === "1h" ? 1 : preset === "7d" ? 168 : 24;
   return { from: new Date(now - hours * 3600_000).toISOString(), to: new Date(now).toISOString() };
 }
+// PostgreSQL entity IDs are signed bigint; compare decimal strings exactly.
+export function validEntityID(value: string): boolean {
+  return /^[1-9]\d{0,18}$/.test(value) && (value.length < 19 || value <= "9223372036854775807");
+}
 export function validFilters(query: UsageFilters): boolean {
   const from = Date.parse(query.from), to = Date.parse(query.to);
   return Number.isFinite(from) && Number.isFinite(to) && from < to && to - from <= 90 * 86400_000 &&
-    [25, 50, 100].includes(query.page_size) && idKeys.every(key => !query[key] || /^[1-9]\d*$/.test(query[key]!)) &&
+    [25, 50, 100].includes(query.page_size) && idKeys.every(key => !query[key] || validEntityID(query[key]!)) &&
     (!query.request_id || /^[A-Za-z0-9._:-]{1,128}$/.test(query.request_id));
 }
 export function filtersFromURL(params: URLSearchParams, now = Date.now()): { query: UsageFilters; preset: TimePreset } {

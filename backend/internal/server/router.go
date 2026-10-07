@@ -18,13 +18,14 @@ import (
 
 // RouteConfig holds all HTTP handler functions that the router needs to mount.
 type RouteConfig struct {
-	JWTService           *token.JWTService
-	APIKeyAuth           any
-	UsageRecorder        *usage.Recorder
-	ListUsageLogsHandler http.HandlerFunc
-	GetUsageLogHandler   http.HandlerFunc
-	RevealLimiter        *middleware.RateLimiter
-	LoginLimiter         *middleware.IPRateLimiter
+	JWTService                   *token.JWTService
+	APIKeyAuth                   any
+	UsageRecorder                *usage.Recorder
+	ListUsageLogsHandler         http.HandlerFunc
+	GetUsageLogHandler           http.HandlerFunc
+	FilterUsageLogOptionsHandler http.HandlerFunc
+	RevealLimiter                *middleware.RateLimiter
+	LoginLimiter                 *middleware.IPRateLimiter
 
 	// Auth
 	LoginHandler          http.HandlerFunc
@@ -115,6 +116,9 @@ func NewRouter(cfg RouteConfig) chi.Router {
 
 		if cfg.ListUsageLogsHandler != nil {
 			r.Get("/api/v1/usage-logs", cfg.ListUsageLogsHandler)
+		}
+		if cfg.FilterUsageLogOptionsHandler != nil {
+			r.Get("/api/v1/usage-logs/filter-options", cfg.FilterUsageLogOptionsHandler)
 		}
 		if cfg.GetUsageLogHandler != nil {
 			r.Get("/api/v1/usage-logs/{id}", cfg.GetUsageLogHandler)

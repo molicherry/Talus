@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { apiClient } from "../../lib/api-client";
 import { outcomes } from "./types";
-import type { UsageFilters, UsageLog, UsageLogPage } from "./types";
+import type { UsageFilters, UsageIdentityKind, UsageIdentityOptions, UsageLog, UsageLogPage } from "./types";
 
 const id = z.string().regex(/^[1-9]\d*$/);
 const optionalID = z.union([id, z.number().int().positive().max(Number.MAX_SAFE_INTEGER)]).transform(value => String(value)).nullish();
@@ -28,4 +28,13 @@ export async function getUsageLogs(query: UsageFilters, cursor: string | null, s
 }
 export async function getUsageLog(id: string, signal?: AbortSignal): Promise<UsageLog> {
   return UsageLogSchema.parse(await apiClient.get(`/api/v1/usage-logs/${encodeURIComponent(id)}`, { signal })) as UsageLog;
+}
+
+const FilterOptionsSchema = z.object({
+  items: z.array(z.object({ id, name: z.string(), prefix: z.string().optional(), deleted: z.boolean() })).max(50),
+  has_more: z.boolean(),
+});
+export async function getUsageFilterOptions(kind: UsageIdentityKind, query: string, signal?: AbortSignal): Promise<UsageIdentityOptions> {
+  const params = new URLSearchParams({ kind, q: query });
+  return FilterOptionsSchema.parse(await apiClient.get(`/api/v1/usage-logs/filter-options?${params}`, { signal }));
 }
