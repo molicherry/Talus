@@ -89,6 +89,16 @@ func main() {
 	}
 	slog.Info("constraints renamed")
 
+	// Normalize unknown legacy owners before AutoMigrate changes the column's
+	// default/NOT NULL constraint. Missing owner columns get default zero below.
+	ownerSchemaCtx, cancelOwnerSchema := context.WithTimeout(context.Background(), 30*time.Second)
+	ownerSchemaErr := repository.NewAPIKeyRepo(db).NormalizeLegacyOwnerNulls(ownerSchemaCtx)
+	cancelOwnerSchema()
+	if ownerSchemaErr != nil {
+		slog.Error("failed to prepare legacy API key owner migration", "error", ownerSchemaErr)
+		os.Exit(1)
+	}
+
 	// 4. AutoMigrate all models in FK dependency order (User → Credential → Server → APIKey → Metric)
 	var autoMigrateErr error
 	for attempt := 0; attempt < 30; attempt++ {
@@ -157,6 +167,16 @@ func main() {
 
 	// Dependency chain — API Keys
 	apiKeyRepo := repository.NewAPIKeyRepo(db)
+	ownerBackfillCtx, cancelOwnerBackfill := context.WithTimeout(context.Background(), 30*time.Second)
+	boundKeys, ownerBackfillErr := apiKeyRepo.BindUnownedToDefaultAdmin(ownerBackfillCtx)
+	cancelOwnerBackfill()
+	if ownerBackfillErr != nil {
+		slog.Error("failed to assign legacy API key owners", "error", ownerBackfillErr)
+		os.Exit(1)
+	}
+	if boundKeys > 0 {
+		slog.Info("legacy API key owners assigned", "keys", boundKeys)
+	}
 	apiKeySvc := service.NewAPIKeyService(apiKeyRepo, serverRepo, masterKey)
 	auditRepo := repository.NewAuditEventRepo(db)
 	usageRetention := time.Duration(cfg.UsageRetentionDays) * 24 * time.Hour

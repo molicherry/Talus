@@ -14,7 +14,7 @@ var AllScopeGatedScopes = []string{
 
 type APIKey struct {
 	ID              uint      `gorm:"primaryKey" json:"id"`
-	UserID          uint      `gorm:"not null;index" json:"-"`
+	UserID          uint      `gorm:"not null;default:0;index" json:"-"`
 	Name            string    `gorm:"size:128;not null" json:"name"`
 	KeyHash         string    `gorm:"uniqueIndex;not null" json:"-"`
 	KeyPrefix       string    `gorm:"size:16;not null" json:"key_prefix"`

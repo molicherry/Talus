@@ -32,7 +32,7 @@
 `Principal` 至少包含 `auth_type`、真实 `user_id?`、`username?`、`api_key_id?`、Key 名称/前缀、role 和 ServerIDs。
 
 - JWT 验证成功后填用户身份；API Key 验证成功后填 Key 身份，owner 有可信来源时另填 `user_id`。Key ID 不得再次映射成用户 ID。
-- 新 Key 创建时从已验证 JWT 写入 owner；历史 owner 为零或无法验证时保持未知。改动同步检查现有 server 访问判断与 reveal 限流，不把 Key owner 当作 Key 调用者本身。
+- 新 Key 创建时从已验证 JWT 写入 owner；根据单用户升级策略，旧 Key 的 owner 为零或空时自动绑定默认管理员（未软删除且 role=admin 的最小用户 ID）。启动时执行幂等绑定；尚无管理员时不修改，首次初始化创建管理员的事务中补做。已有非零 owner 不覆盖，Key 内容和权限不改变。该绑定只影响 Key 当前归属与后续操作日志，不改写旧审计或使用日志。改动同步检查现有 server 访问判断与 reveal 限流，不把 Key owner 当作 Key 调用者本身。
 - 验证成功后、scope/server 权限检查前填 Principal，因此拒绝也能归属已验证身份。无效凭据不解码成可信身份，记 `auth_type=unauthenticated`。
 - 首版日志列表和详情均加入 `jwtOnlyRoutes`，handler 再要求 JWT Principal 且 `role=admin`。API Key 即使带 admin role 也不能查询。每次请求重新鉴权，cursor 不承担授权。
 - `resource_id` 是操作对象，`api_key_id` 是调用身份。JWT 查看某个 Key 时只设置前者。
