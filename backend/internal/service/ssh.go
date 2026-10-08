@@ -241,6 +241,7 @@ func (s *SSHService) runCommand(parent context.Context, client *ssh.Client, comm
 		// caller, requires servers:exec for API keys, and checks target access.
 		// The caller supplies the complete command for the selected SSH server;
 		// it is never executed by a local shell on the Talus host.
+		// codeql[go/command-injection]
 		runErr := session.Run(command)
 		done <- runErr
 	}()
