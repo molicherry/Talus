@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import { Field, Input } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
-import { getAuthEpoch } from "../../../lib/auth";
+import { getAuthSnapshot } from "../../../lib/auth";
 import { translateApiError } from "../../../lib/api-error";
 import { getUsageFilterOptions } from "../api";
 import { validEntityID } from "../lib/session";
@@ -27,6 +27,10 @@ interface LabelState {
   status: "loading" | "success" | "error";
   item?: UsageIdentityOption;
   error?: unknown;
+}
+function accessIsCurrent(epoch: number): boolean {
+  const auth = getAuthSnapshot();
+  return auth.authEpoch === epoch && auth.canViewUsageLogs;
 }
 
 /** IDs stay decimal strings through search, selection, manual input and URLs. */
@@ -74,10 +78,10 @@ export function UsageIdentityFilter({ id, kind, value, onChange, authEpoch }: Pr
     labelController.current = controller;
     setSelected({ key: labelKey, status: "loading" });
     void getUsageFilterOptions(kind, value, controller.signal).then(data => {
-      if (controller.signal.aborted || generation !== labelGeneration.current || authEpoch !== getAuthEpoch()) return;
+      if (controller.signal.aborted || generation !== labelGeneration.current || !accessIsCurrent(authEpoch)) return;
       setSelected({ key: labelKey, status: "success", item: data.items.find(item => item.id === value) });
     }, error => {
-      if (controller.signal.aborted || generation !== labelGeneration.current || authEpoch !== getAuthEpoch()) return;
+      if (controller.signal.aborted || generation !== labelGeneration.current || !accessIsCurrent(authEpoch)) return;
       setSelected({ key: labelKey, status: "error", error });
     });
     return () => controller.abort();
@@ -90,11 +94,11 @@ export function UsageIdentityFilter({ id, kind, value, onChange, authEpoch }: Pr
     setResults({ key: searchKey, status: "loading" });
     const timer = window.setTimeout(() => {
       void getUsageFilterOptions(kind, needle, controller.signal).then(data => {
-        if (controller.signal.aborted || generation !== searchGeneration.current || authEpoch !== getAuthEpoch()) return;
+        if (controller.signal.aborted || generation !== searchGeneration.current || !accessIsCurrent(authEpoch)) return;
         setActive(index => index === 0 ? 0 : -1);
         setResults({ key: searchKey, status: "success", data });
       }, error => {
-        if (controller.signal.aborted || generation !== searchGeneration.current || authEpoch !== getAuthEpoch()) return;
+        if (controller.signal.aborted || generation !== searchGeneration.current || !accessIsCurrent(authEpoch)) return;
         setResults({ key: searchKey, status: "error", error });
       });
     }, 250);
@@ -121,8 +125,8 @@ export function UsageIdentityFilter({ id, kind, value, onChange, authEpoch }: Pr
     <div ref={root} className="relative" onBlur={event => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
     }}>
-      <div className="flex items-center gap-2">
-        <Input ref={input} className="min-w-0" id={id} role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded={open}
+      <div className="flex flex-wrap items-center gap-2">
+        <Input ref={input} className="min-w-0 flex-1" id={id} role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded={open}
           aria-controls={open ? listID : undefined} aria-activedescendant={open && active >= 0 && choices[active] ? `${listID}-${active}` : undefined}
           aria-describedby={hintID} autoComplete="off" spellCheck={false} maxLength={128}
           placeholder={t("usage.identity.search")} title={selectedText || undefined} value={open ? search : selectedText}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { subscribeAuth } from "./auth";
+import { getAuthSnapshot, subscribeAuth } from "./auth";
 
 /** A small cache retaining the existing 30s staleness, one retry and no focus fetch. */
 export type QueryKey = readonly unknown[];
@@ -199,8 +199,17 @@ export function pruneQueryCache({ prefix, maxEntries, maxIdleMs, retain }: Prune
   }
 }
 
-// All authenticated resource caches must disappear before another identity renders.
-subscribeAuth(() => removeQueries());
+// An identity change clears every resource. A log-only permission denial must
+// leave unrelated readers, requests and cache data in the same session intact.
+let cacheAuthSnapshot = getAuthSnapshot();
+subscribeAuth(() => {
+  const next = getAuthSnapshot();
+  if (next.authEpoch !== cacheAuthSnapshot.authEpoch) removeQueries();
+  else if (next.usagePermissionRevision !== cacheAuthSnapshot.usagePermissionRevision) {
+    for (const prefix of ["usage-logs", "usage-logs-probe", "usage-log"]) removeQueries([prefix]);
+  }
+  cacheAuthSnapshot = next;
+});
 
 export function useQuery<T>(opts: QueryOptions<T>): QueryResult<T> {
   const key = JSON.stringify(opts.queryKey);

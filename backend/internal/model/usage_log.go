@@ -8,10 +8,10 @@ import (
 // UsageLog is a best-effort operation summary. It deliberately has no soft
 // deletion or foreign-key associations: historical snapshots survive resources.
 type UsageLog struct {
-	ID                   uint64          `gorm:"primaryKey;index:idx_usage_started,priority:2;index:idx_usage_action,priority:3;index:idx_usage_resource,priority:4;index:idx_usage_key,priority:3;index:idx_usage_running_owner,priority:2,where:outcome = 'running'" json:"id,string"`
+	ID                   uint64          `gorm:"primaryKey;index:idx_usage_started,priority:2;index:idx_usage_action,priority:3;index:idx_usage_resource,priority:4;index:idx_usage_key,priority:3;index:idx_usage_user,priority:3;index:idx_usage_server,priority:3;index:idx_usage_running_owner,priority:2,where:outcome = 'running'" json:"id,string"`
 	OperationID          string          `gorm:"type:uuid;not null;uniqueIndex" json:"operation_id"`
-	LegacyAuditEventID   *uint           `gorm:"uniqueIndex" json:"legacy_audit_event_id,omitempty"`
-	StartedAt            time.Time       `gorm:"not null;index:idx_usage_started,priority:1;index:idx_usage_action,priority:2;index:idx_usage_resource,priority:3;index:idx_usage_key,priority:2" json:"started_at"`
+	LegacyAuditEventID   *uint           `gorm:"uniqueIndex" json:"legacy_audit_event_id,omitempty,string"`
+	StartedAt            time.Time       `gorm:"not null;index:idx_usage_started,priority:1;index:idx_usage_action,priority:2;index:idx_usage_resource,priority:3;index:idx_usage_key,priority:2;index:idx_usage_user,priority:2;index:idx_usage_server,priority:2" json:"started_at"`
 	FinishedAt           *time.Time      `json:"finished_at,omitempty"`
 	DurationMS           *int64          `json:"duration_ms,omitempty"`
 	RecordedAt           time.Time       `gorm:"not null;autoCreateTime" json:"recorded_at"`
@@ -23,13 +23,13 @@ type UsageLog struct {
 	RecoveryReason       string          `gorm:"size:64" json:"recovery_reason,omitempty"`
 	Action               string          `gorm:"size:96;not null;index:idx_usage_action,priority:1" json:"action"`
 	ResourceType         string          `gorm:"size:64;index:idx_usage_resource,priority:1" json:"resource_type"`
-	ResourceID           *uint           `gorm:"index:idx_usage_resource,priority:2" json:"resource_id,omitempty"`
+	ResourceID           *uint           `gorm:"index:idx_usage_resource,priority:2" json:"resource_id,omitempty,string"`
 	ResourceNameSnapshot string          `gorm:"size:256" json:"resource_name_snapshot,omitempty"`
-	ServerID             *uint           `json:"server_id,omitempty"`
+	ServerID             *uint           `gorm:"index:idx_usage_server,priority:1" json:"server_id,omitempty,string"`
 	AuthType             string          `gorm:"size:32;not null" json:"auth_type"`
-	UserID               *uint           `json:"user_id,omitempty"`
+	UserID               *uint           `gorm:"index:idx_usage_user,priority:1" json:"user_id,omitempty,string"`
 	UsernameSnapshot     string          `gorm:"size:256" json:"username_snapshot,omitempty"`
-	APIKeyID             *uint           `gorm:"index:idx_usage_key,priority:1" json:"api_key_id,omitempty"`
+	APIKeyID             *uint           `gorm:"index:idx_usage_key,priority:1" json:"api_key_id,omitempty,string"`
 	APIKeyNameSnapshot   string          `gorm:"size:256" json:"api_key_name_snapshot,omitempty"`
 	APIKeyPrefixSnapshot string          `gorm:"size:32" json:"api_key_prefix_snapshot,omitempty"`
 	RequestID            string          `gorm:"size:128;index" json:"request_id,omitempty"`

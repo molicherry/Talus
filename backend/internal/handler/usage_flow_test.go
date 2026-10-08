@@ -125,29 +125,37 @@ func TestUsageFlowRevealAuditSurvivesSummaryFailure(t *testing.T) {
 	if len(auditRows) != 1 || auditRows[0].OperationID == nil || auditRows[0].UserID != 77 {
 		t.Fatal("independent security event missing or incorrect identity")
 	}
-	if recorder.Stats().WriteFailed == 0 || recorder.Stats().Pending == 0 {
-		t.Fatal("summary failure was silently lost")
+	if st := recorder.Stats(); st.WriteFailed != 1 || st.FinalizationLost != 1 || st.Pending != 0 {
+		t.Fatalf("permanent summary failure was not counted or kept retrying: %+v", st)
 	}
 	if err = db.Exec("ALTER TABLE usage_logs DROP CONSTRAINT fail_reveal_summary").Error; err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(4 * time.Second)
 	var logs []model.UsageLog
-	for time.Now().Before(deadline) {
-		if err = db.Order("id").Find(&logs).Error; err != nil {
-			t.Fatal(err)
-		}
-		if len(logs) == 2 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	if err = db.Order("id").Find(&logs).Error; err != nil {
+		t.Fatal(err)
 	}
-	if len(logs) != 2 {
-		t.Fatal("failed final summary did not recover")
+	if len(logs) != 1 {
+		t.Fatal("permanently rejected summary was retried after the constraint was removed")
+	}
+	// A later request succeeds after repair and keeps its own audit identity;
+	// the rejected earlier summary is counted as lost rather than resurrected.
+	w = route("GET", "/api/v1/credentials/"+strconv.Itoa(int(created.Data.ID))+"/reveal", nil, h.Reveal)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), secret) {
+		t.Fatalf("new reveal after storage repair failed: %s", w.Body)
+	}
+	if err = db.Order("id").Find(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Order("id").Find(&auditRows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 || len(auditRows) != 2 || auditRows[1].OperationID == nil {
+		t.Fatal("new successful request did not persist its independent summary and audit")
 	}
 	last := logs[1]
-	if last.OperationID != *auditRows[0].OperationID || last.Outcome != "succeeded" || last.ResourceNameSnapshot != "production ssh" || last.RequestID != "client-request" {
-		t.Fatalf("incorrect recovered summary: %+v", last)
+	if last.OperationID != *auditRows[1].OperationID || last.OperationID == *auditRows[0].OperationID || last.Outcome != "succeeded" || last.ResourceNameSnapshot != "production ssh" || last.RequestID != "client-request" {
+		t.Fatalf("incorrect new summary after repair: %+v", last)
 	}
 	serialized, _ := json.Marshal(struct {
 		Logs  []model.UsageLog

@@ -1,8 +1,13 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"net/http/httptest"
+	"strconv"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func uintPtr(v uint) *uint { return &v }
@@ -47,5 +52,25 @@ func TestUpdateServerRequestRejectsBadCredentialID(t *testing.T) {
 	var req UpdateServerRequest
 	if err := json.Unmarshal([]byte(`{"credential_id":"nope"}`), &req); err == nil {
 		t.Fatal("expected a non-numeric credential_id to fail decoding")
+	}
+}
+
+func TestServerPathIDRejectsNativeOverflow(t *testing.T) {
+	request := func(id string) (uint, error) {
+		r := httptest.NewRequest("GET", "/", nil)
+		route := chi.NewRouteContext()
+		route.URLParams.Add("id", id)
+		return parseIDParam(r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route)))
+	}
+	max := ^uint(0)
+	if got, err := request(strconv.FormatUint(uint64(max), 10)); err != nil || got != max {
+		t.Fatalf("native maximum truncated: got=%d err=%v", got, err)
+	}
+	overflow := "18446744073709551616"
+	if strconv.IntSize == 32 {
+		overflow = "4294967296"
+	}
+	if _, err := request(overflow); err == nil {
+		t.Fatal("native overflow was accepted")
 	}
 }

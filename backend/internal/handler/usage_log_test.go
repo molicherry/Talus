@@ -58,6 +58,62 @@ func TestUsageDetailPreservesFullWidthIDs(t *testing.T) {
 	}
 }
 
+func TestUsageResponsePreservesRelatedIDPrecision(t *testing.T) {
+	if strconv.IntSize == 32 {
+		t.Skip("related entity IDs use native uint")
+	}
+	const decimalID = "9007199254742001"
+	wideID, err := strconv.ParseUint(decimalID, 10, strconv.IntSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := uint(wideID)
+	now := time.Now().UTC()
+	row := model.UsageLog{ID: wideID, StartedAt: now.Add(-time.Hour), UserID: &id, APIKeyID: &id, ResourceID: &id, ServerID: &id, LegacyAuditEventID: &id}
+	s := &usageReaderStub{rows: []model.UsageLog{row}, bound: wideID}
+	h := NewUsageLogHandler(s, "secret")
+	for _, detail := range []bool{false, true} {
+		w := httptest.NewRecorder()
+		r := usageTestRequest(url.Values{}, 1, "admin")
+		if detail {
+			route := chi.NewRouteContext()
+			route.URLParams.Add("id", decimalID)
+			h.Get(w, r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route)))
+		} else {
+			h.List(w, r)
+		}
+		if w.Code != http.StatusOK {
+			t.Fatalf("response status=%d: %s", w.Code, w.Body)
+		}
+		var envelope struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]json.RawMessage
+		if detail {
+			err = json.Unmarshal(envelope.Data, &got)
+		} else {
+			var page struct {
+				Items []map[string]json.RawMessage `json:"items"`
+			}
+			err = json.Unmarshal(envelope.Data, &page)
+			if err == nil && len(page.Items) == 1 {
+				got = page.Items[0]
+			}
+		}
+		if err != nil || got == nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		for _, field := range []string{"id", "user_id", "api_key_id", "resource_id", "server_id", "legacy_audit_event_id"} {
+			if string(got[field]) != `"`+decimalID+`"` {
+				t.Fatalf("detail=%t %s lost precision: %s", detail, field, got[field])
+			}
+		}
+	}
+}
+
 func TestResourceIDParsingRejectsNativeOverflow(t *testing.T) {
 	maxID := ^uint(0)
 	maxValid := uint64(maxID)

@@ -46,14 +46,38 @@ for (const status of [401, 403]) {
   assert.equal(redirects.length, 0);
 }
 
-// A current log 403 removes log permission while preserving the login.
+// An earlier unrelated 401 must still log out after a log-only 403.
 {
   const currentToken = auth.getAuthToken();
+  const epoch = auth.getAuthEpoch();
+  const serverRequest = apiClient.get("/api/v1/servers");
+  const serverIndex = pending.length - 1;
+  const lateLogs = apiClient.get("/api/v1/usage-logs?from=frozen");
+  const lateIndex = pending.length - 1;
   const request = apiClient.get("/api/v1/usage-logs/123");
   reply(pending.length - 1, 403, "forbidden");
   await assert.rejects(request);
   assert.equal(auth.getAuthToken(), currentToken);
   assert.equal(auth.getAuthSnapshot().canViewUsageLogs, false);
+  assert.equal(auth.getAuthEpoch(), epoch);
+  pending[lateIndex].resolve(new Response(JSON.stringify({data: "late-private-log"}), {status: 200}));
+  await assert.rejects(lateLogs, error => error.name === "AbortError");
+  assert.equal(auth.getAuthSnapshot().canViewUsageLogs, false);
+  reply(serverIndex, 401, "unauthorized");
+  await assert.rejects(serverRequest);
+  assert.equal(auth.getAuthToken(), null);
+  assert.deepEqual(redirects.splice(0), ["/login"]);
+}
+
+// Other 403 reasons (including a proxy without an envelope reason) stay inline.
+for (const reason of [undefined, "server_credentials_unavailable"]) {
+  auth.setAuthToken(token(3));
+  const epoch = auth.getAuthEpoch();
+  const request = apiClient.get("/api/v1/usage-logs/filter-options?kind=server");
+  reply(pending.length - 1, 403, reason);
+  await assert.rejects(request);
+  assert.equal(auth.getAuthEpoch(), epoch);
+  assert.equal(auth.getAuthSnapshot().canViewUsageLogs, true);
 }
 
 // A generic resource 403 does not revoke login or log permission.

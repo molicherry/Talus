@@ -9,6 +9,7 @@ export interface UseAuthResult {
   isAuthenticated: boolean;
   isAdmin: boolean;
   authEpoch: number;
+  usagePermissionRevision: number;
   canViewUsageLogs: boolean;
 }
 
@@ -19,6 +20,7 @@ export function useAuth(): UseAuthResult {
     isAuthenticated: snapshot.user !== null,
     isAdmin: snapshot.user?.role === "admin",
     authEpoch: snapshot.authEpoch,
+    usagePermissionRevision: snapshot.usagePermissionRevision,
     canViewUsageLogs: snapshot.canViewUsageLogs,
   };
 }

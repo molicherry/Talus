@@ -51,6 +51,12 @@ func insertOwnerBackfillKey(t *testing.T, db *gorm.DB, id, owner uint, nullOwner
 	if err := db.Create(&k).Error; err != nil {
 		t.Fatal(err)
 	}
+	if owner == 0 || nullOwner {
+		// This fixture represents a key present at the upgrade boundary.
+		if err := db.Model(&model.APIKey{}).Where("id = ?", id).Update("owner_binding_version", 0).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
 	if nullOwner {
 		if err := db.Model(&model.APIKey{}).Where("id = ?", id).Update("user_id", nil).Error; err != nil {
 			t.Fatal(err)
@@ -129,7 +135,7 @@ func TestAPIKeyOwnerBackfillSelectsActiveDefaultAndPreservesData(t *testing.T) {
 		t.Fatal(err)
 	}
 	queries := []string{
-		"SELECT (to_jsonb(api_keys) - 'user_id')::text AS snapshot FROM api_keys ORDER BY id",
+		"SELECT (to_jsonb(api_keys) - 'user_id' - 'owner_binding_version')::text AS snapshot FROM api_keys ORDER BY id",
 		"SELECT to_jsonb(usage_logs)::text AS snapshot FROM usage_logs ORDER BY id",
 		"SELECT to_jsonb(audit_events)::text AS snapshot FROM audit_events ORDER BY id",
 	}
@@ -174,12 +180,15 @@ func TestAPIKeyOwnerBackfillWithoutAdminCanRetryLater(t *testing.T) {
 				t.Fatalf("retry after administrator created: changed=%d err=%v", changed, err)
 			}
 			requireOwnerBackfillOwners(t, db, map[uint]string{1: "8", 2: "8"})
-			insertOwnerBackfillKey(t, db, 3, 0, false)
-			changed, err = repo.BindUnownedToDefaultAdmin(context.Background())
-			if err != nil || changed != 1 {
-				t.Fatalf("new unowned key could not be retried: changed=%d err=%v", changed, err)
+			newKey := model.APIKey{ID: 3, Name: "new-unowned", KeyHash: "new-key-hash", KeyPrefix: "new"}
+			if err := db.Create(&newKey).Error; err != nil {
+				t.Fatal(err)
 			}
-			requireOwnerBackfillOwners(t, db, map[uint]string{1: "8", 2: "8", 3: "8"})
+			changed, err = repo.BindUnownedToDefaultAdmin(context.Background())
+			if err != nil || changed != 0 {
+				t.Fatalf("later unowned key entered the legacy set: changed=%d err=%v", changed, err)
+			}
+			requireOwnerBackfillOwners(t, db, map[uint]string{1: "8", 2: "8", 3: "0"})
 		})
 	}
 }
@@ -234,8 +243,8 @@ func TestAPIKeyOwnerBackfillMigratesLegacyOwnerColumn(t *testing.T) {
 	t.Run("fresh-schema", func(t *testing.T) {
 		db := newTestDB(t)
 		repo := NewAPIKeyRepo(db)
-		if err := repo.NormalizeLegacyOwnerNulls(context.Background()); err != nil {
-			t.Fatalf("fresh schema normalization must be a no-op: %v", err)
+		if err := repo.PrepareLegacyOwnerBinding(context.Background()); err != nil {
+			t.Fatalf("fresh schema preparation must be a no-op: %v", err)
 		}
 		if err := db.AutoMigrate(&model.User{}, &model.APIKey{}); err != nil {
 			t.Fatal(err)
@@ -269,12 +278,15 @@ func TestAPIKeyOwnerBackfillMigratesLegacyOwnerColumn(t *testing.T) {
 				}
 				insertOwnerBackfillKey(t, db, 31, 0, true)
 			}
-			payloadBefore := ownerBackfillSnapshots(t, db, "SELECT (to_jsonb(api_keys) - 'user_id')::text AS snapshot FROM api_keys ORDER BY id")
-			if err := repo.NormalizeLegacyOwnerNulls(context.Background()); err != nil {
-				t.Fatalf("legacy owner normalization failed: %v", err)
+			if err := db.Exec("ALTER TABLE api_keys DROP COLUMN owner_binding_version").Error; err != nil {
+				t.Fatal(err)
+			}
+			payloadBefore := ownerBackfillSnapshots(t, db, "SELECT (to_jsonb(api_keys) - 'user_id' - 'owner_binding_version')::text AS snapshot FROM api_keys ORDER BY id")
+			if err := repo.PrepareLegacyOwnerBinding(context.Background()); err != nil {
+				t.Fatalf("legacy owner preparation failed: %v", err)
 			}
 			if schema == "nullable-without-default" {
-				requireOwnerBackfillOwners(t, db, map[uint]string{31: "0"})
+				requireOwnerBackfillOwners(t, db, map[uint]string{31: "NULL"})
 			}
 			if err := db.AutoMigrate(&model.User{}, &model.APIKey{}); err != nil {
 				t.Fatalf("legacy schema migration failed before owner backfill: %v", err)
@@ -295,10 +307,68 @@ func TestAPIKeyOwnerBackfillMigratesLegacyOwnerColumn(t *testing.T) {
 				t.Fatalf("backfill after migration: changed=%d err=%v", changed, err)
 			}
 			requireOwnerBackfillOwners(t, db, map[uint]string{31: "7"})
-			payloadAfter := ownerBackfillSnapshots(t, db, "SELECT (to_jsonb(api_keys) - 'user_id')::text AS snapshot FROM api_keys ORDER BY id")
+			payloadAfter := ownerBackfillSnapshots(t, db, "SELECT (to_jsonb(api_keys) - 'user_id' - 'owner_binding_version')::text AS snapshot FROM api_keys ORDER BY id")
 			if !reflect.DeepEqual(payloadBefore, payloadAfter) {
 				t.Fatal("legacy migration or owner backfill changed key material or permissions")
 			}
 		})
+	}
+}
+
+func TestAPIKeyOwnerBackfillUpgradeBoundaryExcludesLaterKeys(t *testing.T) {
+	db, repo := apiKeyOwnerBackfillDB(t)
+	insertOwnerBackfillKey(t, db, 1, 0, false)
+	insertOwnerBackfillKey(t, db, 2, 9, false)
+	if err := db.Exec("ALTER TABLE api_keys DROP COLUMN owner_binding_version").Error; err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := repo.PrepareLegacyOwnerBinding(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.APIKey{}); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := repo.BindUnownedToDefaultAdmin(ctx); err != nil || changed != 0 {
+		t.Fatalf("upgrade before administrator: changed=%d err=%v", changed, err)
+	}
+	// All inserts after preparation are excluded, including raw SQL without a
+	// version and non-HTTP GORM callers explicitly passing the zero value.
+	newKey := model.APIKey{ID: 3, Name: "new", KeyHash: "new-hash", KeyPrefix: "new", OwnerBindingVersion: 0}
+	if err := db.Create(&newKey).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO api_keys (id, user_id, name, key_hash, key_prefix, created_at)
+		VALUES (4, 0, 'raw-new', 'raw-new-hash', 'raw', now())`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.APIKey{}).Where("id = ?", 2).Update("user_id", 0).Error; err != nil {
+		t.Fatal(err)
+	}
+	// A restart must not recapture the rows created or cleared in the meantime.
+	if err := NewAPIKeyRepo(db).PrepareLegacyOwnerBinding(ctx); err != nil {
+		t.Fatal(err)
+	}
+	insertOwnerBackfillUser(t, db, 7, "admin", false)
+	changed, err := repo.BindUnownedToDefaultAdmin(ctx)
+	if err != nil || changed != 1 {
+		t.Fatalf("fixed legacy set: changed=%d err=%v", changed, err)
+	}
+	requireOwnerBackfillOwners(t, db, map[uint]string{1: "7", 2: "0", 3: "0", 4: "0"})
+}
+
+func TestAPIKeyOwnerBackfillKeepsBatchesBounded(t *testing.T) {
+	db, repo := apiKeyOwnerBackfillDB(t)
+	insertOwnerBackfillUser(t, db, 7, "admin", false)
+	for id := uint(1); id <= APIKeyOwnerBackfillBatchSize+3; id++ {
+		insertOwnerBackfillKey(t, db, id, 0, false)
+	}
+	changed, err := repo.BindUnownedToDefaultAdmin(context.Background())
+	if err != nil || changed != APIKeyOwnerBackfillBatchSize {
+		t.Fatalf("first bounded batch: changed=%d err=%v", changed, err)
+	}
+	changed, err = repo.BindUnownedToDefaultAdmin(context.Background())
+	if err != nil || changed != 3 {
+		t.Fatalf("remaining batch: changed=%d err=%v", changed, err)
 	}
 }

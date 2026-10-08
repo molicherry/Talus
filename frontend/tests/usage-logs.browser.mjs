@@ -3,14 +3,16 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
 const port = Number(process.env.UI_TEST_PORT ?? 4178), base = `http://127.0.0.1:${port}`;
 const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { cwd: fileURLToPath(new URL('../', import.meta.url)), stdio: 'ignore' });
 async function until(check, label, timeout = 5000) { const deadline = Date.now() + timeout; while (Date.now() < deadline) { if (await check()) return; await delay(20); } throw new Error(`Timed out: ${label}`); }
 const A = '9007199254741009', B = '9007199254741008';
-const row = (id, extra = {}) => ({ id, operation_id: `op-${id}`, started_at: new Date(Date.now() - 10000).toISOString(), action: 'server.exec', outcome: 'failed', phase: 'closed', auth_type: 'jwt', username_snapshot: 'test-admin', resource_type: 'server', resource_id: 1, resource_name_snapshot: 'Historical server', source: 'operation', request_id: `request-${id}`, http_status: 200, exit_code: 1, duration_ms: 25, ...extra });
+const row = (id, extra = {}) => ({ id, operation_id: `op-${id}`, started_at: new Date(Date.now() - 10000).toISOString(), action: 'server.exec', outcome: 'failed', phase: 'closed', auth_type: 'jwt', username_snapshot: 'test-admin', resource_type: 'server', resource_id: '1', resource_name_snapshot: 'Historical server', source: 'operation', request_id: `request-${id}`, http_status: 200, exit_code: 1, duration_ms: 25, ...extra });
 async function fixture(browser, role = 'admin', mobile = false) {
- const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 }, isMobile: mobile, hasTouch: mobile, locale: 'en-US' });
+ const context = await browser.newContext({ viewport: mobile ? { width: typeof mobile === 'number' ? mobile : 390, height: 844 } : { width: 1280, height: 900 }, isMobile: !!mobile, hasTouch: !!mobile, locale: 'en-US' });
  await context.addInitScript(role => { localStorage.setItem('auth_token', `test.${btoa(JSON.stringify({ uid: 1, username: 'test-admin', role, exp: Date.now() / 1000 + 3600 }))}.test`); localStorage.setItem('i18nextLng', 'en'); }, role);
  const state = { lists: [], details: [], first: row(A), detail: row(A), forbid: false, holdList: null, detailStatus: null, optionRequests: [], optionStatus: null, optionCustom: null };
  await context.route('**/api/v1/**', async route => {
@@ -40,6 +42,7 @@ try {
  browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : {}), args: JSON.parse(process.env.CHROMIUM_ARGS ?? '[]') });
  {
   const { page, context, state, errors } = await fixture(browser);
+  const exactID = '9223372036854775807'; state.first = row(A, {resource_id: exactID, user_id: exactID, api_key_id: exactID, server_id: exactID}); state.detail = state.first;
   await page.goto(`${base}/usage-logs`); await detailButton(page, A).waitFor(); assert.equal(state.details.length, 0);
   await page.getByRole('button', { name: 'Next page', exact: true }).click(); await detailButton(page, B).waitFor();
   for (const key of ['from', 'to']) assert.equal(state.lists[1].searchParams.get(key), state.lists[0].searchParams.get(key));
@@ -47,6 +50,8 @@ try {
   await page.getByRole('button', { name: 'Previous page', exact: true }).click(); await detailButton(page, A).waitFor(); assert.equal(state.lists.length, 2);
   await detailButton(page, A).click(); const drawer = page.getByRole('dialog'); await drawer.getByText('Command exit code', { exact: true }).waitFor();
   assert.equal(new URL(page.url()).searchParams.get('detail'), A); await drawer.getByText('200', { exact: true }).waitFor(); await drawer.getByText('1', { exact: true }).waitFor();
+  assert.equal(await drawer.getByRole('link', {name: 'Open resource', exact: true}).getAttribute('href'), `/servers/${exactID}`);
+  assert.equal(await drawer.getByText(exactID, {exact: true}).count(), 2, 'actor and key IDs retain all decimal digits');
   await delay(2200); assert.equal(state.details.length, 1); await page.keyboard.press('Escape'); await drawer.waitFor({ state: 'detached' }); assert.equal(new URL(page.url()).searchParams.has('detail'), false); assert.equal(state.lists.length, 2);
   await page.getByRole('button', { name: `Filter by request ID: request-${A}`, exact: true }).click(); await until(() => state.lists.length === 3, 'request filter'); assert.equal(state.lists[2].searchParams.get('request_id'), `request-${A}`);
   assert.equal(errors.length, 0); await context.close(); console.log('  ok: frozen pages, exact IDs, on-demand details, URL, HTTP/exit and request filter');
@@ -75,8 +80,82 @@ try {
  {
   const { page, context, state } = await fixture(browser, 'user'); await page.goto(`${base}/usage-logs`); await page.getByText(denied, { exact: true }).waitFor(); assert.equal(state.lists.length, 0); assert.equal(await page.getByRole('link', { name: 'Usage logs', exact: true }).count(), 0); await context.close(); console.log('  ok: non-admin denied before queries');
  }
+ for (const width of [320, 375, 390]) {
+  const { page, context, state, errors } = await fixture(browser, 'admin', width);
+  state.first = row(A, {request_id: 'request-' + 'x'.repeat(120), resource_id: '9223372036854775807', username_snapshot: 'An actor with a longer historical display name', resource_name_snapshot: 'A historical resource with a longer name'});
+  state.detail = {...state.first, operation_id: 'op-' + 'x'.repeat(120), route_pattern: '/api/v1/servers/:id/exec', metadata: {close_reason: 'x'.repeat(128)}};
+  await page.goto(`${base}/usage-logs`); await detailButton(page, A).waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${width}px list fits viewport`);
+  assert.equal(await page.getByRole('button', {name: 'Show filters', exact: true}).getAttribute('aria-expanded'), 'false');
+  assert.ok((await detailButton(page, A).boundingBox()).y < 844, 'first log is visible without scrolling through filters');
+  if (process.env.UI_TEST_SCREENSHOTS) { await mkdir(process.env.UI_TEST_SCREENSHOTS, {recursive: true}); await page.screenshot({path: join(process.env.UI_TEST_SCREENSHOTS, `usage-list-${width}.png`), fullPage: true}); }
+  await page.getByRole('button', {name: 'Show filters', exact: true}).tap();
+  assert.equal(await page.getByRole('button', {name: 'Hide filters', exact: true}).getAttribute('aria-expanded'), 'true');
+  if (process.env.UI_TEST_SCREENSHOTS) await page.screenshot({path: join(process.env.UI_TEST_SCREENSHOTS, `usage-filters-${width}.png`), fullPage: true});
+  const input = page.getByRole('combobox', {name: 'Server', exact: true});
+  await input.tap(); await input.fill('Retired'); const option = page.getByRole('option', {name: 'Retired server · #9007199254741999 · Deleted', exact: true}); await option.waitFor();
+  assert.ok((await option.boundingBox()).height >= 44, 'touch options have a 44px target');
+  const box = await page.getByRole('listbox').boundingBox(); assert.ok(box.x >= 0 && box.x + box.width <= width, `${width}px combobox fits viewport`);
+  await option.tap(); assert.ok((await input.inputValue()).includes('Retired server'));
+  await page.getByRole('button', {name: 'Clear Server filter', exact: true}).tap();
+  await page.getByLabel('Time range', {exact: true}).selectOption('custom');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'custom datetime fields fit viewport');
+  const apply = page.getByRole('button', {name: 'Apply filters', exact: true}); await apply.tap();
+  await until(() => state.lists.length === 2, 'mobile filters applied');
+  await page.getByRole('button', {name: 'Show filters', exact: true}).waitFor();
+  assert.equal(await page.getByRole('combobox', {name: 'Server', exact: true}).count(), 0, 'successful mobile apply collapses the form');
+  await page.getByRole('button', {name: 'Next page', exact: true}).tap(); await detailButton(page, B).waitFor();
+  await page.getByRole('button', {name: 'Previous page', exact: true}).tap(); await detailButton(page, A).waitFor();
+  await detailButton(page, A).tap(); const drawer = page.getByRole('dialog'); await drawer.getByText('Command exit code', {exact: true}).waitFor();
+  assert.equal(await drawer.evaluate(el => el.scrollWidth <= el.clientWidth), true, `${width}px drawer long fields fit`);
+  assert.ok((await drawer.boundingBox()).width <= width);
+  if (process.env.UI_TEST_SCREENSHOTS) { await mkdir(process.env.UI_TEST_SCREENSHOTS, {recursive: true}); await page.screenshot({path: join(process.env.UI_TEST_SCREENSHOTS, `usage-detail-${width}.png`)}); }
+  await drawer.getByRole('button', {name: 'Close dialog', exact: true}).tap(); await drawer.waitFor({state: 'detached'});
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  if (width === 320) {
+    await page.addStyleTag({content: 'html { font-size: 32px; }'});
+    for (const name of ['Previous page', 'Next page']) { const box = await page.getByRole('button', {name, exact: true}).boundingBox(); assert.ok(box.x >= 0 && box.x + box.width <= width, 'pagination fits at 200% font size'); }
+    await page.getByRole('button', {name: 'Show filters', exact: true}).tap();
+    if (process.env.UI_TEST_SCREENSHOTS) await page.screenshot({path: join(process.env.UI_TEST_SCREENSHOTS, 'usage-zoom-320.png'), fullPage: true});
+    const largeInput = await page.getByRole('combobox', {name: 'Server', exact: true}).boundingBox(); assert.ok(largeInput.x >= 0 && largeInput.x + largeInput.width <= width, `selector fits at 200% font size: ${JSON.stringify(largeInput)}`);
+  }
+  assert.equal(errors.length, 0); await context.close(); console.log(`  ok: ${width}px touch filters, custom dates, pagination, long-field detail and close`);
+ }
+
+ // Malformed page-size URLs normalize before fetching; relative presets resolve
+ // on entry/explicit refresh while navigation preserves the frozen range.
  {
-  const { page, context, errors } = await fixture(browser, 'admin', true); await page.goto(`${base}/usage-logs`); await detailButton(page, A).waitFor(); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true); await detailButton(page, A).click(); await page.getByRole('dialog').getByText('Command exit code', { exact: true }).waitFor(); await page.keyboard.press('Escape'); assert.equal(errors.length, 0); await context.close(); console.log('  ok: mobile rows and drawer fit viewport');
+  const {page, context, state, errors} = await fixture(browser); const time = new Date();
+  await page.clock.install({time});
+  await page.goto(`${base}/usage-logs?page_size=abc&preset=1h&from=2020-01-01T00:00:00Z&to=2020-01-02T00:00:00Z`); await detailButton(page, A).waitFor();
+  assert.equal(state.lists[0].searchParams.get('page_size'), '25');
+  assert.equal(await page.getByLabel('Rows per page', {exact: true}).inputValue(), '25');
+  const initialTo = Date.parse(state.lists[0].searchParams.get('to')); assert.ok(Math.abs(initialTo - time.getTime()) < 1000);
+  await page.clock.fastForward(60000);
+  await page.getByRole('button', {name: 'Next page', exact: true}).click(); await detailButton(page, B).waitFor();
+  assert.equal(state.lists[1].searchParams.get('to'), state.lists[0].searchParams.get('to'));
+  await page.getByRole('button', {name: 'Refresh', exact: true}).click(); await detailButton(page, A).waitFor();
+  assert.ok(Date.parse(state.lists[2].searchParams.get('to')) >= initialTo + 60000); assert.equal(state.lists[2].searchParams.get('cursor'), null);
+  await page.goto(`${base}/usage-logs?preset=custom&page_size=101&from=2026-10-01T00:00:00Z&to=2026-10-02T00:00:00Z`); await detailButton(page, A).waitFor();
+  const custom = state.lists.at(-1); await page.clock.fastForward(60000); await page.getByRole('button', {name: 'Refresh', exact: true}).click(); await until(() => state.lists.at(-1) !== custom, 'custom refresh');
+  for (const key of ['from', 'to']) assert.equal(state.lists.at(-1).searchParams.get(key), custom.searchParams.get(key));
+  assert.equal(state.lists.at(-1).searchParams.get('page_size'), '25'); assert.equal(errors.length, 0); await context.close(); console.log('  ok: URL page-size normalization, relative entry/refresh, frozen navigation and custom refresh');
+ }
+ {
+  const {page, context, state, errors} = await fixture(browser);
+  const invalid = new URLSearchParams({preset: 'custom', from: 'invalid', to: '2026-10-02T00:00:00Z', page_size: 'abc', outcome: 'unexpected', server_id: '9223372036854775808', request_id: 'invalid request'});
+  await page.goto(`${base}/usage-logs?${invalid}`); await page.getByRole('alert').first().waitFor();
+  assert.equal(state.lists.length, 0, 'invalid URL filters never trigger a list request');
+  assert.equal(await page.getByRole('button', {name: 'Retry', exact: true}).count(), 0, 'invalid input is corrected rather than blindly retried');
+  assert.equal(await page.getByLabel('Rows per page', {exact: true}).inputValue(), '25');
+  assert.equal(await page.getByRole('button', {name: 'Refresh', exact: true}).isDisabled(), true);
+  await page.getByLabel('Time range', {exact: true}).selectOption('24h');
+  await page.getByLabel('Result', {exact: true}).selectOption('');
+  await page.getByRole('button', {name: 'Clear Server filter', exact: true}).click();
+  await page.getByLabel('Request ID', {exact: true}).fill('');
+  await page.getByRole('button', {name: 'Apply filters', exact: true}).click(); await detailButton(page, A).waitFor(); assert.equal(state.lists.length, 1);
+  await page.goto(`${base}/usage-logs?detail=18446744073709551616`); const dialog = page.getByRole('dialog'); await dialog.getByRole('alert').waitFor(); assert.equal(state.details.length, 0, 'out-of-range detail ID is not requested');
+  await page.keyboard.press('Escape'); assert.equal(errors.length, 0); await context.close(); console.log('  ok: invalid URL filters require correction without fetch/retry; detail IDs enforce uint64');
  }
  {
   const { page, context, state, errors } = await fixture(browser); let release; state.holdList = new Promise(resolve => { release = resolve; });

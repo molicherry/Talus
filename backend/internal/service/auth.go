@@ -21,9 +21,16 @@ const firstUserSetupLock int64 = 0x54414c5553415554 // "TALUSAUT", database-wide
 
 // AuthService handles authentication including first-user bootstrap.
 type AuthService struct {
-	userRepo *repository.UserRepo
-	jwtSvc   *token.JWTService
-	db       *gorm.DB
+	userRepo             *repository.UserRepo
+	jwtSvc               *token.JWTService
+	db                   *gorm.DB
+	ownerBackfillTrigger func()
+}
+
+// SetOwnerBackfillTrigger connects optional background work to successful
+// initial setup. The callback must be nonblocking and is configured at startup.
+func (s *AuthService) SetOwnerBackfillTrigger(trigger func()) {
+	s.ownerBackfillTrigger = trigger
 }
 
 // NewAuthService creates an AuthService with the given dependencies.
@@ -60,8 +67,8 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (str
 	return s.authenticateExisting(ctx, username, password)
 }
 
-// createFirstUser serializes initial administrator creation and legacy Key
-// ownership in one transaction, including concurrent setup on other instances.
+// createFirstUser serializes initial administrator creation across instances.
+// Optional legacy key assignment runs separately after the user commits.
 func (s *AuthService) createFirstUser(ctx context.Context, username, password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -88,10 +95,7 @@ func (s *AuthService) createFirstUser(ctx context.Context, username, password st
 		if err := tx.Create(user).Error; err != nil {
 			return err
 		}
-		// Startup can precede the first administrator. Bind any legacy keys in
-		// the same transaction so successful setup also completes ownership.
-		_, err := repository.NewAPIKeyRepo(tx).BindUnownedToDefaultAdmin(ctx)
-		return err
+		return nil
 	})
 
 	if err != nil {
@@ -102,6 +106,9 @@ func (s *AuthService) createFirstUser(ctx context.Context, username, password st
 		return "", fmt.Errorf("login: %w", err)
 	}
 
+	if s.ownerBackfillTrigger != nil {
+		s.ownerBackfillTrigger()
+	}
 	return s.jwtSvc.GenerateToken(user.ID, user.Username, user.Role)
 }
 

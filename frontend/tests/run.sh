@@ -33,6 +33,10 @@ compile src/features/monitoring/lib/series.ts series
 compile src/features/auth/lib/api-key-error.ts api-key-error
 compile src/lib/unauthorized.ts unauthorized
 compile src/features/usage-logs/lib/session.ts usage-session
+# Runtime enum validation imports the usage protocol's constant lists.
+compile src/features/usage-logs/types.ts usage-types
+sed 's|"../types"|"./.compiled-usage-types.mjs"|g' tests/.compiled-usage-session.mjs > tests/.compiled-usage-session-imports.mjs
+mv tests/.compiled-usage-session-imports.mjs tests/.compiled-usage-session.mjs
 compile src/features/services/lib/credential-rows.ts credential-rows
 
 # 2. Run every test file under tests/ (skip this runner + compiled artifacts).

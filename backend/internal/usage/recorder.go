@@ -29,13 +29,19 @@ type AuditStore interface {
 type ownerUnknownStore interface {
 	OwnerUnknown(context.Context, string) ([]string, error)
 }
+type trackedReconciliationStore interface {
+	ReconcileTracked(context.Context, string, func() []string) error
+}
 type reconciliationCounter interface{ ReconciledCount() uint64 }
 type cleanupCounter interface{ CleanedCount() uint64 }
+type instanceCleanupCounter interface{ CleanedInstanceCount() uint64 }
+type cleanupPreparationStore interface{ PrepareCleanup(context.Context) error }
 
 const (
 	cleanupRoundTimeout  = 2 * time.Second
 	cleanupRoundBatches  = 100
 	cleanupRetryInterval = time.Second
+	cleanupReportTimeout = 5 * time.Second
 )
 
 type Options struct {
@@ -95,9 +101,6 @@ func (o Options) defaults() Options {
 	if o.HeartbeatInterval <= 0 {
 		o.HeartbeatInterval = 10 * time.Second
 	}
-	if o.LeaseDuration <= 0 {
-		o.LeaseDuration = 60 * time.Second
-	}
 	if o.ReconcileInterval <= 0 {
 		o.ReconcileInterval = 30 * time.Second
 	}
@@ -128,12 +131,8 @@ func (o Options) defaults() Options {
 	if o.IPBurst <= 0 {
 		o.IPBurst = 5
 	}
-	if o.OrdinaryRetention <= 0 {
-		o.OrdinaryRetention = 30 * 24 * time.Hour
-	}
-	if o.SensitiveRetention <= 0 {
-		o.SensitiveRetention = 90 * 24 * time.Hour
-	}
+	policy := (model.UsagePolicy{LeaseDuration: o.LeaseDuration, OrdinaryRetention: o.OrdinaryRetention, SensitiveRetention: o.SensitiveRetention}).WithDefaults()
+	o.LeaseDuration, o.OrdinaryRetention, o.SensitiveRetention = policy.LeaseDuration, policy.OrdinaryRetention, policy.SensitiveRetention
 	return o
 }
 
@@ -367,7 +366,7 @@ func (r *Recorder) Finish(op *Operation, status int) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err != nil && !permanentOwnerError(err) && !r.snapshotExpired(row, time.Now()) {
+	if err != nil && !permanentUsageError(err) && !r.snapshotExpired(row, time.Now()) {
 		r.enqueueUsageLocked(row, completion)
 	} else if err != nil {
 		r.stats.FinalizationLost++
@@ -407,7 +406,7 @@ func (r *Recorder) enqueueUsageLocked(row model.UsageLog, completion bool) {
 }
 
 func (r *Recorder) WriteAudit(_ context.Context, event *model.AuditEvent) error {
-	if r == nil || r.audit == nil || event == nil {
+	if r == nil || event == nil {
 		return ErrRecorderUnavailable
 	}
 	safe := *event
@@ -422,6 +421,14 @@ func (r *Recorder) WriteAudit(_ context.Context, event *model.AuditEvent) error 
 	safe.ResourceType = boundedText(safe.ResourceType, 64)
 	safe.IPAddress = boundedText(safe.IPAddress, 64)
 	safe.Details = ""
+	if r.audit == nil {
+		r.mu.Lock()
+		r.stats.AuditWriteFailed++
+		r.stats.AuditLost++
+		r.warnLocked(*safe.OperationID, safe.Action, "audit_store_unavailable", 0)
+		r.mu.Unlock()
+		return ErrRecorderUnavailable
+	}
 	err := r.writeAudit(safe)
 	if err == nil {
 		return nil
@@ -487,22 +494,15 @@ func (r *Recorder) writeAudit(event model.AuditEvent) error {
 func permanentOwnerError(err error) bool {
 	return errors.Is(err, repository.ErrUsageOwnerMissing) || errors.Is(err, repository.ErrUsageOwnerRetired)
 }
+func permanentUsageError(err error) bool {
+	return permanentOwnerError(err) || errors.Is(err, repository.ErrUsageInvalid) || errors.Is(err, repository.ErrUsagePermanent)
+}
 func (r *Recorder) snapshotExpired(row model.UsageLog, now time.Time) bool {
 	if row.RetentionAt == nil {
 		return false
 	}
-	retention := r.opts.OrdinaryRetention
-	if sensitiveAction(row.Action) {
-		retention = r.opts.SensitiveRetention
-	}
+	retention := (model.UsagePolicy{OrdinaryRetention: r.opts.OrdinaryRetention, SensitiveRetention: r.opts.SensitiveRetention}).Retention(row.Action)
 	return now.Sub(*row.RetentionAt) >= retention
-}
-func sensitiveAction(action string) bool {
-	switch action {
-	case "credential.reveal", "api_key.reveal", "service.credentials", "server.host_key.trust", "server.delete", "credential.delete", "service.delete", "api_key.delete":
-		return true
-	}
-	return false
 }
 func retryDelay(attempt int) time.Duration {
 	delays := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 15 * time.Second, 30 * time.Second}
@@ -622,7 +622,7 @@ func (r *Recorder) retryPending() {
 			r.writeFailure(row, "final_retry_failed", p.attempts+1)
 		}
 		r.mu.Lock()
-		if err == nil || permanentOwnerError(err) {
+		if err == nil || permanentUsageError(err) {
 			delete(r.pending, id)
 			r.pendingBytes -= p.bytes
 			if err != nil {
@@ -783,6 +783,23 @@ func (r *Recorder) maintenanceWrite(fn func(context.Context) error) error {
 	return r.maintenanceWriteContext(context.Background(), fn)
 }
 func (r *Recorder) maintenanceWriteContext(parent context.Context, fn func(context.Context) error) error {
+	return r.maintenanceWriteWithin(parent, r.opts.WriteTimeout, fn)
+}
+
+// PrepareCleanupReport permits a bounded initial count without extending the
+// budget of ordinary cleanup writes or holding the recorder's state mutex.
+func (r *Recorder) PrepareCleanupReport(ctx context.Context) error {
+	if r == nil || r.store == nil {
+		return ErrRecorderUnavailable
+	}
+	store, ok := r.store.(cleanupPreparationStore)
+	if !ok {
+		return nil
+	}
+	return r.maintenanceWriteWithin(ctx, cleanupReportTimeout, store.PrepareCleanup)
+}
+
+func (r *Recorder) maintenanceWriteWithin(parent context.Context, timeout time.Duration, fn func(context.Context) error) error {
 	if err := parent.Err(); err != nil {
 		return err
 	}
@@ -794,7 +811,7 @@ func (r *Recorder) maintenanceWriteContext(parent context.Context, fn func(conte
 		return errNoWriteSlot
 	}
 	defer release(r.allSlots)
-	ctx, cancel := context.WithTimeout(parent, r.opts.WriteTimeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	return fn(ctx)
 }
@@ -832,6 +849,7 @@ func (r *Recorder) drainCleanup(parent context.Context, reconcile <-chan time.Ti
 	defer cancel()
 	deadline, _ := ctx.Deadline()
 	counter, counted := r.store.(cleanupCounter)
+	instances, countInstances := r.store.(instanceCleanupCounter)
 	anyProgress := false
 	for batch := 0; batch < cleanupRoundBatches; batch++ {
 		if ctx.Err() != nil || !time.Now().Before(deadline) {
@@ -849,8 +867,13 @@ func (r *Recorder) drainCleanup(parent context.Context, reconcile <-chan time.Ti
 		if counted {
 			before = counter.CleanedCount()
 		}
+		var beforeInstances uint64
+		if countInstances {
+			beforeInstances = instances.CleanedInstanceCount()
+		}
 		err := r.maintenanceWriteContext(ctx, r.store.Cleanup)
 		progress := counted && counter.CleanedCount() > before
+		progress = progress || (countInstances && instances.CleanedInstanceCount() > beforeInstances)
 		anyProgress = anyProgress || progress
 		if parent.Err() != nil {
 			return false
@@ -876,13 +899,35 @@ func (r *Recorder) reconcileContext(ctx context.Context) {
 		return
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	now := time.Now()
 	for ip, b := range r.ips {
 		if now.Sub(b.seen) >= r.opts.IPTTL {
 			delete(r.ips, ip)
 		}
 	}
+	owner := r.owner
+	r.mu.Unlock()
+	err := r.maintenanceWriteContext(ctx, func(ctx context.Context) error {
+		if store, ok := r.store.(trackedReconciliationStore); ok {
+			return store.ReconcileTracked(ctx, owner, r.trackedOperations)
+		}
+		return r.store.Reconcile(ctx, owner, r.trackedOperations())
+	})
+	var reconciled uint64
+	if counter, ok := r.store.(reconciliationCounter); ok {
+		reconciled = counter.ReconciledCount()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err != nil {
+		r.warnLocked("", "", "usage_reconcile_failed", 0)
+	}
+	r.stats.Reconciled = max(r.stats.Reconciled, reconciled)
+}
+
+func (r *Recorder) trackedOperations() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	tracked := make([]string, 0, len(r.active)+len(r.pending))
 	for id := range r.active {
 		tracked = append(tracked, id)
@@ -890,11 +935,5 @@ func (r *Recorder) reconcileContext(ctx context.Context) {
 	for id := range r.pending {
 		tracked = append(tracked, id)
 	}
-	err := r.maintenanceWriteContext(ctx, func(ctx context.Context) error { return r.store.Reconcile(ctx, r.owner, tracked) })
-	if err != nil {
-		r.warnLocked("", "", "usage_reconcile_failed", 0)
-	}
-	if counter, ok := r.store.(reconciliationCounter); ok {
-		r.stats.Reconciled = counter.ReconciledCount()
-	}
+	return tracked
 }

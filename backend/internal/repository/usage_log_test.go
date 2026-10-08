@@ -332,10 +332,10 @@ func TestUsageCleanupRetiresOwnerWithoutFinishedTime(t *testing.T) {
 		t.Fatalf("unknown retained: %v", err)
 	}
 	late := usageFinish(v, "succeeded")
-	if err := r.Upsert(ctx, &late); !errors.Is(err, ErrUsageOwnerRetired) {
+	if err := r.Upsert(ctx, &late); !errors.Is(err, ErrUsageOwnerRetired) && !errors.Is(err, ErrUsageOwnerMissing) {
 		t.Fatalf("late completion revived: %v", err)
 	}
-	if err := r.Heartbeat(ctx, owner); !errors.Is(err, ErrUsageOwnerRetired) {
+	if err := r.Heartbeat(ctx, owner); !errors.Is(err, ErrUsageOwnerRetired) && !errors.Is(err, ErrUsageOwnerMissing) {
 		t.Fatalf("retirement reversed: %v", err)
 	}
 }
@@ -616,7 +616,7 @@ func TestUsageErrorsContainNoDatabaseInput(t *testing.T) {
 	v.Action = "server.update"
 	v.OperationID = "SECRET_MARKER_INVALID_UUID"
 	err := r.Upsert(context.Background(), &v)
-	if !errors.Is(err, ErrUsageStorage) || err.Error() != "usage_storage_unavailable" {
+	if !errors.Is(err, ErrUsageInvalid) || err.Error() != "invalid_usage_record" {
 		t.Fatalf("unsafe persistence error: %v", err)
 	}
 }

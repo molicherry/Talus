@@ -11,6 +11,8 @@ export interface AuthSnapshot {
   readonly token: string | null;
   readonly user: AuthUser | null;
   readonly authEpoch: number;
+  /** Log permission changes are independent of the authenticated identity. */
+  readonly usagePermissionRevision: number;
   readonly canViewUsageLogs: boolean;
 }
 
@@ -25,6 +27,7 @@ const emptySnapshot: AuthSnapshot = {
   token: null,
   user: null,
   authEpoch: 0,
+  usagePermissionRevision: 0,
   canViewUsageLogs: false,
 };
 let snapshot = emptySnapshot;
@@ -96,6 +99,7 @@ function replaceToken(token: string | null, forceEpoch = false): void {
     token: nextToken,
     user: decoded?.user ?? null,
     authEpoch: snapshot.authEpoch + 1,
+    usagePermissionRevision: snapshot.usagePermissionRevision + 1,
     canViewUsageLogs: decoded?.user.role === "admin",
   };
   scheduleExpiry();
@@ -112,6 +116,7 @@ function initialize(): void {
     token: decoded ? token : null,
     user: decoded?.user ?? null,
     authEpoch: 0,
+    usagePermissionRevision: 0,
     canViewUsageLogs: decoded?.user.role === "admin",
   };
   expiresAt = decoded?.expiresAt ?? null;
@@ -179,8 +184,7 @@ export function denyUsageLogs(expectedEpoch: number): boolean {
   initialize();
   if (expectedEpoch !== snapshot.authEpoch) return false;
   if (!snapshot.canViewUsageLogs) return true;
-  snapshot = { ...snapshot, authEpoch: snapshot.authEpoch + 1, canViewUsageLogs: false };
-  scheduleExpiry();
+  snapshot = { ...snapshot, usagePermissionRevision: snapshot.usagePermissionRevision + 1, canViewUsageLogs: false };
   emit();
   return true;
 }

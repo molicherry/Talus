@@ -9,7 +9,9 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "bash tests/run.sh",
-    "test:ui": "npm run build && node tests/ui-regressions.browser.mjs"
+    "test:ui": "npm run build && npm run test:ui:built",
+    "test:ui:built": "node tests/ui-regressions.browser.mjs && node tests/usage-logs.browser.mjs",
+    "test:usage-ui": "npm run build && node tests/usage-logs.browser.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
@@ -34,6 +36,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "oxlint": "^1.71.0",
+    "playwright": "1.62.1",
     "typescript": "~6.0.2",
     "vite": "^8.1.1"
   }

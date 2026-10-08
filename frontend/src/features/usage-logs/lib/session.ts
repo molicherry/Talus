@@ -1,4 +1,5 @@
 import type { TimePreset, UsageFilters, UsageLog, UsageLogPage } from "../types";
+import { actions, authTypes, outcomes, resourceTypes } from "../types";
 
 export const PAGE_LIMIT = 20;
 export const HISTORY_LIMIT = 100;
@@ -13,21 +14,43 @@ export function resolveRange(preset: TimePreset, now = Date.now()): { from: stri
   const hours = preset === "1h" ? 1 : preset === "7d" ? 168 : 24;
   return { from: new Date(now - hours * 3600_000).toISOString(), to: new Date(now).toISOString() };
 }
+/** New sessions resolve relative presets; custom ranges keep their exact bounds. */
+export function refreshFilters(query: UsageFilters, preset: TimePreset, now = Date.now()): UsageFilters {
+  return preset === "custom" ? query : { ...query, ...resolveRange(preset, now) };
+}
 // PostgreSQL entity IDs are signed bigint; compare decimal strings exactly.
 export function validEntityID(value: string): boolean {
   return /^[1-9]\d{0,18}$/.test(value) && (value.length < 19 || value <= "9223372036854775807");
 }
+export function validDetailID(value: string): boolean {
+  return /^[1-9]\d{0,19}$/.test(value) && (value.length < 20 || value <= "18446744073709551615");
+}
+function queryTime(value: string): number {
+  // Date.parse alone accepts date-only strings and normalizes February 30,
+  // although the API requires a real RFC3339 timestamp with a timezone.
+  if (!/^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(value)) return NaN;
+  const lastDay = new Date(`${value.slice(0, 7)}-01T00:00:00Z`);
+  lastDay.setUTCMonth(lastDay.getUTCMonth() + 1);
+  lastDay.setUTCDate(0);
+  return Number(value.slice(8, 10)) <= lastDay.getUTCDate() ? Date.parse(value) : NaN;
+}
 export function validFilters(query: UsageFilters): boolean {
-  const from = Date.parse(query.from), to = Date.parse(query.to);
+  const from = queryTime(query.from), to = queryTime(query.to);
   return Number.isFinite(from) && Number.isFinite(to) && from < to && to - from <= 90 * 86400_000 &&
     [25, 50, 100].includes(query.page_size) && idKeys.every(key => !query[key] || validEntityID(query[key]!)) &&
+    (!query.action || (actions as readonly string[]).includes(query.action)) &&
+    (!query.outcome || (outcomes as readonly string[]).includes(query.outcome)) &&
+    (!query.auth_type || (authTypes as readonly string[]).includes(query.auth_type)) &&
+    (!query.resource_type || (resourceTypes as readonly string[]).includes(query.resource_type)) &&
     (!query.request_id || /^[A-Za-z0-9._:-]{1,128}$/.test(query.request_id));
 }
 export function filtersFromURL(params: URLSearchParams, now = Date.now()): { query: UsageFilters; preset: TimePreset } {
   const value = params.get("preset");
-  const preset: TimePreset = value === "1h" || value === "7d" || value === "custom" ? value : "24h";
-  const range = params.get("from") && params.get("to") ? { from: params.get("from")!, to: params.get("to")! } : resolveRange(preset, now);
-  const query: UsageFilters = { ...range, page_size: Number(params.get("page_size") || 25) };
+  const explicitRange = params.has("from") || params.has("to");
+  const preset: TimePreset = value === "1h" || value === "7d" || value === "custom" ? value : !value && explicitRange ? "custom" : "24h";
+  const range = preset === "custom" ? { from: params.get("from") || "", to: params.get("to") || "" } : resolveRange(preset, now);
+  const pageSize = params.get("page_size");
+  const query: UsageFilters = { ...range, page_size: pageSize === "50" ? 50 : pageSize === "100" ? 100 : 25 };
   for (const key of filterKeys) if (params.get(key)) query[key] = params.get(key)!;
   return { query, preset };
 }

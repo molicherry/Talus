@@ -279,7 +279,7 @@ func (h *ServerHandler) TrustHostKey(w http.ResponseWriter, r *http.Request) {
 // parseIDParam extracts a uint path parameter named "id" from the request URL.
 func parseIDParam(r *http.Request) (uint, error) {
 	idStr := chi.URLParam(r, "id")
-	id, err := strconv.ParseUint(idStr, 10, 64)
+	id, err := strconv.ParseUint(idStr, 10, strconv.IntSize)
 	if err != nil {
 		return 0, err
 	}

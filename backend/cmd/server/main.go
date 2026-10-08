@@ -89,10 +89,10 @@ func main() {
 	}
 	slog.Info("constraints renamed")
 
-	// Normalize unknown legacy owners before AutoMigrate changes the column's
-	// default/NOT NULL constraint. Missing owner columns get default zero below.
+	// Fix the legacy key set in an atomic schema migration before AutoMigrate.
+	// Optional owner assignment runs in the background after schema preparation.
 	ownerSchemaCtx, cancelOwnerSchema := context.WithTimeout(context.Background(), 30*time.Second)
-	ownerSchemaErr := repository.NewAPIKeyRepo(db).NormalizeLegacyOwnerNulls(ownerSchemaCtx)
+	ownerSchemaErr := repository.NewAPIKeyRepo(db).PrepareLegacyOwnerBinding(ownerSchemaCtx)
 	cancelOwnerSchema()
 	if ownerSchemaErr != nil {
 		slog.Error("failed to prepare legacy API key owner migration", "error", ownerSchemaErr)
@@ -167,32 +167,50 @@ func main() {
 
 	// Dependency chain — API Keys
 	apiKeyRepo := repository.NewAPIKeyRepo(db)
-	ownerBackfillCtx, cancelOwnerBackfill := context.WithTimeout(context.Background(), 30*time.Second)
-	boundKeys, ownerBackfillErr := apiKeyRepo.BindUnownedToDefaultAdmin(ownerBackfillCtx)
-	cancelOwnerBackfill()
-	if ownerBackfillErr != nil {
-		slog.Error("failed to assign legacy API key owners", "error", ownerBackfillErr)
-		os.Exit(1)
-	}
-	if boundKeys > 0 {
-		slog.Info("legacy API key owners assigned", "keys", boundKeys)
-	}
+	ownerBackfill := service.NewLegacyAPIKeyOwnerBackfill(apiKeyRepo)
+	ownerBackfillCtx, cancelOwnerBackfill := context.WithCancel(context.Background())
+	defer cancelOwnerBackfill()
+	authSvc.SetOwnerBackfillTrigger(ownerBackfill.Trigger)
+	go ownerBackfill.Run(ownerBackfillCtx)
 	apiKeySvc := service.NewAPIKeyService(apiKeyRepo, serverRepo, masterKey)
 	auditRepo := repository.NewAuditEventRepo(db)
-	usageRetention := time.Duration(cfg.UsageRetentionDays) * 24 * time.Hour
-	usageSensitiveRetention := time.Duration(cfg.UsageSensitiveRetentionDays) * 24 * time.Hour
-	usageRepo := repository.NewUsageLogRepo(db, repository.UsageLogRepoConfig{OrdinaryRetention: usageRetention, SensitiveRetention: usageSensitiveRetention})
+	usagePolicy := (model.UsagePolicy{
+		OrdinaryRetention:  time.Duration(cfg.UsageRetentionDays) * 24 * time.Hour,
+		SensitiveRetention: time.Duration(cfg.UsageSensitiveRetentionDays) * 24 * time.Hour,
+	}).WithDefaults()
+	usageRepo := repository.NewUsageLogRepo(db, repository.UsageLogRepoConfig{LeaseDuration: usagePolicy.LeaseDuration, OrdinaryRetention: usagePolicy.OrdinaryRetention, SensitiveRetention: usagePolicy.SensitiveRetention})
 	usageRecorder := usage.NewRecorder(usageRepo, auditRepo, usage.Options{
 		DBMaxOpenConnections: cfg.DBMaxOpenConnections,
 		WriteConcurrency:     cfg.UsageWriteConcurrency,
 		ActiveLimit:          cfg.UsageActiveLimit,
-		OrdinaryRetention:    usageRetention,
-		SensitiveRetention:   usageSensitiveRetention,
+		LeaseDuration:        usagePolicy.LeaseDuration,
+		OrdinaryRetention:    usagePolicy.OrdinaryRetention,
+		SensitiveRetention:   usagePolicy.SensitiveRetention,
 	})
 	usageCtx, stopUsage := context.WithCancel(context.Background())
 	defer stopUsage()
 	usageRecorder.Start(usageCtx)
 	defer usageRecorder.Close()
+	go func() {
+		// The initial read-only report may need longer than a 200ms write
+		// batch. Keep it in the same bounded maintenance connection budget.
+		retry := time.NewTicker(time.Minute)
+		defer retry.Stop()
+		for {
+			if err := usageRecorder.PrepareCleanupReport(usageCtx); err == nil {
+				return
+			}
+			if usageCtx.Err() != nil {
+				return
+			}
+			slog.Warn("usage retention cleanup report deferred", "reason", "cleanup_report_unavailable")
+			select {
+			case <-usageCtx.Done():
+				return
+			case <-retry.C:
+			}
+		}
+	}()
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
@@ -222,6 +240,18 @@ func main() {
 		go func() {
 			if err := usageRepo.Backfill(usageCtx); err != nil {
 				slog.Warn("legacy usage backfill paused", "reason", "backfill_unavailable")
+				return
+			}
+			statusCtx, cancelStatus := context.WithTimeout(usageCtx, 2*time.Second)
+			defer cancelStatus()
+			state, err := usageRepo.BackfillStatus(statusCtx)
+			if err != nil {
+				slog.Warn("legacy usage backfill status unavailable", "reason", "backfill_status_unavailable")
+				return
+			}
+			if state.CompletedAt != nil {
+				slog.Info("legacy usage backfill completed", "imported", state.Imported,
+					"final_bound", state.FinalBound, "completed_at", state.CompletedAt)
 			}
 		}()
 	} else {

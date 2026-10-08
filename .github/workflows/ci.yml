@@ -134,6 +134,14 @@ jobs:
         run: npm run build
         working-directory: frontend
 
+      - name: Install Chromium for browser regressions
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+
+      - name: Browser regressions (production build)
+        run: npm run test:ui:built
+        working-directory: frontend
+
   docker:
     name: Docker
     runs-on: ubuntu-latest

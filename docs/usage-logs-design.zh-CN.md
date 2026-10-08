@@ -1,6 +1,6 @@
 # 使用日志查看功能设计（v2）
 
-状态：已按本方案实现日志采集、查询 API 和管理员日志页面，处于提交评审阶段。修订日期：2026-10-07。源码基线：`85847696bc6be022e072821715d3bf0925192370`（PR #46 合并后）。本文替代先前上传的设计稿，部署步骤见 [使用日志部署说明](usage-logs-deployment.zh-CN.md)。
+状态：已按本方案实现日志采集、查询 API 和管理员日志页面，处于提交评审阶段。修订日期：2026-10-08。源码基线：`85847696bc6be022e072821715d3bf0925192370`（PR #46 合并后）。本文替代先前上传的设计稿，部署步骤见 [使用日志部署说明](usage-logs-deployment.zh-CN.md)。
 
 ## 1. 目标与交付范围
 
@@ -32,7 +32,7 @@
 `Principal` 至少包含 `auth_type`、真实 `user_id?`、`username?`、`api_key_id?`、Key 名称/前缀、role 和 ServerIDs。
 
 - JWT 验证成功后填用户身份；API Key 验证成功后填 Key 身份，owner 有可信来源时另填 `user_id`。Key ID 不得再次映射成用户 ID。
-- 新 Key 创建时从已验证 JWT 写入 owner；根据单用户升级策略，旧 Key 的 owner 为零或空时自动绑定默认管理员（未软删除且 role=admin 的最小用户 ID）。启动时执行幂等绑定；尚无管理员时不修改，首次初始化创建管理员的事务中补做。已有非零 owner 不覆盖，Key 内容和权限不改变。该绑定只影响 Key 当前归属与后续操作日志，不改写旧审计或使用日志。改动同步检查现有 server 访问判断与 reveal 限流，不把 Key owner 当作 Key 调用者本身。
+- 新 Key 创建时从已验证 JWT 写入 owner；根据单用户升级策略，仅升级前的旧 Key 在 owner 为零或空时自动绑定默认管理员（未软删除且 role=admin 的最小用户 ID）。兼容升级在数据库事务内为既有无归属行设置 `owner_binding_version=0`，已有非零 owner 及列默认值为 1；新 Key（包括直接 SQL 创建）默认标记为 1，不因未来重启被误归属。后台分批处理版本 0 的旧行，完成后标记为 1，已有非零 owner 不覆盖。尚无管理员时等待首次初始化完成，绑定失败只告警并有界重试，不阻止服务启动或回滚管理员创建；初始化本身仍以事务锁防止并发创建多个首位管理员。必要的 schema 迁移遵循正常启动迁移规则。Key 内容、权限及已有日志不改写。改动同步检查现有 server 访问判断与 reveal 限流，不把 Key owner 当作 Key 调用者本身。
 - 验证成功后、scope/server 权限检查前填 Principal，因此拒绝也能归属已验证身份。无效凭据不解码成可信身份，记 `auth_type=unauthenticated`。
 - 首版日志列表和详情均加入 `jwtOnlyRoutes`，handler 再要求 JWT Principal 且 `role=admin`。API Key 即使带 admin role 也不能查询。每次请求重新鉴权，cursor 不承担授权。
 - `resource_id` 是操作对象，`api_key_id` 是调用身份。JWT 查看某个 Key 时只设置前者。
@@ -64,7 +64,7 @@
 
 正常终态不能被 phase 更新、重试旧快照或恢复任务覆盖。追踪恢复 unknown 可由原 owner 的更高 `state_seq`、真实完成快照精化；其中 owner_lease_expired 还允许按第 6.2 节恢复真实活跃状态。历史 unknown 永不走这些修正分支。序号只由本地操作锁内推进，全局恢复任务不推进 owner 的序号。
 
-首批索引为 `(started_at,id)`、request_id、`(action,started_at,id)`、`(resource_type,resource_id,started_at,id)`、`(api_key_id,started_at,id)`、`(owner_instance_id,id) WHERE outcome='running'` 和终态清理所需 retention 索引。user/server/outcome 索引依据阶段验收的 EXPLAIN 增补。
+首批索引为 `(started_at,id)`、request_id、`(action,started_at,id)`、`(resource_type,resource_id,started_at,id)`、`(api_key_id,started_at,id)`、`(user_id,started_at,id)`、`(server_id,started_at,id)`、`(owner_instance_id,id) WHERE outcome='running'` 和终态清理所需 retention 索引。用户和服务器索引用 4 万行、90 天查询范围的首页及续页 `EXPLAIN ANALYZE` 验收；其它组合依据实际查询计划增补。
 
 新 `AuditEvent` 只增加可空、非空值唯一的 `operation_id`；旧记录保持 NULL。不将通用访问日志、HTTP 状态和命令内容塞入 AuditEvent。另建轻量 `usage_log_instances(instance_id,last_seen_at,lease_until,retired_at?)` 管理追踪存活和失效屏障；历史回填进度使用独立 `usage_log_backfill_state`，不复用只有完成标记的 ApplyOnce 当作可续跑任务。
 
@@ -110,7 +110,7 @@ flowchart LR
 
 未认证预算和槽位判断必须发生在日志 INSERT 之前。IP 预算 Map 有最多 4,096 项、10 分钟过期和定期淘汰；满时仍受全局预算约束，不能通过新 IP 无限扩大内存。过量拒绝事件直接跳过并计数，首版不把聚合统计伪装成单条真实操作日志。
 
-普通新记录、已接纳操作的完成写入、恢复/续租分别限额，完成写入优先于普通新记录。重试共用有界写入池；租约续租保留独立槽位。所有 UsageLog 与续租写入的并发总额不得超过共享数据库连接上限的 25%，给业务和安全审计留出连接容量。
+普通新记录、已接纳操作的完成写入、恢复/续租分别限额，完成写入优先于普通新记录。重试共用有界写入池；租约续租保留独立槽位。所有 UsageLog 与续租写入的并发总额不得超过共享数据库连接上限的 25%，给业务和安全审计留出连接容量。非法 UUID、字段超长及约束等永久性错误只计数和告警，不进入或继续占据重试队列；暂时连接、锁和事务故障继续有界重试。
 
 安全 AuditEvent 使用独立并发槽位（起始值 1）、200 ms 单次截止和独立重试限额（最多 256 项/1 MiB/2 分钟），不能因 UsageLog 预算耗尽而跳过。超出自身限额仍告警、计数，保留原业务放行语义；不声称审计自身绝不丢失。
 
@@ -131,7 +131,7 @@ flowchart LR
 
 所有长操作的开始、修正和结束写入，都在短事务中先锁 instance 行并检查存在、未退休且租约有效，再锁/更新 UsageLog。正常写入可用 instance 的 FOR SHARE；恢复、续租后修正和清理采用 FOR UPDATE，并统一按 instance → UsageLog 顺序加锁，事务内以数据库当前时间重新判断资格，避免先检查失联、后错误修改已续租的会话。
 
-全局对账只修复 owner 租约已失效的 running，不在启动时全表重置。正常代码不会删除仍被记录引用的非退休实例；若发现 owner 行异常缺失，将该 running 修为 unknown/owner_missing，原子设置 reconciled_at/retention_at 并告警，旧 owner 的后续写入仍因缺少实例而被拒绝。
+全局对账只修复 owner 租约已失效的 running，不在启动时全表重置。数据库等待不持有 recorder 全局内存锁；本地 owner 在数据库取得 UPDATE 锁后才复制 active/pending 快照，新 Begin 的 INSERT 必须取得同一 owner 的 SHARE 锁，避免快照后新操作被误修。正常代码不会删除仍被记录引用的非退休实例；若发现 owner 行异常缺失，将该 running 修为 unknown/owner_missing，原子设置 reconciled_at/retention_at 并告警，旧 owner 的后续写入仍因缺少实例而被拒绝。
 
 首次修复原子写 `outcome=unknown`、`recovery_reason=owner_lease_expired`、reconciled_at 和 retention_at，后续扫描不重新计时。不填造真实关闭时间，不主动关闭业务连接。长终端超过保留天数，只要仍被活跃 owner 追踪，就仍是 running。
 
@@ -181,7 +181,7 @@ PostgreSQL 的小 ID 可以晚提交，因此最终查漏不能只查询 `id > �
 
 ### 8.1 固定查询条件与游标
 
-首次进入或显式刷新时，将相对预设一次解析成具体 UTC from/to；API 省略时间时也仅在无 cursor 的首次请求求默认值，并在响应 query 返回全部已应用的规范化筛选（不限于时间和页大小）。翻页复用这些值，不再次计算 now。
+首次进入或显式刷新时，将相对预设一次解析成具体 UTC from/to；带相对 preset 的 URL 在浏览器重新加载时建立新的时间范围，当前页面会话内翻页和详情复用已冻结范围。只有 from/to 而没有 preset 的 URL 视为自定义固定范围，刷新仍保留其区间。API 省略时间时也仅在无 cursor 的首次请求求默认值，并在响应 query 返回全部已应用的规范化筛选（不限于时间和页大小）。前端把不支持或非法的 URL page_size 规范化为 25，再发起查询。
 
 后续请求形式为 `GET /api/v1/usage-logs?from=<query.from>&to=<query.to>&page_size=<query.page_size>&<其他规范化筛选>&cursor=<next_cursor>`。服务端先解 cursor，再与请求的全部条件比较；缺必需条件就返回失配错误，不能重新求默认时间。上界只信任签名 cursor 中的值，不接受裸 id_upper_bound 作为另一个分页入口。
 
@@ -201,7 +201,7 @@ LIMIT :page_size_plus_one;
 
 cursor 经 HMAC 签名，包含协议版本、查看者用户 ID、规范化筛选摘要、from/to、页大小、ID 上界、最后排序位置和固定到期时间（首次建立后 30 分钟，翻页不延长）。可使用从 JWTSecret 以独立用途派生的签名密钥，密钥轮换使旧 cursor 失效。
 
-服务端校验签名、查看者、条件、范围、页大小和精度；非法/失配/过期分别返回 `invalid_cursor/cursor_filter_mismatch/cursor_expired`。过期不默默跳回第一页。时间保留数据库微秒精度，cursor 位置不能经过 JS Date 毫秒截断；UsageLog ID 和上界按十进制字符串传输，避免 JS 大整数精度丢失。
+服务端校验签名、查看者、条件、范围、页大小和精度；非法/失配/过期分别返回 `invalid_cursor/cursor_filter_mismatch/cursor_expired`。过期不默默跳回第一页。时间保留数据库微秒精度，cursor 位置不能经过 JS Date 毫秒截断；UsageLog ID、上界及 user/server/resource/api_key/legacy_audit_event 关联 ID 均按十进制字符串传输，避免 JS 大整数精度丢失。
 
 ```json
 {
@@ -234,7 +234,7 @@ cursor 经 HMAC 签名，包含协议版本、查看者用户 ID、规范化筛�
 
 ## 9. 页面、详情与查询缓存
 
-侧栏入口为“使用日志”，路径 `/usage-logs`，只对 JWT 管理员显示；后端鉴权仍是权限依据。桌面表格、移动紧凑行包含时间、操作、身份来源/操作者、资源快照、结果、耗时和 request_id。删除后的资源保留快照，跳转不可用时明确说明。
+侧栏入口为“使用日志”，路径 `/usage-logs`，只对 JWT 管理员显示；后端鉴权仍是权限依据。桌面表格、移动卡片包含时间、操作、身份来源/操作者、资源快照、结果、耗时和 request_id。手机筛选区默认收起，通过带 aria-expanded 的按钮展开；桌面始终展开，无效 URL 自动展开以便纠正。控件及候选触摸目标至少 44px，输入字号为 16px，长 ID、名称和详情字段在窄屏换行。删除后的资源保留快照，跳转不可用时明确说明。
 
 服务器、用户和 API Key 提供可搜索选择，显示名称和 ID，Key 另显示前缀，软删除项标记“已删除”。选中后保存 ID 筛选，实体 ID 校验 PostgreSQL bigint 上界且避免经过 JavaScript Number，支持清除和 URL 恢复；候选截断时提示继续搜索，加载失败可重试。找不到的历史实体或已撤销 Key 可手动输入正整数 ID，列表仍按日志中的原始 ID 精确查询。候选搜索请求在查询变化、关闭控件或认证会话变化时取消，旧响应不能恢复候选。`request_id` 输入旁说明其为 HTTP 请求关联编号，用于排错；外部合法值可复用，不能作为资源 ID、日志 ID 或去重凭据。
 
@@ -249,7 +249,7 @@ cursor 经 HMAC 签名，包含协议版本、查看者用户 ID、规范化筛�
 - `queryFn({signal})` 的 controller 和 request generation 由缓存 Entry 管理。AbortError 不重试、不显示为业务错误；所有成功、失败和 finally 更新均检查 generation。
 - 同 key 最后一个订阅者离开时才取消，不让一个组件取消其他订阅者的请求。取消后无数据恢复 idle，有数据保留已有 success；相同 key 重新进入可以发起新请求，不能复用已取消的 inFlight。
 - 列表 key 使用 `usage-logs + auth_epoch + query_session_id + canonical_filters + cursor`；上界已包含在 cursor，首次 key 不因响应带回上界再变化。显式刷新或新筛选生成新的本地 query_session_id。详情另用 `usage-log + auth_epoch + id`，探测单独 key。JWT 原值不进入 key。
-- 建立响应式 auth store：设置/清除 token、跨标签 storage 事件和到期 timer 更新 auth_epoch。检测到退出、身份变化或本会话日志 401/403 时，取消并移除全部日志缓存、抽屉、页栈和候选首页，立即清 UI；enabled=false 不能替代清理。认证未恢复完成前不展示缓存。
+- 建立响应式 auth store：设置/清除 token、跨标签 storage 事件和到期 timer 更新真实会话的 auth_epoch。日志权限使用独立修订号及可见性标记；本会话日志返回 `403/forbidden` 时只取消并移除日志列表、探测、详情及候选状态，不改变 auth_epoch，不清其它功能缓存。403 缺少 reason 或属于其它业务错误时仅呈现错误。真正退出、身份变化及应登出的 401 按会话规则清理缓存；403 前已发出的同会话 401 仍可正常登出。日志 UI 清理包括抽屉、页栈和候选首页，enabled=false 不能替代清理。认证未恢复完成前不展示缓存。
 - API client 的认证副作用也检查发起请求时的 auth_epoch；旧账号请求晚到的 401/403 不能清掉新登录 token、跳转新会话或擦除其缓存。当前后端验证 JWT 中的 role，不承诺数据库角色变更立即撤销旧 token；这里的及时清理指检测到本地认证变化或认证响应时。
 - 单会话最多缓存 20 页（第一页和当前页固定保留，其余 LRU）与 50 个详情。淘汰页重读使用原进入 cursor、原条件和同一上界，明确提示可能已变化；成员或下一 cursor 变化时，废弃该页之后的页栈及缓存，从新末行继续翻页，不能接上旧下游页制造重复 ID。
 - 10 分钟淘汰针对无订阅、无人阅读的数据，不清正在阅读的当前页/首页；页面查询会话销毁后，返回建立新会话。旧页的 cursor 历史最多保留 100 个（当前前进路径），超限提示先刷新以继续浏览，避免只限制行缓存却无限保存页栈。
@@ -267,7 +267,7 @@ cursor 经 HMAC 签名，包含协议版本、查看者用户 ID、规范化筛�
 
 exec 退出码 1 且 HTTP 200 应显示“命令失败，退出码 1，HTTP 200”。不能统一按 HTTP 200 判成功；取消也不能只凭某个 teardown 中派生 context 的 canceled 判定。
 
-当前 SSH 执行的 runCommand 使用 background context 派生超时，不能感知原请求取消。B 阶段须将请求 context 传入，区分客户端取消与执行超时，关闭/回收 SSH session 和执行 goroutine 后才 Finish。仅客户端请求断开但命令仍继续/完成时，不能编造 cancelled；也不把传输取消说成远端命令副作用已撤销。
+SSH 执行从请求 context 派生超时，区分客户端取消与执行超时，关闭/回收本次 SSH session 和执行 goroutine 后才 Finish。取消与完成同时发生时，在 join 后再次检查完成结果；已收到的真实 exit-status（含 0 和非零）优先，未获得退出事实的取消不补造退出码。优先关闭 session 并给出有界收敛窗口，只有阻塞无法解除或连接损坏时关闭底层连接；健康连接归还池中。仅客户端请求断开但命令仍继续/完成时，不能编造 cancelled；也不把传输取消说成远端命令副作用已撤销。
 
 relay 返回结构化 upstream method/status、复制字节数和复制错误；耗时到复制结束/断连。保持直接转发与 backpressure，不完整缓冲；已发出最终响应头后不能再追加 JSON 错误。安全路径标识使用内部路由模板/已配置标签，没有可信模板时为空，禁止把用户提供路径或替换前路径简单删 query 后当作安全路径。
 
@@ -293,7 +293,7 @@ metadata 采用版本化白名单，总量最多 4 KiB，仅接收 timeout_secon
 
 恢复 unknown 的保留期不通过重复扫描重新计时。按 instance → UsageLog 的事务锁顺序，健康 owner 先修正其 unknown，清理跳过；真实完成设置实际保留起点。退休/缺失 owner 永不重建旧操作。普通重试提交前检查固定快照的保留期限，已过期真实终态快照不重新插入；旧迁移 complete 后禁止回填。原 AuditEvent 不受摘要清理影响。
 
-首版保留天数、预算和定时任务通过服务端配置提供，非法配置启动时拒绝或使用明确默认值。首次启用清理前报告按来源/action/终态将清理的数量；不建设存储管理页面。
+首版保留天数、预算和定时任务通过服务端配置提供，非法配置启动时拒绝或使用明确默认值。租约默认值及 action 保留分类由共享 policy 提供，删除类统一按 `.delete` 后缀处理，SQL 清理与 recorder 重试使用同一规则；保留天数为零采用明确默认值。首次启用清理前报告按来源/action/终态符合清理条件的数量，未知维度归入 other 以保持日志低基数；报告使用独立最多 5 秒的只读截止及同一维护连接预算，失败每分钟重试并推迟删除，避免全量计数受普通 200ms 写入截止限制而始终无法清理。历史回填封口前另报告旧摘要数量，成功封口后记录导入总数、最终水位及完成时间。数量是当时的清理候选，实际删除仍在逐条短事务中复核。清理任务另分批移除租约过期或已退休且没有任何日志引用的实例行，在实例锁内重新检查引用与租约；健康实例保留。不建设存储管理页面。
 
 ## 12. 分阶段实现与验收
 

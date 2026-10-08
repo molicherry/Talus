@@ -69,6 +69,9 @@ func TestFirstAdminSetupBindsLegacyKeys(t *testing.T) {
 	if err := db.Create(&legacy).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Model(&legacy).Update("owner_binding_version", 0).Error; err != nil {
+		t.Fatal(err)
+	}
 	keyRepo := repository.NewAPIKeyRepo(db)
 	if bound, err := keyRepo.BindUnownedToDefaultAdmin(ctx); err != nil || bound != 0 {
 		t.Fatalf("startup without administrator: bound=%d err=%v", bound, err)
@@ -78,6 +81,7 @@ func TestFirstAdminSetupBindsLegacyKeys(t *testing.T) {
 	}
 	jwtSvc := token.NewJWTService("test-secret", time.Hour)
 	svc := NewAuthService(repository.NewUserRepo(db), jwtSvc, db)
+	startAuthOwnerBackfill(t, db, svc)
 	signed, err := svc.Login(ctx, "first-admin", "test-password")
 	if err != nil {
 		t.Fatal(err)
@@ -86,20 +90,20 @@ func TestFirstAdminSetupBindsLegacyKeys(t *testing.T) {
 	if err != nil || claims.UserID != 41 || claims.Role != "admin" {
 		t.Fatalf("first administrator login: claims=%+v err=%v", claims, err)
 	}
-	key, err := keyRepo.FindByID(ctx, legacy.ID)
-	if err != nil || key.UserID != claims.UserID {
-		t.Fatalf("setup did not bind legacy key: key=%+v err=%v", key, err)
-	}
+	waitAuthKeyOwner(t, keyRepo, legacy.ID, claims.UserID)
 	if _, err := svc.Login(ctx, "first-admin", "test-password"); err != nil {
 		t.Fatalf("existing administrator login changed: %v", err)
 	}
 }
 
-func TestFirstAdminSetupRollsBackFailedKeyBinding(t *testing.T) {
+func TestFirstAdminSetupCommitsDespiteFailedKeyBinding(t *testing.T) {
 	db := authOwnerTestDB(t)
 	ctx := context.Background()
 	legacy := model.APIKey{Name: "legacy", KeyHash: "legacy-hash", KeyPrefix: "legacy01"}
 	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&legacy).Update("owner_binding_version", 0).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Exec(`CREATE FUNCTION reject_owner_binding() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test binding failure'; END $$`).Error; err != nil {
@@ -109,27 +113,33 @@ func TestFirstAdminSetupRollsBackFailedKeyBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := NewAuthService(repository.NewUserRepo(db), token.NewJWTService("test-secret", time.Hour), db)
-	if _, err := svc.Login(ctx, "first-admin", "test-password"); err == nil {
-		t.Fatal("setup returned success despite failed legacy key binding")
+	startAuthOwnerBackfill(t, db, svc, 20*time.Millisecond)
+	if _, err := svc.Login(ctx, "first-admin", "test-password"); err != nil {
+		t.Fatalf("optional key assignment blocked setup: %v", err)
 	}
 	count, err := repository.NewUserRepo(db).Count(ctx)
-	if err != nil || count != 0 {
-		t.Fatalf("failed setup committed administrator: count=%d err=%v", count, err)
+	if err != nil || count != 1 {
+		t.Fatalf("optional assignment rolled back administrator: count=%d err=%v", count, err)
 	}
-	key, err := repository.NewAPIKeyRepo(db).FindByID(ctx, legacy.ID)
+	keyRepo := repository.NewAPIKeyRepo(db)
+	if _, err := keyRepo.BindUnownedToDefaultAdmin(ctx); err == nil {
+		t.Fatal("fixture must produce an actual key-assignment failure")
+	}
+	key, err := keyRepo.FindByID(ctx, legacy.ID)
 	if err != nil || key.UserID != 0 {
-		t.Fatalf("failed setup changed legacy key: key=%+v err=%v", key, err)
+		t.Fatalf("failed assignment changed legacy key: key=%+v err=%v", key, err)
 	}
 	if err := db.Exec(`DROP TRIGGER reject_owner_binding ON api_keys`).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Login(ctx, "first-admin", "test-password"); err != nil {
-		t.Fatalf("setup could not retry after binding failure: %v", err)
+		t.Fatalf("committed administrator cannot log in after assignment failure: %v", err)
 	}
-	key, err = repository.NewAPIKeyRepo(db).FindByID(ctx, legacy.ID)
-	if err != nil || key.UserID == 0 {
-		t.Fatalf("retried setup left legacy key unbound: key=%+v err=%v", key, err)
+	var admin model.User
+	if err := db.First(&admin).Error; err != nil {
+		t.Fatal(err)
 	}
+	waitAuthKeyOwner(t, keyRepo, legacy.ID, admin.ID)
 }
 
 func TestConcurrentFirstAdminSetupKeepsOneDefaultOwner(t *testing.T) {
@@ -139,7 +149,11 @@ func TestConcurrentFirstAdminSetupKeepsOneDefaultOwner(t *testing.T) {
 	if err := db.Create(&legacy).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Model(&legacy).Update("owner_binding_version", 0).Error; err != nil {
+		t.Fatal(err)
+	}
 	svc := NewAuthService(repository.NewUserRepo(db), token.NewJWTService("test-secret", time.Hour), db)
+	startAuthOwnerBackfill(t, db, svc)
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	for _, username := range []string{"first-admin-a", "first-admin-b"} {
@@ -163,8 +177,49 @@ func TestConcurrentFirstAdminSetupKeepsOneDefaultOwner(t *testing.T) {
 	if succeeded != 1 || len(admins) != 1 || admins[0].Role != "admin" {
 		t.Fatalf("concurrent setup created multiple administrators: successes=%d users=%+v", succeeded, admins)
 	}
-	key, err := repository.NewAPIKeyRepo(db).FindByID(ctx, legacy.ID)
-	if err != nil || key.UserID != admins[0].ID {
-		t.Fatalf("concurrent setup picked a different owner: key=%+v err=%v", key, err)
+	waitAuthKeyOwner(t, repository.NewAPIKeyRepo(db), legacy.ID, admins[0].ID)
+}
+
+func startAuthOwnerBackfill(t *testing.T, db *gorm.DB, svc *AuthService, retryInterval ...time.Duration) *LegacyAPIKeyOwnerBackfill {
+	t.Helper()
+	worker := NewLegacyAPIKeyOwnerBackfill(repository.NewAPIKeyRepo(db))
+	worker.interval = time.Hour
+	if len(retryInterval) != 0 {
+		worker.interval = retryInterval[0]
+	}
+	svc.SetOwnerBackfillTrigger(worker.Trigger)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { worker.Run(ctx); close(done) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("owner worker did not stop after cancellation")
+		}
+	})
+	return worker
+}
+
+func waitAuthKeyOwner(t *testing.T, repo *repository.APIKeyRepo, keyID, owner uint) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		key, err := repo.FindByID(ctx, keyID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if key.UserID == owner {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("background assignment did not bind key %d to owner %d", keyID, owner)
+		case <-ticker.C:
+		}
 	}
 }

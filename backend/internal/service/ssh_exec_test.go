@@ -100,16 +100,20 @@ func TestExecPreservesRealExitCode(t *testing.T) {
 	pool.Release(1, client)
 }
 
-func TestExecClientCancellationJoinsAndReleasesSlot(t *testing.T) {
-	started, remoteClosed := make(chan struct{}), make(chan struct{})
+func TestExecClientCancellationJoinsAndReusesHealthyTransport(t *testing.T) {
+	started := make(chan struct{})
+	remoteClosed := make(chan (<-chan struct{}), 1)
 	address, hostKey := startExecSSHServer(t, func(_ string, channel ssh.Channel, transportClosed <-chan struct{}) {
+		remoteClosed <- transportClosed
 		close(started)
+		// Keep the channel open independently of Run's empty-stdin EOF.
+		// The server mux handles our client's channel cancellation itself.
 		<-transportClosed
 		_ = channel.Close()
-		close(remoteClosed)
 	})
 	pool := newTestPool(t)
-	seedPool(t, pool, 1, dialTestSSH(t, address, hostKey))
+	original := dialTestSSH(t, address, hostKey)
+	seedPool(t, pool, 1, original)
 	svc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -129,20 +133,21 @@ func TestExecClientCancellationJoinsAndReleasesSlot(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("cancelled execution did not join")
 	}
+	transportClosed := <-remoteClosed
 	select {
-	case <-remoteClosed:
-	case <-time.After(3 * time.Second):
-		t.Fatal("SSH transport remained open")
+	case <-transportClosed:
+		t.Fatal("channel cancellation closed a healthy SSH transport")
+	default:
 	}
 	client, err := pool.Get(1, testFP(1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if client != nil {
+	if client != original {
 		pool.Release(1, client)
-		t.Fatal("cancelled transport returned to the pool")
+		t.Fatal("channel cancellation did not preserve its healthy transport")
 	}
-	pool.Release(1, nil)
+	pool.Release(1, client)
 }
 
 func TestExecOwnTimeoutIsNotClientCancellation(t *testing.T) {
@@ -151,7 +156,8 @@ func TestExecOwnTimeoutIsNotClientCancellation(t *testing.T) {
 		_ = channel.Close()
 	})
 	pool := newTestPool(t)
-	seedPool(t, pool, 1, dialTestSSH(t, address, hostKey))
+	original := dialTestSSH(t, address, hostKey)
+	seedPool(t, pool, 1, original)
 	svc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
 	_, err := svc.Exec(context.Background(), 1, "wait", 30*time.Millisecond)
 	if !errors.Is(err, server.ErrSSHTimeout) || errors.Is(err, context.Canceled) {
@@ -161,11 +167,11 @@ func TestExecOwnTimeoutIsNotClientCancellation(t *testing.T) {
 	if getErr != nil {
 		t.Fatal(getErr)
 	}
-	if client != nil {
+	if client != original {
 		pool.Release(1, client)
-		t.Fatal("timed out transport returned to the pool")
+		t.Fatal("channel timeout did not preserve its healthy transport")
 	}
-	pool.Release(1, nil)
+	pool.Release(1, client)
 }
 
 func TestExecCancellationUnblocksSessionSetupWrite(t *testing.T) {
@@ -177,7 +183,7 @@ func TestExecCancellationUnblocksSessionSetupWrite(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { _, err := svc.runCommand(ctx, client, "blocked", time.Minute); done <- err }()
+	go func() { _, err, _ := svc.runCommand(ctx, client, "blocked", time.Minute); done <- err }()
 	select {
 	case err := <-done:
 		if !errors.Is(err, context.DeadlineExceeded) {

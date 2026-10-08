@@ -33,10 +33,36 @@ assert.equal(auth.clearAuthToken(epochA), false);
 assert.equal(auth.denyUsageLogs(epochA), false);
 assert.equal(auth.getAuthSnapshot().user.id, 2);
 const epochB = auth.getAuthEpoch();
+const revisionB = auth.getAuthSnapshot().usagePermissionRevision;
+const serverEntry = query.getEntry('["servers"]');
+serverEntry.queryKey = ["servers"];
+await query.runQuery(serverEntry, async () => "same-account-servers");
+const logEntries = ["usage-logs", "usage-logs-probe", "usage-log"].map(prefix => {
+  const result = query.getEntry(JSON.stringify([prefix, epochB])); result.queryKey = [prefix, epochB]; return result;
+});
+for (const result of logEntries) await query.runQuery(result, async () => "private-logs");
+let releaseServer, serverSignal;
+const serverWork = query.runQuery(serverEntry, ({signal}) => { serverSignal = signal; return new Promise(resolve => { releaseServer = resolve; }); });
+let releaseLate;
+const late = query.runQuery(logEntries[0], () => new Promise(resolve => { releaseLate = resolve; }));
+await Promise.resolve();
 assert.equal(auth.denyUsageLogs(epochB), true);
 assert.equal(auth.getAuthSnapshot().canViewUsageLogs, false);
 assert.equal(auth.getAuthSnapshot().user.id, 2);
-assert.notEqual(auth.getAuthEpoch(), epochB);
+assert.equal(auth.getAuthEpoch(), epochB, "permission denial is not an identity change");
+assert.equal(auth.getAuthSnapshot().usagePermissionRevision, revisionB + 1);
+assert.equal(serverEntry.data, "same-account-servers", "unrelated cached resources survive a log denial");
+assert.strictEqual(query.getEntry(serverEntry.key), serverEntry);
+assert.equal(serverSignal.aborted, false, "log denial does not cancel another feature's request");
+releaseServer("fresh-servers"); await serverWork;
+assert.equal(serverEntry.data, "fresh-servers");
+for (const result of logEntries) assert.equal(result.data, undefined);
+releaseLate("late-private-logs"); await late;
+assert.equal(logEntries[0].data, undefined, "late logs cannot repopulate revoked entries");
+assert.equal(auth.denyUsageLogs(epochB), true);
+assert.equal(auth.getAuthSnapshot().usagePermissionRevision, revisionB + 1, "repeat denial is idempotent");
+assert.equal(auth.clearAuthToken(epochB), true, "an in-flight session failure still applies after log denial");
+assert.equal(serverEntry.data, undefined, "a real logout still removes every cache");
 
 // Other-tab login and logout synchronously invalidate the local session.
 values.set("auth_token", token(3));

@@ -53,3 +53,8 @@ export function shouldApplyAuthorizationFailure(requestEpoch: number, currentEpo
 export function isUsageLogRequest(path: string): boolean {
   return /^\/api\/v1\/usage-logs(?:\/|\?|$)/.test(path);
 }
+
+/** Only the backend's permission denial revokes access; proxy/business 403s do not. */
+export function isUsageLogPermissionDenied(path: string, reason: unknown): boolean {
+  return isUsageLogRequest(path) && reason === "forbidden";
+}

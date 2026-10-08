@@ -12,8 +12,8 @@ import { useTranslation } from "../../../i18n";
 import { ApiClientError } from "../../../lib/api-client";
 import { translateApiError } from "../../../lib/api-error";
 import { useFrozenList, useUsageDetail } from "../hooks/use-usage-logs";
-import { DetailCache, filterKeys, filtersFromURL, filtersToURL, FrozenPages, HISTORY_LIMIT, resolveRange, validFilters } from "../lib/session";
-import { actions, authTypes, outcomes } from "../types";
+import { DetailCache, filterKeys, filtersFromURL, filtersToURL, FrozenPages, HISTORY_LIMIT, refreshFilters, validDetailID, validFilters } from "../lib/session";
+import { actions, authTypes, outcomes, resourceTypes } from "../types";
 import { UsageIdentityFilter } from "./usage-identity-filter";
 import type { TimePreset, UsageFilters, UsageLog } from "../types";
 
@@ -68,6 +68,8 @@ function UsageLogsSession({ authEpoch }: { authEpoch: number }) {
   const [draftPreset, setDraftPreset] = useState<TimePreset>(initial.current.preset);
   const [index, setIndex] = useState(0);
   const [formError, setFormError] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(() => !validFilters(initial.current.query));
+  const resultsRef = useRef<HTMLDivElement>(null);
   const [autoCheck, setAutoCheck] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [now, setNow] = useState(Date.now());
@@ -75,7 +77,7 @@ function UsageLogsSession({ authEpoch }: { authEpoch: number }) {
   const visible = usePageVisibility();
   const list = useFrozenList(session, index, authEpoch, visible, autoCheck, preset);
   const rawDetail = params.get("detail");
-  const detailID = rawDetail && /^[1-9]\d*$/.test(rawDetail) ? rawDetail : null;
+  const detailID = rawDetail && validDetailID(rawDetail) ? rawDetail : null;
   const detail = useUsageDetail(detailID, authEpoch, visible, detailCache);
   const seenURL = useRef(queryURLKey(params));
   const urlKey = queryURLKey(params);
@@ -85,6 +87,7 @@ function UsageLogsSession({ authEpoch }: { authEpoch: number }) {
     const next = filtersFromURL(params);
     setSession(new FrozenPages(next.query, crypto.randomUUID()));
     setIndex(0); setPreset(next.preset); setDraft(next.query); setDraftPreset(next.preset); setFormError(false);
+    setFiltersOpen(!validFilters(next.query));
   }, [urlKey, params]);
   const runningVisible = !!list.data?.items.some(log => log.outcome === "running") || detail.data?.outcome === "running";
   useEffect(() => {
@@ -102,11 +105,18 @@ function UsageLogsSession({ authEpoch }: { authEpoch: number }) {
   };
   const apply = (event: FormEvent) => {
     event.preventDefault();
-    const query = draftPreset === "custom" ? draft : { ...draft, ...resolveRange(draftPreset) };
+    const query = refreshFilters(draft, draftPreset);
     if (!validFilters(query)) { setFormError(true); return; }
     startSession(query, draftPreset, true);
+    if (window.matchMedia("(max-width: 639px)").matches) {
+      setFiltersOpen(false);
+      requestAnimationFrame(() => {
+        resultsRef.current?.scrollIntoView({ block: "start" });
+        resultsRef.current?.focus({ preventScroll: true });
+      });
+    }
   };
-  const refresh = () => startSession(preset === "custom" ? session.query : { ...session.query, ...resolveRange(preset) }, preset);
+  const refresh = () => startSession(refreshFilters(session.query, preset), preset);
   const setDetail = (id: string | null) => {
     const next = new URLSearchParams(params);
     if (id) next.set("detail", id); else next.delete("detail");
@@ -144,37 +154,38 @@ function UsageLogsSession({ authEpoch }: { authEpoch: number }) {
   const atLimit = session.visits.length >= HISTORY_LIMIT && index === HISTORY_LIMIT - 1 && !!list.data?.has_more;
 
   return <div className="mx-auto max-w-7xl">
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold tracking-tight">{t("nav.usageLogs")}</h1><p className="mt-1 max-w-3xl text-sm text-muted-foreground">{t("usage.subtitle")}</p></div><Button variant="outline" onClick={refresh}><RefreshCw className="h-4 w-4" />{t("usage.refresh")}</Button></div>
-    <form onSubmit={apply} className="mb-5 rounded-2xl border border-border bg-card p-4 shadow-card">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold tracking-tight">{t("nav.usageLogs")}</h1><p className="mt-1 max-w-3xl text-sm text-muted-foreground">{t("usage.subtitle")}</p></div><Button variant="outline" onClick={refresh} disabled={!validFilters(session.query)}><RefreshCw className="h-4 w-4" />{t("usage.refresh")}</Button></div>
+    <Button type="button" variant="outline" className="mb-4 sm:hidden" aria-expanded={filtersOpen} aria-controls="usage-filter-form" onClick={() => setFiltersOpen(open => !open)}>{t(filtersOpen ? "usage.hideFilters" : "usage.showFilters")}</Button>
+    <form id="usage-filter-form" onSubmit={apply} className={`mb-5 rounded-2xl border border-border bg-card p-4 shadow-card ${filtersOpen ? "" : "hidden sm:block"}`}>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 [&>div]:min-w-0 [&_input]:min-h-11 [&_input]:min-w-0 [&_input]:text-base [&_select]:min-h-11 [&_select]:min-w-0 [&_select]:text-base sm:[&_input]:min-h-0 sm:[&_input]:text-sm sm:[&_select]:min-h-0 sm:[&_select]:text-sm">
         <Field label={t("usage.range")} htmlFor="usage-preset"><Select id="usage-preset" value={draftPreset} onChange={event => setDraftPreset(event.target.value as TimePreset)}>{["1h", "24h", "7d", "custom"].map(value => <option key={value} value={value}>{t(`usage.presets.${value}`)}</option>)}</Select></Field>
         {draftPreset === "custom" && <><Field label={t("usage.from")} htmlFor="usage-from"><Input id="usage-from" type="datetime-local" required value={localInput(draft.from)} onChange={event => setDraft({ ...draft, from: utcInput(event.target.value) })} /></Field><Field label={t("usage.to")} htmlFor="usage-to"><Input id="usage-to" type="datetime-local" required value={localInput(draft.to)} onChange={event => setDraft({ ...draft, to: utcInput(event.target.value) })} /></Field></>}
-        <Field label={t("usage.action")} htmlFor="usage-action"><Select id="usage-action" value={draft.action || ""} onChange={event => setDraft({ ...draft, action: event.target.value || undefined })}><option value="">{t("usage.all")}</option>{actions.map(value => <option key={value} value={value}>{actionLabel(value)}</option>)}</Select></Field>
-        <Field label={t("usage.outcome")} htmlFor="usage-outcome"><Select id="usage-outcome" value={draft.outcome || ""} onChange={event => setDraft({ ...draft, outcome: event.target.value || undefined })}><option value="">{t("usage.all")}</option>{outcomes.map(value => <option key={value} value={value}>{t(`usage.outcomes.${value}`)}</option>)}</Select></Field>
-        <Field label={t("usage.authType")} htmlFor="usage-auth"><Select id="usage-auth" value={draft.auth_type || ""} onChange={event => setDraft({ ...draft, auth_type: event.target.value || undefined })}><option value="">{t("usage.all")}</option>{authTypes.map(value => <option key={value} value={value}>{t(`usage.authTypes.${value}`)}</option>)}</Select></Field>
-        {filterKeys.filter(key => !["action", "outcome", "auth_type"].includes(key)).map(key => key === "server_id" || key === "user_id" || key === "api_key_id" ? <UsageIdentityFilter key={key} id={`usage-${key}`} kind={key === "server_id" ? "server" : key === "user_id" ? "user" : "api_key"} value={draft[key]} authEpoch={authEpoch} onChange={value => setDraft({ ...draft, [key]: value })} /> : <Field key={key} label={t(`usage.filters.${key}`)} htmlFor={`usage-${key}`} hint={key === "request_id" ? <span id="usage-request-id-help">{t("usage.requestIDHelp")}</span> : undefined}>{key === "resource_type" ? <Select id={`usage-${key}`} value={draft.resource_type || ""} onChange={event => setDraft({ ...draft, resource_type: event.target.value || undefined })}><option value="">{t("usage.all")}</option>{["server", "credential", "service", "api_key"].map(value => <option key={value} value={value}>{t(`usage.resourceTypes.${value}`)}</option>)}</Select> : <Input id={`usage-${key}`} aria-describedby={key === "request_id" ? "usage-request-id-help" : undefined} value={draft[key] || ""} maxLength={key === "request_id" ? 128 : 20} onChange={event => setDraft({ ...draft, [key]: event.target.value.trim() || undefined })} />}</Field>)}
+        <Field label={t("usage.action")} htmlFor="usage-action"><Select id="usage-action" value={draft.action || ""} onChange={event => setDraft({ ...draft, action: event.target.value || undefined })}><option value="">{t("usage.all")}</option>{draft.action && !(actions as readonly string[]).includes(draft.action) && <option value={draft.action} disabled>{t("usage.invalidSelection")}</option>}{actions.map(value => <option key={value} value={value}>{actionLabel(value)}</option>)}</Select></Field>
+        <Field label={t("usage.outcome")} htmlFor="usage-outcome"><Select id="usage-outcome" value={draft.outcome || ""} onChange={event => setDraft({ ...draft, outcome: event.target.value || undefined })}><option value="">{t("usage.all")}</option>{draft.outcome && !(outcomes as readonly string[]).includes(draft.outcome) && <option value={draft.outcome} disabled>{t("usage.invalidSelection")}</option>}{outcomes.map(value => <option key={value} value={value}>{t(`usage.outcomes.${value}`)}</option>)}</Select></Field>
+        <Field label={t("usage.authType")} htmlFor="usage-auth"><Select id="usage-auth" value={draft.auth_type || ""} onChange={event => setDraft({ ...draft, auth_type: event.target.value || undefined })}><option value="">{t("usage.all")}</option>{draft.auth_type && !(authTypes as readonly string[]).includes(draft.auth_type) && <option value={draft.auth_type} disabled>{t("usage.invalidSelection")}</option>}{authTypes.map(value => <option key={value} value={value}>{t(`usage.authTypes.${value}`)}</option>)}</Select></Field>
+        {filterKeys.filter(key => !["action", "outcome", "auth_type"].includes(key)).map(key => key === "server_id" || key === "user_id" || key === "api_key_id" ? <UsageIdentityFilter key={key} id={`usage-${key}`} kind={key === "server_id" ? "server" : key === "user_id" ? "user" : "api_key"} value={draft[key]} authEpoch={authEpoch} onChange={value => setDraft({ ...draft, [key]: value })} /> : <Field key={key} label={t(`usage.filters.${key}`)} htmlFor={`usage-${key}`} hint={key === "request_id" ? <span id="usage-request-id-help">{t("usage.requestIDHelp")}</span> : undefined}>{key === "resource_type" ? <Select id={`usage-${key}`} value={draft.resource_type || ""} onChange={event => setDraft({ ...draft, resource_type: event.target.value || undefined })}><option value="">{t("usage.all")}</option>{draft.resource_type && !(resourceTypes as readonly string[]).includes(draft.resource_type) && <option value={draft.resource_type} disabled>{t("usage.invalidSelection")}</option>}{resourceTypes.map(value => <option key={value} value={value}>{t(`usage.resourceTypes.${value}`)}</option>)}</Select> : <Input id={`usage-${key}`} aria-describedby={key === "request_id" ? "usage-request-id-help" : undefined} value={draft[key] || ""} maxLength={key === "request_id" ? 128 : 20} onChange={event => setDraft({ ...draft, [key]: event.target.value.trim() || undefined })} />}</Field>)}
         <Field label={t("usage.pageSize")} htmlFor="usage-size"><Select id="usage-size" value={draft.page_size} onChange={event => setDraft({ ...draft, page_size: Number(event.target.value) })}>{[25, 50, 100].map(value => <option key={value}>{value}</option>)}</Select></Field>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-4"><Button type="submit">{t("usage.apply")}</Button><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={autoCheck} onChange={event => setAutoCheck(event.target.checked)} />{t("usage.checkUpdates")}</label><span className="text-xs text-muted-foreground">{t("usage.timezone", { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone })}</span></div>
-      {formError && <p className="mt-3 text-sm text-danger" role="alert">{t("usage.invalidFilters")}</p>}
+      {(formError || !validFilters(session.query)) && <p className="mt-3 text-sm text-danger" role="alert">{t("usage.invalidFilters")}</p>}
     </form>
-    <p className="mb-3 text-xs text-muted-foreground">{timestamp(session.query.from)} — {timestamp(session.query.to)} · {t("usage.consistency")}</p>
+    <p className="mb-3 text-xs text-muted-foreground">{timestamp(session.query.from)} — {timestamp(session.query.to)} · {t("usage.consistency")} {t(preset === "custom" ? "usage.customRefreshHint" : "usage.relativeRefreshHint")}</p>
     {list.updates && index === 0 && <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-border bg-primary-subtle p-3 text-sm" role="status"><span>{t("usage.updates")}</span><Button size="sm" onClick={refresh}>{t("usage.refresh")}</Button></div>}
     {list.probeError && autoCheck && index === 0 && <p className="mb-3 text-xs text-danger" role="status">{t("usage.probeFailed")}</p>}
     {list.error && <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger bg-danger-subtle p-3 text-sm" role="alert"><span>{cursorError ? t("usage.cursorExpired") : translateApiError(list.error, t)}</span><Button variant="outline" size="sm" onClick={() => cursorError ? refresh() : void list.retry()}>{cursorError ? t("usage.refresh") : t("common.retry")}</Button></div>}
     {list.rereading && <p className="mb-3 text-sm text-muted-foreground" role="status">{t("usage.rereading")}</p>}
     {list.changedPage === index && <p className="mb-3 text-sm text-muted-foreground" role="status">{t("usage.pageChanged")}</p>}
     {(list.fetching || selectedDifferent) && <p className="mb-3 text-sm text-muted-foreground" role="status">{t("usage.loadingPage", { page: index + 1 })}</p>}
-    <div aria-busy={list.fetching}>
+    <div ref={resultsRef} tabIndex={-1} aria-busy={list.fetching} className="scroll-mt-4 focus:outline-none">
       {!list.data && list.loading ? <div className="space-y-3 rounded-2xl border border-border bg-card p-6" aria-label={t("common.loading")}>{[0, 1, 2, 3].map(value => <div key={value} className="h-10 animate-pulse rounded bg-muted" />)}</div> : list.data?.items.length === 0 ? <div className="rounded-2xl border border-border bg-card p-12 text-center"><FileClock className="mx-auto mb-3 h-8 w-8 text-muted-foreground" /><p>{t("usage.empty")}</p><p className="mt-2 text-sm text-muted-foreground">{t("usage.emptyHint")}</p></div> : list.data && <>
         <TableCard className="hidden md:block"><Table><THead><tr>{["time", "action", "actor", "resource", "outcome", "duration", "requestID"].map(key => <Th key={key}>{t(`usage.${key}`)}</Th>)}<Th>{t("common.actions")}</Th></tr></THead><TBody>{list.data.items.map(log => <tr key={log.id}><Td><span title={fullTimestamp(log.started_at)} className="whitespace-nowrap">{timestamp(log.started_at)}</span></Td><Td>{actionLabel(log.action)}</Td><Td><span className="block max-w-48 truncate" title={identity(log)}>{identity(log)}</span><span className="text-xs text-muted-foreground">{authLabel(log)}</span></Td><Td>{resource(log)}</Td><Td><span className={log.outcome === "failed" || log.outcome === "rejected" ? "text-danger" : "text-foreground"}>{outcome(log)}</span></Td><Td className="whitespace-nowrap text-xs">{duration(log)}</Td><Td>{requestControl(log)}</Td><Td><Button size="sm" variant="outline" onClick={() => setDetail(log.id)} aria-label={`${t("usage.viewDetails")} #${log.id}`}>{t("usage.viewDetails")}</Button></Td></tr>)}</TBody></Table></TableCard>
         <div className="space-y-3 md:hidden">{list.data.items.map(log => <article key={log.id} className="rounded-2xl border border-border bg-card p-4 shadow-card"><div className="mb-2 flex items-center justify-between gap-3"><span className="text-xs text-muted-foreground" title={fullTimestamp(log.started_at)}>{timestamp(log.started_at)}</span><span className="text-xs">{outcome(log)}</span></div><h2 className="font-medium">{actionLabel(log.action)}</h2><p className="mt-1 break-words text-sm">{authLabel(log)} · {identity(log)}</p><div className="my-2 text-sm">{resource(log)}</div><p className="mb-2 text-xs text-muted-foreground">{duration(log)}</p><div className="flex flex-wrap items-center justify-between gap-2">{requestControl(log)}<Button size="sm" variant="outline" onClick={() => setDetail(log.id)} aria-label={`${t("usage.viewDetails")} #${log.id}`}>{t("usage.viewDetails")}</Button></div></article>)}</div>
       </>}
     </div>
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><span className="text-sm text-muted-foreground">{t("usage.page", { page: (list.displayedPage ?? index) + 1 })}</span><div className="flex gap-2"><Button variant="outline" disabled={index === 0 || list.fetching} onClick={() => setIndex(value => value - 1)}>{t("usage.previous")}</Button><Button variant="outline" disabled={!!list.error || list.fetching || !session.get(index)?.has_more || atLimit} onClick={() => { const next = session.next(index); if (next !== undefined) setIndex(next); }}>{t("usage.next")}</Button></div></div>
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><span className="text-sm text-muted-foreground">{t("usage.page", { page: (list.displayedPage ?? index) + 1 })}</span><div className="flex flex-wrap gap-2"><Button variant="outline" disabled={index === 0 || list.fetching} onClick={() => setIndex(value => value - 1)}>{t("usage.previous")}</Button><Button variant="outline" disabled={!!list.error || list.fetching || !session.get(index)?.has_more || atLimit} onClick={() => { const next = session.next(index); if (next !== undefined) setIndex(next); }}>{t("usage.next")}</Button></div></div>
     {atLimit && <p className="mt-3 text-sm text-muted-foreground" role="status">{t("usage.historyLimit")}</p>}
     <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
-    <Dialog open={!!rawDetail} onClose={() => setDetail(null)} title={t("usage.detailTitle")} className="m-0 ml-auto h-dvh max-h-none w-[min(100vw,40rem)] max-w-none rounded-none border-y-0 border-r-0" contentClassName="p-6">
+    <Dialog open={!!rawDetail} onClose={() => setDetail(null)} title={t("usage.detailTitle")} className="m-0 ml-auto h-dvh max-h-none w-[min(100vw,40rem)] max-w-none rounded-none border-y-0 border-r-0" contentClassName="p-4 sm:p-6">
       {!detailID ? <p role="alert">{t("usage.invalidDetail")}</p> : <>
         <div className="mb-3 flex items-center justify-between gap-3"><span className="break-all text-xs text-muted-foreground">#{detailID}</span><Button size="sm" variant="outline" disabled={detail.fetching} onClick={() => void detail.refetch()}>{t("usage.refreshDetail")}</Button></div>
         {detail.loading && <p role="status">{t("common.loading")}</p>}

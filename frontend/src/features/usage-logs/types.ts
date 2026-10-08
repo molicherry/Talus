@@ -1,5 +1,6 @@
 export const outcomes = ["running", "succeeded", "failed", "rejected", "cancelled", "unknown"] as const;
 export const authTypes = ["jwt", "api_key", "unauthenticated", "legacy_unknown"] as const;
+export const resourceTypes = ["server", "credential", "service", "api_key"] as const;
 export const actions = [
   "server.create", "server.update", "server.delete", "credential.create", "credential.update", "credential.delete",
   "service.create", "service.update", "service.delete", "api_key.create", "api_key.delete",
@@ -33,6 +34,7 @@ export interface UsageLog {
   http_status?: number | null;
   client_address?: string | null;
   source: "operation" | "audit_legacy";
+  legacy_audit_event_id?: string | null;
   exit_code?: number | null;
   upstream_status?: number | null;
   error_reason?: string | null;

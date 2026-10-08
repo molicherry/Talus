@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { getUsageLog, getUsageLogs } from "../api";
 import { pruneQueryCache, removeQueries, useQuery } from "../../../lib/query";
-import { DetailCache, FrozenPages, resolveRange, visibleSignature } from "../lib/session";
+import { DetailCache, FrozenPages, refreshFilters, validFilters, visibleSignature } from "../lib/session";
 import type { TimePreset, UsageLog, UsageLogPage } from "../types";
 
 export function useFrozenList(session: FrozenPages, index: number, authEpoch: number, visible: boolean, autoCheck: boolean, preset: TimePreset) {
+  const valid = validFilters(session.query);
   const cached = session.get(index);
   const cursor = session.visits[index]?.cursor ?? null;
   const query = useQuery({
     queryKey: ["usage-logs", authEpoch, session.sessionID, session.canonical, cursor],
     queryFn: ({ signal }) => getUsageLogs(session.query, cursor, signal),
-    enabled: !cached,
+    enabled: valid && !cached,
     staleTime: Infinity,
   });
   const [display, setDisplay] = useState<{ session: FrozenPages; page: number; data: UsageLogPage } | null>(null);
@@ -19,7 +20,7 @@ export function useFrozenList(session: FrozenPages, index: number, authEpoch: nu
   const [updates, setUpdates] = useState(false);
   const accepted = useRef<UsageLogPage | undefined>(undefined);
   const [probeTick, setProbeTick] = useState(0);
-  const probeReady = autoCheck && visible && index === 0 && !!session.get(0);
+  const probeReady = valid && autoCheck && visible && index === 0 && !!session.get(0);
   useEffect(() => {
     accepted.current = undefined;
     setUpdates(false);
@@ -47,7 +48,7 @@ export function useFrozenList(session: FrozenPages, index: number, authEpoch: nu
   // inside the request and never become the currently displayed conditions.
   const probe = useQuery({
     queryKey: ["usage-logs-probe", authEpoch, session.sessionID],
-    queryFn: ({ signal }) => getUsageLogs(preset === "custom" ? session.query : { ...session.query, ...resolveRange(preset) }, null, signal),
+    queryFn: ({ signal }) => getUsageLogs(refreshFilters(session.query, preset), null, signal),
     enabled: false,
     staleTime: Infinity,
   });

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -25,6 +26,7 @@ var (
 	ErrUsageLeaseExpired = errors.New("owner_lease_expired")
 	ErrUsageInvalid      = errors.New("invalid_usage_record")
 	ErrUsageStorage      = errors.New("usage_storage_unavailable")
+	ErrUsagePermanent    = errors.New("usage_storage_permanent_failure")
 )
 
 type UsageLogRepoConfig struct {
@@ -39,14 +41,17 @@ type UsageLogFilter struct {
 }
 
 type UsageLogRepo struct {
-	db         *gorm.DB
-	config     UsageLogRepoConfig
-	reconciled atomic.Uint64
-	cleaned    atomic.Uint64
+	db               *gorm.DB
+	config           UsageLogRepoConfig
+	reconciled       atomic.Uint64
+	cleaned          atomic.Uint64
+	cleanedInstances atomic.Uint64
+	cleanupReported  atomic.Bool
+	reportSlot       chan struct{}
 }
 
 func NewUsageLogRepo(db *gorm.DB, configs ...UsageLogRepoConfig) *UsageLogRepo {
-	c := UsageLogRepoConfig{LeaseDuration: time.Minute, OrdinaryRetention: 30 * 24 * time.Hour, SensitiveRetention: 90 * 24 * time.Hour, ReconcileGrace: 30 * time.Second, BatchSize: 200}
+	c := UsageLogRepoConfig{ReconcileGrace: 30 * time.Second, BatchSize: 200}
 	if len(configs) > 0 {
 		v := configs[0]
 		if v.LeaseDuration > 0 {
@@ -65,18 +70,37 @@ func NewUsageLogRepo(db *gorm.DB, configs ...UsageLogRepoConfig) *UsageLogRepo {
 			c.BatchSize = v.BatchSize
 		}
 	}
+	policy := (model.UsagePolicy{LeaseDuration: c.LeaseDuration, OrdinaryRetention: c.OrdinaryRetention, SensitiveRetention: c.SensitiveRetention}).WithDefaults()
+	c.LeaseDuration, c.OrdinaryRetention, c.SensitiveRetention = policy.LeaseDuration, policy.OrdinaryRetention, policy.SensitiveRetention
 	// Persistence failures are reported with fixed codes by the recorder. GORM
 	// must not also emit SQL containing snapshots or legacy audit free text.
-	return &UsageLogRepo{db: db.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)}), config: c}
+	return &UsageLogRepo{db: db.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)}), config: c, reportSlot: make(chan struct{}, 1)}
 }
 
 func usageErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	for _, known := range []error{ErrUsageOwnerMissing, ErrUsageOwnerRetired, ErrUsageLeaseExpired, ErrUsageInvalid, gorm.ErrRecordNotFound, context.Canceled, context.DeadlineExceeded} {
+	for _, known := range []error{ErrUsageOwnerMissing, ErrUsageOwnerRetired, ErrUsageLeaseExpired, ErrUsageInvalid, ErrUsagePermanent, ErrUsageStorage, gorm.ErrRecordNotFound, context.Canceled, context.DeadlineExceeded} {
 		if errors.Is(err, known) {
 			return known
+		}
+	}
+	for _, invalid := range []error{gorm.ErrInvalidData, gorm.ErrInvalidField, gorm.ErrInvalidValue, gorm.ErrDuplicatedKey, gorm.ErrForeignKeyViolated} {
+		if errors.Is(err, invalid) {
+			return ErrUsageInvalid
+		}
+	}
+	var coded interface{ SQLState() string }
+	if errors.As(err, &coded) {
+		code := coded.SQLState()
+		if len(code) >= 2 {
+			switch code[:2] {
+			case "22", "23": // Data and integrity failures cannot improve on retry.
+				return ErrUsageInvalid
+			case "0A", "28", "3D", "3F", "42": // Unsupported, authorization, or schema errors.
+				return ErrUsagePermanent
+			}
 		}
 	}
 	return ErrUsageStorage
@@ -151,10 +175,7 @@ func recoveryUnknown(v *model.UsageLog) bool {
 }
 func sameOwner(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
 func (r *UsageLogRepo) retention(action string) time.Duration {
-	if action == "credential.reveal" || action == "api_key.reveal" || action == "service.credentials" || action == "server.host_key.trust" || strings.HasSuffix(action, ".delete") {
-		return r.config.SensitiveRetention
-	}
-	return r.config.OrdinaryRetention
+	return (model.UsagePolicy{OrdinaryRetention: r.config.OrdinaryRetention, SensitiveRetention: r.config.SensitiveRetention}).Retention(action)
 }
 
 func (r *UsageLogRepo) Upsert(ctx context.Context, input *model.UsageLog) error {
@@ -317,18 +338,23 @@ func (r *UsageLogRepo) OwnerUnknown(ctx context.Context, id string) ([]string, e
 	return ids, usageErr(err)
 }
 
-func (r *UsageLogRepo) ReconciledCount() uint64 { return r.reconciled.Load() }
-func (r *UsageLogRepo) CleanedCount() uint64    { return r.cleaned.Load() }
+func (r *UsageLogRepo) ReconciledCount() uint64      { return r.reconciled.Load() }
+func (r *UsageLogRepo) CleanedCount() uint64         { return r.cleaned.Load() }
+func (r *UsageLogRepo) CleanedInstanceCount() uint64 { return r.cleanedInstances.Load() }
 
 // Reconcile never invents a business result or advances an owner's sequence.
-// Active and finishing snapshots are held by the caller while this runs.
+// The static tracked list remains supported for callers without local state.
 func (r *UsageLogRepo) Reconcile(ctx context.Context, ownerID string, tracked []string) error {
+	return r.ReconcileTracked(ctx, ownerID, func() []string { return tracked })
+}
+
+// ReconcileTracked takes the in-memory tracking snapshot after locking the
+// local owner. New inserts must take that owner's SHARE lock, so a Begin that
+// arrives after this snapshot cannot persist a row until reconciliation ends.
+// snapshot must only read memory and must never wait on database work.
+func (r *UsageLogRepo) ReconcileTracked(ctx context.Context, ownerID string, snapshot func() []string) error {
 	if ownerID == "" {
 		ownerID = "00000000-0000-0000-0000-000000000000"
-	}
-	seen := make(map[string]bool, len(tracked))
-	for _, id := range tracked {
-		seen[id] = true
 	}
 	var owners []string
 	err := r.db.WithContext(ctx).Table("usage_logs AS logs").Joins("LEFT JOIN usage_log_instances AS instances ON logs.owner_instance_id = instances.instance_id").Where("(logs.outcome = 'running' AND (instances.instance_id IS NULL OR instances.retired_at IS NOT NULL OR instances.lease_until <= clock_timestamp() OR logs.owner_instance_id = ?)) OR (logs.owner_instance_id = ? AND logs.outcome = 'unknown' AND logs.recovery_reason = 'owner_lease_expired')", ownerID, ownerID).Distinct("logs.owner_instance_id").Limit(r.config.BatchSize).Pluck("logs.owner_instance_id", &owners).Error
@@ -368,6 +394,14 @@ func (r *UsageLogRepo) Reconcile(ctx context.Context, ownerID string, tracked []
 			stale := missing || owner.RetiredAt != nil || !owner.LeaseUntil.After(now)
 			if !stale && id != ownerID {
 				return nil
+			}
+			var tracked []string
+			seen := map[string]bool{}
+			if !stale && snapshot != nil {
+				tracked = snapshot()
+				for _, operationID := range tracked {
+					seen[operationID] = true
+				}
 			}
 			var records []model.UsageLog
 			q := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("owner_instance_id = ?", id)
@@ -415,11 +449,81 @@ func (r *UsageLogRepo) Reconcile(ctx context.Context, ownerID string, tracked []
 	return nil
 }
 
+// CleanupReport contains only fixed dimensions. Arbitrary historical action,
+// source, and outcome text is grouped under "other", never emitted to logs.
+type UsageCleanupGroupCount struct {
+	Source  string `json:"source"`
+	Action  string `json:"action"`
+	Outcome string `json:"outcome"`
+	Count   int64  `json:"count"`
+}
+
+var usageReportActions = []string{
+	"server.create", "server.update", "server.delete", "server.host_key.trust", "server.exec", "server.terminal",
+	"credential.create", "credential.update", "credential.delete", "credential.reveal",
+	"api_key.create", "api_key.delete", "api_key.reveal",
+	"service.create", "service.update", "service.delete", "service.relay", "service.credentials",
+}
+
+func (r *UsageLogRepo) cleanupCandidates(db *gorm.DB) *gorm.DB {
+	return db.Table("usage_logs AS logs").Where("logs.outcome <> 'running' AND logs.retention_at IS NOT NULL AND logs.retention_at <= clock_timestamp() - (CASE WHEN logs.action IN ? OR RIGHT(logs.action, ?) = ? THEN ?::double precision ELSE ?::double precision END * INTERVAL '1 second')", model.UsageSensitiveActions(), len(model.UsageDeleteActionSuffix), model.UsageDeleteActionSuffix, r.config.SensitiveRetention.Seconds(), r.config.OrdinaryRetention.Seconds()).Where("logs.source <> 'audit_legacy' OR EXISTS (SELECT 1 FROM usage_log_backfill_states WHERE id = ? AND completed_at IS NOT NULL)", usageBackfillID).Where("NOT (logs.outcome = 'unknown' AND logs.recovery_reason = 'owner_lease_expired') OR NOT EXISTS (SELECT 1 FROM usage_log_instances AS i WHERE i.instance_id = logs.owner_instance_id AND i.retired_at IS NULL AND i.lease_until > clock_timestamp())")
+}
+
+func (r *UsageLogRepo) cleanupReport(db *gorm.DB) ([]UsageCleanupGroupCount, error) {
+	groups := make([]UsageCleanupGroupCount, 0)
+	err := r.cleanupCandidates(db).Select("CASE WHEN logs.source IN ? THEN logs.source ELSE 'other' END AS source, CASE WHEN logs.action IN ? THEN logs.action ELSE 'other' END AS action, CASE WHEN logs.outcome IN ? THEN logs.outcome ELSE 'other' END AS outcome, COUNT(*) AS count", []string{"operation", "audit_legacy"}, usageReportActions, []string{"succeeded", "failed", "rejected", "cancelled", "unknown"}).Group("1,2,3").Order("1,2,3").Scan(&groups).Error
+	return groups, usageErr(err)
+}
+
+func (r *UsageLogRepo) CleanupReport(ctx context.Context) ([]UsageCleanupGroupCount, error) {
+	return r.cleanupReport(r.db.WithContext(ctx))
+}
+
+// PrepareCleanup reports eligibility before enabling deletion. A caller can
+// allow a larger read budget than each subsequent small deletion batch.
+func (r *UsageLogRepo) PrepareCleanup(ctx context.Context) error {
+	return r.ensureCleanupReported(ctx)
+}
+
+func logCleanupReport(scope string, groups []UsageCleanupGroupCount) {
+	var total int64
+	for _, group := range groups {
+		total += group.Count
+	}
+	slog.Info("usage retention cleanup eligibility", "scope", scope, "eligible", total, "groups", groups)
+}
+
+func (r *UsageLogRepo) ensureCleanupReported(ctx context.Context) error {
+	if r.cleanupReported.Load() {
+		return nil
+	}
+	select {
+	case r.reportSlot <- struct{}{}:
+		defer func() { <-r.reportSlot }()
+	default:
+		return ErrUsageStorage
+	}
+	if r.cleanupReported.Load() {
+		return nil
+	}
+	groups, err := r.CleanupReport(ctx)
+	if err != nil {
+		return err
+	}
+	logCleanupReport("initial_cleanup", groups)
+	r.cleanupReported.Store(true)
+	return nil
+}
+
 func (r *UsageLogRepo) Cleanup(ctx context.Context) error {
+	// A failed report leaves cleanup disabled until a later successful report.
+	if err := r.ensureCleanupReported(ctx); err != nil {
+		return err
+	}
 	// Candidates are read without row locks, then each transaction locks owner
 	// before log. Every eligibility check is repeated under those locks.
 	var ids []uint64
-	err := r.db.WithContext(ctx).Table("usage_logs AS logs").Where("logs.outcome <> 'running' AND logs.retention_at IS NOT NULL AND logs.retention_at <= clock_timestamp() - (CASE WHEN logs.action IN ('credential.reveal','api_key.reveal','service.credentials','server.host_key.trust') OR logs.action LIKE '%.delete' THEN ?::double precision ELSE ?::double precision END * INTERVAL '1 second')", r.config.SensitiveRetention.Seconds(), r.config.OrdinaryRetention.Seconds()).Where("logs.source <> 'audit_legacy' OR EXISTS (SELECT 1 FROM usage_log_backfill_states WHERE id = ? AND completed_at IS NOT NULL)", usageBackfillID).Where("NOT (logs.outcome = 'unknown' AND logs.recovery_reason = 'owner_lease_expired') OR NOT EXISTS (SELECT 1 FROM usage_log_instances AS i WHERE i.instance_id = logs.owner_instance_id AND i.retired_at IS NULL AND i.lease_until > clock_timestamp())").Order("logs.retention_at,logs.id").Limit(r.config.BatchSize).Pluck("logs.id", &ids).Error
+	err := r.cleanupCandidates(r.db.WithContext(ctx)).Order("logs.retention_at,logs.id").Limit(r.config.BatchSize).Pluck("logs.id", &ids).Error
 	if err != nil {
 		return usageErr(err)
 	}
@@ -493,11 +597,57 @@ func (r *UsageLogRepo) Cleanup(ctx context.Context) error {
 		}
 		r.cleaned.Add(uint64(deleted))
 	}
+	return r.cleanupInstances(ctx)
+}
+
+func (r *UsageLogRepo) cleanupInstances(ctx context.Context) error {
+	var owners []string
+	err := r.db.WithContext(ctx).Model(&model.UsageLogInstance{}).Where("(retired_at IS NOT NULL OR lease_until <= clock_timestamp()) AND NOT EXISTS (SELECT 1 FROM usage_logs WHERE owner_instance_id = usage_log_instances.instance_id)").Order("lease_until, instance_id").Limit(r.config.BatchSize).Pluck("instance_id", &owners).Error
+	if err != nil {
+		return usageErr(err)
+	}
+	for _, id := range owners {
+		var deleted int64
+		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var owner model.UsageLogInstance
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).First(&owner, "instance_id = ?", id).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil
+				}
+				return err
+			}
+			now, err := databaseNow(tx)
+			if err != nil {
+				return err
+			}
+			if owner.RetiredAt == nil && owner.LeaseUntil.After(now) {
+				return nil
+			}
+			// Inserts hold the owner's SHARE lock, so references cannot appear
+			// between this recheck and deletion. Never remove a healthy owner.
+			result := tx.Where("instance_id = ? AND NOT EXISTS (SELECT 1 FROM usage_logs WHERE owner_instance_id = ?)", id, id).Delete(&model.UsageLogInstance{})
+			deleted = result.RowsAffected
+			return result.Error
+		})
+		if err != nil {
+			return usageErr(err)
+		}
+		r.cleanedInstances.Add(uint64(deleted))
+	}
 	return nil
 }
 
 const usageBackfillID = "usage-log-audit-legacy-v2"
 const usageBackfillLock int64 = 734864170319
+
+func (r *UsageLogRepo) BackfillStatus(ctx context.Context) (*model.UsageLogBackfillState, error) {
+	var state model.UsageLogBackfillState
+	err := r.db.WithContext(ctx).First(&state, "id = ?", usageBackfillID).Error
+	if err != nil {
+		return nil, usageErr(err)
+	}
+	return &state, nil
+}
 
 func legacyOperationID(id uint) string {
 	b := sha1.Sum([]byte(fmt.Sprintf("talus/usage-log/audit-legacy/v2/%d", id)))
@@ -607,7 +757,24 @@ func (r *UsageLogRepo) Backfill(ctx context.Context) error {
 				}
 			}
 		}
-		return conn.Model(&model.UsageLogBackfillState{}).Where("id = ? AND completed_at IS NULL", state.ID).Update("completed_at", gorm.Expr("clock_timestamp()")).Error
+		var groups []UsageCleanupGroupCount
+		var completed bool
+		e = conn.Transaction(func(tx *gorm.DB) error {
+			updated := tx.Model(&model.UsageLogBackfillState{}).Where("id = ? AND completed_at IS NULL", state.ID).Update("completed_at", gorm.Expr("clock_timestamp()"))
+			if updated.Error != nil {
+				return updated.Error
+			}
+			completed = updated.RowsAffected > 0
+			var err error
+			groups, err = r.cleanupReport(tx.Where("logs.source = 'audit_legacy'"))
+			return err
+		})
+		if e == nil && completed {
+			// Complete and its cleanup report commit together: no cleaner can
+			// delete legacy summaries before these counts have been captured.
+			logCleanupReport("legacy_backfill", groups)
+		}
+		return e
 	})
 	return usageErr(err)
 }
