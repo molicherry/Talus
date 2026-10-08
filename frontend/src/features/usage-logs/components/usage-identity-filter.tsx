@@ -125,8 +125,8 @@ export function UsageIdentityFilter({ id, kind, value, onChange, authEpoch }: Pr
     <div ref={root} className="relative" onBlur={event => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
     }}>
-      <div className="flex flex-wrap items-center gap-2">
-        <Input ref={input} className="min-w-0 flex-1" id={id} role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded={open}
+      <div className="relative">
+        <Input ref={input} className={`min-w-0 ${value ? "pr-22" : "pr-11"}`} id={id} role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded={open}
           aria-controls={open ? listID : undefined} aria-activedescendant={open && active >= 0 && choices[active] ? `${listID}-${active}` : undefined}
           aria-describedby={hintID} autoComplete="off" spellCheck={false} maxLength={128}
           placeholder={t("usage.identity.search")} title={selectedText || undefined} value={open ? search : selectedText}
@@ -150,8 +150,8 @@ export function UsageIdentityFilter({ id, kind, value, onChange, authEpoch }: Pr
             }
           }}
         />
-        <Button type="button" variant="ghost" size="icon" className="shrink-0" aria-label={t("usage.identity.toggle", { label })} aria-expanded={open} aria-controls={open ? listID : undefined} onMouseDown={event => event.preventDefault()} onClick={() => { setOpen(previous => !previous); setSearch(""); setActive(-1); input.current?.focus(); }}><ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} /></Button>
-        {value && <Button type="button" variant="ghost" size="icon" aria-label={t("usage.identity.clear", { label })} onClick={clear}><X className="h-4 w-4" /></Button>}
+        <Button type="button" variant="ghost" size="icon" className="absolute inset-y-0 right-0 h-full w-11" aria-label={t("usage.identity.toggle", { label })} aria-expanded={open} aria-controls={open ? listID : undefined} onMouseDown={event => event.preventDefault()} onClick={() => { setOpen(previous => !previous); setSearch(""); setActive(-1); input.current?.focus(); }}><ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} /></Button>
+        {value && <Button type="button" variant="ghost" size="icon" className="absolute inset-y-0 right-11 h-full w-11" aria-label={t("usage.identity.clear", { label })} onClick={clear}><X className="h-4 w-4" /></Button>}
       </div>
       {value && <p className="mt-1 break-words text-xs text-foreground">{t("usage.identity.selectedID", { id: value })}{selectedState?.item?.deleted ? ` · ${t("usage.identity.deleted")}` : ""}</p>}
       <p id={hintID} className="mt-1 text-xs text-muted-foreground">{t("usage.identity.manualHint")}</p>
