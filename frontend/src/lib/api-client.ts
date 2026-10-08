@@ -1,7 +1,7 @@
 import type { ApiError, ApiErrorDetail } from "../types/api";
 import i18n from "../i18n";
-import { clearAuthToken, getAuthToken } from "./auth";
-import { classifyUnauthorized } from "./unauthorized";
+import { clearAuthToken, denyUsageLogs, getAuthEpoch, getAuthSnapshot, getAuthToken } from "./auth";
+import { classifyUnauthorized, isUsageLogPermissionDenied, isUsageLogRequest, shouldApplyAuthorizationFailure } from "./unauthorized";
 
 /**
  * Prefix for API requests, empty when the UI is served by the backend itself.
@@ -57,6 +57,8 @@ async function errorFromResponse(response: Response): Promise<ApiClientError> {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
+  const requestEpoch = getAuthEpoch();
+  const usagePermissionRevision = getAuthSnapshot().usagePermissionRevision;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...((options.headers as Record<string, string>) ?? {}),
@@ -71,15 +73,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers,
   });
 
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 403) {
     const error = await errorFromResponse(response);
-    // The decision (inline / clear the token / also navigate) lives in
-    // lib/unauthorized.ts so it can be unit tested — in particular that a 401
-    // while already on /login must NOT navigate, or the setup probe on that page
-    // would reload it forever.
-    const action = classifyUnauthorized(error.reason, window.location.pathname);
-    if (action !== "inline") clearAuthToken();
-    if (action === "clear-token-and-redirect") window.location.replace("/login");
+    if (shouldApplyAuthorizationFailure(requestEpoch, getAuthEpoch(), options.signal?.aborted ?? false)) {
+      if (response.status === 401) {
+        const action = classifyUnauthorized(error.reason, window.location.pathname);
+        if (action !== "inline") clearAuthToken(requestEpoch);
+        if (action === "clear-token-and-redirect") window.location.replace("/login");
+      } else if (isUsageLogPermissionDenied(path, error.reason)) {
+        denyUsageLogs(requestEpoch);
+      }
+    }
     throw error;
   }
 
@@ -92,6 +96,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   const json = await response.json();
+  if (isUsageLogRequest(path)) {
+    const current = getAuthSnapshot();
+    if (options.signal?.aborted || current.authEpoch !== requestEpoch || current.usagePermissionRevision !== usagePermissionRevision || !current.canViewUsageLogs) {
+      throw new DOMException("Usage log access changed", "AbortError");
+    }
+  }
   return (json as { data: T }).data;
 }
 

@@ -1,19 +1,23 @@
 package middleware
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vpsmanager/backend/internal/usage"
 )
 
-// RateLimiter implements a simple per-user in-memory rate limiter.
+// RateLimiter distinguishes JWT users from API key callers and their owners.
 type RateLimiter struct {
 	mu       sync.Mutex
 	window   time.Duration
 	maxReqs  int
-	requests map[uint][]time.Time
+	requests map[string][]time.Time
 }
 
 // NewRateLimiter creates a rate limiter with the given window and max requests.
@@ -21,19 +25,23 @@ func NewRateLimiter(window time.Duration, maxReqs int) *RateLimiter {
 	return &RateLimiter{
 		window:   window,
 		maxReqs:  maxReqs,
-		requests: make(map[uint][]time.Time),
+		requests: make(map[string][]time.Time),
 	}
 }
 
 // Allow checks if the user is within the rate limit and records the request.
 func (rl *RateLimiter) Allow(userID uint) bool {
+	return rl.allow("jwt:" + strconv.FormatUint(uint64(userID), 10))
+}
+
+func (rl *RateLimiter) allow(identity string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
 
-	times := rl.requests[userID]
+	times := rl.requests[identity]
 	valid := make([]time.Time, 0, len(times))
 	for _, t := range times {
 		if t.After(cutoff) {
@@ -42,31 +50,44 @@ func (rl *RateLimiter) Allow(userID uint) bool {
 	}
 
 	if len(valid) >= rl.maxReqs {
-		rl.requests[userID] = valid
+		rl.requests[identity] = valid
 		return false
 	}
 
-	rl.requests[userID] = append(valid, now)
+	rl.requests[identity] = append(valid, now)
 	return true
 }
 
-// Limit returns a middleware that rate-limits requests per user.
-// User ID is extracted from the request context via GetUserClaims.
+// Limit uses the verified key ID for key callers, including legacy keys whose
+// owner is unknown. Keys and users with equal numeric IDs have separate quotas.
 func (rl *RateLimiter) Limit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		claims := GetUserClaims(r.Context())
-		if claims == nil {
+		principal := GetPrincipal(r.Context())
+		identity := ""
+		if principal.AuthType == "api_key" && principal.APIKeyID != nil {
+			identity = "api_key:" + strconv.FormatUint(uint64(*principal.APIKeyID), 10)
+		} else if principal.AuthType == "jwt" && principal.UserID != nil {
+			identity = "jwt:" + strconv.FormatUint(uint64(*principal.UserID), 10)
+		}
+		if identity == "" {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if !rl.Allow(claims.UserID) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":{"code":429,"reason":"rate_limited","message":"too many requests"}}`))
+		if !rl.allow(identity) {
+			if op := usage.FromContext(r.Context()); op != nil {
+				op.SetResult("rejected", "rate_limited")
+			}
+			writeRateLimitError(w, r)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func writeRateLimitError(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusTooManyRequests)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": 429, "reason": "rate_limited", "message": "too many requests", "request_id": GetRequestID(r.Context())}})
 }
 
 // IPRateLimiter implements a simple per-client-IP in-memory rate limiter.
@@ -133,9 +154,7 @@ func (rl *IPRateLimiter) Allow(ip string) bool {
 func (rl *IPRateLimiter) Limit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !rl.Allow(clientIP(r, rl.trustProxy)) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":{"code":429,"reason":"rate_limited","message":"too many requests"}}`))
+			writeRateLimitError(w, r)
 			return
 		}
 		next.ServeHTTP(w, r)

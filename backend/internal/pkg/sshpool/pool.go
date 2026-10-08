@@ -1,6 +1,7 @@
 package sshpool
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ const probeTimeout = 3 * time.Second
 // ErrSlotTimeout is returned by Get when the server already has maxConns
 // active sessions and no slot frees up within slotTimeout.
 var ErrSlotTimeout = errors.New("sshpool: too many concurrent sessions for this server")
+var ErrClosed = errors.New("sshpool: pool closed")
 
 type Pool struct {
 	mu          sync.Mutex
@@ -26,6 +28,8 @@ type Pool struct {
 	maxConns    int
 	slotTimeout time.Duration
 	done        chan struct{}
+	closed      bool
+	closeOnce   sync.Once
 	// probe reports whether a pooled connection is still usable. It is
 	// overridable in tests; the default performs a keepalive round-trip.
 	probe func(*ssh.Client) bool
@@ -40,6 +44,7 @@ type connEntry struct {
 	fingerprint string
 	lastUsed    time.Time
 	sem         chan struct{} // concurrency limiter per server
+	waiters     int
 }
 
 // NewPool creates a connection pool that evicts idle connections after maxIdle
@@ -71,7 +76,20 @@ func NewPool(maxIdle time.Duration, maxConns int, slotTimeout time.Duration) *Po
 // previous credential. Callers compute it from current server state, so a
 // reconfigured or deleted server can never hit a stale cache entry.
 func (p *Pool) Get(serverID uint, fingerprint string) (*ssh.Client, error) {
+	return p.GetContext(context.Background(), serverID, fingerprint)
+}
+
+// GetContext also cancels slot waits and joins a cancelled keepalive probe.
+// On error it owns no slot and returns no client; callers must not Release.
+func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string) (*ssh.Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil, ErrClosed
+	}
 	entry, ok := p.conns[serverID]
 	if !ok {
 		entry = &connEntry{
@@ -86,16 +104,38 @@ func (p *Pool) Get(serverID uint, fingerprint string) (*ssh.Client, error) {
 		}
 		entry.fingerprint = fingerprint
 	}
+	entry.waiters++
 	p.mu.Unlock()
 
 	// Acquire concurrency slot (bounded wait; never block forever)
+	timer := time.NewTimer(p.slotTimeout)
+	defer timer.Stop()
+	var waitErr error
 	select {
 	case entry.sem <- struct{}{}:
-	case <-time.After(p.slotTimeout):
-		return nil, ErrSlotTimeout
+	case <-timer.C:
+		waitErr = ErrSlotTimeout
+	case <-ctx.Done():
+		waitErr = ctx.Err()
+	case <-p.done:
+		waitErr = ErrClosed
 	}
 
 	p.mu.Lock()
+	entry.waiters--
+	if waitErr != nil {
+		p.mu.Unlock()
+		return nil, waitErr
+	}
+	if p.closed || ctx.Err() != nil {
+		waitErr = ctx.Err()
+		if waitErr == nil {
+			waitErr = ErrClosed
+		}
+		p.mu.Unlock()
+		<-entry.sem
+		return nil, waitErr
+	}
 	client := entry.client
 	if client != nil {
 		entry.client = nil // transfer ownership to caller
@@ -107,11 +147,47 @@ func (p *Pool) Get(serverID uint, fingerprint string) (*ssh.Client, error) {
 	// restart, or the peer timing it out). Verify it is still usable before
 	// handing it out; otherwise close and drop it so the caller dials a fresh
 	// connection instead of reusing a dead one forever.
-	if client != nil && !p.probe(client) {
-		client.Close()
-		client = nil
+	if client != nil {
+		probed := make(chan bool, 1)
+		go func() { probed <- p.probe(client) }()
+		var healthy bool
+		select {
+		case healthy = <-probed:
+		case <-ctx.Done():
+			_ = client.Close()
+			<-probed // the probe cannot retain ownership after returning
+			<-entry.sem
+			return nil, ctx.Err()
+		case <-p.done:
+			_ = client.Close()
+			<-probed
+			<-entry.sem
+			return nil, ErrClosed
+		}
+		if err := ctx.Err(); err != nil {
+			_ = client.Close()
+			<-entry.sem
+			return nil, err
+		}
+		if !healthy {
+			_ = client.Close()
+			client = nil
+		}
 	}
 
+	p.mu.Lock()
+	closed := p.closed
+	p.mu.Unlock()
+	if closed || ctx.Err() != nil {
+		if client != nil {
+			_ = client.Close()
+		}
+		<-entry.sem
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, ErrClosed
+	}
 	return client, nil
 }
 
@@ -183,17 +259,18 @@ func (p *Pool) Invalidate(serverID uint) {
 
 // Close shuts down the eviction goroutine and closes all cached connections.
 func (p *Pool) Close() {
-	close(p.done)
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	for _, entry := range p.conns {
-		if entry.client != nil {
-			entry.client.Close()
+	p.closeOnce.Do(func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.closed = true
+		close(p.done)
+		for _, entry := range p.conns {
+			if entry.client != nil {
+				entry.client.Close()
+			}
 		}
-	}
-	p.conns = nil
+		p.conns = nil
+	})
 }
 
 // evictLoop periodically removes idle connections.
@@ -222,7 +299,7 @@ func (p *Pool) evict() {
 			entry.client = nil
 		}
 		// Remove entries with no cached client and no active users.
-		if entry.client == nil && len(entry.sem) == 0 {
+		if entry.client == nil && len(entry.sem) == 0 && entry.waiters == 0 {
 			delete(p.conns, id)
 		}
 	}
@@ -240,6 +317,8 @@ func keepAliveProbe(client *ssh.Client) bool {
 	case err := <-done:
 		return err == nil
 	case <-time.After(probeTimeout):
+		_ = client.Close()
+		<-done
 		return false
 	}
 }

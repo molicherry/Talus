@@ -160,6 +160,8 @@ func (h *ServerHandler) Create(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, err)
 		return
 	}
+	usageResource(r, "server", created.ID, created.Name, &created.ID)
+	usageCommitted(r)
 	server.WriteJSON(w, http.StatusCreated, created)
 }
 
@@ -213,6 +215,8 @@ func (h *ServerHandler) Update(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, err)
 		return
 	}
+	usageResource(r, "server", updated.ID, updated.Name, &updated.ID)
+	usageCommitted(r)
 	server.WriteJSON(w, http.StatusOK, updated)
 }
 
@@ -224,10 +228,14 @@ func (h *ServerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if snapshot, err := h.svc.Get(r.Context(), id); err == nil {
+		usageResource(r, "server", id, snapshot.Name, &id)
+	}
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		server.WriteError(w, r, err)
 		return
 	}
+	usageCommitted(r)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -263,13 +271,15 @@ func (h *ServerHandler) TrustHostKey(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, err)
 		return
 	}
+	usageResource(r, "server", updated.ID, updated.Name, &updated.ID)
+	usageCommitted(r)
 	server.WriteJSON(w, http.StatusOK, updated)
 }
 
 // parseIDParam extracts a uint path parameter named "id" from the request URL.
 func parseIDParam(r *http.Request) (uint, error) {
 	idStr := chi.URLParam(r, "id")
-	id, err := strconv.ParseUint(idStr, 10, 64)
+	id, err := strconv.ParseUint(idStr, 10, strconv.IntSize)
 	if err != nil {
 		return 0, err
 	}

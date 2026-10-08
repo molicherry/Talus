@@ -2,7 +2,11 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+
+	"github.com/vpsmanager/backend/internal/server/middleware"
+	"github.com/vpsmanager/backend/internal/usage"
 )
 
 // envelope wraps data in a "data" key for JSON responses.
@@ -23,14 +27,21 @@ func WriteJSON(w http.ResponseWriter, statusCode int, data any) {
 
 // WriteError writes a structured JSON error response.
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
-	requestID := ""
-	if rid := r.Context().Value("request_id"); rid != nil {
-		if s, ok := rid.(string); ok {
-			requestID = s
-		}
-	}
+	requestID := middleware.GetRequestID(r.Context())
 
 	statusCode := StatusCode(err)
+	if op := usage.FromContext(r.Context()); op != nil {
+		reason := ReasonInternal
+		var appErr *AppError
+		var validationErr *ValidationError
+		if errors.As(err, &appErr) && appErr.Reason != "" {
+			reason = appErr.Reason
+		}
+		if errors.As(err, &validationErr) && validationErr.Reason != "" {
+			reason = validationErr.Reason
+		}
+		op.SetHTTPError(statusCode, reason)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)

@@ -1,10 +1,11 @@
-import { Fingerprint, Key, LayoutDashboard, Link2, Server } from "lucide-react";
+import { FileClock, Fingerprint, Key, LayoutDashboard, Link2, Server } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Dialog } from "../ui/dialog";
 import { NavLink } from "react-router-dom";
 
 import { useTranslation } from "../../i18n";
 import { Logo } from "../ui/logo";
+import { useAuth } from "../../hooks/use-auth";
 
 const VERSION = import.meta.env.VITE_APP_VERSION || "dev";
 
@@ -23,6 +24,7 @@ interface SidebarProps {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const { t } = useTranslation();
+  const { canViewUsageLogs } = useAuth();
 
   const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
   useEffect(() => {
@@ -38,7 +40,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const content = (
     <>
       <nav className="flex-1 space-y-1 overflow-y-auto p-4">
-        {navItems.map(({ to, label, icon: Icon }) => (
+        {[...navItems, ...(canViewUsageLogs ? [{ to: "/usage-logs", label: "nav.usageLogs", icon: FileClock }] : [])].map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}

@@ -19,6 +19,7 @@ import (
 	"github.com/vpsmanager/backend/internal/server"
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
+	"github.com/vpsmanager/backend/internal/usage"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -46,6 +47,13 @@ func main() {
 		slog.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		slog.Error("database pool unavailable")
+		os.Exit(1)
+	}
+	sqlDB.SetMaxOpenConns(cfg.DBMaxOpenConnections)
+	sqlDB.SetMaxIdleConns(cfg.DBMaxOpenConnections / 2)
 
 	// --- Database initialization (AutoMigrate replaces golang-migrate) ---
 
@@ -81,6 +89,16 @@ func main() {
 	}
 	slog.Info("constraints renamed")
 
+	// Fix the legacy key set in an atomic schema migration before AutoMigrate.
+	// Optional owner assignment runs in the background after schema preparation.
+	ownerSchemaCtx, cancelOwnerSchema := context.WithTimeout(context.Background(), 30*time.Second)
+	ownerSchemaErr := repository.NewAPIKeyRepo(db).PrepareLegacyOwnerBinding(ownerSchemaCtx)
+	cancelOwnerSchema()
+	if ownerSchemaErr != nil {
+		slog.Error("failed to prepare legacy API key owner migration", "error", ownerSchemaErr)
+		os.Exit(1)
+	}
+
 	// 4. AutoMigrate all models in FK dependency order (User → Credential → Server → APIKey → Metric)
 	var autoMigrateErr error
 	for attempt := 0; attempt < 30; attempt++ {
@@ -92,6 +110,9 @@ func main() {
 			&model.Metric{},
 			&model.Service{},
 			&model.AuditEvent{},
+			&model.UsageLogInstance{},
+			&model.UsageLog{},
+			&model.UsageLogBackfillState{},
 		)
 		if autoMigrateErr == nil {
 			break
@@ -146,8 +167,96 @@ func main() {
 
 	// Dependency chain — API Keys
 	apiKeyRepo := repository.NewAPIKeyRepo(db)
+	ownerBackfill := service.NewLegacyAPIKeyOwnerBackfill(apiKeyRepo)
+	ownerBackfillCtx, cancelOwnerBackfill := context.WithCancel(context.Background())
+	defer cancelOwnerBackfill()
+	authSvc.SetOwnerBackfillTrigger(ownerBackfill.Trigger)
+	go ownerBackfill.Run(ownerBackfillCtx)
 	apiKeySvc := service.NewAPIKeyService(apiKeyRepo, serverRepo, masterKey)
 	auditRepo := repository.NewAuditEventRepo(db)
+	usagePolicy := (model.UsagePolicy{
+		OrdinaryRetention:  time.Duration(cfg.UsageRetentionDays) * 24 * time.Hour,
+		SensitiveRetention: time.Duration(cfg.UsageSensitiveRetentionDays) * 24 * time.Hour,
+	}).WithDefaults()
+	usageRepo := repository.NewUsageLogRepo(db, repository.UsageLogRepoConfig{LeaseDuration: usagePolicy.LeaseDuration, OrdinaryRetention: usagePolicy.OrdinaryRetention, SensitiveRetention: usagePolicy.SensitiveRetention})
+	usageRecorder := usage.NewRecorder(usageRepo, auditRepo, usage.Options{
+		DBMaxOpenConnections: cfg.DBMaxOpenConnections,
+		WriteConcurrency:     cfg.UsageWriteConcurrency,
+		ActiveLimit:          cfg.UsageActiveLimit,
+		LeaseDuration:        usagePolicy.LeaseDuration,
+		OrdinaryRetention:    usagePolicy.OrdinaryRetention,
+		SensitiveRetention:   usagePolicy.SensitiveRetention,
+	})
+	usageCtx, stopUsage := context.WithCancel(context.Background())
+	defer stopUsage()
+	usageRecorder.Start(usageCtx)
+	defer usageRecorder.Close()
+	go func() {
+		// The initial read-only report may need longer than a 200ms write
+		// batch. Keep it in the same bounded maintenance connection budget.
+		retry := time.NewTicker(time.Minute)
+		defer retry.Stop()
+		for {
+			if err := usageRecorder.PrepareCleanupReport(usageCtx); err == nil {
+				return
+			}
+			if usageCtx.Err() != nil {
+				return
+			}
+			slog.Warn("usage retention cleanup report deferred", "reason", "cleanup_report_unavailable")
+			select {
+			case <-usageCtx.Done():
+				return
+			case <-retry.C:
+			}
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-usageCtx.Done():
+				return
+			case <-ticker.C:
+				s := usageRecorder.Stats()
+				slog.Info("usage capture statistics",
+					"usage_capture_skipped_total", s.CaptureSkipped,
+					"usage_write_failed_total", s.WriteFailed,
+					"usage_finalization_retry_total", s.FinalizationRetry,
+					"usage_reconciled_total", s.Reconciled,
+					"audit_write_failed_total", s.AuditWriteFailed,
+					"audit_lost_total", s.AuditLost,
+					"usage_finalization_lost_total", s.FinalizationLost,
+					"active", s.Active, "pending", s.Pending, "pending_bytes", s.PendingBytes,
+					"audit_pending", s.AuditPending, "audit_pending_bytes", s.AuditPendingBytes,
+					"oldest_pending_ms", s.OldestPendingMS)
+			}
+		}
+	}()
+	usageHandler := handler.NewUsageLogHandler(usageRepo, cfg.JWTSecret)
+	usageFilterOptionsHandler := handler.NewUsageLogFilterOptionsHandler(usageRepo)
+	if cfg.UsageLegacyWritersDrained {
+		go func() {
+			if err := usageRepo.Backfill(usageCtx); err != nil {
+				slog.Warn("legacy usage backfill paused", "reason", "backfill_unavailable")
+				return
+			}
+			statusCtx, cancelStatus := context.WithTimeout(usageCtx, 2*time.Second)
+			defer cancelStatus()
+			state, err := usageRepo.BackfillStatus(statusCtx)
+			if err != nil {
+				slog.Warn("legacy usage backfill status unavailable", "reason", "backfill_status_unavailable")
+				return
+			}
+			if state.CompletedAt != nil {
+				slog.Info("legacy usage backfill completed", "imported", state.Imported,
+					"final_bound", state.FinalBound, "completed_at", state.CompletedAt)
+			}
+		}()
+	} else {
+		slog.Info("legacy usage backfill awaiting coordinated writer drain")
+	}
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeySvc, auditRepo)
 	serverHandler := handler.NewServerHandler(serverSvc)
 
@@ -177,19 +286,27 @@ func main() {
 
 	go monitorSvc.Start(context.Background())
 
-	apiKeyAuth := mw.APIKeyValidatorFunc(func(ctx context.Context, rawKey string) (uint, string, string, []string, []uint, error) {
+	apiKeyAuth := mw.APIKeyIdentityValidatorFunc(func(ctx context.Context, rawKey string) (usage.Principal, error) {
 		k, err := apiKeySvc.Validate(ctx, rawKey)
 		if err != nil {
-			return 0, "", "", nil, nil, err
+			return usage.Principal{}, err
 		}
-		return k.ID, k.Name, "admin", k.Scopes, k.ServerIDs, nil
+		p := usage.Principal{AuthType: "api_key", APIKeyID: &k.ID, APIKeyName: k.Name, APIKeyPrefix: k.KeyPrefix, Role: "admin", Scopes: k.Scopes, ServerIDs: k.ServerIDs}
+		if k.UserID != 0 {
+			p.UserID = &k.UserID
+		}
+		return p, nil
 	})
 
 	router := server.NewRouter(server.RouteConfig{
-		JWTService:    jwtSvc,
-		APIKeyAuth:    apiKeyAuth,
-		RevealLimiter: mw.NewRateLimiter(1*time.Minute, 5),
-		LoginLimiter:  mw.NewIPRateLimiter(1*time.Minute, cfg.LoginRateLimit, cfg.TrustProxy),
+		JWTService:                   jwtSvc,
+		APIKeyAuth:                   apiKeyAuth,
+		UsageRecorder:                usageRecorder,
+		ListUsageLogsHandler:         usageHandler.List,
+		GetUsageLogHandler:           usageHandler.Get,
+		FilterUsageLogOptionsHandler: usageFilterOptionsHandler.List,
+		RevealLimiter:                mw.NewRateLimiter(1*time.Minute, 5),
+		LoginLimiter:                 mw.NewIPRateLimiter(1*time.Minute, cfg.LoginRateLimit, cfg.TrustProxy),
 		// Auth
 		LoginHandler:          authHandler.Login,
 		SetupHandler:          authHandler.Setup,

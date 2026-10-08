@@ -48,6 +48,9 @@ const (
 	ReasonRelayTimeout         = "relay_timeout"
 	ReasonRelayUnreachable     = "relay_unreachable"
 	ReasonInvalidQuery         = "invalid_query"
+	ReasonInvalidCursor        = "invalid_cursor"
+	ReasonCursorFilterMismatch = "cursor_filter_mismatch"
+	ReasonCursorExpired        = "cursor_expired"
 	ReasonSSHConnection        = "ssh_connection_failed"
 	ReasonSSHAuth              = "ssh_authentication_failed"
 	ReasonSSHTimeout           = "ssh_timeout"
@@ -100,6 +103,9 @@ var reasonMessages = map[string]string{
 	ReasonRelayTimeout:         "target service timeout",
 	ReasonRelayUnreachable:     "target service unreachable: {{detail}}",
 	ReasonInvalidQuery:         "invalid query parameters: {{detail}}",
+	ReasonInvalidCursor:        "invalid usage log cursor",
+	ReasonCursorFilterMismatch: "cursor filters do not match this query",
+	ReasonCursorExpired:        "usage log cursor expired; refresh the list",
 	ReasonSSHConnection:        "ssh connection failed",
 	ReasonSSHAuth:              "ssh authentication failed",
 	ReasonSSHTimeout:           "ssh command timed out",

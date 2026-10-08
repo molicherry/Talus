@@ -85,6 +85,10 @@ On first login, enter any username and a password of at least 8 characters — t
 3. Optionally assign the service to a server for SSH-tunneled access
 4. Use the relay API to proxy requests through Talus — credentials are injected automatically, `{{key}}` placeholders are substituted
 
+### 6. View Usage Logs
+
+Administrators can open **Usage Logs** for filtered operation history and details. Logs cover resource changes, sensitive reveals, SSH exec, service relay and terminal sessions, without recording secrets, commands or stream content. API keys cannot query this history.
+
 ## Production Deployment (GHCR images)
 
 Pre-built images are published to [GHCR](https://github.com/molicherry/Talus/pkgs/container/talus)
@@ -119,6 +123,12 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       PORT: 8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_MAX_OPEN_CONNECTIONS: ${DB_MAX_OPEN_CONNECTIONS:-32}
+      USAGE_LOG_WRITE_CONCURRENCY: ${USAGE_LOG_WRITE_CONCURRENCY:-4}
+      USAGE_LOG_ACTIVE_LIMIT: ${USAGE_LOG_ACTIVE_LIMIT:-4096}
+      USAGE_LOG_RETENTION_DAYS: ${USAGE_LOG_RETENTION_DAYS:-30}
+      USAGE_LOG_SENSITIVE_RETENTION_DAYS: ${USAGE_LOG_SENSITIVE_RETENTION_DAYS:-90}
+      USAGE_LOG_LEGACY_WRITERS_DRAINED: ${USAGE_LOG_LEGACY_WRITERS_DRAINED:-false}
       MONITOR_INTERVAL: ${MONITOR_INTERVAL:-60}
       SSH_TIMEOUT: ${SSH_TIMEOUT:-10}
       EXEC_TIMEOUT: ${EXEC_TIMEOUT:-30}
@@ -248,6 +258,12 @@ it impossible to miss.
 | `JWT_SECRET` | *(required)* | JWT signing secret |
 | `PORT` | `8080` | HTTP server port |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `DB_MAX_OPEN_CONNECTIONS` | `32` | Maximum open database connections, with a minimum of `12` |
+| `USAGE_LOG_WRITE_CONCURRENCY` | `4` | Usage log write concurrency limit |
+| `USAGE_LOG_ACTIVE_LIMIT` | `4096` | Maximum number of active operations tracked in memory |
+| `USAGE_LOG_RETENTION_DAYS` | `30` | Ordinary usage log retention in days |
+| `USAGE_LOG_SENSITIVE_RETENTION_DAYS` | `90` | Sensitive-operation and deletion log retention in days |
+| `USAGE_LOG_LEGACY_WRITERS_DRAINED` | `false` | Set to `true` only after all legacy instances and their transactions have stopped to enable historical audit backfill; remove after completion is confirmed |
 | `MONITOR_INTERVAL` | `60` | Metrics collection interval (seconds) |
 | `SSH_TIMEOUT` | `10` | SSH connection timeout (seconds) |
 | `EXEC_TIMEOUT` | `30` | Command execution timeout (seconds) |

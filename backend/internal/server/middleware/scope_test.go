@@ -27,7 +27,7 @@ func TestNormalizePath(t *testing.T) {
 		{"api keys delete", "DELETE", "/api/v1/api-keys/2", "DELETE /api/v1/api-keys/{id}"},
 		{"auth profile", "GET", "/api/v1/auth/profile", "GET /api/v1/auth/profile"},
 		{"auth password", "PUT", "/api/v1/auth/password", "PUT /api/v1/auth/password"},
-		{"non-numeric segment preserved", "GET", "/api/v1/servers/abc", "GET /api/v1/servers/abc"},
+		{"malformed resource id follows endpoint permission", "GET", "/api/v1/servers/abc", "GET /api/v1/servers/{id}"},
 		{"health check untouched", "GET", "/healthz", "GET /healthz"},
 		{"version endpoint", "GET", "/api/v1/", "GET /api/v1"},
 	}

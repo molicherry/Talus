@@ -12,22 +12,31 @@ compile() { # <src> <outName>
   tmp="$(mktemp -d)"
   if ! env -u NODE_ENV npx tsc "$src" \
     --ignoreConfig --outDir "$tmp" \
-    --module nodenext --moduleResolution nodenext --target es2022 \
+    --module esnext --moduleResolution bundler --target es2022 \
     --skipLibCheck --esModuleInterop 2>"$tmp/tsc.log"; then
     echo "✗ tsc failed for $src"
     cat "$tmp/tsc.log"
     rm -rf "$tmp"
     exit 1
   fi
-  outfile="$tmp/$(basename "${src%.ts}").js"
+  outfile="$(find "$tmp" -name "$(basename "${src%.ts}").js" -print -quit)"
   cp "$outfile" "tests/.compiled-$out.mjs"
   rm -rf "$tmp"
 }
 
+compile src/lib/auth.ts auth
 compile src/lib/query.ts query
+# query.ts imports the auth store; tests use the separately compiled module.
+sed 's|"./auth"|"./.compiled-auth.mjs"|g' tests/.compiled-query.mjs > tests/.compiled-query-auth.mjs
+mv tests/.compiled-query-auth.mjs tests/.compiled-query.mjs
 compile src/features/monitoring/lib/series.ts series
 compile src/features/auth/lib/api-key-error.ts api-key-error
 compile src/lib/unauthorized.ts unauthorized
+compile src/features/usage-logs/lib/session.ts usage-session
+# Runtime enum validation imports the usage protocol's constant lists.
+compile src/features/usage-logs/types.ts usage-types
+sed 's|"../types"|"./.compiled-usage-types.mjs"|g' tests/.compiled-usage-session.mjs > tests/.compiled-usage-session-imports.mjs
+mv tests/.compiled-usage-session-imports.mjs tests/.compiled-usage-session.mjs
 compile src/features/services/lib/credential-rows.ts credential-rows
 
 # 2. Run every test file under tests/ (skip this runner + compiled artifacts).

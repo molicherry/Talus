@@ -44,3 +44,17 @@ export function classifyUnauthorized(reason: unknown, pathname: string): Unautho
   if (isCredentialRejection(reason)) return "inline";
   return isLoginRoute(pathname) ? "clear-token" : "clear-token-and-redirect";
 }
+
+/** Authorization responses belong only to the session that sent their request. */
+export function shouldApplyAuthorizationFailure(requestEpoch: number, currentEpoch: number, aborted = false): boolean {
+  return !aborted && requestEpoch === currentEpoch;
+}
+
+export function isUsageLogRequest(path: string): boolean {
+  return /^\/api\/v1\/usage-logs(?:\/|\?|$)/.test(path);
+}
+
+/** Only the backend's permission denial revokes access; proxy/business 403s do not. */
+export function isUsageLogPermissionDenied(path: string, reason: unknown): boolean {
+  return isUsageLogRequest(path) && reason === "forbidden";
+}

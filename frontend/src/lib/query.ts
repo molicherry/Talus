@@ -1,26 +1,18 @@
 import { useEffect, useRef, useState } from "react";
+import { getAuthSnapshot, subscribeAuth } from "./auth";
 
-/**
- * Minimal data-fetching layer replacing @tanstack/react-query.
- *
- * The app only uses: useQuery (key/fn/staleTime/enabled/refetchInterval),
- * useMutation (fn/onSuccess/onError + per-call callbacks), and
- * invalidateQueries with prefix keys. No optimistic updates, no dependent
- * queries, no cache writes. That surface is covered here in ~150 lines.
- *
- * Semantics preserved from the old config (src/app/query-client.ts):
- *   staleTime 30s default, retry 1, refetchOnWindowFocus false (never refetched
- *   on focus — focus does nothing), 60s polling for metrics/dashboard.
- */
-
+/** A small cache retaining the existing 30s staleness, one retry and no focus fetch. */
 export type QueryKey = readonly unknown[];
+export interface QueryContext { signal: AbortSignal }
+export type QueryFn<T> = (context: QueryContext) => Promise<T>;
 
 interface QueryOptions<T> {
   queryKey: QueryKey;
-  queryFn: () => Promise<T>;
+  queryFn: QueryFn<T>;
   staleTime?: number;
   enabled?: boolean;
   refetchInterval?: number | false;
+  retry?: number;
 }
 
 export interface QueryResult<T> {
@@ -45,177 +37,221 @@ export interface UseMutationResult<TData, TError, TVars> {
   isPending: boolean;
   isSuccess: boolean;
   isError: boolean;
-  mutate: (
-    vars: TVars,
-    callbacks?: {
-      onSuccess?: (data: TData, vars: TVars) => void;
-      onError?: (error: unknown, vars: TVars) => void;
-    },
-  ) => void;
+  mutate: (vars: TVars, callbacks?: {
+    onSuccess?: (data: TData, vars: TVars) => void;
+    onError?: (error: unknown, vars: TVars) => void;
+  }) => void;
 }
 
-interface Entry<T> {
+export interface Entry<T> {
   key: string;
   queryKey?: QueryKey;
   data: T | undefined;
   error: Error | null;
   status: "idle" | "loading" | "success" | "error";
   lastFetched: number;
+  lastUsed: number;
   listeners: Set<() => void>;
   inFlight: Promise<void> | null;
-  lastQueryFn?: () => Promise<unknown>;
+  controller: AbortController | null;
+  generation: number;
+  lastQueryFn?: QueryFn<unknown>;
   lastStaleTime?: number;
 }
 
 const cache = new Map<string, Entry<unknown>>();
 
 export function getEntry<T>(key: string): Entry<T> {
-  let e = cache.get(key) as Entry<T> | undefined;
-  if (!e) {
-    e = {
-      key,
-      data: undefined,
-      error: null,
-      status: "idle",
-      lastFetched: 0,
-      listeners: new Set(),
-      inFlight: null,
+  let entry = cache.get(key) as Entry<T> | undefined;
+  if (!entry) {
+    entry = {
+      key, data: undefined, error: null, status: "idle", lastFetched: 0,
+      lastUsed: Date.now(), listeners: new Set(), inFlight: null,
+      controller: null, generation: 0,
     };
-    cache.set(key, e as Entry<unknown>);
+    cache.set(key, entry as Entry<unknown>);
   }
-  return e;
+  entry.lastUsed = Date.now();
+  return entry;
 }
 
-export function notify(e: Entry<unknown>): void {
-  e.listeners.forEach((l) => l());
+export function notify(entry: Entry<unknown>): void {
+  entry.listeners.forEach((listener) => listener());
 }
 
-export async function runQuery<T>(
-  e: Entry<T>,
-  queryFn: () => Promise<T>,
-  retriesLeft = 1,
-): Promise<void> {
-  if (e.inFlight) return e.inFlight;
-  e.status = "loading";
-  notify(e);
-  const attempt = async (n: number): Promise<void> => {
-    try {
-      const data = await queryFn();
-      e.data = data;
-      e.error = null;
-      e.status = "success";
-      e.lastFetched = Date.now();
-      e.inFlight = null;
-      notify(e);
-    } catch (err) {
-      if (n > 0) return attempt(n - 1); // one retry (old config: retry: 1)
-      e.error = err instanceof Error ? err : new Error(String(err));
-      e.status = "error";
-      e.inFlight = null;
-      notify(e);
-    }
+/** Cancellation detaches the promise immediately, even for transports ignoring signal. */
+export function cancelQuery(entry: Entry<unknown>): void {
+  if (!entry.inFlight && !entry.controller) return;
+  entry.generation++;
+  const controller = entry.controller;
+  entry.controller = null;
+  entry.inFlight = null;
+  entry.error = null;
+  entry.status = entry.data === undefined ? "idle" : "success";
+  controller?.abort();
+  notify(entry);
+}
+
+export function subscribeQuery(entry: Entry<unknown>, listener: () => void): () => void {
+  entry.listeners.add(listener);
+  entry.lastUsed = Date.now();
+  return () => {
+    entry.listeners.delete(listener);
+    entry.lastUsed = Date.now();
+    if (entry.listeners.size === 0) cancelQuery(entry);
   };
-  e.inFlight = attempt(retriesLeft);
-  return e.inFlight;
 }
 
-function isPrefixMatch(full: readonly unknown[], prefix: readonly unknown[]): boolean {
-  if (prefix.length > full.length) return false;
-  for (let i = 0; i < prefix.length; i++) {
-    if (!Object.is(full[i], prefix[i])) return false;
-  }
-  return true;
+function isAbortError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
 }
 
-/**
- * Prefix-matched cache invalidation.
- * Marks every matching entry stale (so it refetches on next mount, even if no
- * component is currently subscribed) and actively refetches the ones that are
- * mounted — mirroring react-query's invalidateQueries semantics.
- */
-export function invalidateQueries(prefix: QueryKey): void {
-  for (const e of cache.values()) {
-    if (e.lastQueryFn && e.queryKey && isPrefixMatch(e.queryKey, prefix)) {
-      e.lastFetched = 0; // stale → next mount refetches regardless of staleTime
-      if (e.listeners.size > 0 && e.status !== "loading") {
-        void runQuery(e, e.lastQueryFn);
+export async function runQuery<T>(entry: Entry<T>, queryFn: QueryFn<T>, retriesLeft = 1): Promise<void> {
+  if (entry.inFlight) return entry.inFlight;
+  const generation = ++entry.generation;
+  const controller = new AbortController();
+  entry.controller = controller;
+  entry.status = "loading";
+  const current = () => entry.generation === generation && !controller.signal.aborted;
+  const attempt = async (remaining: number): Promise<void> => {
+    try {
+      const data = await queryFn({ signal: controller.signal });
+      if (!current()) return;
+      entry.data = data;
+      entry.error = null;
+      entry.status = "success";
+      entry.lastFetched = Date.now();
+      entry.lastUsed = Date.now();
+    } catch (error) {
+      if (!current()) return;
+      if (isAbortError(error)) {
+        entry.error = null;
+        entry.status = entry.data === undefined ? "idle" : "success";
+      } else if (remaining > 0) {
+        return attempt(remaining - 1);
+      } else {
+        entry.error = error instanceof Error ? error : new Error(String(error));
+        entry.status = "error";
       }
     }
+  };
+  // Assign before invoking user code so synchronous completion cannot leave a stale promise.
+  entry.inFlight = Promise.resolve().then(() => {
+    if (current()) return attempt(retriesLeft);
+  }).finally(() => {
+    if (entry.generation !== generation) return;
+    entry.controller = null;
+    entry.inFlight = null;
+    notify(entry);
+  });
+  notify(entry);
+  return entry.inFlight;
+}
+
+function isPrefixMatch(full: QueryKey, prefix: QueryKey): boolean {
+  return prefix.length <= full.length && prefix.every((value, index) => Object.is(value, full[index]));
+}
+
+export function invalidateQueries(prefix: QueryKey): void {
+  for (const entry of [...cache.values()]) {
+    if (!entry.queryKey || !isPrefixMatch(entry.queryKey, prefix)) continue;
+    entry.lastFetched = 0;
+    if (entry.lastQueryFn && entry.listeners.size > 0 && entry.status !== "loading") {
+      void runQuery(entry, entry.lastQueryFn);
+    }
   }
 }
+
+export function removeQueries(prefix: QueryKey = [], predicate?: (key: QueryKey) => boolean): void {
+  for (const [key, entry] of [...cache]) {
+    const queryKey = entry.queryKey ?? [];
+    if (!isPrefixMatch(queryKey, prefix) || (predicate && !predicate(queryKey))) continue;
+    cache.delete(key);
+    cancelQuery(entry);
+    entry.generation++;
+    entry.data = undefined;
+    entry.error = null;
+    entry.status = "idle";
+    entry.lastFetched = 0;
+    notify(entry);
+  }
+}
+
+interface PruneOptions {
+  prefix: QueryKey;
+  maxEntries: number;
+  maxIdleMs?: number;
+  retain?: (key: QueryKey) => boolean;
+}
+
+/** Evict only unused, unpinned entries. Active readers always remain attached. */
+export function pruneQueryCache({ prefix, maxEntries, maxIdleMs, retain }: PruneOptions): void {
+  const entries = [...cache.values()].filter((entry) => entry.queryKey && isPrefixMatch(entry.queryKey, prefix));
+  const candidates = entries.filter((entry) => entry.listeners.size === 0 && !retain?.(entry.queryKey!))
+    .sort((a, b) => a.lastUsed - b.lastUsed);
+  let count = entries.length;
+  const now = Date.now();
+  for (const entry of candidates) {
+    const expired = maxIdleMs !== undefined && now - entry.lastUsed >= maxIdleMs;
+    if (count <= maxEntries && !expired) continue;
+    removeQueries(prefix, (key) => key === entry.queryKey);
+    count--;
+  }
+}
+
+// An identity change clears every resource. A log-only permission denial must
+// leave unrelated readers, requests and cache data in the same session intact.
+let cacheAuthSnapshot = getAuthSnapshot();
+subscribeAuth(() => {
+  const next = getAuthSnapshot();
+  if (next.authEpoch !== cacheAuthSnapshot.authEpoch) removeQueries();
+  else if (next.usagePermissionRevision !== cacheAuthSnapshot.usagePermissionRevision) {
+    for (const prefix of ["usage-logs", "usage-logs-probe", "usage-log"]) removeQueries([prefix]);
+  }
+  cacheAuthSnapshot = next;
+});
 
 export function useQuery<T>(opts: QueryOptions<T>): QueryResult<T> {
   const key = JSON.stringify(opts.queryKey);
   const [, forceRender] = useState(0);
   const optsRef = useRef(opts);
   optsRef.current = opts;
-
   const entry = getEntry<T>(key);
   entry.queryKey = opts.queryKey;
-  entry.lastQueryFn = opts.queryFn as () => Promise<unknown>;
+  entry.lastQueryFn = opts.queryFn as QueryFn<unknown>;
   entry.lastStaleTime = opts.staleTime ?? 30_000;
 
-  // Subscribe to cache notifications for this key.
-  useEffect(() => {
-    const e = getEntry<T>(key);
-    const listener = () => forceRender((n) => n + 1);
-    e.listeners.add(listener);
-    return () => {
-      e.listeners.delete(listener);
-    };
-  }, [key]);
-
-  // Initial / enabled / staleness-driven fetch.
+  useEffect(() => subscribeQuery(entry, () => forceRender((value) => value + 1)), [entry]);
   const enabled = opts.enabled !== false;
   useEffect(() => {
     if (!enabled) return;
-    const e = getEntry<T>(key);
     const staleTime = optsRef.current.staleTime ?? 30_000;
-    if (e.status === "success" && Date.now() - e.lastFetched < staleTime) return;
-    void runQuery(e, optsRef.current.queryFn);
-  }, [key, enabled]);
+    if (entry.status === "success" && entry.lastFetched !== 0 && Date.now() - entry.lastFetched < staleTime) return;
+    void runQuery(entry, optsRef.current.queryFn, optsRef.current.retry ?? 1);
+  }, [entry, enabled]);
 
-  // Polling — must re-schedule when refetchInterval or enabled changes (e.g.
-  // useMetrics polls only while the tab is visible: isVisible ? 60_000 : false).
   const interval = opts.refetchInterval;
   useEffect(() => {
     if (!interval || !enabled) return;
     const id = window.setInterval(() => {
-      const e = getEntry<T>(key);
-      void runQuery(e, optsRef.current.queryFn);
+      void runQuery(entry, optsRef.current.queryFn, optsRef.current.retry ?? 1);
     }, interval);
     return () => window.clearInterval(id);
-  }, [key, interval, enabled]);
+  }, [entry, interval, enabled]);
 
   return {
     data: entry.data,
     error: entry.error,
-    // A fresh (idle, no-data) query is still "loading" on its first render,
-    // matching react-query — otherwise list/detail pages flash their error/
-    // empty state for one frame before the fetch kicks in.
     ...computeQueryFlags(entry, enabled),
-    refetch: () => runQuery(entry, opts.queryFn),
+    refetch: () => runQuery(entry, opts.queryFn, opts.retry ?? 1),
   };
 }
 
-/**
- * Pure render-flag computation for a query — extracted from useQuery so the
- * react-query-parity flags (notably the idle-vs-loading first-render rule that
- * fixes the error/empty-state flash) can be unit-tested without a React renderer.
- */
-export function computeQueryFlags<T>(
-  entry: Entry<T>,
-  enabled: boolean,
-): {
-  isLoading: boolean;
-  isFetching: boolean;
-  isRefetching: boolean;
-  isError: boolean;
+export function computeQueryFlags<T>(entry: Entry<T>, enabled: boolean): {
+  isLoading: boolean; isFetching: boolean; isRefetching: boolean; isError: boolean;
 } {
   return {
-    isLoading:
-      entry.data === undefined &&
-      (entry.status === "loading" || (entry.status === "idle" && enabled)),
+    isLoading: entry.data === undefined && (entry.status === "loading" || (entry.status === "idle" && enabled)),
     isFetching: entry.status === "loading",
     isRefetching: entry.status === "loading" && entry.data !== undefined,
     isError: entry.status === "error",

@@ -14,6 +14,7 @@ import (
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
+	"github.com/vpsmanager/backend/internal/usage"
 	"gorm.io/gorm"
 )
 
@@ -105,6 +106,10 @@ func (s *APIKeyService) Create(ctx context.Context, name string, scopes *[]strin
 		EncryptedRawKey: encryptedRaw,
 		Salt:            salt,
 	}
+	p := mw.GetPrincipal(ctx)
+	if p.AuthType == "jwt" && p.UserID != nil {
+		k.UserID = *p.UserID
+	}
 	if err := s.repo.Create(ctx, k); err != nil {
 		return nil, fmt.Errorf("save key: %w", err)
 	}
@@ -120,6 +125,16 @@ func (s *APIKeyService) Delete(ctx context.Context, id uint) error {
 	return s.repo.Delete(ctx, id)
 }
 
+// CaptureSnapshot copies only the resource's safe historical label.
+func (s *APIKeyService) CaptureSnapshot(ctx context.Context, id uint) {
+	if usage.FromContext(ctx) == nil {
+		return
+	}
+	if k, err := s.repo.FindByID(ctx, id); err == nil {
+		usage.FromContext(ctx).SetResource("api_key", &id, k.Name, nil)
+	}
+}
+
 // Reveal decrypts and returns the raw API key string.
 func (s *APIKeyService) Reveal(ctx context.Context, id uint) (string, error) {
 	k, err := s.repo.FindByID(ctx, id)
@@ -132,6 +147,7 @@ func (s *APIKeyService) Reveal(ctx context.Context, id uint) (string, error) {
 	if k.EncryptedRawKey == "" {
 		return "", server.NewAppError(http.StatusNotFound, server.ReasonRawKeyUnavailable)
 	}
+	usage.FromContext(ctx).SetResource("api_key", &id, k.Name, nil)
 	key := s.masterKey.DeriveKey(k.Salt)
 	plain, err := crypto.Decrypt(k.EncryptedRawKey, key)
 	if err != nil {

@@ -2,6 +2,7 @@ package sshpool
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -44,6 +45,20 @@ func Fingerprint(key []byte) string {
 // If knownHostKey is set, the presented key must match or the connection is rejected with a *HostKeyMismatchError
 // that carries the presented key (the client is still returned as nil).
 func DialSSH(host string, port int, username string, authMethod ssh.AuthMethod, knownHostKey []byte, timeout time.Duration) (*ssh.Client, []byte, error) {
+	return DialSSHContext(context.Background(), host, port, username, authMethod, knownHostKey, timeout)
+}
+
+// DialSSHContext bounds TCP connection and SSH authentication together. The
+// cancellation callback is stopped or joined before returning ownership.
+func DialSSHContext(parent context.Context, host string, port int, username string, authMethod ssh.AuthMethod, knownHostKey []byte, timeout time.Duration) (*ssh.Client, []byte, error) {
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(parent, timeout)
+	} else {
+		ctx, cancel = context.WithCancel(parent)
+	}
+	defer cancel()
 	var capturedKey []byte
 	mismatch := false
 
@@ -70,13 +85,27 @@ func DialSSH(host string, port int, username string, authMethod ssh.AuthMethod, 
 
 	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 
-	client, err := ssh.Dial("tcp", addr, config)
+	raw, err := (&net.Dialer{Timeout: timeout}).DialContext(ctx, "tcp", addr)
 	if err != nil {
+		return nil, nil, fmt.Errorf("ssh dial %s: %w", addr, err)
+	}
+	closed := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { _ = raw.Close(); close(closed) })
+	conn, channels, requests, err := ssh.NewClientConn(raw, addr, config)
+	if !stop() {
+		<-closed
+	}
+	if contextErr := ctx.Err(); contextErr != nil {
+		_ = raw.Close()
+		return nil, nil, contextErr
+	}
+	if err != nil {
+		_ = raw.Close()
 		if mismatch {
 			return nil, capturedKey, &HostKeyMismatchError{Host: host, Presented: capturedKey, Cause: err}
 		}
 		return nil, nil, fmt.Errorf("ssh dial %s: %w", addr, err)
 	}
 
-	return client, capturedKey, nil
+	return ssh.NewClient(conn, channels, requests), capturedKey, nil
 }

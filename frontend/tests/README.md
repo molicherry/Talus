@@ -35,13 +35,16 @@ temp module first (the file is TypeScript with React imports, so it can't be
 `ui-regressions.browser.mjs` exercises the production build in Chromium with
 mock API responses and synthetic credentials. It never needs a running backend
 or access to real servers. The regular `npm test` suite remains dependency-free;
-browser checks use an optional local Playwright installation:
+browser checks use the pinned Playwright development dependency:
 
 ```bash
-npm install --no-save --package-lock=false playwright
+npm ci
 npx playwright install chromium
 npm run test:ui
 ```
+
+`npm run test:ui` builds once and runs both browser suites. CI runs
+`npm run test:ui:built` after its production build and Chromium installation.
 
 The suite covers draft-key collisions and visibility state, delayed and failed
 secret loads, retry/cancellation, all four refresh-error pages (including cached
@@ -57,3 +60,28 @@ Optional environment variables:
 - `UI_TEST_FILTER`: a regular expression selecting scenario names.
 - `UI_TEST_PORT`: the local preview port (default `4177`).
 - `UI_TEST_SCREENSHOTS`: a directory for optional inspection screenshots.
+
+## Usage log tests
+
+`npm test` also verifies filter normalization, exact string IDs and opaque
+cursors, the frozen page store, 20-page LRU, 100-page cursor history,
+changed-page rereads, update comparison, and the 50-entry/10-minute detail cache.
+
+The production-build browser suite uses mocked APIs and no backend:
+
+```bash
+npm run test:usage-ui
+```
+
+It supports the same optional Playwright/Chromium environment overrides as the
+main UI suite. It checks frozen time ranges and cached previous pages,
+URL-linked on-demand details, running/terminal polling, first-page update
+probes, current-session 403 cleanup, non-admin access, request filtering and
+320/375/390 px mobile layouts, touch selection/detail/pagination, and custom
+versus relative time refresh. The default preview port is 4178 (`UI_TEST_PORT` overrides it).
+
+Identity-filter browser cases also cover name/prefix/deleted labels and URL
+restoration, precise IDs above JavaScript's integer range, historical manual
+IDs, PostgreSQL bigint bounds, numeric names, clearing and repeated selection,
+keyboard retry, late-search cancellation, account-switch cleanup and a pending
+label lookup superseded by a same-ID selection.

@@ -13,15 +13,24 @@ import (
 	"gorm.io/gorm"
 )
 
-// errFirstUserTaken signals that another concurrent request committed the first user
-// before this one's COUNT check — best-effort only; see createFirstUser.
+// errFirstUserTaken signals that another request initialized the administrator
+// before this request acquired the setup transaction lock.
 var errFirstUserTaken = errors.New("first user already created")
+
+const firstUserSetupLock int64 = 0x54414c5553415554 // "TALUSAUT", database-wide setup lock.
 
 // AuthService handles authentication including first-user bootstrap.
 type AuthService struct {
-	userRepo *repository.UserRepo
-	jwtSvc   *token.JWTService
-	db       *gorm.DB
+	userRepo             *repository.UserRepo
+	jwtSvc               *token.JWTService
+	db                   *gorm.DB
+	ownerBackfillTrigger func()
+}
+
+// SetOwnerBackfillTrigger connects optional background work to successful
+// initial setup. The callback must be nonblocking and is configured at startup.
+func (s *AuthService) SetOwnerBackfillTrigger(trigger func()) {
+	s.ownerBackfillTrigger = trigger
 }
 
 // NewAuthService creates an AuthService with the given dependencies.
@@ -58,15 +67,8 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (str
 	return s.authenticateExisting(ctx, username, password)
 }
 
-// createFirstUser inserts the initial admin account inside a transaction.
-//
-// NOTE: the COUNT-then-INSERT inside the transaction is a best-effort guard,
-// not a serialization guarantee. Under READ COMMITTED, two concurrent first
-// logins can both read count==0 and both insert an admin (different usernames
-// won't trip the username unique index). errFirstUserTaken only recovers when
-// one insert commits before the other's count. A guaranteed single admin
-// requires restricting access during initial setup (or a dedicated
-// serialization constraint).
+// createFirstUser serializes initial administrator creation across instances.
+// Optional legacy key assignment runs separately after the user commits.
 func (s *AuthService) createFirstUser(ctx context.Context, username, password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -80,6 +82,9 @@ func (s *AuthService) createFirstUser(ctx context.Context, username, password st
 	}
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", firstUserSetupLock).Error; err != nil {
+			return err
+		}
 		var txCount int64
 		if err := tx.Model(&model.User{}).Count(&txCount).Error; err != nil {
 			return err
@@ -87,7 +92,10 @@ func (s *AuthService) createFirstUser(ctx context.Context, username, password st
 		if txCount > 0 {
 			return errFirstUserTaken
 		}
-		return tx.Create(user).Error
+		if err := tx.Create(user).Error; err != nil {
+			return err
+		}
+		return nil
 	})
 
 	if err != nil {
@@ -98,6 +106,9 @@ func (s *AuthService) createFirstUser(ctx context.Context, username, password st
 		return "", fmt.Errorf("login: %w", err)
 	}
 
+	if s.ownerBackfillTrigger != nil {
+		s.ownerBackfillTrigger()
+	}
 	return s.jwtSvc.GenerateToken(user.ID, user.Username, user.Role)
 }
 

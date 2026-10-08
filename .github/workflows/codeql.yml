@@ -47,6 +47,7 @@ jobs:
             build-mode: none
           - language: go
             build-mode: autobuild
+            packs: +codeql/go-queries:AlertSuppression.ql
           - language: javascript-typescript
             build-mode: none
     steps:
@@ -65,8 +66,44 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          # Append the official suppression query for Go. Default security
+          # queries stay enabled; the other languages keep their current setup.
+          packs: ${{ matrix.packs || '' }}
 
       - name: Perform CodeQL Analysis
+        id: analyze
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
+          output: sarif-results
+
+      - name: Verify the intended SSH suppression
+        if: matrix.language == 'go'
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          source = Path("backend/internal/service/ssh.go")
+          line = next(i for i, text in enumerate(source.read_text().splitlines(), 1)
+                      if "runErr := session.Run(command)" in text)
+          data = json.loads(Path("sarif-results/go.sarif").read_text())
+          matches = [result for run in data["runs"] for result in run.get("results", [])
+                     if result.get("ruleId") == "go/command-injection"
+                     and any(location["physicalLocation"]["artifactLocation"]["uri"] == source.as_posix()
+                             and location["physicalLocation"].get("region", {}).get("startLine") == line
+                             for location in result.get("locations", []))]
+          assert matches, "Expected SSH command-injection result missing; review query coverage"
+          assert all(any(item.get("kind") == "inSource" for item in result.get("suppressions", []))
+                     for result in matches), "The intended SSH result is not suppressed in SARIF"
+          print(f"Verified {len(matches)} in-source SSH suppression(s) at {source}:{line}")
+
+      # Dismissal is global across branches. Never run this step on a PR.
+      - name: Apply source suppressions on the default branch
+        if: matrix.language == 'go' && github.ref == 'refs/heads/main'
+        uses: advanced-security/dismiss-alerts@a18f986bdb40edba0dd7a74382c15d4a3d50a1c8 # v2
+        with:
+          sarif-id: ${{ steps.analyze.outputs.sarif-id }}
+          sarif-file: sarif-results/go.sarif
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

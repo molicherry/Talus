@@ -2,13 +2,10 @@ package handler
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 
-	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
-	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
 )
 
@@ -40,6 +37,8 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, err)
 		return
 	}
+	usageResource(r, "api_key", result.APIKey.ID, result.APIKey.Name, nil)
+	usageCommitted(r)
 	server.WriteJSON(w, http.StatusCreated, result)
 }
 
@@ -58,10 +57,12 @@ func (h *APIKeyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidKeyID))
 		return
 	}
+	h.svc.CaptureSnapshot(r.Context(), id)
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		server.WriteError(w, r, err)
 		return
 	}
+	usageCommitted(r)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -77,23 +78,8 @@ func (h *APIKeyHandler) Reveal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims := mw.GetUserClaims(r.Context())
-	if claims != nil {
-		slog.Info("audit: api key revealed",
-			"user_id", claims.UserID,
-			"key_id", id,
-			"ip", r.RemoteAddr,
-		)
-
-		_ = h.auditRepo.Create(r.Context(), &model.AuditEvent{
-			UserID:       claims.UserID,
-			Username:     claims.Username,
-			Action:       "api_key.reveal",
-			ResourceType: "api_key",
-			ResourceID:   id,
-			IPAddress:    r.RemoteAddr,
-		})
-	}
+	writeRevealAudit(r, h.auditRepo, "api_key.reveal", "api_key", id)
+	usageCommitted(r)
 
 	server.WriteJSON(w, http.StatusOK, rawKey)
 }

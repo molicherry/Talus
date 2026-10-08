@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/vpsmanager/backend/internal/server"
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
+	"github.com/vpsmanager/backend/internal/usage"
 )
 
 // upgrader configures WebSocket connection upgrades.
@@ -50,20 +53,27 @@ type wsMessage struct {
 // the handshake (API access, e.g. the talus skill) skip the first-message
 // requirement.
 func (h *TerminalHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	op := usage.FromContext(r.Context())
 	id, err := parseIDParam(r)
 	if err != nil {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServerID))
 		return
 	}
+	op.SetResource("server", &id, "", &id)
 
 	// Upgrade to WebSocket.
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		slog.Error("terminal websocket upgrade failed", "error", err)
-		server.WriteError(w, r, server.ErrInternal)
+		op.SetResult("rejected", "websocket_upgrade_failed")
+		slog.Warn("terminal websocket upgrade failed", "reason", "websocket_upgrade_failed")
+		// Upgrade already wrote the actual HTTP failure. Do not replace its
+		// status or append a JSON envelope to that response.
 		return
 	}
 	defer conn.Close()
+	mw.ReportHTTPStatus(w, http.StatusSwitchingProtocols)
+	op.SetHTTPStatus(http.StatusSwitchingProtocols)
+	op.SetPhase("handshake")
 
 	claims := mw.GetUserClaims(r.Context())
 	if claims == nil {
@@ -74,12 +84,19 @@ func (h *TerminalHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		_ = conn.SetReadDeadline(time.Now().Add(authTimeout))
 		var msg wsMessage
 		if err := conn.ReadJSON(&msg); err != nil {
-			slog.Warn("terminal auth message read failed", "server_id", id, "error", err)
+			reason := "terminal_auth_failed"
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				reason = "terminal_auth_timeout"
+			}
+			op.SetResult("rejected", reason)
+			slog.Warn("terminal auth message read failed", "server_id", id, "reason", reason)
 			return
 		}
 		_ = conn.SetReadDeadline(time.Time{})
 
 		if msg.Type != "auth" || msg.Data == "" {
+			op.SetResult("rejected", "terminal_auth_failed")
 			_ = conn.WriteJSON(wsMessage{Type: "error", Data: "authentication required"})
 			slog.Warn("terminal connection missing auth message", "server_id", id)
 			return
@@ -87,20 +104,32 @@ func (h *TerminalHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 		parsed, verifyErr := h.jwtSvc.ValidateToken(msg.Data)
 		if verifyErr != nil {
+			op.SetResult("rejected", "terminal_auth_failed")
 			_ = conn.WriteJSON(wsMessage{Type: "error", Data: "invalid or expired token"})
-			slog.Warn("terminal auth failed", "server_id", id, "error", verifyErr)
+			slog.Warn("terminal auth failed", "server_id", id, "reason", "terminal_auth_failed")
 			return
 		}
 		claims = parsed
+		r = r.WithContext(mw.WithUserClaims(r.Context(), claims))
 	}
+	op.SetPhase("authenticated")
 
 	if !mw.CheckServerAccess(claims, id) {
+		op.SetResult("rejected", "terminal_permission_denied")
 		_ = conn.WriteJSON(wsMessage{Type: "error", Data: "access denied: no access to this server"})
 		slog.Warn("terminal access denied", "server_id", id)
 		return
 	}
+	op.Begin()
 
-	if err := h.terminalSvc.StartSession(r.Context(), id, conn); err != nil {
-		slog.Error("terminal session failed", "server_id", id, "error", err)
+	result, sessionErr := h.terminalSvc.StartSessionWithResult(r.Context(), id, conn)
+	op.SetResult(result.Outcome, result.Reason)
+	op.SetMetadata("close_reason", result.CloseReason)
+	if !result.ReadyAt.IsZero() {
+		op.SetMetadata("ready_at", result.ReadyAt)
+	}
+	op.SetMetadata("closed_at", result.ClosedAt)
+	if sessionErr != nil || result.Outcome == "failed" {
+		slog.Warn("terminal session failed", "server_id", id, "reason", result.Reason)
 	}
 }

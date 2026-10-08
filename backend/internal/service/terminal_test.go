@@ -157,15 +157,21 @@ func startSeededTerminalService(t *testing.T, serverID uint) (*TerminalService, 
 type sessionHarness struct {
 	ws     *websocket.Conn
 	result chan error
+	facts  chan TerminalResult
 }
 
 // beginSession serves one StartSession call over an httptest WebSocket server
 // and connects a client to it, waiting until the SSH shell is up.
 func beginSession(t *testing.T, svc *TerminalService, serverID uint) *sessionHarness {
+	return beginSessionWithContext(t, svc, serverID, nil)
+}
+
+func beginSessionWithContext(t *testing.T, svc *TerminalService, serverID uint, parent context.Context) *sessionHarness {
 	t.Helper()
 
 	started := make(chan struct{})
 	result := make(chan error, 1)
+	facts := make(chan TerminalResult, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := terminalTestUpgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -175,7 +181,13 @@ func beginSession(t *testing.T, svc *TerminalService, serverID uint) *sessionHar
 		close(started)
 		// r.Context() stays live for the whole handler call, matching the real
 		// terminal handler (which calls StartSession and only then returns).
-		result <- svc.StartSession(r.Context(), serverID, conn)
+		ctx := r.Context()
+		if parent != nil {
+			ctx = parent
+		}
+		outcome, err := svc.StartSessionWithResult(ctx, serverID, conn)
+		facts <- outcome
+		result <- err
 	}))
 	t.Cleanup(srv.Close)
 
@@ -204,7 +216,7 @@ func beginSession(t *testing.T, svc *TerminalService, serverID uint) *sessionHar
 		t.Fatalf("first frame = %q, want %q", ready.Type, "connected")
 	}
 
-	return &sessionHarness{ws: ws, result: result}
+	return &sessionHarness{ws: ws, result: result, facts: facts}
 }
 
 // wait asserts StartSession returned on its own within a bounded time. Since it

@@ -13,14 +13,19 @@ import (
 
 	"github.com/vpsmanager/backend/internal/pkg/token"
 	"github.com/vpsmanager/backend/internal/server/middleware"
+	"github.com/vpsmanager/backend/internal/usage"
 )
 
 // RouteConfig holds all HTTP handler functions that the router needs to mount.
 type RouteConfig struct {
-	JWTService    *token.JWTService
-	APIKeyAuth    middleware.APIKeyValidator
-	RevealLimiter *middleware.RateLimiter
-	LoginLimiter  *middleware.IPRateLimiter
+	JWTService                   *token.JWTService
+	APIKeyAuth                   any
+	UsageRecorder                *usage.Recorder
+	ListUsageLogsHandler         http.HandlerFunc
+	GetUsageLogHandler           http.HandlerFunc
+	FilterUsageLogOptionsHandler http.HandlerFunc
+	RevealLimiter                *middleware.RateLimiter
+	LoginLimiter                 *middleware.IPRateLimiter
 
 	// Auth
 	LoginHandler          http.HandlerFunc
@@ -106,7 +111,18 @@ func NewRouter(cfg RouteConfig) chi.Router {
 
 	// Protected API routes (JWT or API key required)
 	r.Group(func(r chi.Router) {
+		r.Use(middleware.UsageCapture(cfg.UsageRecorder))
 		r.Use(middleware.Auth(cfg.JWTService, cfg.APIKeyAuth))
+
+		if cfg.ListUsageLogsHandler != nil {
+			r.Get("/api/v1/usage-logs", cfg.ListUsageLogsHandler)
+		}
+		if cfg.FilterUsageLogOptionsHandler != nil {
+			r.Get("/api/v1/usage-logs/filter-options", cfg.FilterUsageLogOptionsHandler)
+		}
+		if cfg.GetUsageLogHandler != nil {
+			r.Get("/api/v1/usage-logs/{id}", cfg.GetUsageLogHandler)
+		}
 
 		// User profile & password
 		r.Get("/api/v1/auth/profile", cfg.ProfileHandler)
