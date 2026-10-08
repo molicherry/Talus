@@ -89,8 +89,6 @@ On first login, enter any username and a password of at least 8 characters — t
 
 Administrators can open **Usage Logs** for filtered operation history and details. Logs cover resource changes, sensitive reveals, SSH exec, service relay and terminal sessions, without recording secrets, commands or stream content. API keys cannot query this history.
 
-See the [v2 design](docs/usage-logs-design.zh-CN.md) and [upgrade instructions](docs/usage-logs-deployment.zh-CN.md) for retention, failure recovery and the coordinated legacy audit backfill.
-
 ## Production Deployment (GHCR images)
 
 Pre-built images are published to [GHCR](https://github.com/molicherry/Talus/pkgs/container/talus)

@@ -99,7 +99,6 @@ jobs:
           print(f"Verified {len(matches)} in-source SSH suppression(s) at {source}:{line}")
 
       # Dismissal is global across branches. Never run this step on a PR.
-      # See docs/codeql-suppression.zh-CN.md for first-time PR triage.
       - name: Apply source suppressions on the default branch
         if: matrix.language == 'go' && github.ref == 'refs/heads/main'
         uses: advanced-security/dismiss-alerts@a18f986bdb40edba0dd7a74382c15d4a3d50a1c8 # v2
