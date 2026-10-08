@@ -79,6 +79,10 @@ docker compose up -d --build
 3. 可选：将服务关联到某台服务器，通过 SSH 隧道访问
 4. 使用 relay API 通过 Talus 代理请求——凭据自动注入，`{{key}}` 占位符自动替换
 
+### 6. 查看使用日志
+
+管理员可进入 **使用日志**，筛选操作历史并查看详情。日志覆盖资源变更、敏感信息查看、SSH 命令执行、服务转发和终端会话，不记录密钥等秘密信息、命令内容或流式传输内容。API 密钥无法查询这些日志。
+
 ## 技术栈
 
 | 层级 | 技术 |
@@ -173,6 +177,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/molicherry/Talus/main/ai-int
 | `JWT_SECRET` | *(必填)* | JWT 签名密钥 |
 | `PORT` | `8080` | HTTP 服务端口 |
 | `LOG_LEVEL` | `info` | 日志级别：`debug`、`info`、`warn`、`error` |
+| `DB_MAX_OPEN_CONNECTIONS` | `32` | 数据库最大连接数，最小为 `12` |
+| `USAGE_LOG_WRITE_CONCURRENCY` | `4` | 使用日志写入并发上限 |
+| `USAGE_LOG_ACTIVE_LIMIT` | `4096` | 内存中同时跟踪的活动操作数量上限 |
+| `USAGE_LOG_RETENTION_DAYS` | `30` | 普通使用日志保留天数 |
+| `USAGE_LOG_SENSITIVE_RETENTION_DAYS` | `90` | 敏感操作和删除操作日志保留天数 |
+| `USAGE_LOG_LEGACY_WRITERS_DRAINED` | `false` | 仅在所有旧实例及其事务停止后设为 `true`，启用历史审计日志回填；确认回填完成后可移除 |
 | `MONITOR_INTERVAL` | `60` | 指标采集间隔（秒） |
 | `SSH_TIMEOUT` | `10` | SSH 连接超时（秒） |
 | `EXEC_TIMEOUT` | `30` | 命令执行超时（秒） |
@@ -218,6 +228,12 @@ services:
       JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置 JWT_SECRET}
       PORT: 8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_MAX_OPEN_CONNECTIONS: ${DB_MAX_OPEN_CONNECTIONS:-32}
+      USAGE_LOG_WRITE_CONCURRENCY: ${USAGE_LOG_WRITE_CONCURRENCY:-4}
+      USAGE_LOG_ACTIVE_LIMIT: ${USAGE_LOG_ACTIVE_LIMIT:-4096}
+      USAGE_LOG_RETENTION_DAYS: ${USAGE_LOG_RETENTION_DAYS:-30}
+      USAGE_LOG_SENSITIVE_RETENTION_DAYS: ${USAGE_LOG_SENSITIVE_RETENTION_DAYS:-90}
+      USAGE_LOG_LEGACY_WRITERS_DRAINED: ${USAGE_LOG_LEGACY_WRITERS_DRAINED:-false}
       MONITOR_INTERVAL: ${MONITOR_INTERVAL:-60}
       SSH_TIMEOUT: ${SSH_TIMEOUT:-10}
       EXEC_TIMEOUT: ${EXEC_TIMEOUT:-30}

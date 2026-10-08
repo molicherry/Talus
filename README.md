@@ -258,6 +258,12 @@ it impossible to miss.
 | `JWT_SECRET` | *(required)* | JWT signing secret |
 | `PORT` | `8080` | HTTP server port |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `DB_MAX_OPEN_CONNECTIONS` | `32` | Maximum open database connections, with a minimum of `12` |
+| `USAGE_LOG_WRITE_CONCURRENCY` | `4` | Usage log write concurrency limit |
+| `USAGE_LOG_ACTIVE_LIMIT` | `4096` | Maximum number of active operations tracked in memory |
+| `USAGE_LOG_RETENTION_DAYS` | `30` | Ordinary usage log retention in days |
+| `USAGE_LOG_SENSITIVE_RETENTION_DAYS` | `90` | Sensitive-operation and deletion log retention in days |
+| `USAGE_LOG_LEGACY_WRITERS_DRAINED` | `false` | Set to `true` only after all legacy instances and their transactions have stopped to enable historical audit backfill; remove after completion is confirmed |
 | `MONITOR_INTERVAL` | `60` | Metrics collection interval (seconds) |
 | `SSH_TIMEOUT` | `10` | SSH connection timeout (seconds) |
 | `EXEC_TIMEOUT` | `30` | Command execution timeout (seconds) |
