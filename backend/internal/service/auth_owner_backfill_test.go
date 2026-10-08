@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/token"
@@ -122,8 +124,16 @@ func TestFirstAdminSetupCommitsDespiteFailedKeyBinding(t *testing.T) {
 		t.Fatalf("optional assignment rolled back administrator: count=%d err=%v", count, err)
 	}
 	keyRepo := repository.NewAPIKeyRepo(db)
-	if _, err := keyRepo.BindUnownedToDefaultAdmin(ctx); err == nil {
-		t.Fatal("fixture must produce an actual key-assignment failure")
+	// The worker uses SKIP LOCKED, so another batch may legitimately return
+	// (0, nil) while it owns this row. Probe the specific row with a normal
+	// UPDATE that waits for its lock and must reach the rejecting trigger.
+	probe := db.WithContext(ctx).Exec(`UPDATE api_keys SET user_id = (
+		SELECT id FROM users WHERE role = 'admin' AND deleted_at IS NULL
+		ORDER BY id ASC LIMIT 1
+	) WHERE id = ?`, legacy.ID)
+	var rejected *pgconn.PgError
+	if !errors.As(probe.Error, &rejected) || rejected.Code != "P0001" || rejected.Message != "test binding failure" {
+		t.Fatalf("fixture must reject this key's owner update with the trigger error: %v", probe.Error)
 	}
 	key, err := keyRepo.FindByID(ctx, legacy.ID)
 	if err != nil || key.UserID != 0 {
