@@ -82,6 +82,9 @@ func NewRouter(cfg RouteConfig) chi.Router {
 	r := chi.NewRouter()
 
 	// Global middleware stack
+	// WriteDeadline runs first so its per-route budget covers the whole chain;
+	// the server's global WriteTimeout is disabled (see cmd/server/main.go).
+	r.Use(middleware.WriteDeadline)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(chimw.Recoverer)

@@ -350,10 +350,13 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:         ":" + cfg.Port,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		Addr:        ":" + cfg.Port,
+		Handler:     router,
+		ReadTimeout: 15 * time.Second,
+		// WriteTimeout is disabled globally: a single 15s deadline truncates
+		// long Exec/Relay responses. Per-route budgets are applied by
+		// middleware.WriteDeadline (REQ-07 §7.1).
+		WriteTimeout: 0,
 		IdleTimeout:  60 * time.Second,
 	}
 

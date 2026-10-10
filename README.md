@@ -155,6 +155,22 @@ docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+### Reverse-proxy timeouts
+
+Talus disables its global HTTP write timeout and applies per-route budgets, so a
+300-second Exec or a bounded Relay stream is not cut off mid-response. Any proxy
+in front of Talus (nginx, Traefik, Caddy, Cloudflare) must match that budget —
+including room for result return and cleanup, so a 300-second route needs more
+than 300 seconds at the proxy:
+
+| Route | Minimum proxy timeout |
+| --- | --- |
+| `POST /api/v1/servers/*/exec`, `POST /api/v1/services/*/relay` | ≥ 330s |
+| All other API routes | 15s |
+
+Buffered responses must be disabled for `/api/v1/services/*/relay` so streamed
+bodies are forwarded incrementally.
+
 ## Tech Stack
 
 | Layer | Technology |
