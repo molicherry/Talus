@@ -65,8 +65,10 @@ function checkGateCoverage(doc, gate, runs) {
   const missing = [];
   for (const c of doc.cases) {
     if (!c.requirement_ids.some((r) => scope.has(r))) continue;
-    if (!c.implementations.some((i) => i.required)) continue;
-    if (!c.implementations.some((i) => inGate.has(i.run_id))) missing.push(c.case_id);
+    for (const impl of c.implementations) {
+      if (!impl.required) continue;
+      if (!inGate.has(impl.run_id)) missing.push(`${c.case_id}/${impl.implementation_id}`);
+    }
   }
   if (missing.length) {
     console.error(`gate ${gate} does not include runs covering required cases: ${missing.join(", ")}`);
@@ -106,8 +108,14 @@ function manualEvidence(runID) {
   } catch (e) {
     return { ok: false, reason: `invalid evidence JSON: ${e.message}` };
   }
+  if (doc.run_id !== runID) return { ok: false, reason: `evidence run_id ${doc.run_id} does not match ${runID}` };
   if (doc.status !== "passed") return { ok: false, reason: `evidence status is ${doc.status}` };
-  if (!Array.isArray(doc.evidence) || doc.evidence.length === 0) return { ok: false, reason: "evidence list is empty" };
+  if (!Array.isArray(doc.evidence) || doc.evidence.length === 0 || doc.evidence.some((e) => typeof e !== "string" || e.trim() === "")) {
+    return { ok: false, reason: "evidence must be a non-empty list of non-empty strings" };
+  }
+  if (typeof doc.commit !== "string" || doc.commit === "") return { ok: false, reason: "evidence.commit is required" };
+  const anc = spawnSync("git", ["merge-base", "--is-ancestor", doc.commit, "HEAD"], { cwd: ROOT });
+  if (anc.status !== 0) return { ok: false, reason: `evidence commit ${doc.commit} is not in this history` };
   return { ok: true };
 }
 
@@ -115,16 +123,15 @@ function checkEnvironment(run) {
   for (const req of run.environment.requires) {
     if (req === "playwright") {
       if (!existsSync(join(ROOT, "frontend", "node_modules", "playwright"))) {
-        console.error(`run ${run.run_id}: requires playwright (run: cd frontend && npm ci)`);
-        process.exit(1);
+        return { ok: false, reason: "requires playwright (run: cd frontend && npm ci)" };
       }
       continue;
     }
     if (!process.env[req]) {
-      console.error(`run ${run.run_id}: requires env ${req} (selected classification needs it; export it or choose another suite)`);
-      process.exit(1);
+      return { ok: false, reason: `requires env ${req} (export it or choose another suite)` };
     }
   }
+  return { ok: true };
 }
 
 function main() {
@@ -175,7 +182,13 @@ function main() {
       results.push({ run_id: run.run_id, status: "passed", manual: true });
       continue;
     }
-    checkEnvironment(run);
+    const env = checkEnvironment(run);
+    if (!env.ok) {
+      console.error(`✗ ${run.run_id}: ${env.reason}`);
+      results.push({ run_id: run.run_id, status: "blocked", reason: env.reason });
+      failed = true;
+      break;
+    }
     const cwd = run.cwd === "." ? ROOT : join(ROOT, run.cwd);
     console.log(`▶ ${run.run_id}: ${run.command.join(" ")}  (cwd=${run.cwd})`);
     const res = spawnSync(run.command[0], run.command.slice(1), {

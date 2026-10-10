@@ -78,6 +78,3 @@ Cases: 32 · Runs: 9 · Schema: 1
 | `docs/IMPLEMENTATION.zh-CN.md` | planning | Planning document that describes the adapter removal work package. |
 | `docs/DEVELOPMENT-PLAN.zh-CN.md` | planning | Planning document that describes the adapter removal task. |
 | `tests/static/adapters-removed.sh` | checker | The checker itself must contain the banned patterns it searches for. |
-| `.trellis/tasks/08-03-service-skills/prd.md` | history | Historical task PRD that specified creating the adapter directory. |
-| `.trellis/tasks/08-03-service-skills/design.md` | history | Historical task design that describes the adapter layout. |
-| `.trellis/tasks/08-03-service-skills/implement.md` | history | Historical task plan that lists the adapter artifacts to build. |

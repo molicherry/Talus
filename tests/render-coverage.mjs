@@ -139,6 +139,14 @@ export function loadAndValidate() {
     const isDir = statSync(abs).isDirectory();
     if (ex.kind === "negative_fixture" && !isDir) fail(`scan_exemption ${ex.path}: negative_fixture must be a directory`);
     if (ex.kind !== "negative_fixture" && isDir) fail(`scan_exemption ${ex.path}: only a negative_fixture may be a directory`);
+    // A negative fixture must be a scoped subdirectory of tests/fixtures/, so a
+    // broad directory such as docs/ cannot be exempted wholesale.
+    if (ex.kind === "negative_fixture") {
+      const dir = ex.path.replace(/\/+$/, "");
+      if (!dir.startsWith("tests/fixtures/") || dir === "tests/fixtures") {
+        fail(`scan_exemption ${ex.path}: negative_fixture must be a subdirectory of tests/fixtures/`);
+      }
+    }
   }
   return doc;
 }

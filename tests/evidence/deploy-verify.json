@@ -1,10 +1,10 @@
 {
   "run_id": "deploy-verify",
   "status": "passed",
-  "recorded_at": "2026-10-10T02:08:00Z",
+  "recorded_at": "2026-10-10T02:25:00Z",
   "recorded_by": "agent",
   "commit": "1defcf2",
-  "summary": "Phase 1 (M1) verified on the tx server (server 8, tx4c16g) at the current branch head: the branch was built into a local image, deployed through dokploy, and the running Hub served the expected version from both the local and public endpoints with a clean startup.",
+  "summary": "M1 verified on the tx server (server 8, tx4c16g): the branch was built into a local image, deployed through dokploy, the Hub served the expected version from the local and public endpoints, and the service catalog, usage_guide detail and a real Relay request all worked.",
   "environment": {
     "server_id": 8,
     "server_name": "tx4c16g",
@@ -15,6 +15,9 @@
     "docker ps: compose-...-hub-1 uses image talus-local:v0.9.0-test.2",
     "curl http://localhost:8081/api/v1/version -> {\"data\":{\"version\":\"v0.9.0-test.2\"}}",
     "curl https://talus-test.kisihin.dpdns.org/api/v1/version -> {\"data\":{\"version\":\"v0.9.0-test.2\"}}",
+    "GET /api/v1/services -> directory returned service id=5 (dokploy-tx) with usage_guide_excerpt",
+    "GET /api/v1/services/5 -> detail returned the full usage_guide markdown",
+    "POST /api/v1/services/5/relay (compose.one) -> relay returned appName=compose-quantify-optical-bandwidth-m9qml4, composeType=docker-compose",
     "docker logs: hub started (server starting), no error/panic; migration hardening applied at startup"
   ],
   "checks": {
@@ -22,6 +25,8 @@
     "version_local": "v0.9.0-test.2",
     "version_public": "v0.9.0-test.2",
     "startup_clean": "migration/apply-once and monitor started without error",
-    "skill_and_service_catalog": "preserved (static assertion + Hub served the version endpoint with the skill and Relay routes intact)"
+    "services_directory": "ok",
+    "service_detail": "ok (usage_guide present)",
+    "relay_request": "ok"
   }
 }

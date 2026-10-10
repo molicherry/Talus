@@ -75,7 +75,8 @@ is_exempt() { # <repo-relative-path>
   while IFS=$'\t' read -r kind path; do
     [ -n "$path" ] || continue
     if [ "$kind" = "negative_fixture" ]; then
-      case "$rel" in "$path"*|"${path%/}"*) return 0 ;; esac
+      local dir="${path%/}"
+      case "$rel" in "$dir"|"$dir"/*) return 0 ;; esac
     elif [ "$rel" = "$path" ]; then
       return 0
     fi
@@ -86,8 +87,14 @@ is_exempt() { # <repo-relative-path>
 # --- content scan (repo or fixture root) -------------------------------------
 scan_content() {
   local root="$1" rc=0
+  # Hidden files are always scanned. Ignored files are only scanned outside a
+  # git work tree (fixture roots): inside the repository, gitignored scratch
+  # (e.g. .trellis/, .pi/) is not shipped and would make a clean checkout
+  # diverge from CI.
+  local ign=()
+  if ! git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then ign=(--no-ignore); fi
   set +e
-  ( cd "$root" && rg --files --hidden --no-ignore "${EXCLUDES[@]}" . ) > "$TMP/files" 2> "$TMP/err"
+  ( cd "$root" && rg --files --hidden "${ign[@]}" "${EXCLUDES[@]}" . ) > "$TMP/files" 2> "$TMP/err"
   rc=$?
   set -e
   if [ "$rc" -ge 2 ]; then
@@ -98,7 +105,7 @@ scan_content() {
   sed -i 's|^\./||' "$TMP/files" 2>/dev/null || true
 
   set +e
-  ( cd "$root" && rg --no-heading --line-number --color never --hidden --no-ignore "${EXCLUDES[@]}" \
+  ( cd "$root" && rg --no-heading --line-number --color never --hidden "${ign[@]}" "${EXCLUDES[@]}" \
       -e "${PATTERNS[0]}" -e "${PATTERNS[1]}" -e "${PATTERNS[2]}" -e "${PATTERNS[3]}" -e "${PATTERNS[4]}" . ) \
     > "$TMP/matches" 2> "$TMP/err"
   rc=$?
@@ -235,6 +242,21 @@ self_test() {
   make_clean_fixture "$TMP/narrow"; mkdir -p "$TMP/narrow/other/docs"
   printf 'ai-integration\n' > "$TMP/narrow/other/docs/ARCHITECTURE.zh-CN.md"
   expect_fail "unregistered look-alike path" "$TMP/narrow" || rc=1
+
+  # A negative_fixture exemption is directory-boundary scoped: a look-alike
+  # sibling (adapters-removal-evil) must NOT inherit the exemption.
+  make_clean_fixture "$TMP/neg"
+  node -e '
+    const fs=require("fs");const p=process.argv[1];
+    const d=JSON.parse(fs.readFileSync(p,"utf8"));
+    d.scan_exemptions.push({path:"tests/fixtures/adapters-removal",kind:"negative_fixture",reason:"Negative fixtures intentionally contain banned adapter artifacts."});
+    fs.writeFileSync(p,JSON.stringify(d,null,2));
+  ' "$TMP/neg/tests/coverage.json"
+  mkdir -p "$TMP/neg/tests/fixtures/adapters-removal" "$TMP/neg/tests/fixtures/adapters-removal-evil"
+  printf 'ai-integration\n' > "$TMP/neg/tests/fixtures/adapters-removal/inside.md"
+  expect_pass "negative fixture inside" "$TMP/neg" || rc=1
+  printf 'ai-integration\n' > "$TMP/neg/tests/fixtures/adapters-removal-evil/outside.md"
+  expect_fail "negative fixture boundary" "$TMP/neg" || rc=1
 
   TALUS_SCAN_ROOT="$TMP/clean" TALUS_COVERAGE_JSON="$TMP/does-not-exist.json" \
     bash "$HERE/adapters-removed.sh" --repo >/dev/null 2>&1

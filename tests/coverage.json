@@ -786,21 +786,6 @@
       "path": "tests/static/adapters-removed.sh",
       "kind": "checker",
       "reason": "The checker itself must contain the banned patterns it searches for."
-    },
-    {
-      "path": ".trellis/tasks/08-03-service-skills/prd.md",
-      "kind": "history",
-      "reason": "Historical task PRD that specified creating the adapter directory."
-    },
-    {
-      "path": ".trellis/tasks/08-03-service-skills/design.md",
-      "kind": "history",
-      "reason": "Historical task design that describes the adapter layout."
-    },
-    {
-      "path": ".trellis/tasks/08-03-service-skills/implement.md",
-      "kind": "history",
-      "reason": "Historical task plan that lists the adapter artifacts to build."
     }
   ]
 }
