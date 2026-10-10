@@ -70,3 +70,25 @@ func TestApplyOnceFailureLeavesNoMarkerAndRetries(t *testing.T) {
 		t.Fatal("migration must not re-apply after a successful retry")
 	}
 }
+
+// TestApplyOnceRollsBackPartialWorkOnFailure proves the transaction rolls back
+// work already written (not just a marker) when the migration fails midway.
+func TestApplyOnceRollsBackPartialWorkOnFailure(t *testing.T) {
+	db := newTestDB(t)
+	const id = "test_apply_once_partial"
+	// Creates a table, then raises: both the table and the marker must roll back.
+	partial := `DO $$ BEGIN CREATE TABLE apply_once_partial (id int); RAISE EXCEPTION 'boom'; END $$;`
+	if _, err := ApplyOnce(db, id, partial); err == nil {
+		t.Fatal("expected the partial migration to fail")
+	}
+	if db.Migrator().HasTable("apply_once_partial") {
+		t.Fatal("work written before the failure must be rolled back")
+	}
+	applied, err := ApplyOnce(db, id, `CREATE TABLE apply_once_partial (id int)`)
+	if err != nil {
+		t.Fatalf("retry after a partial failure: %v", err)
+	}
+	if !applied {
+		t.Fatal("retry after a partial failure should apply the migration")
+	}
+}
