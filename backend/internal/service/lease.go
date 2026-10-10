@@ -79,6 +79,11 @@ func (l *sshLease) Upload(ctx context.Context, localPath, remotePath string, bud
 // the remote command worker on every exit path, and never leaks a goroutine.
 func (s *SSHService) copyFileOnClient(ctx context.Context, client *ssh.Client, localPath, remotePath string, budget time.Duration) (error, bool) {
 	forceClosed := false
+	grace := s.uploadTeardownGrace
+	if grace <= 0 {
+		grace = 100 * time.Millisecond
+	}
+
 	f, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open source: %w", err), false
@@ -89,10 +94,10 @@ func (s *SSHService) copyFileOnClient(ctx context.Context, client *ssh.Client, l
 	if err != nil {
 		return fmt.Errorf("create session: %w", err), false
 	}
-	defer session.Close()
 
 	pipe, err := session.StdinPipe()
 	if err != nil {
+		_ = session.Close()
 		return fmt.Errorf("stdin pipe: %w", err), false
 	}
 
@@ -117,7 +122,7 @@ func (s *SSHService) copyFileOnClient(ctx context.Context, client *ssh.Client, l
 		timeout = timer.C
 	}
 
-	var runErr error
+	var runErr, copyErr error
 	var cause error
 	runOutstanding := true
 	select {
@@ -129,27 +134,23 @@ func (s *SSHService) copyFileOnClient(ctx context.Context, client *ssh.Client, l
 		cause = context.DeadlineExceeded
 	}
 
-	// Settle without touching the pipe/session from this goroutine: the copy
-	// worker is the sole closer of the pipe, so closing it here would race with
-	// an in-flight write. Both workers are joined within the teardown grace and,
-	// if one stays stuck (for example a blocked TCP write), the transport is
-	// force-closed so neither can leak. session.Close runs afterwards, once the
-	// copy worker has exited.
-	grace := s.uploadTeardownGrace
-	if grace <= 0 {
-		grace = 100 * time.Millisecond
-	}
+	// Settle with one shared deadline. The copy worker is the sole closer of the
+	// pipe (closing it here would race an in-flight write). Each worker is joined
+	// within the grace; if one stays stuck (a blocked TCP write, or a remote that
+	// keeps the channel open), the transport is force-closed so it cannot leak.
 	deadline := time.Now().Add(grace)
-	if runOutstanding && !joinWithin(deadline, runDone) {
+	if runOutstanding && !joinWithinErr(deadline, runDone, &runErr) {
 		_ = client.Close()
 		forceClosed = true
-		<-runDone
+		runErr = <-runDone
 	}
-	if !joinWithin(deadline, copyDone) {
+	if !joinWithinErr(deadline, copyDone, &copyErr) {
 		_ = client.Close()
 		forceClosed = true
-		<-copyDone
+		copyErr = <-copyDone
 	}
+	// The session close itself can block; it is supervised by the same budget.
+	closeSessionBounded(session, client, grace, &forceClosed)
 
 	if cause != nil {
 		return cause, forceClosed
@@ -157,12 +158,15 @@ func (s *SSHService) copyFileOnClient(ctx context.Context, client *ssh.Client, l
 	if runErr != nil {
 		return fmt.Errorf("copy failed: %w (stderr: %s)", runErr, stderr.String()), forceClosed
 	}
-	return nil, false
+	if copyErr != nil {
+		return fmt.Errorf("copy file: %w", copyErr), forceClosed
+	}
+	return nil, forceClosed
 }
 
-// joinWithin waits for a single worker channel until deadline, reporting
-// whether it finished in time.
-func joinWithin(deadline time.Time, ch <-chan error) bool {
+// joinWithinErr waits for a worker channel until deadline, stores the received
+// error, and reports whether it finished in time.
+func joinWithinErr(deadline time.Time, ch <-chan error, out *error) bool {
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
 		return false
@@ -170,9 +174,28 @@ func joinWithin(deadline time.Time, ch <-chan error) bool {
 	timer := time.NewTimer(remaining)
 	defer timer.Stop()
 	select {
-	case <-ch:
+	case *out = <-ch:
 		return true
 	case <-timer.C:
 		return false
+	}
+}
+
+// closeSessionBounded closes the session under the teardown grace and
+// force-closes the transport if the close itself blocks.
+func closeSessionBounded(session *ssh.Session, client *ssh.Client, grace time.Duration, forceClosed *bool) {
+	done := make(chan struct{})
+	go func() {
+		_ = session.Close()
+		close(done)
+	}()
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		_ = client.Close()
+		*forceClosed = true
+		<-done
 	}
 }

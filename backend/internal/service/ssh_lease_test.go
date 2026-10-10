@@ -3,7 +3,10 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,5 +155,103 @@ func TestCopyFileRemoteRejectWithoutReadingStdinIsBounded(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("rejected upload did not return within the bounded teardown")
+	}
+}
+
+// startRejectExecSSHServer answers the exec request with a rejection and keeps
+// the channel open, so the client's copy worker can only be reclaimed by the
+// bounded teardown.
+func startRejectExecSSHServer(t *testing.T) (string, ssh.PublicKey) {
+	t.Helper()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := &ssh.ServerConfig{NoClientAuth: true}
+	config.AddHostKey(signer)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				transport, channels, requests, err := ssh.NewServerConn(conn, config)
+				if err != nil {
+					_ = conn.Close()
+					return
+				}
+				defer transport.Close()
+				go ssh.DiscardRequests(requests)
+				for incoming := range channels {
+					channel, reqs, err := incoming.Accept()
+					if err != nil {
+						continue
+					}
+					go func() {
+						// Reject exec and keep the channel open, never draining stdin.
+						for req := range reqs {
+							_ = req.Reply(false, nil)
+						}
+						_ = channel
+					}()
+				}
+			}()
+		}
+	}()
+	return listener.Addr().String(), signer.PublicKey()
+}
+
+// TestCopyFileRejectedExecIsBounded pins the P1 fix: a remote that rejects the
+// exec request and keeps the channel open must not block the upload forever.
+func TestCopyFileRejectedExecIsBounded(t *testing.T) {
+	address, hostKey := startRejectExecSSHServer(t)
+	pool := newTestPool(t)
+	seedPool(t, pool, 1, dialTestSSH(t, address, hostKey))
+	svc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
+
+	big := filepath.Join(t.TempDir(), "artifact")
+	if err := os.WriteFile(big, bytes.Repeat([]byte("x"), 8<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- svc.CopyFile(context.Background(), 1, big, "/tmp/agent") }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a rejected exec must fail")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("rejected exec did not return within the bounded teardown")
+	}
+}
+
+// TestCopyFileReadErrorDoesNotReportSuccess pins the P2 fix: a local read error
+// (a directory) must not be swallowed into a successful upload.
+func TestCopyFileReadErrorDoesNotReportSuccess(t *testing.T) {
+	address, hostKey := startExecSSHServer(t, routeUploads(func(ch ssh.Channel, _ <-chan struct{}) { drainUploadOK(ch) }))
+	pool := newTestPool(t)
+	seedPool(t, pool, 1, dialTestSSH(t, address, hostKey))
+	svc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
+
+	done := make(chan error, 1)
+	go func() { done <- svc.CopyFile(context.Background(), 1, t.TempDir(), "/tmp/agent") }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a local read error must not report success")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a local read error did not return in time")
 	}
 }
