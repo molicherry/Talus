@@ -1,10 +1,10 @@
 {
   "run_id": "deploy-verify",
   "status": "passed",
-  "recorded_at": "2026-10-10T02:25:00Z",
+  "recorded_at": "2026-10-10T08:33:07Z",
   "recorded_by": "agent",
-  "commit": "1defcf2",
-  "summary": "M1 verified on the tx server (server 8, tx4c16g): the branch was built into a local image, deployed through dokploy, the Hub served the expected version from the local and public endpoints, and the service catalog, usage_guide detail and a real Relay request all worked.",
+  "commit": "707cee7db864b5a704de2dde0cc0a33089cd8d00",
+  "summary": "M1 re-verified on tx (server 8, tx4c16g) after the Phase 2 changes: the branch was built into talus-local:v0.9.0-test.3, deployed through dokploy, and the Hub served that version locally and publicly with a clean startup and a completed auto-migrate. The new REQ-07 Relay modes were exercised end-to-end on the deployed build through a temporary service (standard and bounded_stream returned 200, an unknown mode was rejected with 400), and the service catalog, usage_guide detail and a real Relay request still worked against the instance that holds the dokploy-tx service.",
   "covers": [
     "skills/talus/",
     "README.md",
@@ -17,25 +17,45 @@
   "environment": {
     "server_id": 8,
     "server_name": "tx4c16g",
-    "image": "talus-local:v0.9.0-test.2",
-    "deploy": "dokploy compose kSVulcrooQ-VO5VKW2ml"
+    "image": "talus-local:v0.9.0-test.3",
+    "deploy": "dokploy compose kSVulcrooQ-V0O5VKW2ml",
+    "build": "docker build --network=host --build-arg VERSION=v0.9.0-test.3 --build-arg GOPROXY=https://goproxy.cn,direct --build-arg NPM_REGISTRY=https://registry.npmmirror.com -t talus-local:v0.9.0-test.3 .",
+    "build_note": "container bridge egress to the TUN fake-ip range (198.18.0.0/16) times out on tx, so RUN steps need --network=host; the host itself reaches goproxy.cn directly"
   },
   "evidence": [
-    "docker ps: compose-...-hub-1 uses image talus-local:v0.9.0-test.2",
-    "curl http://localhost:8081/api/v1/version -> {\"data\":{\"version\":\"v0.9.0-test.2\"}}",
-    "curl https://talus-test.kisihin.dpdns.org/api/v1/version -> {\"data\":{\"version\":\"v0.9.0-test.2\"}}",
-    "GET /api/v1/services -> directory returned service id=5 (dokploy-tx) with usage_guide_excerpt",
-    "GET /api/v1/services/5 -> detail returned the full usage_guide markdown",
-    "POST /api/v1/services/5/relay (compose.one) -> relay returned appName=compose-quantify-optical-bandwidth-m9qml4, composeType=docker-compose",
-    "docker logs: hub started (server starting), no error/panic; migration hardening applied at startup"
+    "git -C /root/talus-src reset --hard origin/feat/talus-hardening -> HEAD 707cee7",
+    "docker build (VERSION=v0.9.0-test.3) -> 'naming to docker.io/library/talus-local:v0.9.0-test.3 done' and '===BUILD-EXIT-0', image 49.8MB",
+    "docker ps -> compose-quantify-optical-bandwidth-m9qml4-hub-1 uses image talus-local:v0.9.0-test.3 (Up)",
+    "docker logs hub -> 'auto-migrate complete', 'metrics hypertable ready', 'monitor service started', 'server starting' port 8080; grep -icE 'panic|fatal|level=error' = 0",
+    "curl http://localhost:8081/api/v1/version -> v0.9.0-test.3",
+    "curl https://talus-test.kisihin.dpdns.org/api/v1/version -> v0.9.0-test.3",
+    "curl -H 'X-API-Key: bogus' https://.../api/v1/servers/summary -> 401 with reason=unauthorized (stable error envelope)",
+    "GET / -> 200 HTML and /healthz -> 200 (the public edge returned an intermittent 403 on rapid repeated requests during the run)",
+    "docker exec hub grep -rl 'v0.9.0-test.3' /static/assets -> main-layout-*.js (frontend bundle carries the built version)",
+    "docker exec hub grep -rl '暂时无法验证你的会话' /static/assets -> api-client-*.js (new errors.unavailable translation is in the deployed bundle)",
+    "docker exec hub strings /usr/local/bin/hub -> bounded_stream=1, relay_budget_exceeded=1, unavailable=22 (the new relay-mode and reason code is in the running binary)",
+    "temporary service+key inside the tx instance: POST /api/v1/services/8/relay {method:GET,path:/api/v1/version} -> 200 {\"data\":{\"version\":\"v0.9.0-test.3\"}}",
+    "same relay with mode=bounded_stream -> 200 (the new explicit long-stream mode is accepted)",
+    "same relay with mode=bogus -> 400 reason=invalid_request (unknown modes are rejected by the new validation)",
+    "same relay without method -> 400 reason=method_required",
+    "temporary api_keys/services rows deleted; remaining deploy-verify-tmp rows = 0",
+    "GET /api/v1/services -> 1 service, id=5 dokploy-tx, usage_guide_excerpt present (201 bytes)",
+    "GET /api/v1/services/5 -> usage_guide returned (2207 bytes, starts with '# Dokploy 操作指南（dokploy-tx）')",
+    "POST /api/v1/services/5/relay (compose.one) -> appName=compose-quantify-optical-bandwidth-m9qml4, composeType=docker-compose"
   ],
   "checks": {
-    "container_image": "talus-local:v0.9.0-test.2",
-    "version_local": "v0.9.0-test.2",
-    "version_public": "v0.9.0-test.2",
-    "startup_clean": "migration/apply-once and monitor started without error",
-    "services_directory": "ok",
+    "container_image": "talus-local:v0.9.0-test.3",
+    "version_local": "v0.9.0-test.3",
+    "version_public": "v0.9.0-test.3",
+    "startup_clean": "auto-migrate complete + monitor started, 0 panic/fatal/error lines",
+    "new_code_in_binary": "bounded_stream, relay_budget_exceeded and unavailable present in the running binary",
+    "new_code_in_bundle": "errors.unavailable translation present in the served JS assets",
+    "relay_standard": "ok",
+    "relay_bounded_stream": "ok",
+    "relay_unknown_mode": "rejected 400",
+    "services_directory": "ok (id=5 dokploy-tx with usage_guide_excerpt)",
     "service_detail": "ok (usage_guide present)",
-    "relay_request": "ok"
+    "relay_request": "ok",
+    "tx_instance_state": "left running talus-local:v0.9.0-test.3 for continued branch verification (as it already was on v0.9.0-test.2); restore the compose to ghcr.io/molicherry/talus:v0.9.0 when the branch work ends"
   }
 }
