@@ -65,3 +65,31 @@ func TestMetricsCatalogIsClosed(t *testing.T) {
 		t.Fatalf("lease gauge must have exactly the consumer label, got %+v", def)
 	}
 }
+
+func TestRegistryRejectsInvalidLabelValues(t *testing.T) {
+	r := NewRegistry()
+	// consumer is a closed enum: the Monitor role must not appear.
+	if err := r.AddGauge("talus_ssh_leases_in_use", map[string]string{"consumer": "monitor"}, 1); err == nil {
+		t.Fatal("consumer=monitor must be rejected")
+	}
+	if err := r.AddGauge("talus_ssh_leases_in_use", map[string]string{"consumer": "agent"}, 1); err != nil {
+		t.Fatalf("consumer=agent should be accepted: %v", err)
+	}
+	// outcome/reason_class/action are closed enums too.
+	if err := r.IncCounter("talus_operations_total", map[string]string{"action": "server.exec", "outcome": "nope", "reason_class": "none"}); err == nil {
+		t.Fatal("an unknown outcome value must be rejected")
+	}
+	if err := r.IncCounter("talus_operations_total", map[string]string{"action": "curl http://x", "outcome": "success", "reason_class": "none"}); err == nil {
+		t.Fatal("a free-form action must be rejected")
+	}
+}
+
+func TestRegistryEnforcesMetricKind(t *testing.T) {
+	r := NewRegistry()
+	if err := r.IncCounter("talus_ssh_leases_in_use", map[string]string{"consumer": "agent"}); err == nil {
+		t.Fatal("IncCounter on a gauge must be rejected")
+	}
+	if err := r.AddGauge("talus_operations_total", map[string]string{"action": "server.exec", "outcome": "success", "reason_class": "none"}, 1); err == nil {
+		t.Fatal("AddGauge on a counter must be rejected")
+	}
+}

@@ -96,8 +96,73 @@ const (
 	KindGauge     Kind = "gauge"
 )
 
+// Label value vocabulary (REQUIREMENTS §12.2): only fixed enums, never dynamic
+// values such as IDs, hosts, paths, versions or budgets. Values are grouped by
+// label name, so a metric label is validated against its own enum.
+var (
+	actionValues    = []string{"server.exec", "server.terminal", "service.relay", "auth.jwt_check", "auth.password_change", "ssh.upload", "agent.deploy", "monitor.collect", "metrics.aggregate", "metrics.retention"}
+	channelValues   = []string{"http", "ws", "register", "ready"}
+	consumerValues  = []string{"exec", "terminal", "agent"}
+	archValues      = []string{"amd64", "arm64", "unsupported"}
+	resultValues    = []string{"clean", "forced", "budget_exceeded"}
+	componentValues = []string{
+		string(ComponentAuth), string(ComponentSSH), string(ComponentTerminal),
+		string(ComponentAgent), string(ComponentMonitor), string(ComponentMetrics), string(ComponentRelay),
+	}
+	stageValues = []string{
+		string(StageVersionCheck), string(StageRegister), string(StageReady), string(StageRevoke),
+		string(StageQuotaWait), string(StageDial), string(StageArchProbe), string(StageArtifactSelect),
+		string(StageRemoteInspect), string(StageUpload), string(StageHashVerify), string(StageActivate),
+		string(StageRun), string(StageWrite), string(StageStore), string(StageCleanup),
+		string(StageAggregate), string(StageRetention), string(StageFinalize),
+	}
+	outcomeValues = []string{
+		string(OutcomeSuccess), string(OutcomeFailure), string(OutcomeTimeout), string(OutcomeCanceled),
+		string(OutcomeSkipped), string(OutcomeRejected), string(OutcomeUnknown),
+	}
+	reasonValues = []string{
+		string(ReasonNone), string(ReasonAuth), string(ReasonHostKey), string(ReasonQuota), string(ReasonDial),
+		string(ReasonProbe), string(ReasonPlatform), string(ReasonArchitecture), string(ReasonArtifact),
+		string(ReasonIntegrity), string(ReasonPermission), string(ReasonProtocol), string(ReasonDB),
+		string(ReasonWrite), string(ReasonRemoteExit), string(ReasonTimeout), string(ReasonCanceled),
+		string(ReasonRevoked), string(ReasonRetention), string(ReasonOther),
+	}
+)
+
+func valueSetFor(label string) []string {
+	switch label {
+	case "action":
+		return actionValues
+	case "stage":
+		return stageValues
+	case "outcome":
+		return outcomeValues
+	case "reason_class":
+		return reasonValues
+	case "channel":
+		return channelValues
+	case "consumer":
+		return consumerValues
+	case "component":
+		return componentValues
+	case "result":
+		return resultValues
+	case "arch":
+		return archValues
+	}
+	return nil
+}
+
+func containsValue(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
 // MetricDef is a metric with its bounded label key set (REQUIREMENTS §12.2).
-// No ID, host, path, command, version/hash or budget value may be a label.
 type MetricDef struct {
 	Name   string
 	Kind   Kind
@@ -154,9 +219,12 @@ func (r *Registry) key(name string, labels map[string]string) (string, error) {
 	if len(labels) != len(def.Labels) {
 		return "", fmt.Errorf("metric %q expects labels %v, got %v", name, def.Labels, labelKeys(labels))
 	}
-	for k := range labels {
+	for k, v := range labels {
 		if !allowed[k] {
 			return "", fmt.Errorf("metric %q does not allow label %q", name, k)
+		}
+		if vs := valueSetFor(k); vs != nil && !containsValue(vs, v) {
+			return "", fmt.Errorf("metric %q label %q has invalid value %q", name, k, v)
 		}
 	}
 	parts := make([]string, 0, len(def.Labels))
@@ -188,6 +256,11 @@ func join(parts []string) string {
 
 // IncCounter increments a counter by 1 after validating the metric and labels.
 func (r *Registry) IncCounter(name string, labels map[string]string) error {
+	if def, ok := lookup(name); !ok {
+		return fmt.Errorf("unknown metric %q", name)
+	} else if def.Kind != KindCounter {
+		return fmt.Errorf("metric %q is %s, not a counter", name, def.Kind)
+	}
 	k, err := r.key(name, labels)
 	if err != nil {
 		return err
@@ -201,6 +274,11 @@ func (r *Registry) IncCounter(name string, labels map[string]string) error {
 // AddGauge adds delta to a gauge after validating the metric and labels. The
 // caller owns exactly-once accounting for the underlying resource.
 func (r *Registry) AddGauge(name string, labels map[string]string, delta float64) error {
+	if def, ok := lookup(name); !ok {
+		return fmt.Errorf("unknown metric %q", name)
+	} else if def.Kind != KindGauge {
+		return fmt.Errorf("metric %q is %s, not a gauge", name, def.Kind)
+	}
 	k, err := r.key(name, labels)
 	if err != nil {
 		return err

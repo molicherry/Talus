@@ -1,6 +1,9 @@
 package handler
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Metrics query contract (REQUIREMENTS §4.2.1). The field names are frozen and
 // must match the frontend decoder: `interval`/`allow_coarsen`/`actual_interval`,
@@ -29,11 +32,23 @@ type MetricsQuery struct {
 	To           time.Time
 }
 
-// MetricPoint is one bucket. A nil series value means "no valid sample"
-// (a gap); a non-nil 0 is a real zero.
+// MetricPoint is one bucket. Series values are flattened next to `t`
+// ({"t": ..., "cpu_percent": ...}) to match the frozen contract. A nil value
+// means "no valid sample" (a gap); a non-nil 0 is a real zero.
 type MetricPoint struct {
-	T      time.Time           `json:"t"`
-	Series map[string]*float64 `json:"series"`
+	T      time.Time
+	Series map[string]*float64
+}
+
+// MarshalJSON flattens the series into the point object, as the contract and
+// the frontend decoder expect. A nil series value marshals as JSON null.
+func (p MetricPoint) MarshalJSON() ([]byte, error) {
+	out := make(map[string]any, len(p.Series)+1)
+	out["t"] = p.T
+	for k, v := range p.Series {
+		out[k] = v
+	}
+	return json.Marshal(out)
 }
 
 // MetricsResponse is the frozen query response envelope payload.
@@ -41,7 +56,7 @@ type MetricsResponse struct {
 	Range             string        `json:"range"`
 	RequestedInterval string        `json:"requested_interval"`
 	ActualInterval    string        `json:"actual_interval"`
-	CoarsenReason     string        `json:"coarsen_reason,omitempty"`
+	CoarsenReason     *string       `json:"coarsen_reason"`
 	Stat              string        `json:"stat"`
 	Downsampled       bool          `json:"downsampled"`
 	From              time.Time     `json:"from"`
