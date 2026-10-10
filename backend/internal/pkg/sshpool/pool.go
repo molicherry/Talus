@@ -359,6 +359,15 @@ func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint st
 		sem = entry.sem
 	}
 	p.mu.Unlock()
+	if sem == nil {
+		// The pool was closed between acquiring the slot and capturing it. There
+		// is nothing to return the slot to, so fail instead of handing back a
+		// Handle that would block forever in Release/Discard.
+		if client != nil {
+			_ = client.Close()
+		}
+		return nil, ErrClosed
+	}
 	return &Handle{Client: client, serverID: serverID, generation: gen, sem: sem}, nil
 }
 
@@ -366,7 +375,7 @@ func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint st
 // matches the current entry; a stale client is closed instead of cached. The
 // slot is released exactly once.
 func (p *Pool) ReleaseHandle(h *Handle) {
-	if h == nil {
+	if h == nil || h.sem == nil {
 		return
 	}
 	h.once.Do(func() {
@@ -390,7 +399,7 @@ func (p *Pool) ReleaseHandle(h *Handle) {
 // DiscardHandle closes the client (if any) without caching it and releases the
 // slot exactly once.
 func (p *Pool) DiscardHandle(h *Handle) {
-	if h == nil {
+	if h == nil || h.sem == nil {
 		return
 	}
 	h.once.Do(func() {
