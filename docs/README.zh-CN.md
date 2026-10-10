@@ -145,19 +145,6 @@ POST /api/v1/services/{id}/relay → 按指南构造请求
 **Talus Web UI → 服务 → 添加/编辑服务 → 使用指南** 字段中编写。它告诉 AI 如何使用该服务
 （端点、认证头、请求示例），而无需把任何服务细节硬编码进通用 skill。
 
-### 安装服务目录注入插件（推荐）
-
-[ai-integration](../ai-integration/) 插件（OpenCode / pi / Claude Code / Codex）
-在**用户提到服务时**注入服务目录——让 AI 在需要时恰好看到有哪些服务可用，并被提醒
-读取使用指南，同时无关对话轮次不消耗 token。注入只影响当前这一轮，不会写入对话历史。
-在安装 skill 之后安装它：
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/molicherry/Talus/main/ai-integration/install.sh)
-```
-
-没有提示词注入钩子的平台（如 Cursor）依赖 skill 的发现规则——两种方式能力都完整；
-插件只是让它不可能被漏掉。
 
 ### 示例提示词
 

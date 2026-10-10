@@ -223,22 +223,6 @@ written in the **Talus Web UI → Services → Add/Edit Service → Usage Guide*
 tells the AI how to use that service (endpoints, auth headers, request examples)
 without hard-coding any service specifics into the shared skill.
 
-### Install the service-directory injection plugin (recommended)
-
-The [ai-integration](ai-integration/) plugin (OpenCode / pi / Claude Code / Codex)
-injects the service directory **when the user mentions services** — so the AI
-sees what is available exactly when it matters and is reminded to fetch the
-usage guide, without paying tokens on unrelated turns. Injection affects only
-the current turn and is never written to conversation history. Install it after
-the skill:
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/molicherry/Talus/main/ai-integration/install.sh)
-```
-
-Platforms without a prompt-injection hook (e.g. Cursor) rely on the skill's
-discovery rules instead — the capability works either way; the plugin just makes
-it impossible to miss.
 
 ### Example prompts
 
