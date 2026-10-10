@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vpsmanager/backend/internal/config"
+	"github.com/vpsmanager/backend/internal/gate"
 	"github.com/vpsmanager/backend/internal/handler"
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/crypto"
@@ -104,6 +105,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// JWT session versioning (REQ-05). Explicit, idempotent schema migration
+	// rather than relying on AutoMigrate for this security-relevant column.
+	if _, err := repository.ApplyOnce(db, "2026-10-10-users-token-version",
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version bigint NOT NULL DEFAULT 0`); err != nil {
+		slog.Error("failed to add users.token_version", "error", err)
+		os.Exit(1)
+	}
+
 	// 4. AutoMigrate all models in FK dependency order (User → Credential → Server → APIKey → Metric)
 	var autoMigrateErr error
 	for attempt := 0; attempt < 30; attempt++ {
@@ -152,7 +161,11 @@ func main() {
 
 	// Dependency chain — Auth
 	userRepo := repository.NewUserRepo(db)
+	userGate := gate.New(func(ctx context.Context, userID uint) (int64, error) {
+		return userRepo.TokenVersion(ctx, userID)
+	})
 	authSvc := service.NewAuthService(userRepo, jwtSvc, db)
+	authSvc.SetUserGate(userGate)
 	authHandler := handler.NewAuthHandler(authSvc)
 
 	// Dependency chain — SSH pool. Created before the server/credential services
@@ -288,6 +301,7 @@ func main() {
 		MaxTimeoutSeconds:     cfg.ExecTimeoutMax,
 	})
 	terminalH := handler.NewTerminalHandler(terminalSvc, jwtSvc)
+	terminalH.SetUserGate(userGate)
 
 	// Dependency chain — Metrics
 	monitorSvc := service.NewMonitorService(sshSvc, metricRepo, serverRepo, time.Duration(cfg.MonitorInterval)*time.Second)
@@ -309,6 +323,7 @@ func main() {
 
 	router := server.NewRouter(server.RouteConfig{
 		JWTService:                   jwtSvc,
+		UserGate:                     userGate,
 		APIKeyAuth:                   apiKeyAuth,
 		UsageRecorder:                usageRecorder,
 		ListUsageLogsHandler:         usageHandler.List,

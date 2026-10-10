@@ -41,7 +41,7 @@ func TestUsageCaptureScopeDenialHasVerifiedCaller(t *testing.T) {
 	validator := APIKeyIdentityValidatorFunc(func(context.Context, string) (usage.Principal, error) {
 		return usage.Principal{APIKeyID: &keyID, APIKeyName: "automation", Role: "admin"}, nil
 	})
-	handler := RequestID(UsageCapture(recorder)(Auth(nil, validator)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("denied request reached business") }))))
+	handler := RequestID(UsageCapture(recorder)(Auth(nil, validator, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("denied request reached business") }))))
 	req := httptest.NewRequest("POST", "/api/v1/servers/12/exec", nil)
 	req.Header.Set("X-API-Key", "raw-secret")
 	req.Header.Set("X-Request-ID", "same-client-id")
@@ -62,7 +62,7 @@ func TestUsageCaptureScopeDenialHasVerifiedCaller(t *testing.T) {
 func TestUsageCaptureRejectBudgetPrecedesDatabase(t *testing.T) {
 	store := &captureTestStore{}
 	recorder := usage.NewRecorder(store, nil, usage.Options{})
-	handler := UsageCapture(recorder)(Auth(nil, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("unauthenticated operation admitted") })))
+	handler := UsageCapture(recorder)(Auth(nil, nil, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("unauthenticated operation admitted") })))
 	for i := 0; i < 12; i++ {
 		req := httptest.NewRequest("POST", "/api/v1/servers", nil)
 		req.RemoteAddr = "192.0.2.8:3456"
@@ -122,12 +122,12 @@ func TestUsageCapturePersistsAfterClientCancellation(t *testing.T) {
 	store := &captureTestStore{}
 	recorder := usage.NewRecorder(store, nil, usage.Options{})
 	jwtService := token.NewJWTService("secret", time.Hour)
-	bearer, err := jwtService.GenerateToken(7, "admin", "admin")
+	bearer, err := jwtService.GenerateToken(7, "admin", "admin", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	requestCtx, cancel := context.WithCancel(context.Background())
-	handler := UsageCapture(recorder)(Auth(jwtService, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := UsageCapture(recorder)(Auth(jwtService, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		op := usage.FromContext(r.Context())
 		op.SetResult("succeeded", "")
 		cancel()

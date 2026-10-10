@@ -29,7 +29,7 @@ func (stubKeyValidator) Validate(ctx context.Context, rawKey string) (uint, stri
 // summary handler, never to the /{id} parameter route (and vice versa).
 func TestSummaryRouteDoesNotConflictWithIDRoute(t *testing.T) {
 	jwtSvc := token.NewJWTService("test-secret", 24*time.Hour)
-	tok, err := jwtSvc.GenerateToken(1, "admin", "admin")
+	tok, err := jwtSvc.GenerateToken(1, "admin", "admin", 0)
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}

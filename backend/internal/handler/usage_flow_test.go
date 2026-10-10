@@ -82,7 +82,7 @@ func TestUsageFlowRevealAuditSurvivesSummaryFailure(t *testing.T) {
 	creds := service.NewCredentialService(credRepo, serverRepo, master, nil)
 	h := NewCredentialHandler(creds, audit)
 	jwtSvc := token.NewJWTService("usage-flow-secret", time.Hour)
-	jwt, err := jwtSvc.GenerateToken(77, "operator", "admin")
+	jwt, err := jwtSvc.GenerateToken(77, "operator", "admin", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestUsageFlowRevealAuditSurvivesSummaryFailure(t *testing.T) {
 		}
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, ctx))
 		w := httptest.NewRecorder()
-		mw.RequestID(mw.UsageCapture(recorder)(mw.Auth(jwtSvc, nil)(handler))).ServeHTTP(w, r)
+		mw.RequestID(mw.UsageCapture(recorder)(mw.Auth(jwtSvc, nil, nil)(handler))).ServeHTTP(w, r)
 		return w
 	}
 	secret := "secret-value-never-log"

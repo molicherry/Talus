@@ -20,6 +20,7 @@ import (
 type RouteConfig struct {
 	JWTService                   *token.JWTService
 	APIKeyAuth                   any
+	UserGate                     middleware.UserGate
 	UsageRecorder                *usage.Recorder
 	ListUsageLogsHandler         http.HandlerFunc
 	GetUsageLogHandler           http.HandlerFunc
@@ -115,7 +116,7 @@ func NewRouter(cfg RouteConfig) chi.Router {
 	// Protected API routes (JWT or API key required)
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.UsageCapture(cfg.UsageRecorder))
-		r.Use(middleware.Auth(cfg.JWTService, cfg.APIKeyAuth))
+		r.Use(middleware.Auth(cfg.JWTService, cfg.APIKeyAuth, cfg.UserGate))
 
 		if cfg.ListUsageLogsHandler != nil {
 			r.Get("/api/v1/usage-logs", cfg.ListUsageLogsHandler)

@@ -53,7 +53,7 @@ func TestAPIKeyOwnerAndCallerAreSeparate(t *testing.T) {
 		return usage.Principal{AuthType: "api_key", UserID: &owner, APIKeyID: &keyID, Username: "owner", APIKeyName: "automation", APIKeyPrefix: "tk_short", Role: "admin", Scopes: []string{"servers:read"}, ServerIDs: []uint{33}}, nil
 	})
 	called := false
-	handler := Auth(token.NewJWTService("secret", time.Hour), validator)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Auth(token.NewJWTService("secret", time.Hour), validator, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		principal := GetPrincipal(r.Context())
 		claims := GetUserClaims(r.Context())
@@ -77,7 +77,7 @@ func TestLegacyKeyValidatorNeverInventsOwner(t *testing.T) {
 	validator := APIKeyValidatorFunc(func(context.Context, string) (uint, string, string, []string, []uint, error) {
 		return 91, "legacy-key", "admin", []string{"*"}, nil, nil
 	})
-	handler := Auth(nil, validator)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Auth(nil, validator, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal := GetPrincipal(r.Context())
 		if principal.UserID != nil || principal.APIKeyID == nil || *principal.APIKeyID != 91 || GetUserClaims(r.Context()).UserID != 0 {
 			t.Fatalf("legacy key became a user: %#v", principal)
@@ -99,7 +99,7 @@ func TestVerifiedKeyIdentitySurvivesScopeDenial(t *testing.T) {
 	req = req.WithContext(usage.WithOperation(req.Context(), op))
 	response := httptest.NewRecorder()
 	reached := false
-	Auth(nil, validator)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })).ServeHTTP(response, req)
+	Auth(nil, validator, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })).ServeHTTP(response, req)
 	principal := op.Principal()
 	if reached || response.Code != 403 || principal.AuthType != "api_key" || principal.APIKeyID == nil || *principal.APIKeyID != keyID {
 		t.Fatalf("denial lost caller: %d %#v", response.Code, principal)
@@ -118,7 +118,7 @@ func TestUsageRoutesRejectEveryAPIKey(t *testing.T) {
 		req := httptest.NewRequest("GET", path, nil)
 		req.Header.Set("X-API-Key", "raw-secret")
 		response := httptest.NewRecorder()
-		Auth(nil, validator)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("API key reached usage log handler") })).ServeHTTP(response, req)
+		Auth(nil, validator, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("API key reached usage log handler") })).ServeHTTP(response, req)
 		if response.Code != 403 {
 			t.Fatalf("%s status %d", path, response.Code)
 		}
@@ -129,7 +129,7 @@ func TestAuthFailureCarriesValidatedRequestID(t *testing.T) {
 	response := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/v1/servers", nil)
 	req.Header.Set("X-Request-ID", "invalid space")
-	handler := RequestID(Auth(nil, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("missing credentials reached handler") })))
+	handler := RequestID(Auth(nil, nil, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("missing credentials reached handler") })))
 	handler.ServeHTTP(response, req)
 	var envelope struct {
 		Error struct {

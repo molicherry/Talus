@@ -19,18 +19,31 @@ var errFirstUserTaken = errors.New("first user already created")
 
 const firstUserSetupLock int64 = 0x54414c5553415554 // "TALUSAUT", database-wide setup lock.
 
+// userGate serializes admission and password updates for one user. *gate.Gate
+// satisfies it; tests may supply a stub.
+type userGate interface {
+	Admit(ctx context.Context, userID uint, fn func(version int64) error) error
+}
+
 // AuthService handles authentication including first-user bootstrap.
 type AuthService struct {
 	userRepo             *repository.UserRepo
 	jwtSvc               *token.JWTService
 	db                   *gorm.DB
 	ownerBackfillTrigger func()
+	gate                 userGate
 }
 
 // SetOwnerBackfillTrigger connects optional background work to successful
 // initial setup. The callback must be nonblocking and is configured at startup.
 func (s *AuthService) SetOwnerBackfillTrigger(trigger func()) {
 	s.ownerBackfillTrigger = trigger
+}
+
+// SetUserGate wires the shared per-user gate so a password change and JWT
+// admission for the same user are serialized.
+func (s *AuthService) SetUserGate(g userGate) {
+	s.gate = g
 }
 
 // NewAuthService creates an AuthService with the given dependencies.
@@ -109,7 +122,7 @@ func (s *AuthService) createFirstUser(ctx context.Context, username, password st
 	if s.ownerBackfillTrigger != nil {
 		s.ownerBackfillTrigger()
 	}
-	return s.jwtSvc.GenerateToken(user.ID, user.Username, user.Role)
+	return s.jwtSvc.GenerateToken(user.ID, user.Username, user.Role, user.TokenVersion)
 }
 
 // authenticateExisting validates credentials for an existing user.
@@ -126,24 +139,30 @@ func (s *AuthService) authenticateExisting(ctx context.Context, username, passwo
 		return "", fmt.Errorf("login: invalid credentials: %w", server.ErrInvalidCredentials)
 	}
 
-	return s.jwtSvc.GenerateToken(user.ID, user.Username, user.Role)
+	return s.jwtSvc.GenerateToken(user.ID, user.Username, user.Role, user.TokenVersion)
 }
 
 func (s *AuthService) ChangePassword(ctx context.Context, userID uint, currentPassword, newPassword string) error {
-	user, err := s.userRepo.FindByID(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("change password: %w", err)
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
-		return fmt.Errorf("current password is incorrect: %w", server.ErrWrongCurrentPassword)
-	}
-
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("change password: bcrypt: %w", server.ErrInternal)
 	}
-
-	user.PasswordHash = string(hash)
-	return s.userRepo.Update(ctx, user)
+	verify := func(currentHash string) error {
+		if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(currentPassword)); err != nil {
+			return fmt.Errorf("current password is incorrect: %w", server.ErrWrongCurrentPassword)
+		}
+		return nil
+	}
+	change := func() error {
+		_, err := s.userRepo.ChangePassword(ctx, userID, verify, string(hash))
+		return err
+	}
+	if s.gate == nil {
+		// Legacy wiring without a gate: the repository transaction still makes the
+		// password update and version bump atomic.
+		return change()
+	}
+	// Everything under the gate: the version is read after acquiring it, so it
+	// cannot be older than a concurrent update's commit.
+	return s.gate.Admit(ctx, userID, func(int64) error { return change() })
 }

@@ -57,8 +57,18 @@ func (f APIKeyValidatorFunc) Validate(ctx context.Context, rawKey string) (uint,
 	return f(ctx, rawKey)
 }
 
+// UserGate admits a user after reading the current session version, serialized
+// with that user's password updates. *gate.Gate satisfies it.
+type UserGate interface {
+	Admit(ctx context.Context, userID uint, fn func(version int64) error) error
+}
+
+var errTokenRevoked = errors.New("session revoked")
+
 // Auth returns middleware that validates a JWT Bearer token or X-API-Key header.
-func Auth(jwtSvc *token.JWTService, keyValidator any) func(http.Handler) http.Handler {
+// When gate is non-nil, every JWT is admitted through the per-user gate, which
+// reads the current session version from the primary database (no cache).
+func Auth(jwtSvc *token.JWTService, keyValidator any, userGate UserGate) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Try API key first
@@ -115,6 +125,23 @@ func Auth(jwtSvc *token.JWTService, keyValidator any) func(http.Handler) http.Ha
 			if err != nil {
 				writeAuthError(w, r, http.StatusUnauthorized, "invalid or expired token")
 				return
+			}
+			if userGate != nil {
+				admitErr := userGate.Admit(r.Context(), claims.UserID, func(version int64) error {
+					if claims.TokenVersion == nil || *claims.TokenVersion != version {
+						return errTokenRevoked
+					}
+					return nil
+				})
+				switch {
+				case admitErr == nil:
+				case errors.Is(admitErr, errTokenRevoked):
+					writeAuthError(w, r, http.StatusUnauthorized, "session revoked")
+					return
+				default:
+					writeAuthError(w, r, http.StatusServiceUnavailable, "session version unavailable")
+					return
+				}
 			}
 
 			ctx := WithUserClaims(r.Context(), claims)
@@ -195,6 +222,7 @@ func extractBearerToken(r *http.Request) (string, bool) {
 const (
 	reasonUnauthorized = "unauthorized"
 	reasonForbidden    = "forbidden"
+	reasonUnavailable  = "unavailable"
 )
 
 // writeAuthError sends the same error envelope the rest of the API uses, with a
@@ -202,8 +230,11 @@ const (
 // translation fell back to a generic "request failed with status 401".
 func writeAuthError(w http.ResponseWriter, r *http.Request, statusCode int, message string) {
 	reason := reasonUnauthorized
-	if statusCode == http.StatusForbidden {
+	switch statusCode {
+	case http.StatusForbidden:
 		reason = reasonForbidden
+	case http.StatusServiceUnavailable:
+		reason = reasonUnavailable
 	}
 	if op := usage.FromContext(r.Context()); op != nil {
 		op.SetResult("rejected", reason)

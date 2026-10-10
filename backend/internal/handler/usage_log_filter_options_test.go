@@ -194,11 +194,11 @@ func TestUsageFilterOptionsRouterEnforcesAuthAndStaticRoute(t *testing.T) {
 	s := &usageFilterOptionsStub{}
 	h := NewUsageLogFilterOptionsHandler(s)
 	jwt := token.NewJWTService("filter-options-test-secret", time.Hour)
-	adminToken, err := jwt.GenerateToken(1, "admin", "admin")
+	adminToken, err := jwt.GenerateToken(1, "admin", "admin", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	userToken, err := jwt.GenerateToken(2, "user", "user")
+	userToken, err := jwt.GenerateToken(2, "user", "user", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
