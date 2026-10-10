@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -115,7 +116,41 @@ func TestCopyFileCancellationSettlesQuotaAndJoins(t *testing.T) {
 		t.Fatal("a blocked upload must not report success")
 	}
 
+	// The bounded teardown may force-close the transport; re-seed so the next
+	// upload has a healthy client (the fake server source cannot dial).
+	seedPool(t, pool, 1, dialTestSSH(t, address, hostKey))
 	if err := svc.CopyFile(context.Background(), 1, local, "/tmp/agent"); err != nil {
 		t.Fatalf("upload after cancellation: %v", err)
+	}
+}
+
+// TestCopyFileRemoteRejectWithoutReadingStdinIsBounded pins the P1 fix: a remote
+// that rejects the exec request without draining stdin must not block the copy
+// worker forever, even when the file exceeds the SSH window.
+func TestCopyFileRemoteRejectWithoutReadingStdinIsBounded(t *testing.T) {
+	address, hostKey := startExecSSHServer(t, routeUploads(func(ch ssh.Channel, _ <-chan struct{}) {
+		// Reject without reading stdin; the client's copy worker blocks once the
+		// SSH window fills and must be reclaimed by the bounded teardown.
+		_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{1}))
+		_ = ch.Close()
+	}))
+	pool := newTestPool(t)
+	seedPool(t, pool, 1, dialTestSSH(t, address, hostKey))
+	svc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
+
+	big := filepath.Join(t.TempDir(), "artifact")
+	if err := os.WriteFile(big, bytes.Repeat([]byte("x"), 8<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- svc.CopyFile(context.Background(), 1, big, "/tmp/agent") }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a rejected upload must fail")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("rejected upload did not return within the bounded teardown")
 	}
 }

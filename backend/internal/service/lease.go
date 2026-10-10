@@ -65,8 +65,8 @@ func (l *sshLease) Exec(ctx context.Context, command string, budget time.Duratio
 // Upload pipes a local file to a remote path on the pinned client and always
 // settles the quota, including every error and cancellation path.
 func (l *sshLease) Upload(ctx context.Context, localPath, remotePath string, budget time.Duration) error {
-	err := l.svc.copyFileOnClient(ctx, l.h.Client, localPath, remotePath, budget)
-	if isConnectionError(err) {
+	err, transportClosed := l.svc.copyFileOnClient(ctx, l.h.Client, localPath, remotePath, budget)
+	if transportClosed || isConnectionError(err) {
 		l.Discard()
 		return err
 	}
@@ -77,22 +77,23 @@ func (l *sshLease) Upload(ctx context.Context, localPath, remotePath string, bud
 // copyFileOnClient streams localPath to remotePath over an exclusively owned
 // client. It enforces a total budget (when budget > 0), joins both the copy and
 // the remote command worker on every exit path, and never leaks a goroutine.
-func (s *SSHService) copyFileOnClient(ctx context.Context, client *ssh.Client, localPath, remotePath string, budget time.Duration) error {
+func (s *SSHService) copyFileOnClient(ctx context.Context, client *ssh.Client, localPath, remotePath string, budget time.Duration) (error, bool) {
+	forceClosed := false
 	f, err := os.Open(localPath)
 	if err != nil {
-		return fmt.Errorf("open source: %w", err)
+		return fmt.Errorf("open source: %w", err), false
 	}
 	defer f.Close()
 
 	session, err := client.NewSession()
 	if err != nil {
-		return fmt.Errorf("create session: %w", err)
+		return fmt.Errorf("create session: %w", err), false
 	}
 	defer session.Close()
 
 	pipe, err := session.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("stdin pipe: %w", err)
+		return fmt.Errorf("stdin pipe: %w", err), false
 	}
 
 	copyDone := make(chan error, 1)
@@ -116,25 +117,62 @@ func (s *SSHService) copyFileOnClient(ctx context.Context, client *ssh.Client, l
 		timeout = timer.C
 	}
 
+	var runErr error
+	var cause error
+	runOutstanding := true
 	select {
-	case err = <-runDone:
-		cerr := <-copyDone
-		if err != nil {
-			return fmt.Errorf("copy failed: %w (stderr: %s)", err, stderr.String())
-		}
-		if cerr != nil {
-			return fmt.Errorf("copy file: %w", cerr)
-		}
-		return nil
+	case runErr = <-runDone:
+		runOutstanding = false
 	case <-ctx.Done():
-		_ = session.Close()
-		<-runDone
-		<-copyDone
-		return ctx.Err()
+		cause = ctx.Err()
 	case <-timeout:
-		_ = session.Close()
+		cause = context.DeadlineExceeded
+	}
+
+	// Settle without touching the pipe/session from this goroutine: the copy
+	// worker is the sole closer of the pipe, so closing it here would race with
+	// an in-flight write. Both workers are joined within the teardown grace and,
+	// if one stays stuck (for example a blocked TCP write), the transport is
+	// force-closed so neither can leak. session.Close runs afterwards, once the
+	// copy worker has exited.
+	grace := s.uploadTeardownGrace
+	if grace <= 0 {
+		grace = 100 * time.Millisecond
+	}
+	deadline := time.Now().Add(grace)
+	if runOutstanding && !joinWithin(deadline, runDone) {
+		_ = client.Close()
+		forceClosed = true
 		<-runDone
+	}
+	if !joinWithin(deadline, copyDone) {
+		_ = client.Close()
+		forceClosed = true
 		<-copyDone
-		return fmt.Errorf("copy file: %w", context.DeadlineExceeded)
+	}
+
+	if cause != nil {
+		return cause, forceClosed
+	}
+	if runErr != nil {
+		return fmt.Errorf("copy failed: %w (stderr: %s)", runErr, stderr.String()), forceClosed
+	}
+	return nil, false
+}
+
+// joinWithin waits for a single worker channel until deadline, reporting
+// whether it finished in time.
+func joinWithin(deadline time.Time, ch <-chan error) bool {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return false
+	}
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-ch:
+		return true
+	case <-timer.C:
+		return false
 	}
 }

@@ -33,16 +33,20 @@ type SSHService struct {
 	credSvc            *CredentialService
 	sshDialTimeout     time.Duration
 	execDefaultTimeout time.Duration
+	// uploadTeardownGrace bounds the graceful close phase of an upload before the
+	// transport is force-closed (REQUIREMENTS §7.1.1: 100ms).
+	uploadTeardownGrace time.Duration
 }
 
 // NewSSHService creates an SSHService with the given dependencies.
 func NewSSHService(pool *sshpool.Pool, serverRepo serverSource, credSvc *CredentialService, sshDialTimeout, execDefaultTimeout time.Duration) *SSHService {
 	return &SSHService{
-		pool:               pool,
-		serverRepo:         serverRepo,
-		credSvc:            credSvc,
-		sshDialTimeout:     sshDialTimeout,
-		execDefaultTimeout: execDefaultTimeout,
+		pool:                pool,
+		serverRepo:          serverRepo,
+		credSvc:             credSvc,
+		sshDialTimeout:      sshDialTimeout,
+		execDefaultTimeout:  execDefaultTimeout,
+		uploadTeardownGrace: 100 * time.Millisecond,
 	}
 }
 
