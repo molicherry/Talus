@@ -92,3 +92,36 @@ func TestApplyOnceRollsBackPartialWorkOnFailure(t *testing.T) {
 		t.Fatal("retry after a partial failure should apply the migration")
 	}
 }
+
+// TestApplyOnceRollsBackWhenMarkerWriteFails proves the outer transaction covers
+// both the migration SQL and its marker: when the marker insert fails after the
+// SQL has already succeeded, the SQL is rolled back too.
+func TestApplyOnceRollsBackWhenMarkerWriteFails(t *testing.T) {
+	db := newTestDB(t)
+	const id = "test_apply_once_marker_fail"
+	if err := db.Exec(createMigrationsTableSQL).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE OR REPLACE FUNCTION talus_marker_boom() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'marker boom'; END $$ LANGUAGE plpgsql`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TRIGGER talus_marker_boom BEFORE INSERT ON schema_migrations FOR EACH ROW EXECUTE FUNCTION talus_marker_boom()`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyOnce(db, id, `CREATE TABLE marker_fail_work (id int)`); err == nil {
+		t.Fatal("expected the marker write to fail")
+	}
+	if db.Migrator().HasTable("marker_fail_work") {
+		t.Fatal("SQL work must roll back when the marker write fails")
+	}
+	if err := db.Exec(`DROP TRIGGER talus_marker_boom ON schema_migrations`).Error; err != nil {
+		t.Fatal(err)
+	}
+	applied, err := ApplyOnce(db, id, `CREATE TABLE marker_fail_work (id int)`)
+	if err != nil {
+		t.Fatalf("retry after marker failure: %v", err)
+	}
+	if !applied {
+		t.Fatal("retry should apply once the marker can be written")
+	}
+}
