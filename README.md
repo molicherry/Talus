@@ -82,8 +82,8 @@ On first login, enter any username and a password of at least 8 characters — t
 
 1. Go to **Services** → **Add Service**
 2. Fill in name, display name, base URL (e.g. `http://localhost:3000`), and credentials (key-value pairs)
-3. Optionally assign the service to a server for SSH-tunneled access
-4. Use the relay API to proxy requests through Talus — credentials are injected automatically, `{{key}}` placeholders are substituted
+3. Optionally assign the service to a server for management and authorization scope — the relay calls the service base URL directly from the Hub; there is **no** SSH tunnel
+4. Use the relay API to proxy requests through Talus — credentials are injected automatically, `{{key}}` placeholders are substituted. An omitted `mode` is a normal 30s request; pass `"mode": "bounded_stream"` for an explicit up-to-300s stream (30s header wait, 30s no-progress idle limit; the mode is not forwarded upstream)
 
 ### 6. View Usage Logs
 

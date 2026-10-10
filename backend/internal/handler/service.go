@@ -50,6 +50,7 @@ type createServiceRequest struct {
 type relayRequest struct {
 	Method  string            `json:"method"`
 	Path    string            `json:"path"`
+	Mode    string            `json:"mode"`
 	Headers map[string]string `json:"headers"`
 	Body    json.RawMessage   `json:"body"`
 }
@@ -158,6 +159,11 @@ func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
+	if !service.RelayModes[req.Mode] {
+		// mode is a control field; it is never forwarded upstream.
+		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
+		return
+	}
 
 	op := usage.FromContext(r.Context())
 	op.SetMetadata("method", req.Method)
@@ -165,6 +171,7 @@ func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 	result, relayErr := h.svc.RelayWithResult(r.Context(), id, service.RelayInput{
 		Method:  req.Method,
 		Path:    req.Path,
+		Mode:    req.Mode,
 		Headers: req.Headers,
 		Body:    req.Body,
 	}, w)

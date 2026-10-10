@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
@@ -32,13 +33,29 @@ var hopByHopHeaders = map[string]bool{
 	"Upgrade":             true,
 }
 
-const relayTimeout = 30 * time.Second
+const (
+	// relayStandardBudget is the total business budget for the default mode.
+	relayStandardBudget = 30 * time.Second
+	// relayBoundedStreamBudget is the total business budget for an explicit
+	// bounded_stream request (REQUIREMENTS §7.1.3).
+	relayBoundedStreamBudget = 300 * time.Second
+	// relayHeaderWait caps the wait for upstream response headers, and also the
+	// body progress idle window; neither resets the total budget.
+	relayHeaderWait  = 30 * time.Second
+	relayIdleTimeout = 30 * time.Second
+)
 
 // ServiceRelayService provides business logic for external service management and relay.
 type ServiceRelayService struct {
 	repo       *repository.ServiceRepo
 	masterKey  *crypto.MasterKey
 	httpClient *http.Client
+	// Budgets are fields so tests can use short values; zero falls back to the
+	// package defaults below.
+	standardBudget time.Duration
+	boundedBudget  time.Duration
+	headerWait     time.Duration
+	idleTimeout    time.Duration
 }
 
 // NewServiceRelayService creates a ServiceRelayService with the given dependencies.
@@ -47,11 +64,17 @@ func NewServiceRelayService(repo *repository.ServiceRepo, masterKey *crypto.Mast
 		repo:      repo,
 		masterKey: masterKey,
 		httpClient: &http.Client{
-			Timeout: relayTimeout,
+			// No client-wide Timeout: the total budget is per request (standard
+			// 30s, bounded_stream 300s), and a fixed client timeout would cut a
+			// long stream short.
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
 		},
+		standardBudget: relayStandardBudget,
+		boundedBudget:  relayBoundedStreamBudget,
+		headerWait:     relayHeaderWait,
+		idleTimeout:    relayIdleTimeout,
 	}
 }
 
@@ -71,9 +94,13 @@ type CreateServiceInput struct {
 type RelayInput struct {
 	Method  string            `json:"method"`
 	Path    string            `json:"path"`
+	Mode    string            `json:"mode"`
 	Headers map[string]string `json:"headers"`
 	Body    json.RawMessage   `json:"body"`
 }
+
+// RelayModes are the accepted relay modes; the empty value means standard.
+var RelayModes = map[string]bool{"": true, "standard": true, "bounded_stream": true}
 
 // validateAndEncryptCredentials validates the input fields and encrypts the credential map
 // with a freshly generated salt. Create and Update share this helper to prevent rule drift.
@@ -284,6 +311,29 @@ func (s *ServiceRelayService) RelayWithResult(ctx context.Context, serviceID uin
 func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.Service, input RelayInput, w http.ResponseWriter) (RelayResult, error) {
 	result := RelayResult{Outcome: "failed"}
 
+	// One business budget covers the whole relay (lookup, dial, headers, body);
+	// each stage takes the remaining time. An omitted mode is standard.
+	budget := s.standardBudget
+	if budget <= 0 {
+		budget = relayStandardBudget
+	}
+	if input.Mode == "bounded_stream" {
+		budget = s.boundedBudget
+		if budget <= 0 {
+			budget = relayBoundedStreamBudget
+		}
+	}
+	headerWait := s.headerWait
+	if headerWait <= 0 {
+		headerWait = relayHeaderWait
+	}
+	idleTimeout := s.idleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = relayIdleTimeout
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
 	// Decrypt all credentials.
 	var key []byte
 	if len(svc.EncryptedCredentials) > 0 {
@@ -319,7 +369,7 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 		bodyReader = bytes.NewReader([]byte(bodyStr))
 	}
 
-	req, err := http.NewRequestWithContext(ctx, input.Method, targetURL, bodyReader)
+	req, err := http.NewRequestWithContext(reqCtx, input.Method, targetURL, bodyReader)
 	if err != nil {
 		result.Outcome, result.Reason = "rejected", server.ReasonInvalidRelayRequest
 		return result, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRelayRequest)
@@ -332,14 +382,18 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 		}
 	}
 
-	// Execute request.
+	// Execute request. The header wait has its own cap and never resets the
+	// total budget.
+	headerTimer := time.AfterFunc(headerWait, cancel)
 	resp, err := s.httpClient.Do(req)
+	headerTimer.Stop()
 	if err != nil {
 		if ctx.Err() != nil {
 			result.Outcome, result.Reason = "cancelled", "client_cancelled"
 			return result, ctx.Err()
 		}
-		if isTimeout(err) {
+		if isTimeout(err) || reqCtx.Err() != nil {
+			// Either the header wait or the total budget expired before headers.
 			result.Reason = server.ReasonRelayTimeout
 			return result, server.NewAppError(http.StatusGatewayTimeout, server.ReasonRelayTimeout)
 		}
@@ -364,11 +418,71 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
-	result.BytesCopied, result.CopyError = io.CopyBuffer(relayFlushWriter{w}, resp.Body, make([]byte, 32*1024))
+	// Copy the body with an idle watchdog: when no bytes are forwarded for
+	// relayIdleTimeout the request is aborted. The watchdog shares reqCtx, so it
+	// can never extend the total budget.
+	var lastProgress atomic.Int64
+	lastProgress.Store(time.Now().UnixNano())
+	stopWatch := make(chan struct{})
+	watchReturned := make(chan struct{})
+	var idleCanceled atomic.Bool
+	go func() {
+		defer close(watchReturned)
+		interval := idleTimeout / 2
+		if interval > time.Second {
+			interval = time.Second
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopWatch:
+				return
+			case <-ticker.C:
+				if time.Since(time.Unix(0, lastProgress.Load())) >= idleTimeout {
+					idleCanceled.Store(true)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	flush := relayFlushWriter{w}
+	buf := make([]byte, 32*1024)
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := flush.Write(buf[:n]); werr != nil {
+				result.CopyError = werr
+				break
+			}
+			result.BytesCopied += int64(n)
+			lastProgress.Store(time.Now().UnixNano())
+		}
+		if rerr != nil {
+			if rerr != io.EOF {
+				result.CopyError = rerr
+			}
+			break
+		}
+	}
+	close(stopWatch)
+	<-watchReturned
+
 	if result.CopyError != nil {
-		result.Reason = "relay_copy_failed"
-		if ctx.Err() != nil {
+		switch {
+		case idleCanceled.Load():
+			result.Outcome, result.Reason = "timeout", "relay_idle_timeout"
+			if !result.HeadersWritten {
+				return result, server.NewAppError(http.StatusGatewayTimeout, server.ReasonRelayTimeout)
+			}
+		case ctx.Err() != nil:
 			result.Outcome, result.Reason = "cancelled", "client_cancelled"
+		case errors.Is(reqCtx.Err(), context.DeadlineExceeded):
+			result.Outcome, result.Reason = "timeout", "relay_budget_exceeded"
+		default:
+			result.Reason = "relay_copy_failed"
 		}
 		return result, result.CopyError
 	}
