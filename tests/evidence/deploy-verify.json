@@ -1,26 +1,27 @@
 {
   "run_id": "deploy-verify",
   "status": "passed",
-  "recorded_at": "2026-10-10T01:05:00Z",
+  "recorded_at": "2026-10-10T02:08:00Z",
   "recorded_by": "agent",
-  "commit": "1f258d6",
-  "summary": "Phase 1 (M1) verified on the tx server (server 8, tx4c16g): the branch was built into a local image, deployed through dokploy, and the running Hub served the expected version from both the local and public endpoints.",
+  "commit": "1defcf2",
+  "summary": "Phase 1 (M1) verified on the tx server (server 8, tx4c16g) at the current branch head: the branch was built into a local image, deployed through dokploy, and the running Hub served the expected version from both the local and public endpoints with a clean startup.",
   "environment": {
     "server_id": 8,
     "server_name": "tx4c16g",
-    "image": "talus-local:v0.9.0-test.1",
+    "image": "talus-local:v0.9.0-test.2",
     "deploy": "dokploy compose kSVulcrooQ-VO5VKW2ml"
   },
   "evidence": [
-    "docker ps: compose-...-hub-1 uses image talus-local:v0.9.0-test.1",
-    "curl http://localhost:8081/api/v1/version -> {\"data\":{\"version\":\"v0.9.0-test.1\"}}",
-    "curl https://talus-test.kisihin.dpdns.org/api/v1/version -> {\"data\":{\"version\":\"v0.9.0-test.1\"}}",
-    "docker logs: hub started, migration/apply-once ran without error"
+    "docker ps: compose-...-hub-1 uses image talus-local:v0.9.0-test.2",
+    "curl http://localhost:8081/api/v1/version -> {\"data\":{\"version\":\"v0.9.0-test.2\"}}",
+    "curl https://talus-test.kisihin.dpdns.org/api/v1/version -> {\"data\":{\"version\":\"v0.9.0-test.2\"}}",
+    "docker logs: hub started (server starting), no error/panic; migration hardening applied at startup"
   ],
   "checks": {
-    "container_image": "talus-local:v0.9.0-test.1",
-    "version_local": "v0.9.0-test.1",
-    "version_public": "v0.9.0-test.1",
-    "skill_and_service_catalog": "preserved (static assertion + Hub served /api/v1/version with the skill and Relay routes intact)"
+    "container_image": "talus-local:v0.9.0-test.2",
+    "version_local": "v0.9.0-test.2",
+    "version_public": "v0.9.0-test.2",
+    "startup_clean": "migration/apply-once and monitor started without error",
+    "skill_and_service_catalog": "preserved (static assertion + Hub served the version endpoint with the skill and Relay routes intact)"
   }
 }
