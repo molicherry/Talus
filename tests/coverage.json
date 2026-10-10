@@ -397,8 +397,11 @@
         {
           "implementation_id": "impl-05-01",
           "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentPasswordChangeRevokesJWTAndTerminals"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -414,8 +417,11 @@
         {
           "implementation_id": "impl-05-02",
           "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentRevokedJWTRejectedAtHandshakeAndClosesLiveTerminal"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -431,8 +437,11 @@
         {
           "implementation_id": "impl-05-03",
           "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentLegacyJWTWithoutVersionIsRejected"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -448,8 +457,11 @@
         {
           "implementation_id": "impl-05-04",
           "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentPasswordChangeRevokesJWTAndTerminals"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -465,8 +477,11 @@
         {
           "implementation_id": "impl-05-05",
           "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentGateReadsPrimaryWithoutPositiveCaching"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -482,8 +497,11 @@
         {
           "implementation_id": "impl-06-01",
           "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentUploadQuotaRecoversAfterRepeatedUploads"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -499,8 +517,11 @@
         {
           "implementation_id": "impl-06-02",
           "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentCancelledUploadIsBoundedAndReclaimsQuota"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -516,8 +537,11 @@
         {
           "implementation_id": "impl-06-03",
           "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentUploadRejectsRemoteFailureWithoutReportingSuccess"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -533,8 +557,11 @@
         {
           "implementation_id": "impl-07-01",
           "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentExecUsesConfiguredDefaultAndReturnsCompleteResults"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -550,8 +577,11 @@
         {
           "implementation_id": "impl-07-02",
           "run_id": "go-unit",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/execlimit_test.go",
+            "symbol": "TestExecOutputTruncationMetadata"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -567,8 +597,11 @@
         {
           "implementation_id": "impl-07-03",
           "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentRelayBudgetsAndIdleAreEnforced"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -584,8 +617,11 @@
         {
           "implementation_id": "impl-07-04",
           "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentCleanupBudgetsAreAbsolute"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]

@@ -22,6 +22,13 @@ const (
 	cleanupBudget = 3 * time.Second
 )
 
+// Exported mirrors of the frozen §7.1.1 cleanup contract, so callers and
+// acceptance tests can pin the values without duplicating them.
+const (
+	CleanupGrace  = cleanupGrace
+	CleanupBudget = cleanupBudget
+)
+
 // Session is one JWT terminal registered for revocation.
 type Session struct {
 	ID      uint
