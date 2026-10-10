@@ -42,6 +42,7 @@ type connEntry struct {
 	// dialed with (host, port, credential revision). It is compared on every
 	// Get so a cached client can never be used for different parameters.
 	fingerprint string
+	generation  uint64
 	lastUsed    time.Time
 	sem         chan struct{} // concurrency limiter per server
 	waiters     int
@@ -94,6 +95,7 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 	if !ok {
 		entry = &connEntry{
 			fingerprint: fingerprint,
+			generation:  1,
 			sem:         make(chan struct{}, p.maxConns),
 		}
 		p.conns[serverID] = entry
@@ -103,6 +105,7 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 			entry.client = nil
 		}
 		entry.fingerprint = fingerprint
+		entry.generation++
 	}
 	entry.waiters++
 	p.mu.Unlock()
@@ -255,6 +258,7 @@ func (p *Pool) Invalidate(serverID uint) {
 	// session stale too: the next Get passes the current fingerprint and
 	// closes whatever it finds (a stale release included).
 	entry.fingerprint = ""
+	entry.generation++
 }
 
 // Close shuts down the eviction goroutine and closes all cached connections.
@@ -321,4 +325,78 @@ func keepAliveProbe(client *ssh.Client) bool {
 		<-done
 		return false
 	}
+}
+
+// Handle is a borrowed concurrency slot plus (optionally) a cached client,
+// pinned to the target generation observed at acquisition time. ReleaseHandle
+// or DiscardHandle must be called exactly once; a client is only cached when
+// the generation still matches, otherwise the stale client is closed.
+type Handle struct {
+	Client     *ssh.Client
+	serverID   uint
+	generation uint64
+	sem        chan struct{}
+	once       sync.Once
+}
+
+// Generation reports the target generation this handle was pinned to.
+func (h *Handle) Generation() uint64 { return h.generation }
+
+// AcquireContext acquires a concurrency slot for the server and returns a
+// Handle. Client is non-nil when a healthy cached client exists; otherwise the
+// caller dials one and assigns h.Client before ReleaseHandle so it is cached.
+func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint string) (*Handle, error) {
+	client, err := p.GetContext(ctx, serverID, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	entry := p.conns[serverID]
+	var gen uint64
+	var sem chan struct{}
+	if entry != nil {
+		gen = entry.generation
+		sem = entry.sem
+	}
+	p.mu.Unlock()
+	return &Handle{Client: client, serverID: serverID, generation: gen, sem: sem}, nil
+}
+
+// ReleaseHandle returns the client to the pool while its generation still
+// matches the current entry; a stale client is closed instead of cached. The
+// slot is released exactly once.
+func (p *Pool) ReleaseHandle(h *Handle) {
+	if h == nil {
+		return
+	}
+	h.once.Do(func() {
+		if h.Client != nil {
+			p.mu.Lock()
+			entry, ok := p.conns[h.serverID]
+			stale := !ok || entry.generation != h.generation
+			if stale || entry.client != nil {
+				p.mu.Unlock()
+				_ = h.Client.Close()
+			} else {
+				entry.client = h.Client
+				entry.lastUsed = time.Now()
+				p.mu.Unlock()
+			}
+		}
+		<-h.sem
+	})
+}
+
+// DiscardHandle closes the client (if any) without caching it and releases the
+// slot exactly once.
+func (p *Pool) DiscardHandle(h *Handle) {
+	if h == nil {
+		return
+	}
+	h.once.Do(func() {
+		if h.Client != nil {
+			_ = h.Client.Close()
+		}
+		<-h.sem
+	})
 }

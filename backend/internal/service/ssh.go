@@ -5,9 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -61,35 +59,23 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 	if timeout <= 0 {
 		timeout = s.execDefaultTimeout
 	}
-
 	start := time.Now()
-
-	client, err := s.GetClient(ctx, serverID)
+	lease, err := s.AcquireLease(ctx, serverID)
 	if err != nil {
 		return nil, err
 	}
 
-	result, err, transportClosed := s.runCommand(ctx, client, command, timeout)
-	duration := time.Since(start).Milliseconds()
-
+	result, err := lease.Exec(ctx, command, timeout)
 	if result != nil {
-		result.DurationMs = duration
+		result.DurationMs = time.Since(start).Milliseconds()
 	}
-
-	// Never cache a connection whose transport failed — reuse would
-	// immediately fail again on the next call.
-	if transportClosed || isConnectionError(err) {
-		s.pool.Discard(serverID, client)
-	} else {
-		s.pool.Release(serverID, client)
-	}
-
 	return result, err
 }
 
-// GetClient returns a pooled SSH client for the given server, dialing a new
-// connection if none is cached. The caller must call pool.Release when done.
-func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client, error) {
+// AcquireLease borrows a concurrency slot and returns a target-pinned lease,
+// dialing a new connection when no healthy cached client exists. The lease owns
+// the quota: callers must Release or Discard exactly once.
+func (s *SSHService) AcquireLease(ctx context.Context, serverID uint) (*sshLease, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -108,35 +94,35 @@ func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client,
 	}
 	usage.FromContext(ctx).SetResource("server", &srv.ID, srv.Name, &srv.ID)
 
-	client, err := s.pool.GetContext(ctx, serverID, serverFingerprint(srv))
+	h, err := s.pool.AcquireContext(ctx, serverID, serverFingerprint(srv))
 	if err != nil {
 		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
 	}
 	if err := ctx.Err(); err != nil {
-		// GetContext already validated the connection. Cancellation before any
-		// session uses it does not make its transport unhealthy.
-		s.pool.Release(serverID, client)
+		// AcquireContext already validated the connection. Cancellation before
+		// any session uses it does not make its transport unhealthy.
+		s.pool.ReleaseHandle(h)
 		return nil, err
 	}
-	if client != nil {
-		return client, nil
+	if h.Client != nil {
+		return &sshLease{svc: s, h: h}, nil
 	}
 
 	// Pool returned nil — dial a new connection.
 	if srv.CredentialID == nil {
-		s.pool.Release(serverID, nil)
+		s.pool.DiscardHandle(h)
 		return nil, fmt.Errorf("get ssh client for server %d: no credential configured", serverID)
 	}
 
 	username, password, privateKey, err := s.credSvc.GetDecryptedByID(ctx, *srv.CredentialID)
 	if err != nil {
-		s.pool.Release(serverID, nil)
+		s.pool.DiscardHandle(h)
 		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
 	}
 
 	authMethod, err := buildAuthMethod(password, privateKey)
 	if err != nil {
-		s.pool.Release(serverID, nil)
+		s.pool.DiscardHandle(h)
 		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, server.ErrInternal)
 	}
 
@@ -150,11 +136,11 @@ func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client,
 		if client != nil {
 			_ = client.Close()
 		}
-		s.pool.Release(serverID, nil)
+		s.pool.DiscardHandle(h)
 		return nil, contextErr
 	}
 	if err != nil {
-		s.pool.Release(serverID, nil)
+		s.pool.DiscardHandle(h)
 		// A host key change is fail-closed but must not be silent: record the
 		// presented key so the UI can show its fingerprint and let the operator
 		// decide whether to trust it.
@@ -188,7 +174,8 @@ func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client,
 		}
 	}
 
-	return client, nil
+	h.Client = client
+	return &sshLease{svc: s, h: h}, nil
 }
 
 // serverFingerprint identifies everything a pooled SSH connection depends on.
@@ -416,42 +403,9 @@ func isConnectionError(err error) bool {
 
 // CopyFile pipes a local file to a remote path over SSH.
 func (s *SSHService) CopyFile(ctx context.Context, serverID uint, localPath, remotePath string) error {
-	client, err := s.GetClient(ctx, serverID)
+	lease, err := s.AcquireLease(ctx, serverID)
 	if err != nil {
 		return fmt.Errorf("copy file: %w", err)
 	}
-
-	f, err := os.Open(localPath)
-	if err != nil {
-		return fmt.Errorf("open source: %w", err)
-	}
-	defer f.Close()
-
-	session, err := client.NewSession()
-	if err != nil {
-		return fmt.Errorf("create session: %w", err)
-	}
-	defer session.Close()
-
-	pipe, err := session.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("stdin pipe: %w", err)
-	}
-
-	go func() {
-		defer pipe.Close()
-		if _, err := io.Copy(pipe, f); err != nil {
-			slog.Warn("failed to copy file to ssh pipe", "error", err)
-		}
-	}()
-
-	var stderr bytes.Buffer
-	session.Stderr = &stderr
-
-	cmd := fmt.Sprintf("cat > %s && chmod +x %s", remotePath, remotePath)
-	if err := session.Run(cmd); err != nil {
-		return fmt.Errorf("copy failed: %w (stderr: %s)", err, stderr.String())
-	}
-
-	return nil
+	return lease.Upload(ctx, localPath, remotePath, s.execDefaultTimeout)
 }
