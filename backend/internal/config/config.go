@@ -26,9 +26,16 @@ type Config struct {
 	MonitorInterval int
 
 	// SSH
-	SSHTimeout  int
-	SSHMaxIdle  int
-	ExecTimeout int
+	SSHTimeout int
+	SSHMaxIdle int
+
+	// Exec budgets (REQUIREMENTS §7.1.2). The handler resolves the effective
+	// timeout as request -> ExecTimeout -> ExecTimeoutMax; the output limits cap
+	// what is retained in memory (stdout+stderr total, and each stream).
+	ExecTimeout           int
+	ExecTimeoutMax        int
+	ExecOutputLimit       int64
+	ExecOutputStreamLimit int64
 
 	// Rate Limiting
 	LoginRateLimit int
@@ -40,6 +47,32 @@ type Config struct {
 	UsageRetentionDays          int
 	UsageSensitiveRetentionDays int
 	UsageLegacyWritersDrained   bool
+}
+
+// Validate rejects illegal configuration before the server starts serving.
+func (c *Config) Validate() error {
+	if c.MonitorInterval <= 0 {
+		return fmt.Errorf("MONITOR_INTERVAL must be a positive integer, got %d", c.MonitorInterval)
+	}
+	if c.ExecTimeout <= 0 {
+		return fmt.Errorf("EXEC_TIMEOUT must be positive, got %d", c.ExecTimeout)
+	}
+	if c.ExecTimeoutMax <= 0 || c.ExecTimeoutMax < c.ExecTimeout {
+		return fmt.Errorf("EXEC_TIMEOUT_MAX must be >= EXEC_TIMEOUT and positive, got %d/%d", c.ExecTimeoutMax, c.ExecTimeout)
+	}
+	if c.ExecOutputLimit <= 0 {
+		return fmt.Errorf("EXEC_OUTPUT_LIMIT must be positive, got %d", c.ExecOutputLimit)
+	}
+	if c.ExecOutputStreamLimit <= 0 || c.ExecOutputStreamLimit > c.ExecOutputLimit {
+		return fmt.Errorf("EXEC_OUTPUT_STREAM_LIMIT must be positive and <= EXEC_OUTPUT_LIMIT, got %d/%d", c.ExecOutputStreamLimit, c.ExecOutputLimit)
+	}
+	if c.SSHTimeout <= 0 {
+		return fmt.Errorf("SSH_TIMEOUT must be positive, got %d", c.SSHTimeout)
+	}
+	if c.LoginRateLimit < 0 {
+		return fmt.Errorf("LOGIN_RATE_LIMIT must not be negative, got %d", c.LoginRateLimit)
+	}
+	return nil
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -60,6 +93,9 @@ func Load() *Config {
 	cfg.SSHTimeout = getEnvIntOrDefault("SSH_TIMEOUT", 10)
 	cfg.SSHMaxIdle = getEnvIntOrDefault("SSH_MAX_IDLE", 300)
 	cfg.ExecTimeout = getEnvIntOrDefault("EXEC_TIMEOUT", 30)
+	cfg.ExecTimeoutMax = getEnvIntOrDefault("EXEC_TIMEOUT_MAX", 300)
+	cfg.ExecOutputLimit = int64(getEnvIntOrDefault("EXEC_OUTPUT_LIMIT", 8<<20))
+	cfg.ExecOutputStreamLimit = int64(getEnvIntOrDefault("EXEC_OUTPUT_STREAM_LIMIT", 4<<20))
 	cfg.LoginRateLimit = getEnvIntOrDefault("LOGIN_RATE_LIMIT", 10)
 	cfg.TrustProxy = getEnvBool("TRUST_PROXY")
 	cfg.DBMaxOpenConnections = getEnvIntOrDefault("DB_MAX_OPEN_CONNECTIONS", 32)

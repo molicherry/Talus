@@ -30,6 +30,11 @@ func main() {
 
 	setupLogger(cfg.LogFormat, cfg.LogLevel)
 
+	if err := cfg.Validate(); err != nil {
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(1)
+	}
+
 	// Initialize JWT service
 	jwtSvc := token.NewJWTService(cfg.JWTSecret, 24*time.Hour)
 
@@ -275,9 +280,13 @@ func main() {
 	sshDialTimeout := time.Duration(cfg.SSHTimeout) * time.Second
 	execDefaultTimeout := time.Duration(cfg.ExecTimeout) * time.Second
 	sshSvc := service.NewSSHService(sshPool, serverRepo, credSvc, sshDialTimeout, execDefaultTimeout)
+	sshSvc.SetOutputLimits(cfg.ExecOutputLimit, cfg.ExecOutputStreamLimit)
 	terminalSvc := service.NewTerminalService(sshSvc)
 
-	execH := handler.NewExecHandler(sshSvc)
+	execH := handler.NewExecHandler(sshSvc, handler.ExecOptions{
+		DefaultTimeoutSeconds: cfg.ExecTimeout,
+		MaxTimeoutSeconds:     cfg.ExecTimeoutMax,
+	})
 	terminalH := handler.NewTerminalHandler(terminalSvc, jwtSvc)
 
 	// Dependency chain — Metrics

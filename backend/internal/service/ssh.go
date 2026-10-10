@@ -1,12 +1,12 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
@@ -36,6 +36,11 @@ type SSHService struct {
 	// uploadTeardownGrace bounds the graceful close phase of an upload before the
 	// transport is force-closed (REQUIREMENTS §7.1.1: 100ms).
 	uploadTeardownGrace time.Duration
+	// outputLimit caps the total retained stdout+stderr bytes; outputStreamLimit
+	// caps each stream. Beyond the limit bytes are still read and discarded, so
+	// the remote never blocks on output backpressure (REQUIREMENTS §7.1.2).
+	outputLimit       int64
+	outputStreamLimit int64
 }
 
 // NewSSHService creates an SSHService with the given dependencies.
@@ -47,6 +52,19 @@ func NewSSHService(pool *sshpool.Pool, serverRepo serverSource, credSvc *Credent
 		sshDialTimeout:      sshDialTimeout,
 		execDefaultTimeout:  execDefaultTimeout,
 		uploadTeardownGrace: 100 * time.Millisecond,
+		outputLimit:         8 << 20,
+		outputStreamLimit:   4 << 20,
+	}
+}
+
+// SetOutputLimits sets the retained output caps (total and per stream).
+// Non-positive values are ignored so the safe defaults remain in place.
+func (s *SSHService) SetOutputLimits(total, perStream int64) {
+	if total > 0 {
+		s.outputLimit = total
+	}
+	if perStream > 0 {
+		s.outputStreamLimit = perStream
 	}
 }
 
@@ -56,6 +74,15 @@ type ExecResult struct {
 	Stderr     string `json:"stderr"`
 	ExitCode   int    `json:"exit_code"`
 	DurationMs int64  `json:"duration_ms"`
+	// Truncation metadata. A stream is only marked truncated when bytes were
+	// actually discarded; reaching the limit exactly is not truncation.
+	OutputTruncated bool  `json:"output_truncated"`
+	StdoutTruncated bool  `json:"stdout_truncated"`
+	StderrTruncated bool  `json:"stderr_truncated"`
+	StdoutRetained  int64 `json:"stdout_retained_bytes"`
+	StderrRetained  int64 `json:"stderr_retained_bytes"`
+	StdoutDiscarded int64 `json:"stdout_discarded_bytes"`
+	StderrDiscarded int64 `json:"stderr_discarded_bytes"`
 }
 
 // Exec runs a command on a target server via SSH.
@@ -202,7 +229,17 @@ const execTeardownGrace = 100 * time.Millisecond
 // runCommand reports transport ownership separately from command outcome: a
 // cancelled channel can leave a healthy connection available for the next call.
 func (s *SSHService) runCommand(parent context.Context, client *ssh.Client, command string, timeout time.Duration) (*ExecResult, error, bool) {
-	var stdout, stderr bytes.Buffer
+	total := int64(0)
+	var outMu sync.Mutex
+	totalLimit, streamLimit := s.outputLimit, s.outputStreamLimit
+	if totalLimit <= 0 {
+		totalLimit = 8 << 20
+	}
+	if streamLimit <= 0 {
+		streamLimit = 4 << 20
+	}
+	stdout := newCappedWriter(&outMu, &total, totalLimit, streamLimit)
+	stderr := newCappedWriter(&outMu, &total, totalLimit, streamLimit)
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
@@ -220,8 +257,8 @@ func (s *SSHService) runCommand(parent context.Context, client *ssh.Client, comm
 			done <- err
 			return
 		}
-		session.Stdout = &stdout
-		session.Stderr = &stderr
+		session.Stdout = stdout
+		session.Stderr = stderr
 		ready <- session
 		if err := ctx.Err(); err != nil {
 			done <- err
@@ -265,7 +302,7 @@ func (s *SSHService) runCommand(parent context.Context, client *ssh.Client, comm
 	if runErr != nil {
 		var exitErr *ssh.ExitError
 		if errors.As(runErr, &exitErr) {
-			return &ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: exitErr.ExitStatus()}, nil, transportClosed
+			return execResult(stdout, stderr, exitErr.ExitStatus()), nil, transportClosed
 		}
 		if cancellation != nil {
 			return nil, fmt.Errorf("run command: %w", cancellation), transportClosed
@@ -275,7 +312,7 @@ func (s *SSHService) runCommand(parent context.Context, client *ssh.Client, comm
 	// Run returns nil only after receiving a successful remote exit status.
 	// That explicit fact also wins if closing the channel ended a hung stream;
 	// a channel without exit-status instead returns ExitMissingError above.
-	return &ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: 0}, nil, transportClosed
+	return execResult(stdout, stderr, 0), nil, transportClosed
 }
 
 func execCancellation(parent context.Context) error {
