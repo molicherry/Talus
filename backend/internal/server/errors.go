@@ -21,6 +21,7 @@ const (
 	ReasonInvalidCredentials   = "invalid_credentials"
 	ReasonWrongCurrentPassword = "current_password_incorrect"
 	ReasonForbidden            = "forbidden"
+	ReasonUnavailable          = "unavailable"
 	ReasonNotFound             = "not_found"
 	ReasonConflict             = "conflict"
 	ReasonValidationFailed     = "validation_failed"
@@ -76,6 +77,7 @@ var reasonMessages = map[string]string{
 	ReasonInvalidCredentials:   "invalid username or password",
 	ReasonWrongCurrentPassword: "current password is incorrect",
 	ReasonForbidden:            "forbidden",
+	ReasonUnavailable:          "authentication temporarily unavailable",
 	ReasonNotFound:             "resource not found",
 	ReasonConflict:             "resource conflict",
 	ReasonValidationFailed:     "validation failed",

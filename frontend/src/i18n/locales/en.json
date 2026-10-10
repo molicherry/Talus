@@ -72,6 +72,7 @@
     "ssh_host_key_mismatch": "SSH host key changed: verify the new fingerprint before trusting it",
     "no_host_key_mismatch": "No pending host key change to trust",
     "host_key_changed": "The pending host key changed again — re-verify the new fingerprint before trusting it",
+    "unavailable": "Your session could not be verified — please try again",
     "unauthorized": "Your session has expired — please sign in again",
     "validation_failed": "Invalid input",
     "invalid_cursor": "The page cursor is invalid. Refresh to continue.",
