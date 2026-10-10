@@ -149,8 +149,9 @@ func (s *SSHService) copyFileOnClient(ctx context.Context, client *ssh.Client, l
 		forceClosed = true
 		copyErr = <-copyDone
 	}
-	// The session close itself can block; it is supervised by the same budget.
-	closeSessionBounded(session, client, grace, &forceClosed)
+	// The session close itself can block; it is supervised by the same deadline
+	// so the total teardown never re-arms the grace.
+	closeSessionBounded(session, client, deadline, &forceClosed)
 
 	if cause != nil {
 		return cause, forceClosed
@@ -181,15 +182,23 @@ func joinWithinErr(deadline time.Time, ch <-chan error, out *error) bool {
 	}
 }
 
-// closeSessionBounded closes the session under the teardown grace and
-// force-closes the transport if the close itself blocks.
-func closeSessionBounded(session *ssh.Session, client *ssh.Client, grace time.Duration, forceClosed *bool) {
+// closeSessionBounded closes the session under the remaining shared teardown
+// budget (never a fresh grace) and force-closes the transport if the close
+// itself blocks.
+func closeSessionBounded(session *ssh.Session, client *ssh.Client, deadline time.Time, forceClosed *bool) {
 	done := make(chan struct{})
 	go func() {
 		_ = session.Close()
 		close(done)
 	}()
-	timer := time.NewTimer(grace)
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		_ = client.Close()
+		*forceClosed = true
+		<-done
+		return
+	}
+	timer := time.NewTimer(remaining)
 	defer timer.Stop()
 	select {
 	case <-done:
