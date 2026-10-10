@@ -6,376 +6,778 @@
       "suite": "fast",
       "runner": "node-test",
       "cwd": ".",
-      "command": ["node", "tests/render-coverage.mjs", "--check"],
+      "command": [
+        "node",
+        "tests/render-coverage.mjs",
+        "--check"
+      ],
       "timeout_seconds": 120,
-      "environment": { "profile": "local", "requires": [] }
+      "environment": {
+        "profile": "local",
+        "requires": []
+      }
     },
     {
       "run_id": "static-adapters",
       "suite": "fast",
       "runner": "shell",
       "cwd": ".",
-      "command": ["bash", "tests/static/adapters-removed.sh"],
+      "command": [
+        "bash",
+        "tests/static/adapters-removed.sh"
+      ],
       "timeout_seconds": 120,
-      "environment": { "profile": "local", "requires": [] }
+      "environment": {
+        "profile": "local",
+        "requires": []
+      }
     },
     {
       "run_id": "go-unit",
       "suite": "fast",
       "runner": "go-test",
       "cwd": "backend",
-      "command": ["go", "test", "./..."],
+      "command": [
+        "go",
+        "test",
+        "./..."
+      ],
       "timeout_seconds": 600,
-      "environment": { "profile": "local", "requires": [] }
+      "environment": {
+        "profile": "local",
+        "requires": []
+      }
     },
     {
       "run_id": "frontend-node",
       "suite": "fast",
       "runner": "node-test",
       "cwd": "frontend",
-      "command": ["bash", "tests/run.sh"],
+      "command": [
+        "bash",
+        "tests/run.sh"
+      ],
       "timeout_seconds": 600,
-      "environment": { "profile": "local", "requires": [] }
+      "environment": {
+        "profile": "local",
+        "requires": []
+      }
     },
     {
       "run_id": "migrate-hardening",
       "suite": "integration",
       "runner": "go-test",
       "cwd": "backend",
-      "command": ["go", "test", "./internal/repository/...", "-run", "ApplyOnce", "-count=1"],
+      "command": [
+        "go",
+        "test",
+        "./internal/repository/...",
+        "-run",
+        "ApplyOnce",
+        "-count=1"
+      ],
       "timeout_seconds": 600,
-      "environment": { "profile": "isolated-db", "requires": ["TEST_DATABASE_URL"] }
+      "environment": {
+        "profile": "isolated-db",
+        "requires": [
+          "TEST_DATABASE_URL"
+        ]
+      }
     },
     {
       "run_id": "integration-agent",
       "suite": "integration",
       "runner": "go-test",
       "cwd": "backend",
-      "command": ["go", "test", "./internal/service/...", "-run", "Agent", "-count=1"],
+      "command": [
+        "go",
+        "test",
+        "./internal/service/...",
+        "-run",
+        "Agent",
+        "-count=1"
+      ],
       "timeout_seconds": 600,
-      "environment": { "profile": "isolated-db", "requires": ["TEST_DATABASE_URL"] }
+      "environment": {
+        "profile": "isolated-db",
+        "requires": [
+          "TEST_DATABASE_URL"
+        ]
+      }
     },
     {
       "run_id": "ui-charts",
       "suite": "ui",
       "runner": "playwright",
       "cwd": "frontend",
-      "command": ["npm", "run", "test:ui"],
+      "command": [
+        "npm",
+        "run",
+        "test:ui"
+      ],
       "timeout_seconds": 900,
-      "environment": { "profile": "browser-mock", "requires": ["playwright"] }
+      "environment": {
+        "profile": "browser-mock",
+        "requires": [
+          "playwright"
+        ]
+      }
     },
     {
       "run_id": "e2e-core",
       "suite": "e2e",
       "runner": "shell",
       "cwd": ".",
-      "command": ["bash", "tests/e2e/run.sh"],
+      "command": [
+        "bash",
+        "tests/e2e/run.sh"
+      ],
       "timeout_seconds": 1200,
-      "environment": { "profile": "real-hub", "requires": ["TEST_HUB_URL", "TEST_DATABASE_URL"] }
+      "environment": {
+        "profile": "real-hub",
+        "requires": [
+          "TEST_HUB_URL",
+          "TEST_DATABASE_URL"
+        ]
+      }
     }
   ],
   "gates": {
-    "M1": ["coverage-tools", "static-adapters", "go-unit", "frontend-node", "migrate-hardening"],
-    "M2": ["coverage-tools", "static-adapters", "go-unit", "frontend-node", "migrate-hardening", "integration-agent"],
-    "M3": ["go-unit", "frontend-node", "migrate-hardening", "integration-agent", "ui-charts"],
-    "M4": ["go-unit", "frontend-node", "ui-charts", "e2e-core"]
+    "M1": [
+      "coverage-tools",
+      "static-adapters",
+      "go-unit",
+      "frontend-node",
+      "migrate-hardening"
+    ],
+    "M2": [
+      "coverage-tools",
+      "static-adapters",
+      "go-unit",
+      "frontend-node",
+      "migrate-hardening",
+      "integration-agent"
+    ],
+    "M3": [
+      "go-unit",
+      "frontend-node",
+      "migrate-hardening",
+      "integration-agent",
+      "ui-charts"
+    ],
+    "M4": [
+      "go-unit",
+      "frontend-node",
+      "ui-charts",
+      "e2e-core"
+    ]
+  },
+  "phases": {
+    "M1": [
+      "REQ-01",
+      "REQ-02"
+    ],
+    "M2": [
+      "REQ-05",
+      "REQ-06",
+      "REQ-07"
+    ],
+    "M3": [
+      "REQ-04",
+      "REQ-08"
+    ],
+    "M4": [
+      "REQ-09"
+    ]
   },
   "cases": [
     {
       "case_id": "TC-01-01",
-      "requirement_ids": ["REQ-01"],
+      "requirement_ids": [
+        "REQ-01"
+      ],
       "spec_ref": "REQ §2.3",
       "scenario": "Remove adapters while retaining the skill and valid installation links.",
       "implementations": [
-        { "implementation_id": "impl-01-01", "run_id": "static-adapters", "implementation": { "path": "tests/static/adapters-removed.sh", "symbol": "main" }, "automation_status": "implemented", "required": true }
+        {
+          "implementation_id": "impl-01-01",
+          "run_id": "static-adapters",
+          "implementation": {
+            "path": "tests/static/adapters-removed.sh",
+            "symbol": "main"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-01-02",
-      "requirement_ids": ["REQ-01"],
+      "requirement_ids": [
+        "REQ-01"
+      ],
       "spec_ref": "REQ §2.2/§2.3",
       "scenario": "Preserve the service catalog and Relay contracts required by the skill.",
       "implementations": [
-        { "implementation_id": "impl-01-02", "run_id": "e2e-core", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-01-02",
+          "run_id": "e2e-core",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-01-03",
-      "requirement_ids": ["REQ-01"],
+      "requirement_ids": [
+        "REQ-01"
+      ],
       "spec_ref": "REQ §2.3",
       "scenario": "Reject residual adapter artifacts, stale installation links, missing skills, and invalid scan conditions; allow reviewed historical records.",
       "implementations": [
-        { "implementation_id": "impl-01-03", "run_id": "static-adapters", "implementation": { "path": "tests/static/adapters-removed.sh", "symbol": "negative-fixtures" }, "automation_status": "implemented", "required": true }
+        {
+          "implementation_id": "impl-01-03",
+          "run_id": "static-adapters",
+          "implementation": {
+            "path": "tests/static/adapters-removed.sh",
+            "symbol": "negative-fixtures"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-02-01",
-      "requirement_ids": ["REQ-02"],
+      "requirement_ids": [
+        "REQ-02"
+      ],
       "spec_ref": "REQ §3.2.1",
       "scenario": "Index existing tests with English descriptions, generate coverage.md deterministically from coverage.json, reject report drift, and propagate runner failures.",
       "implementations": [
-        { "implementation_id": "impl-02-01", "run_id": "coverage-tools", "implementation": { "path": "tests/render-coverage.mjs", "symbol": "--check" }, "automation_status": "implemented", "required": true }
+        {
+          "implementation_id": "impl-02-01",
+          "run_id": "coverage-tools",
+          "implementation": {
+            "path": "tests/render-coverage.mjs",
+            "symbol": "--check"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-02-02",
-      "requirement_ids": ["REQ-02"],
+      "requirement_ids": [
+        "REQ-02"
+      ],
       "spec_ref": "REQ §3.2.1",
       "scenario": "Validate JSON schema, unique IDs, references, suites, statuses, and commands before execution; fail on missing dependencies and distinguish mock UI from real E2E.",
       "implementations": [
-        { "implementation_id": "impl-02-02", "run_id": "coverage-tools", "implementation": { "path": "tests/run-suites.mjs", "symbol": "validate" }, "automation_status": "implemented", "required": true }
+        {
+          "implementation_id": "impl-02-02",
+          "run_id": "coverage-tools",
+          "implementation": {
+            "path": "tests/run-suites.mjs",
+            "symbol": "validate"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-04-01",
-      "requirement_ids": ["REQ-04"],
+      "requirement_ids": [
+        "REQ-04"
+      ],
       "spec_ref": "REQ §4.2",
       "scenario": "Apply correct time ranges, aggregation intervals, axes, and units; distinguish zero from null without implying finer sampling.",
       "implementations": [
-        { "implementation_id": "impl-04-01", "run_id": "ui-charts", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-04-01",
+          "run_id": "ui-charts",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-04-02",
-      "requirement_ids": ["REQ-04"],
+      "requirement_ids": [
+        "REQ-04"
+      ],
       "spec_ref": "REQ §4.2/§8.3",
       "scenario": "Compute averages and observed sample maxima correctly; retain maxima in long-range data.",
       "implementations": [
-        { "implementation_id": "impl-04-02", "run_id": "migrate-hardening", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-04-02",
+          "run_id": "migrate-hardening",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-04-03",
-      "requirement_ids": ["REQ-04"],
+      "requirement_ids": [
+        "REQ-04"
+      ],
       "spec_ref": "REQ §4.3",
       "scenario": "Ignore stale responses during rapid range changes; support touch, keyboard input, and visibility-aware refresh.",
       "implementations": [
-        { "implementation_id": "impl-04-03", "run_id": "ui-charts", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-04-03",
+          "run_id": "ui-charts",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-04-04",
-      "requirement_ids": ["REQ-04"],
+      "requirement_ids": [
+        "REQ-04"
+      ],
       "spec_ref": "REQ §4.5",
       "scenario": "Distinguish series without color, meet contrast thresholds, preserve visible focus, and expose equivalent chart data to keyboard and screen-reader users.",
       "implementations": [
-        { "implementation_id": "impl-04-04", "run_id": "ui-charts", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-04-04",
+          "run_id": "ui-charts",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-04-05",
-      "requirement_ids": ["REQ-04"],
+      "requirement_ids": [
+        "REQ-04"
+      ],
       "spec_ref": "REQ §4.2.1",
       "scenario": "Enforce 600-bucket and 12,000-raw-sample boundaries; share one 2-second deadline across probes and plans; verify strict/coarsen behavior and 422/503 errors without range truncation.",
       "implementations": [
-        { "implementation_id": "impl-04-05", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-04-05",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-05-01",
-      "requirement_ids": ["REQ-05"],
+      "requirement_ids": [
+        "REQ-05"
+      ],
       "spec_ref": "REQ §5.4",
       "scenario": "Commit or roll back password and token-version changes atomically; reject old JWTs and accept newly issued JWTs.",
       "implementations": [
-        { "implementation_id": "impl-05-01", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-05-01",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-05-02",
-      "requirement_ids": ["REQ-05"],
+      "requirement_ids": [
+        "REQ-05"
+      ],
       "spec_ref": "REQ §5.4",
       "scenario": "Reject revoked JWTs during WS authentication and close existing sessions, including registration races.",
       "implementations": [
-        { "implementation_id": "impl-05-02", "run_id": "e2e-core", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-05-02",
+          "run_id": "e2e-core",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-05-03",
-      "requirement_ids": ["REQ-05"],
+      "requirement_ids": [
+        "REQ-05"
+      ],
       "spec_ref": "REQ §5.4",
       "scenario": "Clear authentication across tabs, keep API Keys independent, and reject legacy JWTs without a version claim.",
       "implementations": [
-        { "implementation_id": "impl-05-03", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-05-03",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-05-04",
-      "requirement_ids": ["REQ-05"],
+      "requirement_ids": [
+        "REQ-05"
+      ],
       "spec_ref": "REQ §5.2",
       "scenario": "Serialize registration, ready admission, and revocation around COMMIT; cancel preparing sessions and reject new ready or input permissions for revoked versions.",
       "implementations": [
-        { "implementation_id": "impl-05-04", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-05-04",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-05-05",
-      "requirement_ids": ["REQ-05"],
+      "requirement_ids": [
+        "REQ-05"
+      ],
       "spec_ref": "REQ §5.3",
       "scenario": "Read the primary database without positive version caching, enforce authentication budgets, and reject admission during unresolved commits, including restart recovery.",
       "implementations": [
-        { "implementation_id": "impl-05-05", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-05-05",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-06-01",
-      "requirement_ids": ["REQ-06"],
+      "requirement_ids": [
+        "REQ-06"
+      ],
       "spec_ref": "REQ §6.2",
       "scenario": "Release upload leases on success and every error path; preserve capacity after repeated uploads.",
       "implementations": [
-        { "implementation_id": "impl-06-01", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-06-01",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-06-02",
-      "requirement_ids": ["REQ-06"],
+      "requirement_ids": [
+        "REQ-06"
+      ],
       "spec_ref": "REQ §6.2",
       "scenario": "Recover from blocked or canceled uploads and prevent stale-generation lease returns.",
       "implementations": [
-        { "implementation_id": "impl-06-02", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-06-02",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-06-03",
-      "requirement_ids": ["REQ-06"],
+      "requirement_ids": [
+        "REQ-06"
+      ],
       "spec_ref": "REQ §6.2/§7.1.1",
       "scenario": "Reuse one target-pinned lease, propagate copy errors, and reclaim resources within one absolute 3-second deadline with a 100-ms grace; nested deployment and Monitor stages never reset it.",
       "implementations": [
-        { "implementation_id": "impl-06-03", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-06-03",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-07-01",
-      "requirement_ids": ["REQ-07"],
+      "requirement_ids": [
+        "REQ-07"
+      ],
       "spec_ref": "REQ §7.2",
       "scenario": "Return complete results for 20-30-second commands and honor the configured default timeout.",
       "implementations": [
-        { "implementation_id": "impl-07-01", "run_id": "e2e-core", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-07-01",
+          "run_id": "e2e-core",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-07-02",
-      "requirement_ids": ["REQ-07"],
+      "requirement_ids": [
+        "REQ-07"
+      ],
       "spec_ref": "REQ §7.1.2",
       "scenario": "Enforce an 8-MiB retained-output total and 4-MiB per-stream limits, distinguish exact-limit from discarded output, preserve true exit status, and reclaim resources after timeout or cancellation.",
       "implementations": [
-        { "implementation_id": "impl-07-02", "run_id": "go-unit", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-07-02",
+          "run_id": "go-unit",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-07-03",
-      "requirement_ids": ["REQ-07"],
+      "requirement_ids": [
+        "REQ-07"
+      ],
       "spec_ref": "REQ §7.1.3",
       "scenario": "Enforce explicit ordinary/stream Relay modes with 30/300-second totals and a 30-second progress idle limit; handle header/body timeouts, write failures, and cancellation.",
       "implementations": [
-        { "implementation_id": "impl-07-03", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-07-03",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-07-04",
-      "requirement_ids": ["REQ-07"],
+      "requirement_ids": [
+        "REQ-07"
+      ],
       "spec_ref": "REQ §7.1.1",
       "scenario": "Verify 100-ms SSH/Relay and 2-second terminal graces inside one absolute 3-second teardown deadline; preserve the original outcome and never reset budgets or falsely publish done/release.",
       "implementations": [
-        { "implementation_id": "impl-07-04", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-07-04",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-08-01",
-      "requirement_ids": ["REQ-08"],
+      "requirement_ids": [
+        "REQ-08"
+      ],
       "spec_ref": "REQ §8.1.1",
       "scenario": "Enforce min(nodes, 16) active collections, one in-flight task per node, bounded pending work, capped jittered backoff, cancellation exclusions, successful recovery, and shutdown cleanup.",
       "implementations": [
-        { "implementation_id": "impl-08-01", "run_id": "go-unit", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-08-01",
+          "run_id": "go-unit",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-08-02",
-      "requirement_ids": ["REQ-08"],
+      "requirement_ids": [
+        "REQ-08"
+      ],
       "spec_ref": "REQ §8.2.3",
       "scenario": "Select architecture-compatible Agents, check version/hash, update atomically, report permission failures, and reconcile unknown activation outcomes.",
       "implementations": [
-        { "implementation_id": "impl-08-02", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-08-02",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-08-03",
-      "requirement_ids": ["REQ-08"],
+      "requirement_ids": [
+        "REQ-08"
+      ],
       "spec_ref": "REQ §8.3",
       "scenario": "Calculate adjacent-sample rates correctly across resets, gaps, and duplicate timestamps; retain observed maxima.",
       "implementations": [
-        { "implementation_id": "impl-08-03", "run_id": "migrate-hardening", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-08-03",
+          "run_id": "migrate-hardening",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-08-04",
-      "requirement_ids": ["REQ-08"],
+      "requirement_ids": [
+        "REQ-08"
+      ],
       "spec_ref": "REQ §8.2.1",
       "scenario": "Probe the target OS and architecture before upload; preserve failure classes and perform zero uploads when probing or artifact selection fails.",
       "implementations": [
-        { "implementation_id": "impl-08-04", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-08-04",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-08-05",
-      "requirement_ids": ["REQ-08"],
+      "requirement_ids": [
+        "REQ-08"
+      ],
       "spec_ref": "REQ §8.2.2",
       "scenario": "Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile.",
       "implementations": [
-        { "implementation_id": "impl-08-05", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-08-05",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-08-06",
-      "requirement_ids": ["REQ-08"],
+      "requirement_ids": [
+        "REQ-08"
+      ],
       "spec_ref": "REQ §8.3.1",
       "scenario": "Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs.",
       "implementations": [
-        { "implementation_id": "impl-08-06", "run_id": "migrate-hardening", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-08-06",
+          "run_id": "migrate-hardening",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-08-07",
-      "requirement_ids": ["REQ-08"],
+      "requirement_ids": [
+        "REQ-08"
+      ],
       "spec_ref": "REQ §12.3",
       "scenario": "Correlate scheduled collections and deployment attempts, count failures and skips, and emit alerts at the defined lag and retention thresholds.",
       "implementations": [
-        { "implementation_id": "impl-08-07", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-08-07",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-08-08",
-      "requirement_ids": ["REQ-08"],
+      "requirement_ids": [
+        "REQ-08"
+      ],
       "spec_ref": "REQ §8.2.2/§8.2.4",
       "scenario": "Fail startup before HTTP/Monitor on invalid bundled artifacts; accept only matching protocol/version JSON, reject legacy output without metric insertion, and preserve node isolation and history.",
       "implementations": [
-        { "implementation_id": "impl-08-08", "run_id": "integration-agent", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-08-08",
+          "run_id": "integration-agent",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-09-01",
-      "requirement_ids": ["REQ-09"],
+      "requirement_ids": [
+        "REQ-09"
+      ],
       "spec_ref": "REQ §9",
       "scenario": "Provide usable toolbar controls, search, font sizing, fullscreen, clipboard actions, and client-side clearing.",
       "implementations": [
-        { "implementation_id": "impl-09-01", "run_id": "ui-charts", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-09-01",
+          "run_id": "ui-charts",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     },
     {
       "case_id": "TC-09-02",
-      "requirement_ids": ["REQ-09"],
+      "requirement_ids": [
+        "REQ-09"
+      ],
       "spec_ref": "REQ §9",
       "scenario": "Support 375px and landscape layouts, PTY resizing, stable focus, and reconnect cleanup.",
       "implementations": [
-        { "implementation_id": "impl-09-02", "run_id": "e2e-core", "implementation": null, "automation_status": "planned", "required": true }
+        {
+          "implementation_id": "impl-09-02",
+          "run_id": "e2e-core",
+          "implementation": null,
+          "automation_status": "planned",
+          "required": true
+        }
       ]
     }
   ],
   "scan_exemptions": [
-    { "path": "docs/ARCHITECTURE.zh-CN.md", "kind": "planning", "reason": "Planning document that references the removed adapter directory by design." },
-    { "path": "docs/REQUIREMENTS.zh-CN.md", "kind": "planning", "reason": "Planning document that specifies the adapter removal requirement." },
-    { "path": "docs/IMPLEMENTATION.zh-CN.md", "kind": "planning", "reason": "Planning document that describes the adapter removal work package." },
-    { "path": "docs/DEVELOPMENT-PLAN.zh-CN.md", "kind": "planning", "reason": "Planning document that describes the adapter removal task." },
-    { "path": "tests/static/adapters-removed.sh", "kind": "checker", "reason": "The checker itself must contain the banned patterns it searches for." },
-    { "path": "tests/fixtures/adapters-removal/", "kind": "negative_fixture", "reason": "Negative fixtures intentionally contain banned adapter artifacts." }
+    {
+      "path": "docs/ARCHITECTURE.zh-CN.md",
+      "kind": "planning",
+      "reason": "Planning document that references the removed adapter directory by design."
+    },
+    {
+      "path": "docs/REQUIREMENTS.zh-CN.md",
+      "kind": "planning",
+      "reason": "Planning document that specifies the adapter removal requirement."
+    },
+    {
+      "path": "docs/IMPLEMENTATION.zh-CN.md",
+      "kind": "planning",
+      "reason": "Planning document that describes the adapter removal work package."
+    },
+    {
+      "path": "docs/DEVELOPMENT-PLAN.zh-CN.md",
+      "kind": "planning",
+      "reason": "Planning document that describes the adapter removal task."
+    },
+    {
+      "path": "tests/static/adapters-removed.sh",
+      "kind": "checker",
+      "reason": "The checker itself must contain the banned patterns it searches for."
+    },
+    {
+      "path": "tests/fixtures/adapters-removal/",
+      "kind": "negative_fixture",
+      "reason": "Negative fixtures intentionally contain banned adapter artifacts."
+    }
   ]
 }

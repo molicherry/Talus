@@ -19,7 +19,7 @@ const SUITES = ["fast", "integration", "ui", "e2e"];
 const RUNNERS = ["go-test", "node-test", "playwright", "shell", "manual"];
 const STATUSES = ["planned", "implemented", "manual"];
 const EXEMPTION_KINDS = ["planning", "history", "checker", "negative_fixture"];
-const TOP_KEYS = ["schema_version", "runs", "cases", "gates", "scan_exemptions"];
+const TOP_KEYS = ["schema_version", "runs", "cases", "gates", "phases", "scan_exemptions"];
 
 function fail(msg) {
   console.error(`coverage.json: ${msg}`);
@@ -41,6 +41,7 @@ export function loadAndValidate() {
   if (doc.schema_version !== 1) fail("schema_version must be 1");
   if (!Array.isArray(doc.runs) || !Array.isArray(doc.cases)) fail("runs and cases must be arrays");
   if (typeof doc.gates !== "object" || doc.gates === null) fail("gates must be an object");
+  if (typeof doc.phases !== "object" || doc.phases === null) fail("phases must be an object");
   if (!Array.isArray(doc.scan_exemptions)) fail("scan_exemptions must be an array");
 
   const runIds = new Set();
@@ -73,6 +74,16 @@ export function loadAndValidate() {
     for (const id of list) {
       if (!runIds.has(id)) fail(`gate ${gate} references unknown run_id ${id}`);
     }
+  }
+  for (const [gate, reqs] of Object.entries(doc.phases)) {
+    if (!Object.prototype.hasOwnProperty.call(doc.gates, gate)) fail(`phases.${gate} has no matching gate`);
+    if (!Array.isArray(reqs) || reqs.length === 0) fail(`phases.${gate} must be a non-empty array`);
+    for (const r of reqs) {
+      if (!/^REQ-\d{2}$/.test(r)) fail(`phases.${gate}: invalid requirement id ${r}`);
+    }
+  }
+  for (const gate of Object.keys(doc.gates)) {
+    if (!Object.prototype.hasOwnProperty.call(doc.phases, gate)) fail(`gate ${gate} has no phases entry`);
   }
 
   const caseIds = new Set();
@@ -139,6 +150,12 @@ export function render(doc) {
   lines.push("");
   for (const [gate, list] of Object.entries(doc.gates)) {
     lines.push(`- **${gate}**: ${list.map((x) => `\`${x}\``).join(", ")}`);
+  }
+  lines.push("");
+  lines.push("## Phases (requirement scope per gate)");
+  lines.push("");
+  for (const [gate, reqs] of Object.entries(doc.phases)) {
+    lines.push(`- **${gate}**: ${reqs.join(", ")}`);
   }
   lines.push("");
   lines.push("## Cases");

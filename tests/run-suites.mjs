@@ -54,10 +54,12 @@ function selectRuns(doc) {
 
 // Correction 1 (#gate): a required implementation in the selected set that is
 // still `planned` must block the gate, regardless of whether it is runnable.
-function checkRequiredImplemented(doc, runs) {
+function checkRequiredImplemented(doc, runs, gate) {
+  const scope = new Set(doc.phases[gate] ?? []);
   const problems = [];
   for (const r of runs) {
     for (const c of doc.cases) {
+      if (!c.requirement_ids.some((req) => scope.has(req))) continue;
       for (const impl of c.implementations) {
         if (impl.run_id === r.run_id && impl.required && impl.automation_status === "planned") {
           problems.push(`${c.case_id} (run ${r.run_id}) is required but still planned`);
@@ -66,7 +68,7 @@ function checkRequiredImplemented(doc, runs) {
     }
   }
   if (problems.length) {
-    console.error("selected set contains unimplemented required cases:");
+    console.error(`gate ${gate} (${[...scope].join(", ")}) contains unimplemented required cases:`);
     for (const p of problems) console.error(`  - ${p}`);
     process.exit(1);
   }
@@ -112,7 +114,7 @@ function main() {
     process.exit(1);
   }
   if (argValue("--gate")) {
-    checkRequiredImplemented(doc, runs);
+    checkRequiredImplemented(doc, runs, argValue("--gate"));
   } else {
     warnPlanned(doc, runs);
   }

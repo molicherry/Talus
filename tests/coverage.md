@@ -24,6 +24,13 @@ Cases: 32 · Runs: 8 · Schema: 1
 - **M3**: `go-unit`, `frontend-node`, `migrate-hardening`, `integration-agent`, `ui-charts`
 - **M4**: `go-unit`, `frontend-node`, `ui-charts`, `e2e-core`
 
+## Phases (requirement scope per gate)
+
+- **M1**: REQ-01, REQ-02
+- **M2**: REQ-05, REQ-06, REQ-07
+- **M3**: REQ-04, REQ-08
+- **M4**: REQ-09
+
 ## Cases
 
 | case_id | requirement | status | run | implementation | required | scenario |
