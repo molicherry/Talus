@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/vpsmanager/backend/internal/gate"
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/token"
 	"github.com/vpsmanager/backend/internal/repository"
@@ -32,6 +33,7 @@ type AuthService struct {
 	db                   *gorm.DB
 	ownerBackfillTrigger func()
 	gate                 userGate
+	terminalRegistry     *gate.Registry
 }
 
 // SetOwnerBackfillTrigger connects optional background work to successful
@@ -44,6 +46,12 @@ func (s *AuthService) SetOwnerBackfillTrigger(trigger func()) {
 // admission for the same user are serialized.
 func (s *AuthService) SetUserGate(g userGate) {
 	s.gate = g
+}
+
+// SetTerminalRegistry wires the JWT terminal registry so a successful password
+// change revokes the user's existing terminals.
+func (s *AuthService) SetTerminalRegistry(r *gate.Registry) {
+	s.terminalRegistry = r
 }
 
 // NewAuthService creates an AuthService with the given dependencies.
@@ -157,12 +165,39 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uint, currentPa
 		_, err := s.userRepo.ChangePassword(ctx, userID, verify, string(hash))
 		return err
 	}
+	// apply runs the change and, inside the gate, marks the user's existing JWT
+	// sessions revoked (COMMIT is the revocation linearization point).
+	apply := func() ([]*gate.Session, error) {
+		if err := change(); err != nil {
+			return nil, err
+		}
+		if s.terminalRegistry == nil {
+			return nil, nil
+		}
+		return s.terminalRegistry.MarkRevoked(userID), nil
+	}
+
+	var revoked []*gate.Session
+	var changeErr error
 	if s.gate == nil {
 		// Legacy wiring without a gate: the repository transaction still makes the
 		// password update and version bump atomic.
-		return change()
+		revoked, changeErr = apply()
+	} else {
+		// The version is read after acquiring the gate, so it cannot be older than
+		// a concurrent update's commit.
+		changeErr = s.gate.Admit(ctx, userID, func(int64) error {
+			var err error
+			revoked, err = apply()
+			return err
+		})
 	}
-	// Everything under the gate: the version is read after acquiring it, so it
-	// cannot be older than a concurrent update's commit.
-	return s.gate.Admit(ctx, userID, func(int64) error { return change() })
+	if changeErr != nil {
+		return changeErr
+	}
+	// Close and join outside the gate.
+	if s.terminalRegistry != nil && len(revoked) > 0 {
+		s.terminalRegistry.Await(ctx, revoked)
+	}
+	return nil
 }

@@ -164,8 +164,10 @@ func main() {
 	userGate := gate.New(func(ctx context.Context, userID uint) (int64, error) {
 		return userRepo.TokenVersion(ctx, userID)
 	})
+	terminalRegistry := gate.NewRegistry()
 	authSvc := service.NewAuthService(userRepo, jwtSvc, db)
 	authSvc.SetUserGate(userGate)
+	authSvc.SetTerminalRegistry(terminalRegistry)
 	authHandler := handler.NewAuthHandler(authSvc)
 
 	// Dependency chain — SSH pool. Created before the server/credential services
@@ -295,6 +297,7 @@ func main() {
 	sshSvc := service.NewSSHService(sshPool, serverRepo, credSvc, sshDialTimeout, execDefaultTimeout)
 	sshSvc.SetOutputLimits(cfg.ExecOutputLimit, cfg.ExecOutputStreamLimit)
 	terminalSvc := service.NewTerminalService(sshSvc)
+	terminalSvc.SetSessionRegistry(terminalRegistry)
 
 	execH := handler.NewExecHandler(sshSvc, handler.ExecOptions{
 		DefaultTimeoutSeconds: cfg.ExecTimeout,

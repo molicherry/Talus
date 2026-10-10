@@ -7,14 +7,23 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/vpsmanager/backend/internal/gate"
+	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/usage"
 	"golang.org/x/crypto/ssh"
 )
 
 // TerminalService manages interactive SSH PTY sessions over WebSocket.
-type TerminalService struct{ sshSvc *SSHService }
+type TerminalService struct {
+	sshSvc   *SSHService
+	registry *gate.Registry
+}
 
 func NewTerminalService(sshSvc *SSHService) *TerminalService { return &TerminalService{sshSvc: sshSvc} }
+
+// SetSessionRegistry wires the JWT terminal registry so a password change can
+// revoke in-flight sessions.
+func (s *TerminalService) SetSessionRegistry(r *gate.Registry) { s.registry = r }
 
 type wsMessage struct {
 	Type string `json:"type"`
@@ -46,13 +55,25 @@ func (s *TerminalService) StartSession(ctx context.Context, serverID uint, wsCon
 
 func (s *TerminalService) StartSessionWithResult(ctx context.Context, serverID uint, wsConn *websocket.Conn) (result TerminalResult, err error) {
 	defer func() { result.ClosedAt = time.Now().UTC() }()
+
+	// A revoked session cancels this context; the pumps then tear down and the
+	// registry observes Done.
+	sessionCtx, revokeSession := context.WithCancel(ctx)
+	defer revokeSession()
+	var reg *gate.Session
+	if s.registry != nil {
+		if claims := mw.GetUserClaims(ctx); claims != nil && claims.TokenVersion != nil {
+			reg = s.registry.Register(claims.UserID, *claims.TokenVersion, revokeSession, func() { _ = wsConn.Close() })
+			defer s.registry.Done(reg.ID)
+		}
+	}
 	startFailed := func(reason string) {
 		result.Outcome, result.Reason, result.CloseReason = "failed", reason, "ssh_error"
 		if ctx.Err() != nil {
 			result.Outcome, result.Reason, result.CloseReason = "cancelled", "client_cancelled", "client_cancelled"
 		}
 	}
-	lease, err := s.sshSvc.AcquireLease(ctx, serverID)
+	lease, err := s.sshSvc.AcquireLease(sessionCtx, serverID)
 	if err != nil {
 		startFailed("terminal_ssh_failed")
 		return result, err
@@ -75,7 +96,7 @@ func (s *TerminalService) StartSessionWithResult(ctx context.Context, serverID u
 	go func() {
 		defer close(preparationDone)
 		select {
-		case <-ctx.Done():
+		case <-sessionCtx.Done():
 			_ = client.Close()
 		case <-stopPreparation:
 		}
@@ -134,12 +155,17 @@ func (s *TerminalService) StartSessionWithResult(ctx context.Context, serverID u
 			_ = session.Close()
 		})
 	}
+	if reg != nil && !s.registry.Admit(reg.ID) {
+		// A revoke that committed during PTY setup must not obtain a ready
+		// admission or a new input permission.
+		end("cancelled", "session_revoked", "revoked")
+	}
 	stopWatch := make(chan struct{})
 	watchDone := make(chan struct{})
 	go func() {
 		defer close(watchDone)
 		select {
-		case <-ctx.Done():
+		case <-sessionCtx.Done():
 			end("cancelled", "client_cancelled", "client_cancelled")
 		case <-stopWatch:
 		}
