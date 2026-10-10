@@ -122,16 +122,30 @@ function manualEvidence(runID) {
   if (!Array.isArray(doc.covers) || doc.covers.length === 0) {
     return { ok: false, reason: "evidence.covers must list the paths the verification covers" };
   }
-  const diff = spawnSync("git", ["diff", "--name-only", doc.commit, "HEAD", "--", ...doc.covers], { cwd: ROOT, encoding: "utf8" });
+  for (const c of doc.covers) {
+    if (typeof c !== "string" || c.trim() === "" || c.includes("*")) {
+      return { ok: false, reason: `invalid evidence.covers entry: ${c}` };
+    }
+    if (!existsSync(join(ROOT, c))) {
+      return { ok: false, reason: `evidence.covers path does not exist: ${c}` };
+    }
+  }
+  // Compare the recorded commit against the actual working tree (staged,
+  // unstaged and untracked), so uncommitted edits to covered code also
+  // invalidate the evidence. Documentation-only changes are always allowed.
+  const diff = spawnSync("git", ["diff", "--name-only", doc.commit, "--", ...doc.covers], { cwd: ROOT, encoding: "utf8" });
   if (diff.status !== 0) {
     return { ok: false, reason: `cannot diff covered paths against ${doc.commit}` };
   }
-  const changedCode = diff.stdout
-    .split("\n")
+  const untracked = spawnSync("git", ["ls-files", "--others", "--exclude-standard", "--", ...doc.covers], { cwd: ROOT, encoding: "utf8" });
+  if (untracked.status !== 0) {
+    return { ok: false, reason: "cannot list untracked files under covered paths" };
+  }
+  const changedCode = [...diff.stdout.split("\n"), ...untracked.stdout.split("\n")]
     .map((f) => f.trim())
     .filter((f) => f !== "" && !f.endsWith(".md"));
   if (changedCode.length) {
-    return { ok: false, reason: `covered paths changed since ${doc.commit}: ${changedCode.slice(0, 5).join(", ")}` };
+    return { ok: false, reason: `covered paths changed since ${doc.commit}: ${[...new Set(changedCode)].slice(0, 5).join(", ")}` };
   }
   return { ok: true };
 }

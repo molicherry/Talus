@@ -11,6 +11,7 @@
     "docs/README.zh-CN.md",
     "backend/internal/handler/service.go",
     "backend/internal/service/service_relay.go",
+    "backend/internal/model/service.go",
     "backend/internal/server/router.go"
   ],
   "environment": {
