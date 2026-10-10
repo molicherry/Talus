@@ -142,6 +142,54 @@ jobs:
         run: npm run test:ui:built
         working-directory: frontend
 
+  unified:
+    name: Unified test entry (tests/run.sh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      # The manifest is the single machine source; a stale generated report
+      # must fail before any runner starts.
+      - name: Coverage manifest + report drift
+        run: node tests/render-coverage.mjs --check
+
+      # The phase gate runs the pre-registered M1 set, including the adapter
+      # scan and the isolated-database migration subset.
+      - name: Phase gate M1
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+        run: bash tests/run.sh --gate M1
+
   docker:
     name: Docker
     runs-on: ubuntu-latest

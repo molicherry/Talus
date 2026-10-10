@@ -51,3 +51,6 @@ pgdata/
 # Python
 __pycache__/
 *.pyc
+
+# Unified test run records (runtime artifacts)
+tests/.artifacts/

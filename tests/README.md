@@ -29,22 +29,37 @@ node tests/render-coverage.mjs --check   # CI: fail on drift
 ## Running
 
 ```bash
-bash tests/run.sh --suite fast            # logic + static assertions (no DB/remote)
-bash tests/run.sh --suite integration     # isolated DB / TimescaleDB / image artifacts
-bash tests/run.sh --suite ui              # production build + mock API (+ manual a11y)
-bash tests/run.sh --suite e2e             # real frontend + Hub + controlled SSH peer
-bash tests/run.sh --gate M1               # pre-registered phase gate
-bash tests/run.sh --list                  # list runs and gates
+bash tests/run.sh --gate M1                               # pre-registered phase gate (recommended)
+bash tests/run.sh --suite fast --phase M1                 # classification, scoped to a phase
+bash tests/run.sh --suite integration --phase M2
+bash tests/run.sh --suite ui --phase M3
+bash tests/run.sh --suite e2e --phase M4
+bash tests/run.sh --list                                  # list runs and gates
 ```
+
+`--suite` without `--phase` is strict: it blocks on every required item mapped to
+a selected run, across all phases. Pass `--phase` to scope the blocking rule to
+one phase's requirements. Use `--gate` for normal phase verification.
 
 Fail-closed rules enforced before any runner starts:
 
-1. `coverage.json` must validate (schema, unique ids, references, suites,
-   statuses, commands, exemptions).
-2. Every **required** implementation in the selected set must be
-   `implemented` or `manual`. A `planned` required item **blocks** the gate.
-3. A selected run whose `environment.requires` is unmet fails explicitly; it is
+1. `coverage.json` must validate: schema, unique ids, real requirement ids,
+   referenced runs, existing implementation paths, statuses, commands, and
+   exemptions (a non-fixture exemption must be an existing file, not a
+   directory).
+2. A **gate** must cover every in-scope required case with one of its runs;
+   dropping a run that covers a required case fails the gate.
+3. Every **required** implementation in scope must be `implemented` or `manual`.
+   A `planned` required item **blocks** gate and suite alike.
+4. A required **manual** run must have `tests/evidence/<run_id>.json` with
+   `status: passed` and a non-empty `evidence` list; otherwise it stays
+   `pending` and blocks.
+5. A selected run whose `environment.requires` is unmet fails explicitly; it is
    never silently skipped and never counted as passing.
+
+Each invocation writes `tests/.artifacts/exec-<execution_id>.json` (selector,
+commit, timestamps, per-run status, environment). That file is a **run result**
+and is never written back into `automation_status`.
 
 `automation_status` describes the implementation, not a run: an implemented
 case that was not executed is still `implemented`. "Not run / no evidence" is a

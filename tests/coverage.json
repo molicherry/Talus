@@ -140,6 +140,18 @@
           "TEST_DATABASE_URL"
         ]
       }
+    },
+    {
+      "run_id": "deploy-verify",
+      "suite": "integration",
+      "runner": "manual",
+      "cwd": ".",
+      "command": null,
+      "timeout_seconds": null,
+      "environment": {
+        "profile": "tx-deploy",
+        "requires": []
+      }
     }
   ],
   "gates": {
@@ -148,7 +160,8 @@
       "static-adapters",
       "go-unit",
       "frontend-node",
-      "migrate-hardening"
+      "migrate-hardening",
+      "deploy-verify"
     ],
     "M2": [
       "coverage-tools",
@@ -221,9 +234,9 @@
       "implementations": [
         {
           "implementation_id": "impl-01-02",
-          "run_id": "e2e-core",
+          "run_id": "deploy-verify",
           "implementation": null,
-          "automation_status": "planned",
+          "automation_status": "manual",
           "required": true
         }
       ]
@@ -400,7 +413,7 @@
       "implementations": [
         {
           "implementation_id": "impl-05-02",
-          "run_id": "e2e-core",
+          "run_id": "integration-agent",
           "implementation": null,
           "automation_status": "planned",
           "required": true
@@ -519,7 +532,7 @@
       "implementations": [
         {
           "implementation_id": "impl-07-01",
-          "run_id": "e2e-core",
+          "run_id": "integration-agent",
           "implementation": null,
           "automation_status": "planned",
           "required": true
@@ -775,9 +788,19 @@
       "reason": "The checker itself must contain the banned patterns it searches for."
     },
     {
-      "path": "tests/fixtures/adapters-removal/",
-      "kind": "negative_fixture",
-      "reason": "Negative fixtures intentionally contain banned adapter artifacts."
+      "path": ".trellis/tasks/08-03-service-skills/prd.md",
+      "kind": "history",
+      "reason": "Historical task PRD that specified creating the adapter directory."
+    },
+    {
+      "path": ".trellis/tasks/08-03-service-skills/design.md",
+      "kind": "history",
+      "reason": "Historical task design that describes the adapter layout."
+    },
+    {
+      "path": ".trellis/tasks/08-03-service-skills/implement.md",
+      "kind": "history",
+      "reason": "Historical task plan that lists the adapter artifacts to build."
     }
   ]
 }

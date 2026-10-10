@@ -7,13 +7,14 @@
 // coverage.json is the single machine-readable source; coverage.md is a
 // generated, read-only report. Nothing here may be hand-edited.
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const JSON_PATH = join(HERE, "coverage.json");
 const MD_PATH = join(HERE, "coverage.md");
+const ROOT = dirname(HERE);
 
 const SUITES = ["fast", "integration", "ui", "e2e"];
 const RUNNERS = ["go-test", "node-test", "playwright", "shell", "manual"];
@@ -86,6 +87,7 @@ export function loadAndValidate() {
     if (!Object.prototype.hasOwnProperty.call(doc.phases, gate)) fail(`gate ${gate} has no phases entry`);
   }
 
+  const knownReqs = new Set(Object.values(doc.phases).flat());
   const caseIds = new Set();
   const implIds = new Set();
   for (const c of doc.cases) {
@@ -93,6 +95,9 @@ export function loadAndValidate() {
     caseIds.add(c.case_id);
     if (!/^TC-\d{2}-\d{2}$/.test(c.case_id)) fail(`case_id ${c.case_id} must match TC-XX-YY`);
     if (!Array.isArray(c.requirement_ids) || c.requirement_ids.length === 0) fail(`case ${c.case_id}: requirement_ids required`);
+    for (const req of c.requirement_ids) {
+      if (!knownReqs.has(req)) fail(`case ${c.case_id}: unknown requirement id ${req}`);
+    }
     if (typeof c.spec_ref !== "string" || c.spec_ref === "") fail(`case ${c.case_id}: spec_ref required`);
     if (typeof c.scenario !== "string" || c.scenario.trim() === "") fail(`case ${c.case_id}: scenario required`);
     if (c.scenario.length < 20) fail(`case ${c.case_id}: scenario must be a descriptive English sentence`);
@@ -111,6 +116,9 @@ export function loadAndValidate() {
         if (run.runner !== "manual" && run.command === null) {
           fail(`implementation ${impl.implementation_id}: implemented requires an executable run`);
         }
+        if (!existsSync(join(ROOT, impl.implementation.path))) {
+          fail(`implementation ${impl.implementation_id}: path ${impl.implementation.path} does not exist`);
+        }
       }
       if (impl.implementation !== null && (typeof impl.implementation.path !== "string" || typeof impl.implementation.symbol !== "string")) {
         fail(`implementation ${impl.implementation_id}: implementation must be null or {path,symbol}`);
@@ -124,6 +132,13 @@ export function loadAndValidate() {
     if (typeof ex.reason !== "string" || ex.reason.trim().length < 10) fail(`scan_exemption ${ex.path}: English reason required`);
     if (ex.kind !== "negative_fixture" && ex.path.endsWith("/")) fail(`scan_exemption ${ex.path}: only negative_fixture may use a directory prefix`);
     if (ex.path.includes("*")) fail(`scan_exemption ${ex.path}: wildcards are not allowed`);
+    // A non-fixture exemption must be a real file inside the repository; a
+    // negative fixture must be a real directory. This rejects path="docs".
+    const abs = join(ROOT, ex.path);
+    if (!existsSync(abs)) fail(`scan_exemption ${ex.path}: path does not exist`);
+    const isDir = statSync(abs).isDirectory();
+    if (ex.kind === "negative_fixture" && !isDir) fail(`scan_exemption ${ex.path}: negative_fixture must be a directory`);
+    if (ex.kind !== "negative_fixture" && isDir) fail(`scan_exemption ${ex.path}: only a negative_fixture may be a directory`);
   }
   return doc;
 }
