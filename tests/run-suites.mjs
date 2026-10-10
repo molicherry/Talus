@@ -116,6 +116,23 @@ function manualEvidence(runID) {
   if (typeof doc.commit !== "string" || doc.commit === "") return { ok: false, reason: "evidence.commit is required" };
   const anc = spawnSync("git", ["merge-base", "--is-ancestor", doc.commit, "HEAD"], { cwd: ROOT });
   if (anc.status !== 0) return { ok: false, reason: `evidence commit ${doc.commit} is not in this history` };
+  // Reuse is valid only while the code the evidence covers has not changed. The
+  // manifest must declare its covered paths; a documentation-only change is
+  // always allowed because it does not change shipped behaviour.
+  if (!Array.isArray(doc.covers) || doc.covers.length === 0) {
+    return { ok: false, reason: "evidence.covers must list the paths the verification covers" };
+  }
+  const diff = spawnSync("git", ["diff", "--name-only", doc.commit, "HEAD", "--", ...doc.covers], { cwd: ROOT, encoding: "utf8" });
+  if (diff.status !== 0) {
+    return { ok: false, reason: `cannot diff covered paths against ${doc.commit}` };
+  }
+  const changedCode = diff.stdout
+    .split("\n")
+    .map((f) => f.trim())
+    .filter((f) => f !== "" && !f.endsWith(".md"));
+  if (changedCode.length) {
+    return { ok: false, reason: `covered paths changed since ${doc.commit}: ${changedCode.slice(0, 5).join(", ")}` };
+  }
   return { ok: true };
 }
 

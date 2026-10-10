@@ -162,6 +162,10 @@ jobs:
           --health-retries 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Evidence re-use checks ancestry and diffs against a recorded
+          # commit, so the unified job needs full history.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v7
         with:

@@ -5,6 +5,14 @@
   "recorded_by": "agent",
   "commit": "1defcf2",
   "summary": "M1 verified on the tx server (server 8, tx4c16g): the branch was built into a local image, deployed through dokploy, the Hub served the expected version from the local and public endpoints, and the service catalog, usage_guide detail and a real Relay request all worked.",
+  "covers": [
+    "skills/talus/",
+    "README.md",
+    "docs/README.zh-CN.md",
+    "backend/internal/handler/service.go",
+    "backend/internal/service/service_relay.go",
+    "backend/internal/server/router.go"
+  ],
   "environment": {
     "server_id": 8,
     "server_name": "tx4c16g",

@@ -109,6 +109,12 @@ export function loadAndValidate() {
       if (!STATUSES.includes(impl.automation_status)) fail(`implementation ${impl.implementation_id}: bad automation_status`);
       if (typeof impl.required !== "boolean") fail(`implementation ${impl.implementation_id}: required must be boolean`);
       const run = doc.runs.find((r) => r.run_id === impl.run_id);
+      if (impl.automation_status === "manual" && run.runner !== "manual") {
+        fail(`implementation ${impl.implementation_id}: manual implementations must reference a manual runner`);
+      }
+      if (run.runner === "manual" && impl.automation_status !== "manual") {
+        fail(`implementation ${impl.implementation_id}: a manual runner requires automation_status=manual`);
+      }
       if (impl.automation_status === "implemented") {
         if (!impl.implementation || !impl.implementation.path || !impl.implementation.symbol) {
           fail(`implementation ${impl.implementation_id}: implemented requires implementation.path and symbol`);

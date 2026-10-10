@@ -87,14 +87,18 @@ is_exempt() { # <repo-relative-path>
 # --- content scan (repo or fixture root) -------------------------------------
 scan_content() {
   local root="$1" rc=0
-  # Hidden files are always scanned. Ignored files are only scanned outside a
-  # git work tree (fixture roots): inside the repository, gitignored scratch
-  # (e.g. .trellis/, .pi/) is not shipped and would make a clean checkout
-  # diverge from CI.
-  local ign=()
-  if ! git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then ign=(--no-ignore); fi
+  # Scan the shipped content: everything git tracks, including tracked files
+  # that match .gitignore and hidden files. A path that is not a repository
+  # root (a fixture) is walked in full.
+  local is_git=0
+  if [ "$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" = "$root" ]; then is_git=1; fi
+
   set +e
-  ( cd "$root" && rg --files --hidden "${ign[@]}" "${EXCLUDES[@]}" . ) > "$TMP/files" 2> "$TMP/err"
+  if [ "$is_git" = 1 ]; then
+    ( cd "$root" && git ls-files ) > "$TMP/files" 2> "$TMP/err"
+  else
+    ( cd "$root" && rg --files --hidden --no-ignore "${EXCLUDES[@]}" . ) > "$TMP/files" 2> "$TMP/err"
+  fi
   rc=$?
   set -e
   if [ "$rc" -ge 2 ]; then
@@ -105,9 +109,14 @@ scan_content() {
   sed -i 's|^\./||' "$TMP/files" 2>/dev/null || true
 
   set +e
-  ( cd "$root" && rg --no-heading --line-number --color never --hidden "${ign[@]}" "${EXCLUDES[@]}" \
-      -e "${PATTERNS[0]}" -e "${PATTERNS[1]}" -e "${PATTERNS[2]}" -e "${PATTERNS[3]}" -e "${PATTERNS[4]}" . ) \
-    > "$TMP/matches" 2> "$TMP/err"
+  if [ "$is_git" = 1 ]; then
+    ( cd "$root" && git grep -n -I -e "${PATTERNS[0]}" -e "${PATTERNS[1]}" -e "${PATTERNS[2]}" -e "${PATTERNS[3]}" -e "${PATTERNS[4]}" -- . ) \
+      > "$TMP/matches" 2> "$TMP/err"
+  else
+    ( cd "$root" && rg --no-heading --line-number --color never --hidden --no-ignore "${EXCLUDES[@]}" \
+        -e "${PATTERNS[0]}" -e "${PATTERNS[1]}" -e "${PATTERNS[2]}" -e "${PATTERNS[3]}" -e "${PATTERNS[4]}" . ) \
+      > "$TMP/matches" 2> "$TMP/err"
+  fi
   rc=$?
   set -e
   if [ "$rc" -ge 2 ]; then
@@ -221,6 +230,19 @@ self_test() {
 
   make_clean_fixture "$TMP/hidden"; mkdir -p "$TMP/hidden/.config"; printf 'ai-integration\n' > "$TMP/hidden/.config/legacy.conf"
   expect_fail "hidden-file residue" "$TMP/hidden" || rc=1
+
+  # A tracked file that also matches .gitignore still ships, so it must be
+  # scanned (git ls-files, not the ignore rules).
+  make_clean_fixture "$TMP/tracked"
+  (
+    cd "$TMP/tracked" || exit 1
+    git init -q
+    printf 'ignored/\n' > .gitignore
+    mkdir -p ignored
+    printf 'ai-integration\n' > ignored/residue.md
+    git add -f ignored/residue.md .gitignore skills/talus/SKILL.md README.md docs/README.zh-CN.md tests/coverage.json >/dev/null 2>&1
+  )
+  expect_fail "tracked-but-gitignored residue" "$TMP/tracked" || rc=1
 
   make_clean_fixture "$TMP/dir"; mkdir -p "$TMP/dir/ai-integration"
   expect_fail "empty adapter directory" "$TMP/dir" || rc=1
