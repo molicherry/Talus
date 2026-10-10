@@ -21,6 +21,11 @@ const probeTimeout = 3 * time.Second
 var ErrSlotTimeout = errors.New("sshpool: too many concurrent sessions for this server")
 var ErrClosed = errors.New("sshpool: pool closed")
 
+// ErrStaleGeneration is returned when the target parameters changed while a
+// client was being handed out; the handed-out client belongs to a previous
+// generation and must not be reused for the new target.
+var ErrStaleGeneration = errors.New("sshpool: target generation changed during acquire")
+
 type Pool struct {
 	mu          sync.Mutex
 	conns       map[uint]*connEntry
@@ -352,22 +357,22 @@ func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint st
 	}
 	p.mu.Lock()
 	entry := p.conns[serverID]
-	var gen uint64
-	var sem chan struct{}
-	if entry != nil {
-		gen = entry.generation
-		sem = entry.sem
-	}
-	p.mu.Unlock()
-	if sem == nil {
-		// The pool was closed between acquiring the slot and capturing it. There
-		// is nothing to return the slot to, so fail instead of handing back a
-		// Handle that would block forever in Release/Discard.
+	if entry == nil || entry.fingerprint != fingerprint {
+		p.mu.Unlock()
+		// The parameters changed (or the pool closed) while the client was being
+		// probed. The handed-out client belongs to the previous generation, so it
+		// must not be stamped with the new one; release the slot and report stale.
 		if client != nil {
 			_ = client.Close()
 		}
-		return nil, ErrClosed
+		if entry != nil {
+			<-entry.sem
+		}
+		return nil, ErrStaleGeneration
 	}
+	gen := entry.generation
+	sem := entry.sem
+	p.mu.Unlock()
 	return &Handle{Client: client, serverID: serverID, generation: gen, sem: sem}, nil
 }
 
