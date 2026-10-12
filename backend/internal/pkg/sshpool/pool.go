@@ -344,6 +344,9 @@ type Handle struct {
 	once       sync.Once
 }
 
+// ServerID reports the server this handle belongs to.
+func (h *Handle) ServerID() uint { return h.serverID }
+
 // Generation reports the target generation this handle was pinned to.
 func (h *Handle) Generation() uint64 { return h.generation }
 

@@ -1504,10 +1504,33 @@
       "scenario": "Correlate scheduled collections and deployment attempts, count failures and skips, and emit alerts at the defined lag and retention thresholds.",
       "implementations": [
         {
-          "implementation_id": "impl-08-07",
-          "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation_id": "impl-08-07a",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployEventsCorrelateWithServerID"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07b",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_schedule_test.go",
+            "symbol": "TestMonitorFailureEscalationIsExactlyOncePerStreak"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07c",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_schedule_test.go",
+            "symbol": "TestMonitorDeferEscalationIsExactlyOncePerStreak"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]

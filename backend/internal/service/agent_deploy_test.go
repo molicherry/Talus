@@ -1,11 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -519,3 +521,40 @@ func asDeployError(err error, target **AgentDeployError) bool {
 
 var _ = os.Stat
 var _ = time.Second
+
+// TestAgentDeployEventsCorrelateWithServerID pins TC-08-07's correlation
+// contract: a deployment attempt and its failure are reported as their own
+// action with the node id, outcome and reason class, so scheduled collections
+// and deployment attempts can be counted together without node identity ever
+// becoming a metric label.
+func TestAgentDeployEventsCorrelateWithServerID(t *testing.T) {
+	deployer, h := newAgentDeployHarness(t, "v1.2.3")
+	var logs bytes.Buffer
+	deployer.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	h.remote.noShaTool = true // deterministic classified failure
+
+	lease, err := h.svc.AcquireLease(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	if _, err := deployer.Collect(context.Background(), lease); err == nil {
+		t.Fatal("expected the deployment to fail")
+	}
+
+	output := logs.String()
+	for _, want := range []string{
+		`"action":"agent.deploy"`,
+		`"outcome":"failure"`,
+		`"reason_class":"agent_remote_tool_missing"`,
+		`"server_id":1`,
+		`"platform":"linux/amd64"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("deployment log is missing %s:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "talus_") {
+		t.Fatalf("node identity must not appear as a metric label:\n%s", output)
+	}
+}

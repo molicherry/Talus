@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -55,6 +56,16 @@ func deployError(reason string, err error) error {
 	return &AgentDeployError{Reason: reason, Err: err}
 }
 
+// ReasonFromError reports the stable failure reason class of an error, or an
+// empty string when the error carries none.
+func ReasonFromError(err error) string {
+	var deployErr *AgentDeployError
+	if errors.As(err, &deployErr) {
+		return deployErr.Reason
+	}
+	return ""
+}
+
 // AgentPlatform is the probed target platform.
 type AgentPlatform struct {
 	OS   string
@@ -72,6 +83,9 @@ type AgentDeploymentService struct {
 	artifactsDir string
 	probeBudget  time.Duration
 	execBudget   time.Duration
+	// logger emits the agent.deploy correlation events (§12.3): shared
+	// server_id with monitor.collect, never a metric label.
+	logger *slog.Logger
 }
 
 // NewAgentDeploymentService creates the deployment service over an artifacts
@@ -81,6 +95,7 @@ func NewAgentDeploymentService(ssh *SSHService, artifactsDir string) *AgentDeplo
 		ssh:          ssh,
 		artifactsDir: artifactsDir,
 		probeBudget:  probeBudget,
+		logger:       slog.Default().With("component", "agent-deploy"),
 	}
 }
 
@@ -168,9 +183,25 @@ func (s *AgentDeploymentService) Collect(ctx context.Context, lease Lease) (*age
 		}
 	}
 
+	// The fast path failed protocol verification or the agent was missing, so a
+	// deployment attempt follows. Deployments are reported as their own action so
+	// failures and skips stay countable next to the collection events.
+	started := time.Now()
+	s.logger.Info("agent deployment attempt",
+		"action", "agent.deploy", "server_id", lease.ServerID(), "platform", platform.String(),
+		"build_version", artifact.BuildVersion, "protocol_version", manifest.ProtocolVersion)
 	if err := s.deploy(ctx, lease, artifact); err != nil {
+		reason := ReasonFromError(err)
+		s.logger.Warn("agent deployment failed",
+			"action", "agent.deploy", "outcome", "failure", "reason_class", reason,
+			"server_id", lease.ServerID(), "platform", platform.String(),
+			"duration_ms", time.Since(started).Milliseconds())
 		return nil, err
 	}
+	s.logger.Info("agent deployment succeeded",
+		"action", "agent.deploy", "outcome", "success", "reason_class", "",
+		"server_id", lease.ServerID(), "platform", platform.String(),
+		"duration_ms", time.Since(started).Milliseconds())
 	out, err = s.runAgent(ctx, lease)
 	if err != nil {
 		return nil, err

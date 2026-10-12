@@ -34,7 +34,11 @@ func newSSHLease(s *SSHService, h *sshpool.Handle) *sshLease {
 	return &sshLease{svc: s, h: h, done: make(chan struct{})}
 }
 
-func (l *sshLease) client() *ssh.Client    { return l.h.Client }
+func (l *sshLease) client() *ssh.Client { return l.h.Client }
+
+// ServerID reports the server this lease is pinned to, so telemetry from one
+// operation can be correlated by node.
+func (l *sshLease) ServerID() uint         { return l.h.ServerID() }
 func (l *sshLease) Generation() Generation { return Generation(l.h.Generation()) }
 
 // Release requests healthy return. It cannot make an active connection visible

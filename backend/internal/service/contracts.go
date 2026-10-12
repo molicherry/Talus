@@ -69,6 +69,7 @@ type Lease interface {
 	Upload(ctx context.Context, localPath, remotePath string, budget time.Duration) error
 	Cancel(reason string)
 	Done() <-chan struct{}
+	ServerID() uint
 	Generation() Generation
 	Release()
 	Discard()
