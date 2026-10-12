@@ -307,7 +307,20 @@ func main() {
 	monitorSvc := service.NewMonitorService(sshSvc, metricRepo, serverRepo, time.Duration(cfg.MonitorInterval)*time.Second)
 	metricsH := handler.NewMetricsHandler(metricRepo)
 
-	go monitorSvc.Start(context.Background())
+	// The monitor joins the application root context so shutdown can stop the
+	// scheduler, cancel in-flight collections and wait for them before the
+	// connection pool and storage are closed below.
+	// A created or deleted node is picked up immediately instead of waiting for
+	// the monitor's next interval.
+	serverSvc.SetTopologyNotifier(monitorSvc)
+
+	appCtx, stopApp := context.WithCancel(context.Background())
+	defer stopApp()
+	monitorDone := make(chan struct{})
+	go func() {
+		defer close(monitorDone)
+		monitorSvc.Start(appCtx)
+	}()
 
 	apiKeyAuth := mw.APIKeyIdentityValidatorFunc(func(ctx context.Context, rawKey string) (usage.Principal, error) {
 		k, err := apiKeySvc.Validate(ctx, rawKey)
@@ -399,6 +412,11 @@ func main() {
 	<-quit
 
 	slog.Info("server shutting down...")
+
+	// Stop scheduling and drain in-flight collections before the pool and the
+	// database are closed by the deferred cleanups.
+	stopApp()
+	<-monitorDone
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

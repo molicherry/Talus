@@ -23,6 +23,9 @@ type ConnectionInvalidator interface {
 
 // ServerService provides business logic for server management.
 type ServerService struct {
+	// topology notifier receives create/delete so the monitor refreshes
+	// the managed node list instead of waiting for its next interval.
+	notifier   topologyNotifier
 	repo       *repository.ServerRepo
 	metricRepo *repository.MetricRepo
 	pool       ConnectionInvalidator
@@ -279,6 +282,22 @@ func (s *ServerService) applyStatus(ctx context.Context, summaries []model.Serve
 }
 
 // Create validates and inserts a new server.
+// topologyNotifier is implemented by the monitor scheduler.
+type topologyNotifier interface{ NotifyTopologyChange() }
+
+// SetTopologyNotifier wires the monitor so node create/delete is observed
+// immediately. It is optional: without it the monitor still converges on its
+// next interval.
+func (s *ServerService) SetTopologyNotifier(n topologyNotifier) {
+	s.notifier = n
+}
+
+func (s *ServerService) notifyTopology() {
+	if s.notifier != nil {
+		s.notifier.NotifyTopologyChange()
+	}
+}
+
 func (s *ServerService) Create(ctx context.Context, server *model.Server) (*model.Server, error) {
 	if server.Name == "" {
 		return nil, fmt.Errorf("create server: name is required")
@@ -294,6 +313,7 @@ func (s *ServerService) Create(ctx context.Context, server *model.Server) (*mode
 		return nil, fmt.Errorf("create server: %w", err)
 	}
 	server.Status = "unknown"
+	s.notifyTopology()
 	return server, nil
 }
 
@@ -369,6 +389,7 @@ func (s *ServerService) Delete(ctx context.Context, id uint) error {
 		return fmt.Errorf("server %d: %w", id, err)
 	}
 	s.invalidate(id)
+	s.notifyTopology()
 	return nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/repository"
 )
 
@@ -70,14 +71,27 @@ type agentOS struct {
 	KernelVer  string `json:"kernel_version"`
 }
 
+// monitorServerSource lists the managed nodes the scheduler must collect from.
+type monitorServerSource interface {
+	FindAll(ctx context.Context) ([]model.Server, error)
+}
+
 // MonitorService periodically collects system metrics from all managed servers
 // via the SSH agent binary and persists them to the database.
 type MonitorService struct {
 	sshSvc     *SSHService
 	metricRepo *repository.MetricRepo
-	serverRepo *repository.ServerRepo
+	serverRepo monitorServerSource
 	interval   time.Duration
 	logger     *slog.Logger
+	clock      monitorClock
+	rng        monitorRand
+	// taskBudget is the per-collection deadline starting at admission (§8.1.1).
+	taskBudget time.Duration
+	// taskFn replaces the collection step in tests; production uses collectOne.
+	taskFn func(ctx context.Context, serverID uint) error
+	// wake asks the scheduler to re-read the managed node list immediately.
+	wake chan struct{}
 }
 
 // NewMonitorService creates a MonitorService with the given dependencies.
@@ -93,63 +107,165 @@ func NewMonitorService(
 		serverRepo: serverRepo,
 		interval:   interval,
 		logger:     slog.Default().With("component", "monitor"),
+		clock:      realMonitorClock{},
+		rng:        newSeededMonitorRand(time.Now().UnixNano()),
+		taskBudget: monitorTaskBudget,
+		wake:       make(chan struct{}, 1),
 	}
 }
 
-// Start begins the monitoring loop. It blocks until ctx is cancelled.
+// monitorDiscoveryRetry bounds how long a failed node listing waits before the
+// next discovery attempt.
+const monitorDiscoveryRetry = 5 * time.Second
+
+// Start runs the per-node scheduler until ctx is cancelled. It stops scheduling,
+// cancels in-flight collections and joins them before returning, so the caller
+// can close connection and storage dependencies afterwards.
 func (s *MonitorService) Start(ctx context.Context) {
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
+	sched := newMonitorScheduler(s.interval, s.clock, s.rng)
+	notify := make(chan struct{}, 1)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	cancels := map[uint]context.CancelFunc{}
 
 	s.logger.Info("monitor service started", "interval", s.interval)
 
-	for {
+	for ctx.Err() == nil {
+		servers, err := s.serverRepo.FindAll(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				break
+			}
+			s.logger.Error("failed to fetch servers for monitoring", "error", err)
+			select {
+			case <-ctx.Done():
+			case <-s.clock.After(monitorDiscoveryRetry):
+			}
+			continue
+		}
+
+		live := make([]uint, 0, len(servers))
+		for _, srv := range servers {
+			live = append(live, srv.ID)
+		}
+		now := s.clock.Now()
+		for _, id := range sched.sync(live, now) {
+			// A deleted node's task is cancelled, never counted as a failure.
+			mu.Lock()
+			cancel := cancels[id]
+			delete(cancels, id)
+			mu.Unlock()
+			if cancel != nil {
+				cancel()
+			}
+		}
+
+		tick := sched.plan(now)
+		for _, id := range tick.Admitted {
+			// The 30s budget starts at admission and covers the whole collection:
+			// quota wait, probe, deployment, execution, parsing and the write.
+			taskCtx, cancel := context.WithTimeout(ctx, s.taskBudget)
+			mu.Lock()
+			cancels[id] = cancel
+			mu.Unlock()
+			wg.Add(1)
+			go func(id uint) {
+				defer wg.Done()
+				defer cancel()
+				outcome := s.runTask(taskCtx, id)
+				sched.complete(id, outcome, s.clock.Now())
+				mu.Lock()
+				delete(cancels, id)
+				mu.Unlock()
+				select {
+				case notify <- struct{}{}:
+				default:
+				}
+			}(id)
+		}
+		s.reportTick(tick)
+
+		// Wake at the next due slot, but never later than one interval so newly
+		// added nodes are discovered promptly.
+		delay := s.interval
+		if wait := sched.earliestDue(s.clock.Now()); wait.IsZero() {
+			delay = 0
+		} else if until := wait.Sub(now); until <= 0 {
+			delay = 0
+		} else if until < s.interval {
+			delay = until
+		}
 		select {
 		case <-ctx.Done():
-			s.logger.Info("monitor service stopped")
-			return
-		case <-ticker.C:
-			s.collect(ctx)
+		case <-notify:
+		case <-s.wake:
+		case <-s.clock.After(delay):
 		}
+	}
+
+	mu.Lock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	mu.Unlock()
+	wg.Wait()
+	s.logger.Info("monitor service stopped")
+}
+
+// NotifyTopologyChange refreshes the managed node list immediately, so a deleted
+// node's task is cancelled and a new node is collected without waiting for the
+// next interval. It never blocks.
+func (s *MonitorService) NotifyTopologyChange() {
+	if s.wake == nil {
+		return
+	}
+	select {
+	case s.wake <- struct{}{}:
+	default:
 	}
 }
 
-func (s *MonitorService) collect(ctx context.Context) {
-	servers, err := s.serverRepo.FindAll(ctx)
-	if err != nil {
-		s.logger.Error("failed to fetch servers for monitoring", "error", err)
+// runTask performs one collection and classifies its outcome, so only real
+// failures advance the node's backoff.
+func (s *MonitorService) runTask(ctx context.Context, serverID uint) (outcome monitorOutcome) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("monitor goroutine panicked", "server_id", serverID, "panic", r)
+			outcome = outcomeFailure
+		}
+	}()
+	err := s.collectTask(ctx, serverID)
+	switch {
+	case ctx.Err() == context.DeadlineExceeded:
+		s.logger.Error("metrics collection exceeded its deadline", "server_id", serverID)
+		return outcomeFailure
+	case ctx.Err() != nil:
+		// Application shutdown, node deletion or generation invalidation.
+		return outcomeCancelled
+	case err != nil:
+		s.logger.Error("failed to collect metrics", "server_id", serverID, "error", err)
+		return outcomeFailure
+	}
+	return outcomeSuccess
+}
+
+// collectTask is the injectable collection step.
+func (s *MonitorService) collectTask(ctx context.Context, serverID uint) error {
+	if s.taskFn != nil {
+		return s.taskFn(ctx, serverID)
+	}
+	return s.collectOne(ctx, serverID)
+}
+
+// reportTick records deferred admissions (missed or late samples). They never
+// increase a node's failure count.
+func (s *MonitorService) reportTick(tick monitorTick) {
+	if len(tick.Queued) == 0 && len(tick.Skipped) == 0 {
 		return
 	}
-
-	if len(servers) == 0 {
-		return
-	}
-
-	var wg sync.WaitGroup
-	var collected int
-	var mu sync.Mutex
-
-	for _, srv := range servers {
-		wg.Add(1)
-		go func(serverID uint) {
-			defer wg.Done()
-			defer func() {
-				if r := recover(); r != nil {
-					s.logger.Error("monitor goroutine panicked", "server_id", serverID, "panic", r)
-				}
-			}()
-			if err := s.collectOne(ctx, serverID); err != nil {
-				s.logger.Error("failed to collect metrics", "server_id", serverID, "error", err)
-				return
-			}
-			mu.Lock()
-			collected++
-			mu.Unlock()
-		}(srv.ID)
-	}
-
-	wg.Wait()
-	s.logger.Info("collected metrics", "servers", collected, "total", len(servers))
+	s.logger.Warn("monitor admission deferred",
+		"admitted", len(tick.Admitted), "queued", len(tick.Queued), "skipped", len(tick.Skipped))
 }
 
 func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
