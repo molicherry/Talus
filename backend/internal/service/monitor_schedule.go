@@ -16,6 +16,10 @@ const (
 	monitorTaskBudget  = 30 * time.Second
 	monitorBackoffCap  = 300 * time.Second
 	monitorJitter      = 0.1
+	// monitorWarnAfter is the consecutive count that escalates to a WARN
+	// (REQUIREMENTS §12.3): repeated collection failures, or repeated deferred
+	// admissions (capacity/re-entrancy skips).
+	monitorWarnAfter = 3
 )
 
 // monitorClock abstracts time so the scheduler can be driven by a controllable
@@ -65,6 +69,19 @@ type monitorNode struct {
 	// next interval and without stacking further records.
 	queued   bool
 	queuedAt time.Time
+	// defers counts consecutive deferred admissions; failureWarned/deferWarned
+	// keep the escalation to exactly one WARN per streak (§12.3).
+	defers        int
+	failureWarned bool
+	deferWarned   bool
+}
+
+// monitorCompletion reports the state transition of one finished task so the
+// caller can emit exactly-once escalation and recovery events.
+type monitorCompletion struct {
+	Failures     int
+	WarnDegraded bool
+	Recovered    bool
 }
 
 // monitorTick is one scheduler pass, reported for telemetry.
@@ -72,6 +89,10 @@ type monitorTick struct {
 	Admitted []uint
 	Queued   []uint
 	Skipped  []uint
+	// WarnDeferred lists nodes that just reached the deferred-admission warning
+	// threshold; RecoveredDefer lists nodes admitted again after such a streak.
+	WarnDeferred   []uint
+	RecoveredDefer []uint
 }
 
 // monitorScheduler owns the pure scheduling state. It never blocks and never
@@ -179,6 +200,7 @@ func (s *monitorScheduler) plan(now time.Time) monitorTick {
 		}
 		if node.inFlight {
 			tick.Skipped = append(tick.Skipped, id)
+			s.noteDeferLocked(node, &tick)
 			continue
 		}
 		if !s.dueLocked(node, now) {
@@ -189,13 +211,27 @@ func (s *monitorScheduler) plan(now time.Time) monitorTick {
 				node.queued, node.queuedAt = true, now
 			}
 			tick.Queued = append(tick.Queued, id)
+			s.noteDeferLocked(node, &tick)
 			continue
 		}
 		node.inFlight, node.queued = true, false
+		if node.deferWarned {
+			tick.RecoveredDefer = append(tick.RecoveredDefer, id)
+		}
+		node.defers, node.deferWarned = 0, false
 		inFlight++
 		tick.Admitted = append(tick.Admitted, id)
 	}
 	return tick
+}
+
+// noteDeferLocked counts a deferred admission and escalates once per streak.
+func (s *monitorScheduler) noteDeferLocked(node *monitorNode, tick *monitorTick) {
+	node.defers++
+	if node.defers >= monitorWarnAfter && !node.deferWarned {
+		node.deferWarned = true
+		tick.WarnDeferred = append(tick.WarnDeferred, node.id)
+	}
 }
 
 // dueLocked requires the caller to hold s.mu.
@@ -207,7 +243,7 @@ func (s *monitorScheduler) dueLocked(node *monitorNode, now time.Time) bool {
 }
 
 // complete records a finished task and returns the node's next due time.
-func (s *monitorScheduler) complete(id uint, outcome monitorOutcome, now time.Time) {
+func (s *monitorScheduler) complete(id uint, outcome monitorOutcome, now time.Time) monitorCompletion {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	node := s.nodes[id]
@@ -215,18 +251,27 @@ func (s *monitorScheduler) complete(id uint, outcome monitorOutcome, now time.Ti
 	// queued node, a node whose task was already accounted for) must not have its
 	// pending slot or schedule rewritten.
 	if node == nil || !node.inFlight {
-		return
+		return monitorCompletion{}
 	}
 	node.inFlight = false
+	result := monitorCompletion{}
 	switch outcome {
 	case outcomeSuccess:
 		// Success resets the counter and resumes the node's normal future
 		// schedule; missed ticks are not replayed.
+		if node.failureWarned {
+			result.Recovered = true
+			node.failureWarned = false
+		}
 		node.failures = 0
 		node.due = s.nextAlignedLocked(node.due, now)
 		node.queued = false
 	case outcomeFailure:
 		node.failures++
+		if node.failures >= monitorWarnAfter && !node.failureWarned {
+			result.WarnDegraded = true
+			node.failureWarned = true
+		}
 		node.due = now.Add(s.backoffDelayLocked(node.failures))
 		node.queued = false
 	default:
@@ -236,6 +281,8 @@ func (s *monitorScheduler) complete(id uint, outcome monitorOutcome, now time.Ti
 			node.due = s.nextAlignedLocked(node.due, now)
 		}
 	}
+	result.Failures = node.failures
+	return result
 }
 
 // nextAligned advances a node's phase to the first schedule slot after now so a

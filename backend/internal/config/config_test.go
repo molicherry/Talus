@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func validConfig() *Config {
 	return &Config{
@@ -52,5 +55,48 @@ func TestValidateAcceptsReducedExecutionLimits(t *testing.T) {
 	c.ExecOutputLimit, c.ExecOutputStreamLimit = 1024, 512
 	if err := c.Validate(); err != nil {
 		t.Fatalf("reduced execution limits were rejected: %v", err)
+	}
+}
+
+// TestMonitorFreshnessThresholdDerivation pins T3.1's derived threshold: the
+// historical 120s is I×(rounds+1)+latency at the default 60s interval, and a
+// longer interval scales with it instead of staying flat.
+func TestMonitorFreshnessThresholdDerivation(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  Config
+		want time.Duration
+	}{
+		{"default interval reproduces 120s", Config{MonitorInterval: 60, MonitorToleratedRounds: 1}, 120 * time.Second},
+		{"600s interval is not a flat threshold", Config{MonitorInterval: 600, MonitorToleratedRounds: 1}, 1200 * time.Second},
+		{"tolerated rounds add whole intervals", Config{MonitorInterval: 60, MonitorToleratedRounds: 3}, 240 * time.Second},
+		{"allowed latency is added", Config{MonitorInterval: 60, MonitorToleratedRounds: 1, MonitorAllowedLatency: 30}, 150 * time.Second},
+		{"zero rounds still tolerates the current interval", Config{MonitorInterval: 60, MonitorToleratedRounds: 0}, 60 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.MonitorFreshnessThreshold(); got != tc.want {
+				t.Fatalf("threshold = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestValidateRejectsNegativeMonitorTuning pins the startup validation.
+func TestValidateRejectsNegativeMonitorTuning(t *testing.T) {
+	base := *validConfig()
+	base.MonitorToleratedRounds = 1
+	if err := base.Validate(); err != nil {
+		t.Fatalf("baseline config must be valid: %v", err)
+	}
+	bad := base
+	bad.MonitorToleratedRounds = -1
+	if err := bad.Validate(); err == nil {
+		t.Fatal("negative MONITOR_TOLERATED_ROUNDS must be rejected")
+	}
+	bad2 := base
+	bad2.MonitorAllowedLatency = -5
+	if err := bad2.Validate(); err == nil {
+		t.Fatal("negative MONITOR_ALLOWED_LATENCY_SECONDS must be rejected")
 	}
 }

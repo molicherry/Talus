@@ -236,3 +236,115 @@ func TestMonitorEarliestDueDrivesWakeUp(t *testing.T) {
 		t.Fatalf("earliestDue = %v, want now+60s", got)
 	}
 }
+
+// TestMonitorFailureEscalationIsExactlyOncePerStreak pins §12.3: three
+// consecutive failures warn once, a fourth does not warn again, and the next
+// success produces exactly one recovery event.
+func TestMonitorFailureEscalationIsExactlyOncePerStreak(t *testing.T) {
+	sched, clock := newTestScheduler(t, 60*time.Second, 0.5)
+	sched.sync([]uint{1}, clock.Now())
+	now := clock.Now()
+
+	warnings, recoveries := 0, 0
+	fail := func() {
+		sched.plan(now)
+		result := sched.complete(1, outcomeFailure, now)
+		if result.WarnDegraded {
+			warnings++
+		}
+		now = sched.nodes[1].due
+	}
+	fail() // 1
+	fail() // 2
+	if warnings != 0 {
+		t.Fatalf("warned after two failures, want none")
+	}
+	fail() // 3 -> the streak escalates exactly once
+	if warnings != 1 {
+		t.Fatalf("warnings = %d after three failures, want 1", warnings)
+	}
+	fail() // 4 -> already warned
+	if warnings != 1 {
+		t.Fatalf("warnings = %d after four failures, want the streak warning once", warnings)
+	}
+
+	sched.plan(now)
+	if result := sched.complete(1, outcomeSuccess, now); !result.Recovered {
+		t.Fatal("the first success after a warned streak must report recovery")
+	}
+	recoveries++
+	if result := sched.complete(1, outcomeSuccess, now); result.Recovered {
+		t.Fatal("recovery must fire once, not on every success")
+	}
+	if recoveries != 1 {
+		t.Fatalf("recoveries = %d, want 1", recoveries)
+	}
+	if sched.failures(1) != 0 {
+		t.Fatalf("failures = %d after recovery, want 0", sched.failures(1))
+	}
+}
+
+// TestMonitorDeferEscalationIsExactlyOncePerStreak pins the deferred-admission
+// side of §12.3 and its recovery event.
+func TestMonitorDeferEscalationIsExactlyOncePerStreak(t *testing.T) {
+	sched, clock := newTestScheduler(t, 60*time.Second, 0.5)
+	live := make([]uint, 0, 17)
+	for id := uint(1); id <= 17; id++ {
+		live = append(live, id)
+	}
+	sched.sync(live, clock.Now())
+	now := clock.Now()
+	deferredID := uint(17)
+
+	if tick := sched.plan(now); len(tick.Admitted) != 16 || len(tick.Queued) != 1 {
+		t.Fatalf("first pass: admitted=%d queued=%d, want 16/1", len(tick.Admitted), len(tick.Queued))
+	}
+	if tick := sched.plan(now); len(tick.WarnDeferred) != 0 { // defer #2
+		t.Fatalf("warned after two deferrals: %v", tick.WarnDeferred)
+	}
+	tick := sched.plan(now) // defer #3 escalates exactly once
+	if len(tick.WarnDeferred) != 1 || tick.WarnDeferred[0] != deferredID {
+		t.Fatalf("warned = %v, want the deferred node %d", tick.WarnDeferred, deferredID)
+	}
+	// A further deferral of the same node must not warn twice. Other nodes may
+	// legitimately escalate on their own streaks, so check this node only.
+	for _, id := range sched.plan(now).WarnDeferred {
+		if id == deferredID {
+			t.Fatalf("node %d warned twice in the same streak", deferredID)
+		}
+	}
+
+	// Freeing a slot admits the deferred node and reports recovery once.
+	sched.complete(sched.order[0], outcomeSuccess, now)
+	admit := sched.plan(now)
+	if len(admit.Admitted) != 1 || admit.Admitted[0] != deferredID {
+		t.Fatalf("admitted = %v, want the deferred node %d", admit.Admitted, deferredID)
+	}
+	if len(admit.RecoveredDefer) != 1 || admit.RecoveredDefer[0] != deferredID {
+		t.Fatalf("recovered = %v, want the deferred node %d", admit.RecoveredDefer, deferredID)
+	}
+}
+
+// TestMonitorInFlightSkipsEscalateAsScheduleDelay pins that a collection which
+// outlives whole intervals (re-entrancy skips) escalates as a schedule delay.
+func TestMonitorInFlightSkipsEscalateAsScheduleDelay(t *testing.T) {
+	sched, clock := newTestScheduler(t, 60*time.Second, 0.5)
+	sched.sync([]uint{1}, clock.Now())
+	now := clock.Now()
+
+	if tick := sched.plan(now); len(tick.Admitted) != 1 {
+		t.Fatalf("first pass admitted %v", tick.Admitted)
+	}
+	warnings := 0
+	for i := 0; i < 3; i++ {
+		now = now.Add(time.Minute)
+		tick := sched.plan(now)
+		if len(tick.Skipped) != 1 {
+			t.Fatalf("pass %d skipped %v, want the in-flight node", i+1, tick.Skipped)
+		}
+		warnings += len(tick.WarnDeferred)
+	}
+	if warnings != 1 {
+		t.Fatalf("warnings = %d after three delayed rounds, want exactly 1", warnings)
+	}
+}

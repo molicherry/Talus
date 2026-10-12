@@ -174,7 +174,7 @@ func (s *MonitorService) Start(ctx context.Context) {
 				defer wg.Done()
 				defer cancel()
 				outcome := s.runTask(taskCtx, id)
-				sched.complete(id, outcome, s.clock.Now())
+				s.reportCompletion(id, sched.complete(id, outcome, s.clock.Now()))
 				mu.Lock()
 				delete(cancels, id)
 				mu.Unlock()
@@ -258,14 +258,38 @@ func (s *MonitorService) collectTask(ctx context.Context, serverID uint) error {
 	return s.collectOne(ctx, serverID)
 }
 
-// reportTick records deferred admissions (missed or late samples). They never
-// increase a node's failure count.
+// reportTick records deferred admissions (missed or late samples) and escalates
+// once per streak, as required by REQUIREMENTS §12.3. Node identity stays in the
+// log for correlation and is never a metric label.
 func (s *MonitorService) reportTick(tick monitorTick) {
-	if len(tick.Queued) == 0 && len(tick.Skipped) == 0 {
-		return
+	if len(tick.Queued) > 0 || len(tick.Skipped) > 0 {
+		s.logger.Info("monitor admission deferred",
+			"action", "monitor.collect", "outcome", "deferred",
+			"admitted", len(tick.Admitted), "queued", len(tick.Queued), "skipped", len(tick.Skipped))
 	}
-	s.logger.Warn("monitor admission deferred",
-		"admitted", len(tick.Admitted), "queued", len(tick.Queued), "skipped", len(tick.Skipped))
+	for _, id := range tick.WarnDeferred {
+		s.logger.Warn("monitor collection repeatedly deferred",
+			"action", "monitor.collect", "outcome", "deferred", "reason_class", "capacity",
+			"server_id", id, "consecutive", monitorWarnAfter)
+	}
+	for _, id := range tick.RecoveredDefer {
+		s.logger.Info("monitor collection resumed",
+			"action", "monitor.collect", "outcome", "recovered", "server_id", id)
+	}
+}
+
+// reportCompletion emits exactly-once escalation and recovery events for a
+// finished collection (§12.3).
+func (s *MonitorService) reportCompletion(serverID uint, result monitorCompletion) {
+	if result.WarnDegraded {
+		s.logger.Warn("monitor collection repeatedly failing",
+			"action", "monitor.collect", "outcome", "failure", "reason_class", "collection_failed",
+			"server_id", serverID, "consecutive", result.Failures)
+	}
+	if result.Recovered {
+		s.logger.Info("monitor collection recovered",
+			"action", "monitor.collect", "outcome", "success", "server_id", serverID)
+	}
 }
 
 func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 // Config holds all application configuration loaded from environment variables.
@@ -24,6 +25,12 @@ type Config struct {
 
 	// Monitoring
 	MonitorInterval int
+	// MonitorToleratedRounds and MonitorAllowedLatency derive the online/expired
+	// freshness threshold together with MonitorInterval (REQUIREMENTS §8.1):
+	// threshold = I×(rounds+1) + latency. The defaults (1 round, 0 latency)
+	// reproduce the historical flat 120s at the default 60s interval.
+	MonitorToleratedRounds int
+	MonitorAllowedLatency  int
 
 	// SSH
 	SSHTimeout int
@@ -53,6 +60,12 @@ type Config struct {
 func (c *Config) Validate() error {
 	if c.MonitorInterval <= 0 {
 		return fmt.Errorf("MONITOR_INTERVAL must be a positive integer, got %d", c.MonitorInterval)
+	}
+	if c.MonitorToleratedRounds < 0 {
+		return fmt.Errorf("MONITOR_TOLERATED_ROUNDS must not be negative, got %d", c.MonitorToleratedRounds)
+	}
+	if c.MonitorAllowedLatency < 0 {
+		return fmt.Errorf("MONITOR_ALLOWED_LATENCY_SECONDS must not be negative, got %d", c.MonitorAllowedLatency)
 	}
 	if c.ExecTimeout <= 0 {
 		return fmt.Errorf("EXEC_TIMEOUT must be positive, got %d", c.ExecTimeout)
@@ -90,6 +103,8 @@ func Load() *Config {
 	cfg.LogFormat = getEnvOrDefault("LOG_FORMAT", "json")
 	cfg.LogLevel = getEnvOrDefault("LOG_LEVEL", "info")
 	cfg.MonitorInterval = getEnvIntOrDefault("MONITOR_INTERVAL", 60)
+	cfg.MonitorToleratedRounds = getEnvIntOrDefault("MONITOR_TOLERATED_ROUNDS", 1)
+	cfg.MonitorAllowedLatency = getEnvIntOrDefault("MONITOR_ALLOWED_LATENCY_SECONDS", 0)
 	cfg.SSHTimeout = getEnvIntOrDefault("SSH_TIMEOUT", 10)
 	cfg.SSHMaxIdle = getEnvIntOrDefault("SSH_MAX_IDLE", 300)
 	cfg.ExecTimeout = getEnvIntOrDefault("EXEC_TIMEOUT", 30)
@@ -152,4 +167,15 @@ func getEnvBool(key string) bool {
 		return false
 	}
 	return b
+}
+
+// MonitorFreshnessThreshold is the age after which a node without a fresh metric
+// is reported offline/expired: I×(tolerated rounds+1) + allowed latency.
+func (c *Config) MonitorFreshnessThreshold() time.Duration {
+	rounds := c.MonitorToleratedRounds + 1
+	if rounds < 1 {
+		rounds = 1
+	}
+	return time.Duration(c.MonitorInterval*rounds)*time.Second +
+		time.Duration(c.MonitorAllowedLatency)*time.Second
 }

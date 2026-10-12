@@ -1274,10 +1274,43 @@
       "scenario": "Enforce min(nodes, 16) active collections, one in-flight task per node, bounded pending work, capped jittered backoff, cancellation exclusions, successful recovery, and shutdown cleanup.",
       "implementations": [
         {
-          "implementation_id": "impl-08-01",
+          "implementation_id": "impl-08-01a",
           "run_id": "go-unit",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/service/monitor_schedule_test.go",
+            "symbol": "TestMonitorBackoffSequenceMatchesContract"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01b",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_schedule_test.go",
+            "symbol": "TestMonitorAdmissionRespectsGlobalCap"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01c",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_loop_test.go",
+            "symbol": "TestMonitorLoopRespectsGlobalCapAndJoinsOnShutdown"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01d",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_loop_test.go",
+            "symbol": "TestMonitorLoopDeadlineCountsAsFailureAndBacksOff"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]

@@ -181,6 +181,7 @@ func main() {
 	serverRepo := repository.NewServerRepo(db)
 	metricRepo := repository.NewMetricRepo(db)
 	serverSvc := service.NewServerService(serverRepo, metricRepo, sshPool)
+	serverSvc.SetFreshnessThreshold(cfg.MonitorFreshnessThreshold())
 
 	// Dependency chain — API Keys
 	apiKeyRepo := repository.NewAPIKeyRepo(db)
