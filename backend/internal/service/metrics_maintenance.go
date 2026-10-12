@@ -1,0 +1,112 @@
+package service
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"github.com/vpsmanager/backend/internal/repository"
+)
+
+// MetricsMaintenance runs the periodic metrics storage jobs of REQ-08 §8.3.1:
+// an hourly 6h-rollup refresh (first run backfills the retention window) and a
+// daily retention pass. A failed refresh or an incomplete aggregation pauses the
+// corresponding work and is reported, never silently ignored.
+type MetricsMaintenance struct {
+	repo         *repository.MetricRepo
+	logger       *slog.Logger
+	refreshEvery time.Duration
+	pruneEvery   time.Duration
+	// jobBudget bounds a single cycle so a huge backfill cannot hold shutdown or
+	// the connection pool forever.
+	jobBudget time.Duration
+	// now is injectable for tests.
+	now func() time.Time
+}
+
+// NewMetricsMaintenance creates the maintenance jobs with their documented
+// cadence: refresh hourly, prune daily.
+func NewMetricsMaintenance(repo *repository.MetricRepo) *MetricsMaintenance {
+	return &MetricsMaintenance{
+		repo:         repo,
+		logger:       slog.Default().With("component", "metrics-maintenance"),
+		refreshEvery: time.Hour,
+		pruneEvery:   24 * time.Hour,
+		jobBudget:    10 * time.Minute,
+		now:          func() time.Time { return time.Now().UTC() },
+	}
+}
+
+// Run drives the jobs until ctx is cancelled. It returns after joining any
+// in-flight cycle, so the caller may close storage afterwards.
+func (m *MetricsMaintenance) Run(ctx context.Context) {
+	if m == nil || m.repo == nil {
+		return
+	}
+	refreshTicker := time.NewTicker(m.refreshEvery)
+	defer refreshTicker.Stop()
+	pruneTicker := time.NewTicker(m.pruneEvery)
+	defer pruneTicker.Stop()
+
+	m.logger.Info("metrics maintenance started", "refresh", m.refreshEvery, "prune", m.pruneEvery)
+	// A first cycle after startup backfills the whole retention window; later
+	// cycles only recompute the recent window.
+	m.Refresh(ctx, repository.RollupBackfillWindow)
+
+	for {
+		select {
+		case <-ctx.Done():
+			m.logger.Info("metrics maintenance stopped")
+			return
+		case <-refreshTicker.C:
+			m.Refresh(ctx, repository.RollupRefreshWindow)
+		case <-pruneTicker.C:
+			m.Prune(ctx)
+		}
+	}
+}
+
+// Refresh materializes closed buckets and reports the outcome.
+func (m *MetricsMaintenance) Refresh(ctx context.Context, window time.Duration) {
+	if ctx.Err() != nil {
+		return
+	}
+	jobCtx, cancel := context.WithTimeout(ctx, m.jobBudget)
+	defer cancel()
+	result, err := m.repo.RefreshRollups(jobCtx, m.now(), window)
+	if err != nil {
+		// A failed cycle leaves the checkpoint untouched, so the next cycle
+		// recomputes the same range.
+		m.logger.Error("metrics rollup refresh failed", "error", err, "window", window)
+		return
+	}
+	m.logger.Info("metrics rollup refreshed",
+		"servers", result.Servers, "buckets", result.Buckets, "through", result.Checkpoint)
+}
+
+// Prune plans and applies retention. It always plans first (the dry run) and
+// pauses for servers whose aggregation is not confirmed.
+func (m *MetricsMaintenance) Prune(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	jobCtx, cancel := context.WithTimeout(ctx, m.jobBudget)
+	defer cancel()
+	now := m.now()
+	plan, err := m.repo.PlanPrune(jobCtx, now, repository.MetricsRetention)
+	if err != nil {
+		m.logger.Error("metrics retention planning failed", "error", err)
+		return
+	}
+	if len(plan.Pending) > 0 {
+		m.logger.Warn("metrics aggregation incomplete, retention paused for those servers",
+			"pending_servers", len(plan.Pending), "cutoff", plan.Cutoff)
+	}
+	result, err := m.repo.PruneMetrics(jobCtx, plan)
+	if err != nil {
+		m.logger.Error("metrics retention failed", "error", err, "cutoff", plan.Cutoff)
+		return
+	}
+	m.logger.Info("metrics retention applied",
+		"raw_rows", result.RawRows, "rollup_rows", result.RollupRows, "paused", result.Paused)
+}

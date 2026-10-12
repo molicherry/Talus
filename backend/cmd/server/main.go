@@ -122,6 +122,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Metrics rollup storage (REQ-08 §8.3.1): the 6h rollup table and its
+	// materialization checkpoints. Idempotent and explicit.
+	if err := repository.PrepareMetricsRollupSchema(db); err != nil {
+		slog.Error("failed to prepare metrics rollup schema", "error", err)
+		os.Exit(1)
+	}
+
 	// 4. AutoMigrate all models in FK dependency order (User → Credential → Server → APIKey → Metric)
 	var autoMigrateErr error
 	for attempt := 0; attempt < 30; attempt++ {
@@ -334,6 +341,15 @@ func main() {
 		monitorSvc.Start(appCtx)
 	}()
 
+	// Metrics storage maintenance (REQ-08 §8.3.1): hourly rollup refresh and the
+	// daily retention pass, joined on the same root context.
+	maintenance := service.NewMetricsMaintenance(metricRepo)
+	maintenanceDone := make(chan struct{})
+	go func() {
+		defer close(maintenanceDone)
+		maintenance.Run(appCtx)
+	}()
+
 	apiKeyAuth := mw.APIKeyIdentityValidatorFunc(func(ctx context.Context, rawKey string) (usage.Principal, error) {
 		k, err := apiKeySvc.Validate(ctx, rawKey)
 		if err != nil {
@@ -429,6 +445,7 @@ func main() {
 	// database are closed by the deferred cleanups.
 	stopApp()
 	<-monitorDone
+	<-maintenanceDone
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

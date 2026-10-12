@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
@@ -201,46 +202,51 @@ func (r *MetricRepo) Query(
 	from, to time.Time,
 	interval string,
 ) ([]AggregatedMetric, error) {
-	sql := `
+	// Rates come from adjacent samples (REQUIREMENTS §8.3): a counter reset, a
+	// zero/negative time delta or a gap beyond the declared threshold yields an
+	// unknown value (a gap), while a real zero increment is a real zero. The scan
+	// starts one threshold early so the first bucket has a predecessor.
+	sql := fmt.Sprintf(deltaSamplesCTE("")+`,
+	aggregate AS (
 		SELECT
-			time_bucket($1::interval, time) AS bucket,
+			to_timestamp(floor(EXTRACT(EPOCH FROM time) / EXTRACT(EPOCH FROM $5::interval))
+			            * EXTRACT(EPOCH FROM $5::interval)) AS bucket,
 			AVG(cpu_percent) AS cpu_percent,
-			CASE WHEN AVG(memory_total) > 0
-				 THEN AVG(memory_used) * 100.0 / AVG(memory_total)
+			CASE WHEN SUM(CASE WHEN memory_total > 0 THEN 1 ELSE 0 END) > 0
+				 THEN SUM(CASE WHEN memory_total > 0 THEN memory_used * 100.0 / memory_total ELSE 0 END)
+				      / SUM(CASE WHEN memory_total > 0 THEN 1 ELSE 0 END)
 				 ELSE NULL END AS memory_percent,
-			CASE WHEN AVG(disk_total) > 0
-				 THEN AVG(disk_used) * 100.0 / AVG(disk_total)
+			CASE WHEN SUM(CASE WHEN disk_total > 0 THEN 1 ELSE 0 END) > 0
+				 THEN SUM(CASE WHEN disk_total > 0 THEN disk_used * 100.0 / disk_total ELSE 0 END)
+				      / SUM(CASE WHEN disk_total > 0 THEN 1 ELSE 0 END)
 				 ELSE NULL END AS disk_percent,
 			AVG(load_1) AS load_1,
 			AVG(load_5) AS load_5,
 			AVG(load_15) AS load_15,
-			CASE WHEN AVG(swap_total) > 0
-				 THEN AVG(swap_used) * 100.0 / AVG(swap_total)
+			CASE WHEN SUM(CASE WHEN swap_total > 0 THEN 1 ELSE 0 END) > 0
+				 THEN SUM(CASE WHEN swap_total > 0 THEN swap_used * 100.0 / swap_total ELSE 0 END)
+				      / SUM(CASE WHEN swap_total > 0 THEN 1 ELSE 0 END)
 				 ELSE NULL END AS swap_percent,
-			CASE WHEN COUNT(*) > 1 AND MAX(net_bytes_recv) IS NOT NULL
-				 THEN (MAX(net_bytes_recv) - MIN(net_bytes_recv))::float8
-				      / EXTRACT(EPOCH FROM (MAX(time) - MIN(time)))
-				 ELSE NULL END AS net_recv_rate,
-			CASE WHEN COUNT(*) > 1 AND MAX(net_bytes_sent) IS NOT NULL
-				 THEN (MAX(net_bytes_sent) - MIN(net_bytes_sent))::float8
-				      / EXTRACT(EPOCH FROM (MAX(time) - MIN(time)))
-				 ELSE NULL END AS net_sent_rate,
-			CASE WHEN COUNT(*) > 1 AND MAX(disk_read_bytes) IS NOT NULL
-				 THEN (MAX(disk_read_bytes) - MIN(disk_read_bytes))::float8
-				      / EXTRACT(EPOCH FROM (MAX(time) - MIN(time)))
-				 ELSE NULL END AS disk_read_rate,
-			CASE WHEN COUNT(*) > 1 AND MAX(disk_write_bytes) IS NOT NULL
-				 THEN (MAX(disk_write_bytes) - MIN(disk_write_bytes))::float8
-				      / EXTRACT(EPOCH FROM (MAX(time) - MIN(time)))
-				 ELSE NULL END AS disk_write_rate
-		FROM metrics
-		WHERE server_id = $2 AND time >= $3 AND time <= $4
+			%s AS net_recv_rate,
+			%s AS net_sent_rate,
+			%s AS disk_read_rate,
+			%s AS disk_write_rate
+		FROM samples
 		GROUP BY bucket
-		ORDER BY bucket ASC
-	`
+	)
+	SELECT bucket, cpu_percent, memory_percent, disk_percent, load_1, load_5, load_15,
+	       swap_percent, net_recv_rate, net_sent_rate, disk_read_rate, disk_write_rate
+	FROM aggregate
+	ORDER BY bucket ASC`,
+		metricRateExpression("net_bytes_recv"),
+		metricRateExpression("net_bytes_sent"),
+		metricRateExpression("disk_read_bytes"),
+		metricRateExpression("disk_write_bytes"))
 
 	var results []AggregatedMetric
-	err := r.db.WithContext(ctx).Raw(sql, interval, serverID, from, to).Scan(&results).Error
+	err := r.db.WithContext(ctx).Raw(sql,
+		serverID, from.Add(-DefaultDeltaGapThreshold), to,
+		DefaultDeltaGapThreshold.String(), interval).Scan(&results).Error
 	if err != nil {
 		return nil, err
 	}

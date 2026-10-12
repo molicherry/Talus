@@ -73,7 +73,7 @@
         "test",
         "./internal/repository/...",
         "-run",
-        "ApplyOnce|PrepareUserTokenVersion",
+        "ApplyOnce|PrepareUserTokenVersion|DeltaRates|DeltaGapThreshold|PrepareMetricsRollup|RefreshRollups|PruneMetrics",
         "-count=1"
       ],
       "timeout_seconds": 600,
@@ -1364,10 +1364,23 @@
       "scenario": "Calculate adjacent-sample rates correctly across resets, gaps, and duplicate timestamps; retain observed maxima.",
       "implementations": [
         {
-          "implementation_id": "impl-08-03",
+          "implementation_id": "impl-08-03a",
           "run_id": "migrate-hardening",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/repository/metric_delta_test.go",
+            "symbol": "TestDeltaRatesFollowRequirementRules"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03b",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_delta_test.go",
+            "symbol": "TestDeltaGapThresholdIsThreeCollectionIntervals"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -1451,10 +1464,33 @@
       "scenario": "Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs.",
       "implementations": [
         {
-          "implementation_id": "impl-08-06",
+          "implementation_id": "impl-08-06a",
           "run_id": "migrate-hardening",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/repository/metric_rollup_test.go",
+            "symbol": "TestPrepareMetricsRollupSchemaIsIdempotent"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06b",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_rollup_test.go",
+            "symbol": "TestRefreshRollupsMaterializesBucketsAndCheckpoint"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06c",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_rollup_test.go",
+            "symbol": "TestPruneMetricsPausesUntilAggregationIsComplete"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
