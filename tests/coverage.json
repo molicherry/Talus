@@ -1375,10 +1375,23 @@
       "scenario": "Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile.",
       "implementations": [
         {
-          "implementation_id": "impl-08-05",
-          "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation_id": "impl-08-05a",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/agentproto/agentproto_test.go",
+            "symbol": "TestVerifyAcceptsMatchingArtifacts"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-05b",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/agent/main_test.go",
+            "symbol": "TestAgentOutputCarriesVersionContract"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -1426,10 +1439,23 @@
       "scenario": "Fail startup before HTTP/Monitor on invalid bundled artifacts; accept only matching protocol/version JSON, reject legacy output without metric insertion, and preserve node isolation and history.",
       "implementations": [
         {
-          "implementation_id": "impl-08-08",
-          "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation_id": "impl-08-08a",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/server/startup_test.go",
+            "symbol": "TestServerRejectsInvalidAgentArtifacts"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-08b",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/agentproto/agentproto_test.go",
+            "symbol": "TestLoadManifestRejectsIncompleteContracts"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]

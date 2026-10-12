@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/vpsmanager/backend/internal/agentproto"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -140,6 +142,29 @@ type startupServer struct {
 	logPath string
 }
 
+// startupServerEnv is the isolated environment every startup regression runs
+// with. extra entries override the defaults.
+func startupServerEnv(dsn, port string, extra map[string]string) map[string]string {
+	env := map[string]string{
+		"TALUS_STARTUP_TEST_PROCESS": "1",
+		"DATABASE_URL":               dsn, "PORT": port,
+		"VPSMANAGER_MASTER_KEY": strings.Repeat("0", 64),
+		"JWT_SECRET":            "isolated-startup-regression-secret",
+		"LOG_FORMAT":            "json", "LOG_LEVEL": "info", "STATIC_DIR": "",
+		"MONITOR_INTERVAL": "60", "SSH_TIMEOUT": "10", "SSH_MAX_IDLE": "300",
+		"EXEC_TIMEOUT": "30", "EXEC_TIMEOUT_MAX": "300",
+		"EXEC_OUTPUT_LIMIT": "8388608", "EXEC_OUTPUT_STREAM_LIMIT": "4194304",
+		"LOGIN_RATE_LIMIT": "100", "TRUST_PROXY": "false",
+		"DB_MAX_OPEN_CONNECTIONS": "16", "USAGE_LOG_WRITE_CONCURRENCY": "2",
+		"USAGE_LOG_ACTIVE_LIMIT": "4096", "USAGE_LOG_RETENTION_DAYS": "30",
+		"USAGE_LOG_SENSITIVE_RETENTION_DAYS": "90", "USAGE_LOG_LEGACY_WRITERS_DRAINED": "false",
+	}
+	for key, value := range extra {
+		env[key] = value
+	}
+	return env
+}
+
 func startTestServer(t *testing.T, dsn string) *startupServer {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -160,20 +185,9 @@ func startTestServer(t *testing.T, dsn string) *startupServer {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(executable, "-test.run=^TestServerProcessHelper$", "-test.count=1", "-test.timeout=2m")
-	cmd.Env = startupTestEnv(map[string]string{
-		"TALUS_STARTUP_TEST_PROCESS": "1",
-		"DATABASE_URL":               dsn, "PORT": port,
-		"VPSMANAGER_MASTER_KEY": strings.Repeat("0", 64),
-		"JWT_SECRET":            "isolated-startup-regression-secret",
-		"LOG_FORMAT":            "json", "LOG_LEVEL": "info", "STATIC_DIR": "",
-		"MONITOR_INTERVAL": "60", "SSH_TIMEOUT": "10", "SSH_MAX_IDLE": "300",
-		"EXEC_TIMEOUT": "30", "EXEC_TIMEOUT_MAX": "300",
-		"EXEC_OUTPUT_LIMIT": "8388608", "EXEC_OUTPUT_STREAM_LIMIT": "4194304",
-		"LOGIN_RATE_LIMIT": "100", "TRUST_PROXY": "false",
-		"DB_MAX_OPEN_CONNECTIONS": "16", "USAGE_LOG_WRITE_CONCURRENCY": "2",
-		"USAGE_LOG_ACTIVE_LIMIT": "4096", "USAGE_LOG_RETENTION_DAYS": "30",
-		"USAGE_LOG_SENSITIVE_RETENTION_DAYS": "90", "USAGE_LOG_LEGACY_WRITERS_DRAINED": "false",
-	})
+	cmd.Env = startupTestEnv(startupServerEnv(dsn, port, map[string]string{
+		"AGENT_ARTIFACTS_DIR": agentArtifactsDir(t),
+	}))
 	cmd.Stdout, cmd.Stderr = logFile, logFile
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
@@ -299,4 +313,193 @@ func startupTestEnv(overrides map[string]string) []string {
 		env = append(env, fmt.Sprintf("%s=%s", key, value))
 	}
 	return env
+}
+
+// agentArtifactsDir builds (once per test binary) a valid agent artifacts
+// directory: both architectures plus a matching manifest.
+func agentArtifactsDir(t *testing.T) string {
+	t.Helper()
+	agentArtifactsOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "talus-agent-artifacts-")
+		if err != nil {
+			agentArtifactsErr = err
+			return
+		}
+		agentArtifactsPath = dir
+		// Reuse the real build script so the fixtures match what ships. The test
+		// binary's working directory varies, so walk up to find it.
+		script, err := findUpwards("build", "agents.sh")
+		if err != nil {
+			agentArtifactsErr = err
+			return
+		}
+		cmd := exec.Command("sh", script, "v0.0.0-startup-test", dir)
+		if combined, err := cmd.CombinedOutput(); err != nil {
+			agentArtifactsErr = fmt.Errorf("build agent artifacts: %w\n%s", err, combined)
+		}
+	})
+	if agentArtifactsErr != nil {
+		t.Fatalf("agent artifacts fixture: %v", agentArtifactsErr)
+	}
+	return agentArtifactsPath
+}
+
+var (
+	agentArtifactsOnce sync.Once
+	agentArtifactsPath string
+	agentArtifactsErr  error
+)
+
+// findUpwards locates a file by walking up from the working directory, so the
+// test does not depend on where the test binary is executed from.
+func findUpwards(parts ...string) (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for i := 0; i < 6; i++ {
+		candidate := filepath.Join(append([]string{dir}, parts...)...)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", fmt.Errorf("%s not found above the working directory", filepath.Join(parts...))
+}
+
+// TestServerRejectsInvalidAgentArtifacts pins TC-08-08: a corrupt, tampered or
+// single-architecture artifact set must stop the process before it binds a port,
+// and the Hub must never fall back to one architecture.
+func TestServerRejectsInvalidAgentArtifacts(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(t *testing.T, dir string)
+	}{
+		{"corrupt manifest", func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, agentproto.ManifestName), []byte("{not json"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"tampered binary", func(t *testing.T, dir string) {
+			path := filepath.Join(dir, "vpsmanager-agent-linux-amd64")
+			f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o755)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			if _, err := f.Write([]byte("tampered")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"missing arm64 artifact", func(t *testing.T, dir string) {
+			if err := os.Remove(filepath.Join(dir, "vpsmanager-agent-linux-arm64")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"single-architecture manifest", func(t *testing.T, dir string) {
+			path := filepath.Join(dir, agentproto.ManifestName)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var manifest agentproto.Manifest
+			if err := json.Unmarshal(raw, &manifest); err != nil {
+				t.Fatal(err)
+			}
+			manifest.Agents = manifest.Agents[:1]
+			trimmed, err := json.Marshal(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, trimmed, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			copyDir(t, agentArtifactsDir(t), dir)
+			tc.mutate(t, dir)
+
+			port := freePort(t)
+			logPath := filepath.Join(t.TempDir(), "server.log")
+			logFile, err := os.Create(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer logFile.Close()
+
+			executable, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(executable, "-test.run=^TestServerProcessHelper$", "-test.count=1", "-test.timeout=1m")
+			cmd.Env = startupTestEnv(startupServerEnv("postgres://unused:none@127.0.0.1:1/unused?sslmode=disable", port,
+				map[string]string{"AGENT_ARTIFACTS_DIR": dir}))
+			cmd.Stdout, cmd.Stderr = logFile, logFile
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+
+			exited := make(chan error, 1)
+			go func() { exited <- cmd.Wait() }()
+			select {
+			case err := <-exited:
+				if err == nil {
+					t.Fatal("the server exited successfully with invalid agent artifacts")
+				}
+				if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 0 {
+					t.Fatal("the server exited 0 with invalid agent artifacts")
+				}
+			case <-time.After(30 * time.Second):
+				_ = cmd.Process.Kill()
+				t.Fatal("the server did not fail fast on invalid agent artifacts")
+			}
+
+			logs, _ := os.ReadFile(logPath)
+			if !strings.Contains(string(logs), "agent artifacts are invalid") {
+				t.Fatalf("startup log does not report the agent artifact failure:\n%s", logs)
+			}
+			if conn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 500*time.Millisecond); err == nil {
+				_ = conn.Close()
+				t.Fatalf("the server bound port %s despite invalid agent artifacts", port)
+			}
+		})
+	}
+}
+
+func copyDir(t *testing.T, from, to string) {
+	t.Helper()
+	entries, err := os.ReadDir(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		raw, err := os.ReadFile(filepath.Join(from, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(to, entry.Name()), raw, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func freePort(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return port
 }

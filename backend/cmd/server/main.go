@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/agentproto"
 	"github.com/vpsmanager/backend/internal/config"
 	"github.com/vpsmanager/backend/internal/gate"
 	"github.com/vpsmanager/backend/internal/handler"
@@ -38,6 +39,15 @@ func main() {
 
 	// Initialize JWT service
 	jwtSvc := token.NewJWTService(cfg.JWTSecret, 24*time.Hour)
+
+	// Agent artifacts (REQUIREMENTS §8.2): validate the bundled agent binaries and
+	// their manifest before touching the database or binding a port. A missing,
+	// corrupt, mis-architecture or mis-versioned artifact is fatal — the Hub never
+	// falls back to a single architecture.
+	if err := verifyAgentArtifacts(); err != nil {
+		slog.Error("agent artifacts are invalid", "error", err)
+		os.Exit(1)
+	}
 
 	// Decrypt master key for credential encryption
 	masterKey, err := crypto.NewMasterKey(cfg.MasterKey)
@@ -458,4 +468,23 @@ func parseLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// verifyAgentArtifacts validates the bundled agent artifacts. AGENT_ARTIFACTS_DIR
+// points at the directory holding the manifest and both arch-specific binaries
+// (the Hub image ships them in /usr/local/bin).
+func verifyAgentArtifacts() error {
+	dir := os.Getenv("AGENT_ARTIFACTS_DIR")
+	if dir == "" {
+		dir = "/usr/local/bin"
+	}
+	manifest, err := agentproto.LoadManifest(dir)
+	if err != nil {
+		return err
+	}
+	if err := manifest.Verify(dir); err != nil {
+		return err
+	}
+	slog.Info("agent artifacts verified", "dir", dir, "build_version", manifest.BuildVersion, "protocol_version", manifest.ProtocolVersion, "agents", len(manifest.Agents))
+	return nil
 }
