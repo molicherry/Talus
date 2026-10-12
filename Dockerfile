@@ -14,7 +14,9 @@ COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w -X github.com/vpsmanager/backend/internal/server.Version=${VERSION}" -o /hub ./cmd/server
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /agent ./cmd/agent
+# Both agent architectures plus their manifest ship in every Hub image: the
+# Hub refuses to start unless the manifest matches the artifacts (§8.2).
+RUN sh build/agents.sh "${VERSION}" /agents
 
 FROM --platform=$BUILDPLATFORM node:24-alpine AS ui-builder
 ARG VERSION=dev
@@ -30,7 +32,10 @@ FROM alpine:3.20
 RUN apk add --no-cache openssh-client ca-certificates tzdata
 RUN adduser -D -H -s /sbin/nologin talus
 COPY --from=go-builder /hub /usr/local/bin/hub
-COPY --from=go-builder /agent /usr/local/bin/vpsmanager-agent
+COPY --from=go-builder /agents/ /usr/local/bin/
+# Transitional: the pre-REQ-08 monitor path still uploads a single binary;
+# T3.3 removes that path once the deployment service owns it.
+RUN cp /usr/local/bin/vpsmanager-agent-linux-amd64 /usr/local/bin/vpsmanager-agent
 COPY --from=ui-builder /app/dist/ /static/
 EXPOSE 8080
 ENV STATIC_DIR=/static
