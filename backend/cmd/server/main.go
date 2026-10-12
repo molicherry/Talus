@@ -44,7 +44,7 @@ func main() {
 	// their manifest before touching the database or binding a port. A missing,
 	// corrupt, mis-architecture or mis-versioned artifact is fatal — the Hub never
 	// falls back to a single architecture.
-	if err := verifyAgentArtifacts(); err != nil {
+	if err := verifyAgentArtifacts(cfg.AgentArtifactsDir); err != nil {
 		slog.Error("agent artifacts are invalid", "error", err)
 		os.Exit(1)
 	}
@@ -316,6 +316,7 @@ func main() {
 
 	// Dependency chain — Metrics
 	monitorSvc := service.NewMonitorService(sshSvc, metricRepo, serverRepo, time.Duration(cfg.MonitorInterval)*time.Second)
+	monitorSvc.SetAgentDeployer(service.NewAgentDeploymentService(sshSvc, cfg.AgentArtifactsDir))
 	metricsH := handler.NewMetricsHandler(metricRepo)
 
 	// The monitor joins the application root context so shutdown can stop the
@@ -473,11 +474,7 @@ func parseLevel(level string) slog.Level {
 // verifyAgentArtifacts validates the bundled agent artifacts. AGENT_ARTIFACTS_DIR
 // points at the directory holding the manifest and both arch-specific binaries
 // (the Hub image ships them in /usr/local/bin).
-func verifyAgentArtifacts() error {
-	dir := os.Getenv("AGENT_ARTIFACTS_DIR")
-	if dir == "" {
-		dir = "/usr/local/bin"
-	}
+func verifyAgentArtifacts(dir string) error {
 	manifest, err := agentproto.LoadManifest(dir)
 	if err != nil {
 		return err

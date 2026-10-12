@@ -1324,10 +1324,33 @@
       "scenario": "Select architecture-compatible Agents, check version/hash, update atomically, report permission failures, and reconcile unknown activation outcomes.",
       "implementations": [
         {
-          "implementation_id": "impl-08-02",
-          "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation_id": "impl-08-02a",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployProbesMapsAndSkipsUploadWhenActive"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-02b",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployRejectsLegacyAndMismatchedProtocols"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-02c",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployConfirmsAmbiguousActivationByRemoteHash"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -1358,10 +1381,33 @@
       "scenario": "Probe the target OS and architecture before upload; preserve failure classes and perform zero uploads when probing or artifact selection fails.",
       "implementations": [
         {
-          "implementation_id": "impl-08-04",
-          "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation_id": "impl-08-04a",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployRejectsUnsupportedPlatformWithoutUploading"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-04b",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployClassifiesRemoteFailures"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-04c",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployReportsLostActivationAndRecoversIdempotently"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]

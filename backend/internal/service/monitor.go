@@ -2,11 +2,8 @@ package service
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"errors"
 	"log/slog"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,21 +11,21 @@ import (
 	"github.com/vpsmanager/backend/internal/repository"
 )
 
-const agentPath = "/tmp/vpsmanager-agent"
-const localAgentPath = "/usr/local/bin/vpsmanager-agent"
-
-// agentOutput mirrors the JSON output of the monitoring agent binary.
+// agentOutput mirrors the JSON output of the monitoring agent binary, including
+// the version contract the Hub verifies before storing any metric (§8.2).
 type agentOutput struct {
-	Timestamp  string       `json:"timestamp"`
-	Hostname   string       `json:"hostname"`
-	CPU        agentCPU     `json:"cpu"`
-	Memory     agentMemory  `json:"memory"`
-	Swap       *agentSwap   `json:"swap"`
-	Disks      []agentDisk  `json:"disks"`
-	DiskIO     *agentDiskIO `json:"disk_io"`
-	NetIO      *agentNetIO  `json:"net_io"`
-	OS         agentOS      `json:"os"`
-	UptimeSecs uint64       `json:"uptime_seconds"`
+	AgentVersion    string       `json:"agent_version"`
+	ProtocolVersion int          `json:"protocol_version"`
+	Timestamp       string       `json:"timestamp"`
+	Hostname        string       `json:"hostname"`
+	CPU             agentCPU     `json:"cpu"`
+	Memory          agentMemory  `json:"memory"`
+	Swap            *agentSwap   `json:"swap"`
+	Disks           []agentDisk  `json:"disks"`
+	DiskIO          *agentDiskIO `json:"disk_io"`
+	NetIO           *agentNetIO  `json:"net_io"`
+	OS              agentOS      `json:"os"`
+	UptimeSecs      uint64       `json:"uptime_seconds"`
 }
 
 type agentCPU struct {
@@ -88,6 +85,8 @@ type MonitorService struct {
 	rng        monitorRand
 	// taskBudget is the per-collection deadline starting at admission (§8.1.1).
 	taskBudget time.Duration
+	// deployer owns probing, uploading and protocol verification.
+	deployer *AgentDeploymentService
 	// taskFn replaces the collection step in tests; production uses collectOne.
 	taskFn func(ctx context.Context, serverID uint) error
 	// wake asks the scheduler to re-read the managed node list immediately.
@@ -250,6 +249,12 @@ func (s *MonitorService) runTask(ctx context.Context, serverID uint) (outcome mo
 	return outcomeSuccess
 }
 
+// SetAgentDeployer wires the agent deployment service that owns probing, upload
+// and protocol verification.
+func (s *MonitorService) SetAgentDeployer(deployer *AgentDeploymentService) {
+	s.deployer = deployer
+}
+
 // collectTask is the injectable collection step.
 func (s *MonitorService) collectTask(ctx context.Context, serverID uint) error {
 	if s.taskFn != nil {
@@ -293,53 +298,31 @@ func (s *MonitorService) reportCompletion(serverID uint, result monitorCompletio
 }
 
 func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
-	result, err := s.sshSvc.Exec(ctx, serverID, agentPath+" --format json", 30*time.Second)
+	if s.deployer == nil {
+		return errors.New("monitor: agent deployment service is not configured")
+	}
+	// One lease spans the probe, the upload and the execution so the whole
+	// collection is pinned to a single target generation (§8.2 step 3).
+	lease, err := s.sshSvc.AcquireLease(ctx, serverID)
 	if err != nil {
 		return err
 	}
+	defer lease.Release()
 
-	if result.ExitCode != 0 {
-		// Agent binary not found — auto-upload and retry once.
-		if strings.Contains(result.Stderr, "not found") || strings.Contains(result.Stderr, "No such file") {
-			s.logger.Info("agent binary not found, uploading...",
-				"server_id", serverID,
-				"stderr", strings.TrimSpace(result.Stderr),
-			)
-
-			// Verify local binary exists.
-			if _, statErr := os.Stat(localAgentPath); statErr != nil {
-				return fmt.Errorf("local agent binary missing at %s: %w", localAgentPath, statErr)
-			}
-
-			if uploadErr := s.sshSvc.CopyFile(ctx, serverID, localAgentPath, agentPath); uploadErr != nil {
-				return fmt.Errorf("failed to upload agent binary: %w", uploadErr)
-			}
-
-			s.logger.Info("agent binary uploaded, retrying exec", "server_id", serverID)
-
-			// Retry execution after upload.
-			var retryErr error
-			result, retryErr = s.sshSvc.Exec(ctx, serverID, agentPath+" --format json", 30*time.Second)
-			if retryErr != nil {
-				return retryErr
-			}
-
-			if result.ExitCode != 0 {
-				return fmt.Errorf("agent still failing after upload (exit %d): %s",
-					result.ExitCode, strings.TrimSpace(result.Stderr))
-			}
-		} else {
-			return fmt.Errorf("agent exited with code %d: %s",
-				result.ExitCode, strings.TrimSpace(result.Stderr))
+	out, err := s.deployer.Collect(ctx, lease)
+	if err != nil {
+		if isConnectionError(err) {
+			lease.Discard()
 		}
+		return err
 	}
+	return s.metricRepo.InsertFull(ctx, s.metricFull(serverID, out))
+}
 
-	var out agentOutput
-	if err := json.Unmarshal([]byte(result.Stdout), &out); err != nil {
-		return fmt.Errorf("failed to parse agent JSON: %w", err)
-	}
-
+// metricFull maps the agent payload onto the stored metric row.
+func (s *MonitorService) metricFull(serverID uint, out *agentOutput) *repository.MetricFull {
 	var cpuPercent *float64
+
 	if out.CPU.Percent != 0 || out.Timestamp != "" {
 		v := out.CPU.Percent
 		cpuPercent = &v
@@ -426,7 +409,7 @@ func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
 		diskWrite = &w
 	}
 
-	return s.metricRepo.InsertFull(ctx, &repository.MetricFull{
+	return &repository.MetricFull{
 		ServerID:       serverID,
 		CPUPercent:     cpuPercent,
 		MemoryUsed:     memUsed,
@@ -446,5 +429,5 @@ func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
 		KernelVersion:  kernelVer,
 		CPUModel:       cpuModel,
 		UptimeSeconds:  uptime,
-	})
+	}
 }

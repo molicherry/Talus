@@ -7,6 +7,7 @@ import (
 
 func validConfig() *Config {
 	return &Config{
+		AgentArtifactsDir:     "/usr/local/bin",
 		MonitorInterval:       60,
 		ExecTimeout:           30,
 		ExecTimeoutMax:        300,

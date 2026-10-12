@@ -22,12 +22,12 @@ mkdir -p "$OUT"
 OUT=$(CDPATH= cd -- "$OUT" && pwd)
 
 for arch in amd64 arm64; do
-  file="vpsmanager-agent-linux-$arch"
-  echo "building $file (version=$VERSION)"
-  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build \
-    -trimpath \
-    -ldflags="-s -w -X ${MODULE}/internal/agentproto.Version=${VERSION}" \
-    -o "$OUT/$file" ./cmd/agent
+	file="vpsmanager-agent-linux-$arch"
+	echo "building $file (version=$VERSION)"
+	CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build \
+		-trimpath \
+		-ldflags="-s -w -X ${MODULE}/internal/agentproto.Version=${VERSION}" \
+		-o "$OUT/$file" ./cmd/agent
 done
 
 # The manifest and the agent's own JSON output share these constants; the values
@@ -35,22 +35,22 @@ done
 PROTOCOL_VERSION=1
 manifest="$OUT/agents-manifest.json"
 {
-  printf '{\n'
-  printf '  "build_version": "%s",\n' "$VERSION"
-  printf '  "protocol_version": %s,\n' "$PROTOCOL_VERSION"
-  printf '  "agents": [\n'
-  first=1
-  for arch in amd64 arm64; do
-    file="vpsmanager-agent-linux-$arch"
-    size=$(wc -c < "$OUT/$file" | tr -d ' ')
-    digest=$(sha256sum "$OUT/$file" | cut -d' ' -f1)
-    [ "$first" -eq 1 ] || printf ',\n'
-    first=0
-    printf '    {"platform": "linux/%s", "file": "%s", "sha256": "%s", "size": %s, "build_version": "%s", "protocol_version": %s}' \
-      "$arch" "$file" "$digest" "$size" "$VERSION" "$PROTOCOL_VERSION"
-  done
-  printf '\n  ]\n}\n'
-} > "$manifest"
+	printf '{\n'
+	printf '  "build_version": "%s",\n' "$VERSION"
+	printf '  "protocol_version": %s,\n' "$PROTOCOL_VERSION"
+	printf '  "agents": [\n'
+	first=1
+	for arch in amd64 arm64; do
+		file="vpsmanager-agent-linux-$arch"
+		size=$(wc -c <"$OUT/$file" | tr -d ' ')
+		digest=$(sha256sum "$OUT/$file" | cut -d' ' -f1)
+		[ "$first" -eq 1 ] || printf ',\n'
+		first=0
+		printf '    {"platform": "linux/%s", "file": "%s", "sha256": "%s", "size": %s, "build_version": "%s", "protocol_version": %s}' \
+			"$arch" "$file" "$digest" "$size" "$VERSION" "$PROTOCOL_VERSION"
+	done
+	printf '\n  ]\n}\n'
+} >"$manifest"
 
 echo "=== AGENTS OK $OUT"
 ls -l "$OUT"

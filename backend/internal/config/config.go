@@ -23,6 +23,10 @@ type Config struct {
 	LogFormat string
 	LogLevel  string
 
+	// Agent artifacts: the directory holding agents-manifest.json and both
+	// architecture-specific binaries (REQUIREMENTS §8.2).
+	AgentArtifactsDir string
+
 	// Monitoring
 	MonitorInterval int
 	// MonitorToleratedRounds and MonitorAllowedLatency derive the online/expired
@@ -102,6 +106,7 @@ func Load() *Config {
 	cfg.Port = getEnvOrDefault("PORT", "8080")
 	cfg.LogFormat = getEnvOrDefault("LOG_FORMAT", "json")
 	cfg.LogLevel = getEnvOrDefault("LOG_LEVEL", "info")
+	cfg.AgentArtifactsDir = getEnvOrDefault("AGENT_ARTIFACTS_DIR", "/usr/local/bin")
 	cfg.MonitorInterval = getEnvIntOrDefault("MONITOR_INTERVAL", 60)
 	cfg.MonitorToleratedRounds = getEnvIntOrDefault("MONITOR_TOLERATED_ROUNDS", 1)
 	cfg.MonitorAllowedLatency = getEnvIntOrDefault("MONITOR_ALLOWED_LATENCY_SECONDS", 0)

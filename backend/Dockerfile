@@ -28,9 +28,6 @@ RUN apk add --no-cache openssh-client ca-certificates tzdata
 RUN adduser -D -H -s /sbin/nologin talus
 COPY --from=go-builder /hub /usr/local/bin/hub
 COPY --from=go-builder /agents/ /usr/local/bin/
-# Transitional: the pre-REQ-08 monitor path still uploads a single binary;
-# T3.3 removes that path once the deployment service owns it.
-RUN cp /usr/local/bin/vpsmanager-agent-linux-amd64 /usr/local/bin/vpsmanager-agent
 COPY --from=ui-builder /app/dist/ /static/
 EXPOSE 8080
 ENV STATIC_DIR=/static
