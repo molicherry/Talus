@@ -441,6 +441,36 @@
       "scenario": "Apply correct time ranges, aggregation intervals, axes, and units; distinguish zero from null without implying finer sampling.",
       "implementations": [
         {
+          "implementation_id": "impl-04-01a",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "ranges include 15m and 30d and stay within the API maximum"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-01b",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "every range stays inside the 600-bucket budget"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-01c",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "zero is a value and null is a gap"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
           "implementation_id": "impl-04-01",
           "run_id": "ui-charts",
           "implementation": null,
@@ -504,6 +534,26 @@
       "spec_ref": "REQ §4.5",
       "scenario": "Distinguish series without color, meet contrast thresholds, preserve visible focus, and expose equivalent chart data to keyboard and screen-reader users.",
       "implementations": [
+        {
+          "implementation_id": "impl-04-04a",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "series stay distinguishable without colour"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04b",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "a coarsened or downsampled response is never silent"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
         {
           "implementation_id": "impl-04-04",
           "run_id": "ui-charts",

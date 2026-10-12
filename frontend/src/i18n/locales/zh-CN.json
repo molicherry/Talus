@@ -242,6 +242,37 @@
   "language": {
     "switch": "EN"
   },
+  "metrics": {
+    "axis": {
+      "percent": "使用率 (%)",
+      "throughput": "吞吐",
+      "load": "负载"
+    },
+    "stat": {
+      "avg": "平均",
+      "peak": "峰值"
+    },
+    "series": {
+      "cpu": "CPU",
+      "memory": "内存",
+      "disk": "磁盘",
+      "swap": "Swap",
+      "net_recv": "网络入",
+      "net_sent": "网络出",
+      "disk_read": "磁盘读",
+      "disk_write": "磁盘写",
+      "load_1": "负载 1 分",
+      "load_5": "负载 5 分",
+      "load_15": "负载 15 分",
+      "unknown": "曲线"
+    },
+    "notice": {
+      "downsampled": "当前显示 {{actual}} 粒度，而非请求的 {{requested}}（{{reason}}）",
+      "rollupSource": "当前显示 {{requested}} 的 {{actual}} 聚合历史（{{reason}}）"
+    },
+    "coverage": "数据覆盖率：{{percent}}",
+    "dataTable": "数据表"
+  },
   "monitoring": {
     "title": "监控",
     "titleNamed": "监控 — {{name}}",
@@ -417,7 +448,9 @@
     "1h": "1 小时",
     "6h": "6 小时",
     "24h": "24 小时",
-    "7d": "7 天"
+    "7d": "7 天",
+    "15m": "15 分钟",
+    "30d": "30 天"
   },
   "update": {
     "available": "新版本已部署。",

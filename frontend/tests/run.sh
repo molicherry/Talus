@@ -30,6 +30,10 @@ compile src/lib/query.ts query
 sed 's|"./auth"|"./.compiled-auth.mjs"|g' tests/.compiled-query.mjs > tests/.compiled-query-auth.mjs
 mv tests/.compiled-query-auth.mjs tests/.compiled-query.mjs
 compile src/features/monitoring/lib/series.ts series
+compile src/types/metric-axes.ts metric-axes
+compile src/features/monitoring/lib/chart-config.ts chart-config
+# chart-config imports the shared vocabulary; point it at the compiled module.
+sed 's|"../../types/metric-axes"|"./.compiled-metric-axes.mjs"|g' tests/.compiled-chart-config.mjs > tests/.compiled-chart-config-standalone.mjs
 compile src/features/auth/lib/api-key-error.ts api-key-error
 compile src/lib/unauthorized.ts unauthorized
 compile src/features/usage-logs/lib/session.ts usage-session

@@ -242,6 +242,37 @@
   "language": {
     "switch": "中文"
   },
+  "metrics": {
+    "axis": {
+      "percent": "Usage (%)",
+      "throughput": "Throughput",
+      "load": "Load"
+    },
+    "stat": {
+      "avg": "Average",
+      "peak": "Peak"
+    },
+    "series": {
+      "cpu": "CPU",
+      "memory": "Memory",
+      "disk": "Disk",
+      "swap": "Swap",
+      "net_recv": "Network in",
+      "net_sent": "Network out",
+      "disk_read": "Disk read",
+      "disk_write": "Disk write",
+      "load_1": "Load 1m",
+      "load_5": "Load 5m",
+      "load_15": "Load 15m",
+      "unknown": "Series"
+    },
+    "notice": {
+      "downsampled": "Showing {{actual}} buckets instead of the requested {{requested}} ({{reason}})",
+      "rollupSource": "Showing aggregated {{actual}} history for {{requested}} ({{reason}})"
+    },
+    "coverage": "Data coverage: {{percent}}",
+    "dataTable": "Data table"
+  },
   "monitoring": {
     "title": "Monitoring",
     "titleNamed": "Monitoring — {{name}}",
@@ -414,10 +445,12 @@
     "system": "System"
   },
   "timeRange": {
-    "1h": "1 Hour",
-    "6h": "6 Hours",
-    "24h": "24 Hours",
-    "7d": "7 Days"
+    "1h": "1h",
+    "6h": "6h",
+    "24h": "24h",
+    "7d": "7d",
+    "15m": "15m",
+    "30d": "30d"
   },
   "update": {
     "available": "A new version has been deployed.",
