@@ -503,6 +503,7 @@ This table is a human-readable scenario summary. Test level describes the verifi
 | TC-01-03 | REQ-01 | Reject residual adapter artifacts, stale installation links, missing skills, and invalid scan conditions; allow reviewed historical records. | Tooling / Static fixtures |
 | TC-02-01 | REQ-02 | Index existing tests with English descriptions, generate coverage.md deterministically from coverage.json, reject report drift, and propagate runner failures. | Tooling / CI |
 | TC-02-02 | REQ-02 | Validate JSON schema, unique IDs, references, suites, statuses, and commands before execution; fail on missing dependencies and distinguish mock UI from real E2E. | Tooling / CI |
+| TC-02-03 | REQ-02 | Apply first-install and upgrade migrations atomically, serialize concurrent migration attempts, and retry failed work without a premature completion marker. | Database / Migration prerequisite |
 | TC-04-01 | REQ-04 | Apply correct time ranges, aggregation intervals, axes, and units; distinguish zero from null without implying finer sampling. | Frontend logic / UI |
 | TC-04-02 | REQ-04 | Compute averages and observed sample maxima correctly; retain maxima in long-range data. | Repository / Charts |
 | TC-04-03 | REQ-04 | Ignore stale responses during rapid range changes; support touch, keyboard input, and visibility-aware refresh. | UI |

@@ -91,6 +91,13 @@ func UsageCapture(recorder *usage.Recorder) func(http.Handler) http.Handler {
 			wrapped, response := WrapResponseWriter(w)
 			defer func() {
 				if recovered := recover(); recovered != nil {
+					if recovered == http.ErrAbortHandler {
+						if response.WriteError() != nil {
+							op.SetMetadata("response_write_failed", true)
+						}
+						recorder.Finish(op, response.Status())
+						panic(recovered)
+					}
 					op.SetHTTPError(http.StatusInternalServerError, "internal_error")
 					recorder.Finish(op, http.StatusInternalServerError)
 					panic(recovered)

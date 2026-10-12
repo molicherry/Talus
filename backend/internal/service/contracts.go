@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/vpsmanager/backend/internal/gate"
 )
 
 // This file freezes the cross-requirement contracts agreed in
-// REQUIREMENTS §5/§6/§7 and IMPLEMENTATION §3. Phase 2 implements them; the
-// shapes live here so REQ-05/07/08 compile against a single definition.
+// REQUIREMENTS §5/§6/§7 and IMPLEMENTATION §3. Compile-time assertions below
+// keep the Phase 2 implementations aligned with the shared contracts.
 
 // Generation identifies a pool entry's target snapshot (host, port, credential,
 // updated_at). A lease may only be returned while its generation still matches
@@ -73,34 +75,39 @@ type Lease interface {
 }
 
 // SessionState is the terminal session lifecycle (REQ-05 §5.2).
-type SessionState string
+type SessionState = gate.SessionState
 
 const (
-	SessionPreparing SessionState = "preparing"
-	SessionReady     SessionState = "ready"
-	SessionRevoked   SessionState = "revoked"
+	SessionPreparing SessionState = gate.StatePreparing
+	SessionReady     SessionState = gate.StateReady
+	SessionRevoked   SessionState = gate.StateRevoked
 )
 
 // TerminalSession is the registry record for one JWT terminal.
-type TerminalSession struct {
-	SessionID uint
-	UserID    uint
-	Version   int64
-	State     SessionState
-}
+type TerminalSession = gate.Session
 
 // UserGate serializes admission and password revocation for one user id. The
 // password transaction COMMIT is the revocation linearization point; the gate
 // is stable for as long as the user has in-flight work.
 type UserGate interface {
 	Admit(ctx context.Context, userID uint, fn func(version int64) error) error
+	Update(ctx context.Context, userID uint, fn func(context.Context, int64) (bool, error)) error
+	Recover(ctx context.Context, userID uint) error
 }
 
 // TerminalRegistry tracks JWT terminal sessions so revocation can cancel and
 // close them. Done is idempotent; only the session's own resources are closed.
 type TerminalRegistry interface {
-	Register(ctx context.Context, s TerminalSession) error
-	Admit(ctx context.Context, sessionID uint) error
-	RevokeUser(ctx context.Context, userID uint, currentVersion int64)
+	Register(userID uint, version int64, cancel, force func()) *TerminalSession
+	Admit(sessionID uint) bool
+	InputPermit(sessionID uint) bool
+	MarkRevoked(userID uint) []*TerminalSession
+	Await(ctx context.Context, sessions []*TerminalSession) gate.CleanupResult
 	Done(sessionID uint)
 }
+
+var (
+	_ Lease            = (*sshLease)(nil)
+	_ UserGate         = (*gate.Gate)(nil)
+	_ TerminalRegistry = (*gate.Registry)(nil)
+)

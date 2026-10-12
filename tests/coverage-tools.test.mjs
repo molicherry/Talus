@@ -1,0 +1,144 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
+import { inspectGoResults } from "./go-results.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+function fixture(t) {
+  const root = mkdtempSync(join(tmpdir(), "talus-coverage-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "tests"));
+  mkdirSync(join(root, "backend"));
+  mkdirSync(join(root, "bin"));
+  for (const file of ["run-suites.mjs", "render-coverage.mjs", "go-results.mjs"]) {
+    copyFileSync(join(HERE, file), join(root, "tests", file));
+  }
+  writeFileSync(join(root, "backend", "go.mod"), "module example.test/backend\n\ngo 1.25\n");
+  writeFileSync(join(root, "backend", "acceptance_test.go"), "package backend\nfunc TestRequired(t *testing.T) {}\n");
+  // The fixture isolates dispatcher behavior from the installed toolchain;
+  // production tests still run native Go and report real -json events.
+  writeFileSync(join(root, "bin", "go"), `#!${process.execPath}\nprocess.stdout.write(process.env.FIXTURE_GO_EVENTS || "");\nprocess.exitCode = Number(process.env.FIXTURE_GO_EXIT || 0);\n`, { mode: 0o755 });
+  const doc = {
+    schema_version: 1,
+    runs: [{ run_id: "native-go", suite: "integration", runner: "go-test", cwd: "backend", command: ["go", "test", "./..."], timeout_seconds: 10, environment: { profile: "fixture", requires: [] } }],
+    gates: { M2: ["native-go"] },
+    phases: { M2: ["REQ-05"] },
+    cases: [{ case_id: "TC-05-05", requirement_ids: ["REQ-05"], spec_ref: "fixture", scenario: "Reject missing acceptance evidence before passing a required gate.", implementations: [{ implementation_id: "required-test", run_id: "native-go", implementation: { path: "backend/acceptance_test.go", symbol: "TestRequired" }, automation_status: "implemented", required: true }] }],
+    scan_exemptions: [],
+  };
+  return {
+    doc,
+    run(events = [], extraEnv = {}) {
+      writeFileSync(join(root, "tests", "coverage.json"), JSON.stringify(doc));
+      return spawnSync(process.execPath, [join(root, "tests", "run-suites.mjs"), "--gate", "M2"], {
+        cwd: root,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${join(root, "bin")}:${process.env.PATH}`, FIXTURE_GO_EVENTS: events.map((event) => JSON.stringify(event)).join("\n"), ...extraEnv },
+      });
+    },
+  };
+}
+
+test("the generated report matches the committed machine inventory", () => {
+  const result = spawnSync(process.execPath, [join(HERE, "render-coverage.mjs"), "--check"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+test("a required planned implementation blocks its phase before execution", (t) => {
+  const f = fixture(t);
+  f.doc.cases[0].implementations[0].automation_status = "planned";
+  f.doc.cases[0].implementations[0].implementation = null;
+  const result = f.run();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /unimplemented required cases/);
+  assert.doesNotMatch(result.stdout, /selected /);
+});
+
+test("removing a required run from a gate cannot hide unfinished coverage", (t) => {
+  const f = fixture(t);
+  f.doc.runs.push({ ...f.doc.runs[0], run_id: "unrelated" });
+  f.doc.gates.M2 = ["unrelated"];
+  const result = f.run();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /does not include runs covering required cases/);
+});
+
+test("a missing implementation symbol fails schema validation", (t) => {
+  const f = fixture(t);
+  f.doc.cases[0].implementations[0].implementation.symbol = "TestNonexistent";
+  const result = f.run();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /test symbol TestNonexistent does not exist/);
+});
+
+test("an exit-zero Go runner cannot pass when its filter selects no required test", (t) => {
+  const f = fixture(t);
+  const result = f.run([{ Package: "example.test/backend", Action: "pass" }]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /TestRequired \(not_run\)/);
+});
+
+test("a skipped required Go test is not accepted as passing", (t) => {
+  const f = fixture(t);
+  const result = f.run([{ Package: "example.test/backend", Test: "TestRequired", Action: "skip" }]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /TestRequired \(skip\)/);
+});
+
+test("a required Go test passes only with evidence from its own package", (t) => {
+  const f = fixture(t);
+  const wrong = f.run([{ Package: "example.test/other", Test: "TestRequired", Action: "pass" }]);
+  assert.equal(wrong.status, 1);
+  const correct = f.run([{ Package: "example.test/backend", Test: "TestRequired", Action: "pass" }]);
+  assert.equal(correct.status, 0, correct.stderr);
+});
+
+test("a skipped subscenario cannot hide under a passing Go parent", () => {
+  const expected = [{ package: "example.test/backend", test: "TestRequired" }];
+  const output = [
+    { Package: "example.test/backend", Test: "TestRequired/database", Action: "skip" },
+    { Package: "example.test/backend", Test: "TestRequired", Action: "pass" },
+  ].map((event) => JSON.stringify(event)).join("\n");
+  assert.equal(inspectGoResults(output, expected)[0].status, "skip");
+});
+
+test("a missing run dependency blocks execution rather than skipping tests", (t) => {
+  const f = fixture(t);
+  f.doc.runs[0].environment.requires = ["FIXTURE_REQUIRED_DATABASE"];
+  const result = f.run([], { FIXTURE_REQUIRED_DATABASE: "" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /requires env FIXTURE_REQUIRED_DATABASE/);
+  assert.doesNotMatch(result.stdout, /▶ native-go/);
+});
+
+test("a nonzero native runner fails even after emitting a required test pass", (t) => {
+  const f = fixture(t);
+  const result = f.run([{ Package: "example.test/backend", Test: "TestRequired", Action: "pass" }], { FIXTURE_GO_EXIT: "7" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /native-go: exit 7/);
+});
+
+test("required manual verification remains pending without recorded evidence", (t) => {
+  const f = fixture(t);
+  f.doc.runs[0].runner = "manual";
+  f.doc.runs[0].command = null;
+  f.doc.runs[0].timeout_seconds = null;
+  f.doc.cases[0].implementations[0].automation_status = "manual";
+  f.doc.cases[0].implementations[0].implementation = null;
+  const result = f.run();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /manual run native-go: pending \(missing tests\/evidence\/native-go.json\)/);
+});
+
+test("a duplicate implementation identifier fails schema validation", (t) => {
+  const f = fixture(t);
+  f.doc.cases[0].implementations.push({ ...f.doc.cases[0].implementations[0] });
+  const result = f.run();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /duplicate or missing implementation_id required-test/);
+});

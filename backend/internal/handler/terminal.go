@@ -35,6 +35,7 @@ type TerminalHandler struct {
 // admitted against the current session version.
 func (h *TerminalHandler) SetUserGate(g mw.UserGate) {
 	h.userGate = g
+	h.terminalSvc.SetUserGate(g)
 }
 
 // NewTerminalHandler creates a TerminalHandler with the given dependencies.
@@ -110,27 +111,13 @@ func (h *TerminalHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		}
 
 		parsed, verifyErr := h.jwtSvc.ValidateToken(msg.Data)
-		if verifyErr != nil {
+		if verifyErr != nil || parsed.TokenVersion == nil {
 			op.SetResult("rejected", "terminal_auth_failed")
 			_ = conn.WriteJSON(wsMessage{Type: "error", Data: "invalid or expired token"})
 			slog.Warn("terminal auth failed", "server_id", id, "reason", "terminal_auth_failed")
 			return
 		}
 		claims = parsed
-		if h.userGate != nil {
-			admitErr := h.userGate.Admit(r.Context(), claims.UserID, func(version int64) error {
-				if claims.TokenVersion == nil || *claims.TokenVersion != version {
-					return errors.New("session revoked")
-				}
-				return nil
-			})
-			if admitErr != nil {
-				op.SetResult("rejected", "terminal_auth_failed")
-				_ = conn.WriteJSON(wsMessage{Type: "error", Data: "session revoked or unavailable"})
-				slog.Warn("terminal first-frame session rejected", "server_id", id)
-				return
-			}
-		}
 		r = r.WithContext(mw.WithUserClaims(r.Context(), claims))
 	}
 	op.SetPhase("authenticated")
@@ -150,7 +137,13 @@ func (h *TerminalHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		op.SetMetadata("ready_at", result.ReadyAt)
 	}
 	op.SetMetadata("closed_at", result.ClosedAt)
+	op.SetMetadata("cleanup_pending", result.CleanupPending)
+	logReason := result.Reason
+	if result.CleanupPending {
+		logReason = "terminal_cleanup_incomplete"
+		op.SetMetadata("cleanup_reason", logReason)
+	}
 	if sessionErr != nil || result.Outcome == "failed" {
-		slog.Warn("terminal session failed", "server_id", id, "reason", result.Reason)
+		slog.Warn("terminal session failed", "server_id", id, "reason", logReason)
 	}
 }

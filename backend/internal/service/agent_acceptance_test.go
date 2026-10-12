@@ -58,9 +58,7 @@ func newAgentAuthFixture(t *testing.T) agentAuthFixture {
 
 // agentRepoGate mirrors production wiring: the version is read from PostgreSQL.
 func agentRepoGate(repo *repository.UserRepo) *gate.Gate {
-	return gate.New(func(ctx context.Context, userID uint) (int64, error) {
-		return repo.TokenVersion(ctx, userID)
-	})
+	return gate.New(repo.TokenVersion, repo.LockedTokenVersion)
 }
 
 // agentJWTStatus runs one request through the real authentication middleware.
@@ -241,6 +239,7 @@ func TestAgentRevokedJWTRejectedAtHandshakeAndClosesLiveTerminal(t *testing.T) {
 	svc, _ := startSeededTerminalService(t, serverID)
 	registry := gate.NewRegistry()
 	svc.SetSessionRegistry(registry)
+	svc.SetUserGate(gate.New(func(context.Context, uint) (int64, error) { return 0, nil }))
 
 	version := int64(0)
 	ctx := mw.WithUserClaims(context.Background(), &token.Claims{UserID: 7, Username: "agent", Role: "admin", TokenVersion: &version})
@@ -342,7 +341,19 @@ func TestAgentCancelledUploadIsBoundedAndReclaimsQuota(t *testing.T) {
 		t.Fatalf("teardown took %v, want within the 3s local cleanup budget", elapsed)
 	}
 
-	reseedAfterForcedClose(t, fixture)
+	// A joined session may leave a healthy transport reusable. Replenish only
+	// when force-close was necessary; either path must return the lease quota.
+	reuseCtx, stopReuse := context.WithTimeout(context.Background(), time.Second)
+	reusable, acquireErr := fixture.pool.AcquireContext(reuseCtx, 1, testFP(1))
+	stopReuse()
+	if acquireErr != nil {
+		t.Fatalf("quota after cancellation: %v", acquireErr)
+	}
+	needsClient := reusable.Client == nil
+	fixture.pool.ReleaseHandle(reusable)
+	if needsClient {
+		reseedAfterForcedClose(t, fixture)
+	}
 	if err := svc.CopyFile(context.Background(), 1, local, "/tmp/agent"); err != nil {
 		t.Fatalf("upload after cancellation: %v", err)
 	}
@@ -498,10 +509,9 @@ func TestAgentRelayBudgetsAndIdleAreEnforced(t *testing.T) {
 	}
 }
 
-// TestAgentCleanupBudgetsAreAbsolute pins TC-07-04's frozen §7.1.1 constants: a
-// 3s local cleanup total, a 2s terminal/JWT grace and 100ms SSH/Relay graces.
-// Nested deployment or Monitor stages must not restart them.
-func TestAgentCleanupBudgetsAreAbsolute(t *testing.T) {
+// TestAgentCleanupDefaults documents the configured defaults. Behavioral
+// deadline, slow-join and forced-close tests provide TC-07-04 acceptance.
+func TestAgentCleanupDefaults(t *testing.T) {
 	if sessionTeardownGrace != 2*time.Second {
 		t.Fatalf("terminal teardown grace = %v, want 2s", sessionTeardownGrace)
 	}

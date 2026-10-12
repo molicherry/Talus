@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -140,28 +142,34 @@ func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims := mw.GetUserClaims(r.Context())
-	svc, getErr := h.svc.Get(r.Context(), id)
-	if getErr != nil {
-		server.WriteError(w, r, getErr)
-		return
-	}
-	usageResource(r, "service", id, svc.Name, svc.ServerID)
-	if getErr == nil && svc.ServerID != nil {
-		if !mw.CheckServerAccess(claims, *svc.ServerID) {
-			server.WriteError(w, r, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServiceDenied))
-			return
-		}
-	}
-
 	var req relayRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
 	}
-	if !service.RelayModes[req.Mode] {
-		// mode is a control field; it is never forwarded upstream.
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
+	// Freeze the budget before either resource lookup or permission evaluation.
+	ctx, cancel, err := h.svc.RelayContext(r.Context(), req.Mode)
+	if err != nil {
+		server.WriteError(w, r, err)
+		return
+	}
+	defer cancel()
+	r = r.WithContext(ctx)
+	claims := mw.GetUserClaims(r.Context())
+	svc, getErr := h.svc.Get(r.Context(), id)
+	if getErr != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			usage.FromContext(ctx).SetResult("failed", "relay_budget_exceeded")
+			getErr = server.NewAppError(http.StatusGatewayTimeout, server.ReasonRelayTimeout)
+		} else if ctx.Err() != nil {
+			usage.FromContext(ctx).SetResult("cancelled", "client_cancelled")
+		}
+		server.WriteError(w, r, getErr)
+		return
+	}
+	usageResource(r, "service", id, svc.Name, svc.ServerID)
+	if svc.ServerID != nil && !mw.CheckServerAccess(claims, *svc.ServerID) {
+		server.WriteError(w, r, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServiceDenied))
 		return
 	}
 
@@ -179,9 +187,21 @@ func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 		op.SetRelayResult(result.UpstreamStatus, result.BytesCopied)
 	}
 	if result.Outcome != "" {
-		op.SetResult(result.Outcome, result.Reason)
+		outcome := result.Outcome
+		if outcome == "timeout" {
+			// Usage's persisted outcome enum groups timeouts under failure;
+			// the bounded reason retains the budget/idle distinction.
+			outcome = "failed"
+		}
+		op.SetResult(outcome, result.Reason)
 	}
-	if relayErr != nil && !result.HeadersWritten {
+	if relayErr != nil {
+		if result.HeadersWritten {
+			// A normal return would append a successful chunked terminator to a
+			// truncated response. net/http aborts the stream on this sentinel;
+			// UsageCapture records the outcome above before rethrowing it.
+			panic(http.ErrAbortHandler)
+		}
 		server.WriteError(w, r, relayErr)
 	}
 }

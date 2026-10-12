@@ -83,11 +83,22 @@ type captureFlusher struct {
 	original http.Flusher
 }
 
-func (f captureFlusher) Flush() {
+type captureFlushController interface {
+	http.Flusher
+	FlushError() error
+}
+
+func (f captureFlusher) Flush() { _ = f.FlushError() }
+
+func (f captureFlusher) FlushError() error {
 	if f.capture.statusCode == 0 {
 		f.capture.WriteHeader(http.StatusOK)
 	}
-	f.original.Flush()
+	err := http.NewResponseController(f.capture.ResponseWriter).Flush()
+	if err != nil && f.capture.writeErr == nil {
+		f.capture.writeErr = err
+	}
+	return err
 }
 
 type captureHijacker struct{ original http.Hijacker }
@@ -146,7 +157,7 @@ func WrapResponseWriter(w http.ResponseWriter) (http.ResponseWriter, *ResponseCa
 	case 1:
 		return &struct {
 			*ResponseCapture
-			http.Flusher
+			captureFlushController
 		}{capture, f}, capture
 	case 2:
 		return &struct {
@@ -156,7 +167,7 @@ func WrapResponseWriter(w http.ResponseWriter) (http.ResponseWriter, *ResponseCa
 	case 3:
 		return &struct {
 			*ResponseCapture
-			http.Flusher
+			captureFlushController
 			http.Hijacker
 		}{capture, f, h}, capture
 	case 4:
@@ -167,7 +178,7 @@ func WrapResponseWriter(w http.ResponseWriter) (http.ResponseWriter, *ResponseCa
 	case 5:
 		return &struct {
 			*ResponseCapture
-			http.Flusher
+			captureFlushController
 			http.Pusher
 		}{capture, f, p}, capture
 	case 6:
@@ -179,7 +190,7 @@ func WrapResponseWriter(w http.ResponseWriter) (http.ResponseWriter, *ResponseCa
 	case 7:
 		return &struct {
 			*ResponseCapture
-			http.Flusher
+			captureFlushController
 			http.Hijacker
 			http.Pusher
 		}{capture, f, h, p}, capture
@@ -191,7 +202,7 @@ func WrapResponseWriter(w http.ResponseWriter) (http.ResponseWriter, *ResponseCa
 	case 9:
 		return &struct {
 			*ResponseCapture
-			http.Flusher
+			captureFlushController
 			io.ReaderFrom
 		}{capture, f, r}, capture
 	case 10:
@@ -203,7 +214,7 @@ func WrapResponseWriter(w http.ResponseWriter) (http.ResponseWriter, *ResponseCa
 	case 11:
 		return &struct {
 			*ResponseCapture
-			http.Flusher
+			captureFlushController
 			http.Hijacker
 			io.ReaderFrom
 		}{capture, f, h, r}, capture
@@ -216,7 +227,7 @@ func WrapResponseWriter(w http.ResponseWriter) (http.ResponseWriter, *ResponseCa
 	case 13:
 		return &struct {
 			*ResponseCapture
-			http.Flusher
+			captureFlushController
 			http.Pusher
 			io.ReaderFrom
 		}{capture, f, p, r}, capture
@@ -230,7 +241,7 @@ func WrapResponseWriter(w http.ResponseWriter) (http.ResponseWriter, *ResponseCa
 	case 15:
 		return &struct {
 			*ResponseCapture
-			http.Flusher
+			captureFlushController
 			http.Hijacker
 			http.Pusher
 			io.ReaderFrom
@@ -245,13 +256,15 @@ func Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		wrapped, capture := WrapResponseWriter(w)
+		defer func() {
+			slog.Info("request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", capture.Status(),
+				"duration_ms", time.Since(start).Milliseconds(),
+				"request_id", GetRequestID(r.Context()),
+			)
+		}()
 		next.ServeHTTP(wrapped, r)
-		slog.Info("request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", capture.Status(),
-			"duration_ms", time.Since(start).Milliseconds(),
-			"request_id", GetRequestID(r.Context()),
-		)
 	})
 }

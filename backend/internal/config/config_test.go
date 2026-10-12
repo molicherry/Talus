@@ -27,6 +27,9 @@ func TestValidateRejectsIllegalValues(t *testing.T) {
 	}{
 		{"zero monitor interval", func(c *Config) { c.MonitorInterval = 0 }},
 		{"negative monitor interval", func(c *Config) { c.MonitorInterval = -1 }},
+		{"timeout above hard cap", func(c *Config) { c.ExecTimeoutMax = 301 }},
+		{"total output above hard cap", func(c *Config) { c.ExecOutputLimit = (8 << 20) + 1 }},
+		{"stream output above hard cap", func(c *Config) { c.ExecOutputStreamLimit = (4 << 20) + 1 }},
 		{"zero exec timeout", func(c *Config) { c.ExecTimeout = 0 }},
 		{"exec max below default", func(c *Config) { c.ExecTimeoutMax = 10 }},
 		{"zero output limit", func(c *Config) { c.ExecOutputLimit = 0 }},
@@ -40,5 +43,14 @@ func TestValidateRejectsIllegalValues(t *testing.T) {
 		if err := cfg.Validate(); err == nil {
 			t.Fatalf("%s: expected a validation error", tc.name)
 		}
+	}
+}
+
+func TestValidateAcceptsReducedExecutionLimits(t *testing.T) {
+	c := validConfig()
+	c.ExecTimeout, c.ExecTimeoutMax = 5, 10
+	c.ExecOutputLimit, c.ExecOutputStreamLimit = 1024, 512
+	if err := c.Validate(); err != nil {
+		t.Fatalf("reduced execution limits were rejected: %v", err)
 	}
 }

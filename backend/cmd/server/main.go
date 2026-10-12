@@ -107,8 +107,7 @@ func main() {
 
 	// JWT session versioning (REQ-05). Explicit, idempotent schema migration
 	// rather than relying on AutoMigrate for this security-relevant column.
-	if _, err := repository.ApplyOnce(db, "2026-10-10-users-token-version",
-		`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version bigint NOT NULL DEFAULT 0`); err != nil {
+	if err := repository.PrepareUserTokenVersionSchema(db); err != nil {
 		slog.Error("failed to add users.token_version", "error", err)
 		os.Exit(1)
 	}
@@ -161,9 +160,7 @@ func main() {
 
 	// Dependency chain — Auth
 	userRepo := repository.NewUserRepo(db)
-	userGate := gate.New(func(ctx context.Context, userID uint) (int64, error) {
-		return userRepo.TokenVersion(ctx, userID)
-	})
+	userGate := gate.New(userRepo.TokenVersion, userRepo.LockedTokenVersion)
 	terminalRegistry := gate.NewRegistry()
 	authSvc := service.NewAuthService(userRepo, jwtSvc, db)
 	authSvc.SetUserGate(userGate)

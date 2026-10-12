@@ -437,6 +437,31 @@ func TestSafeMetadataSnapshotAndBusinessResultPrecedence(t *testing.T) {
 	}
 }
 
+func TestTerminalRevocationPreservesCleanupEvidence(t *testing.T) {
+	op := NewOperation("server.terminal", "/servers/{id}/terminal", "req", "GET", "127.0.0.1")
+	op.SetResult("cancelled", "session_revoked")
+	op.SetMetadata("close_reason", "revoked")
+	op.SetMetadata("cleanup_pending", true)
+	op.SetMetadata("cleanup_reason", "terminal_cleanup_incomplete")
+	// Untrusted text and incorrectly typed values cannot overwrite the facts.
+	op.SetMetadata("cleanup_reason", "SECRET-COMMAND")
+	op.SetMetadata("cleanup_pending", "SECRET-COMMAND")
+	row, _ := op.finish(101)
+	if row.Outcome != "cancelled" || row.ErrorReason != "session_revoked" {
+		t.Fatalf("revocation reason was lost: %+v", row)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(row.Metadata, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata["close_reason"] != "revoked" || metadata["cleanup_pending"] != true || metadata["cleanup_reason"] != "terminal_cleanup_incomplete" {
+		t.Fatalf("cleanup evidence was dropped: %s", row.Metadata)
+	}
+	if strings.Contains(string(row.Metadata), "SECRET") {
+		t.Fatalf("untrusted cleanup metadata was retained: %s", row.Metadata)
+	}
+}
+
 func TestOperationConcurrentPhasesAndFinishAreSingleFinal(t *testing.T) {
 	s := newFakeStore()
 	r := newTestRecorder(s, newFakeAudit())

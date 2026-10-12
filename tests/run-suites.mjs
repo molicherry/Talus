@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loadAndValidate } from "./render-coverage.mjs";
+import { inspectGoResults, requiredGoTests } from "./go-results.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -224,12 +225,29 @@ function main() {
     }
     const cwd = run.cwd === "." ? ROOT : join(ROOT, run.cwd);
     console.log(`▶ ${run.run_id}: ${run.command.join(" ")}  (cwd=${run.cwd})`);
-    const res = spawnSync(run.command[0], run.command.slice(1), {
+    const isGo = run.runner === "go-test";
+    const args = run.command.slice(1);
+    if (isGo) args.splice(1, 0, "-json", "-count=1");
+    const res = spawnSync(run.command[0], args, {
       cwd,
-      stdio: "inherit",
+      stdio: isGo ? ["inherit", "pipe", "inherit"] : "inherit",
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
       env: process.env,
       timeout: run.timeout_seconds * 1000,
     });
+    // Keep native test output readable while preserving structured evidence.
+    if (isGo && res.stdout) {
+      for (const line of res.stdout.split("\n")) {
+        if (!line) continue;
+        try {
+          const event = JSON.parse(line);
+          if (event.Action === "output") process.stdout.write(event.Output);
+        } catch {
+          console.error(line);
+        }
+      }
+    }
     if (res.error) {
       console.error(`✗ ${run.run_id}: ${res.error.message}`);
       results.push({ run_id: run.run_id, status: "error", reason: res.error.message });
@@ -242,9 +260,28 @@ function main() {
       failed = true;
       break;
     }
+    let checks;
+    if (isGo) {
+      try {
+        checks = inspectGoResults(res.stdout, requiredGoTests(doc, run, scope, ROOT));
+        const missing = checks.filter((check) => check.status !== "pass");
+        if (missing.length) {
+          const reason = `required tests did not pass: ${missing.map((check) => `${check.implementation_id}:${check.test} (${check.status})`).join(", ")}`;
+          console.error(`✗ ${run.run_id}: ${reason}`);
+          results.push({ run_id: run.run_id, status: "failed", reason, checks });
+          failed = true;
+          break;
+        }
+      } catch (error) {
+        console.error(`✗ ${run.run_id}: ${error.message}`);
+        results.push({ run_id: run.run_id, status: "error", reason: error.message });
+        failed = true;
+        break;
+      }
+    }
     executed += 1;
     console.log(`✓ ${run.run_id}`);
-    results.push({ run_id: run.run_id, status: "passed" });
+    results.push({ run_id: run.run_id, status: "passed", ...(checks ? { checks } : {}) });
   }
 
   const artifact = {

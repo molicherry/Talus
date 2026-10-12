@@ -140,3 +140,26 @@ func TestUsageCapturePersistsAfterClientCancellation(t *testing.T) {
 		t.Fatal("cancellation prevented independent bounded completion write")
 	}
 }
+
+func TestUsageCapturePreservesRelayAbortOutcome(t *testing.T) {
+	store := &captureTestStore{}
+	recorder := usage.NewRecorder(store, nil, usage.Options{})
+	handler := UsageCapture(recorder)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		op := usage.FromContext(r.Context())
+		op.SetResult("failed", "relay_idle_timeout")
+		op.SetRelayResult(http.StatusOK, 7)
+		w.WriteHeader(http.StatusOK)
+		panic(http.ErrAbortHandler)
+	}))
+	func() {
+		defer func() {
+			if got := recover(); got != http.ErrAbortHandler {
+				t.Fatalf("abort sentinel was swallowed: %v", got)
+			}
+		}()
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/services/1/relay", nil))
+	}()
+	if len(store.rows) != 1 || store.rows[0].Outcome != "failed" || store.rows[0].ErrorReason != "relay_idle_timeout" || store.rows[0].HTTPStatus == nil || *store.rows[0].HTTPStatus != 200 {
+		t.Fatalf("relay abort was rewritten as an internal error: %+v", store.rows)
+	}
+}

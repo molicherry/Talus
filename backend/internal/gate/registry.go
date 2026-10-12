@@ -35,13 +35,16 @@ type Session struct {
 	UserID  uint
 	Version int64
 
-	cancel func()
-	force  func()
-	done   chan struct{}
-	once   sync.Once
+	cancel    func()
+	force     func()
+	done      chan struct{}
+	once      sync.Once
+	forceOnce sync.Once
 
-	mu    sync.Mutex
-	state SessionState
+	mu            sync.Mutex
+	state         SessionState
+	graceDeadline time.Time
+	deadline      time.Time
 }
 
 // State returns the current state.
@@ -114,24 +117,65 @@ func (r *Registry) Done(id uint) {
 	}
 }
 
-// MarkRevoked marks every live session of the user revoked and signals
-// cancellation. It must be called while holding the user gate, before the gate
-// is released; the blocking join happens in Await, outside the gate.
+// BeginCleanup freezes the first cleanup deadlines. A subsequent revoke or
+// Await never grants the same session another grace window.
+func (s *Session) BeginCleanup(start time.Time, grace, budget time.Duration) (time.Time, time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.deadline.IsZero() {
+		s.graceDeadline = start.Add(grace)
+		s.deadline = start.Add(budget)
+	}
+	return s.graceDeadline, s.deadline
+}
+
+// Force starts closing the exclusively owned transport at most once. Even a
+// blocked transport Close cannot hold up Await's absolute budget. Completion is
+// signalled only by the resource owner's Done, never by this dispatch.
+func (s *Session) Force() {
+	s.forceOnce.Do(func() {
+		if s.force != nil {
+			go s.force()
+		}
+	})
+}
+
+// InputPermit is the linearization point for each input/resize operation.
+// MarkRevoked uses the same session lock, so no new permission is granted after
+// revocation. A write already permitted may be interrupted by transport cleanup.
+func (r *Registry) InputPermit(id uint) bool {
+	r.mu.Lock()
+	s := r.sessions[id]
+	r.mu.Unlock()
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state == StateReady
+}
+
+// MarkRevoked runs inside the user gate. It freezes one absolute cleanup budget
+// for the entire batch, marks every session before signalling cancellation, and
+// leaves the blocking join to Await outside the gate.
 func (r *Registry) MarkRevoked(userID uint) []*Session {
+	grace, budget := r.windows()
+	started := time.Now()
 	r.mu.Lock()
 	var sessions []*Session
 	for _, s := range r.sessions {
 		if s.UserID == userID {
 			sessions = append(sessions, s)
+			s.mu.Lock()
+			s.state = StateRevoked
+			if s.deadline.IsZero() {
+				s.graceDeadline, s.deadline = started.Add(grace), started.Add(budget)
+			}
+			s.mu.Unlock()
 		}
 	}
 	r.mu.Unlock()
 	for _, s := range sessions {
-		s.mu.Lock()
-		if s.state != StateRevoked {
-			s.state = StateRevoked
-		}
-		s.mu.Unlock()
 		if s.cancel != nil {
 			s.cancel()
 		}
@@ -139,40 +183,59 @@ func (r *Registry) MarkRevoked(userID uint) []*Session {
 	return sessions
 }
 
-// Await waits for the given sessions to finish within the total cleanup budget;
-// a session that does not finish in its graceful window has its transport
-// force-closed. It must run outside the gate.
-func (r *Registry) Await(ctx context.Context, sessions []*Session) {
-	budget := r.budget
+// CleanupResult distinguishes resource reclamation from an exhausted budget.
+// Pending sessions stay registered until their actual owner reports Done.
+type CleanupResult struct {
+	Complete bool
+	Forced   int
+	Pending  int
+}
+
+func (r *Registry) windows() (time.Duration, time.Duration) {
+	grace, budget := r.grace, r.budget
+	if grace <= 0 {
+		grace = cleanupGrace
+	}
 	if budget <= 0 {
 		budget = cleanupBudget
 	}
-	graceWindow := r.grace
-	if graceWindow <= 0 {
-		graceWindow = cleanupGrace
-	}
-	deadline := time.Now().Add(budget)
+	return grace, budget
+}
+
+// Await is independent of the originating HTTP request once revocation has
+// committed. Every session uses the deadlines frozen by MarkRevoked; delayed
+// invocation, repeated calls and multiple sessions cannot restart that budget.
+func (r *Registry) Await(_ context.Context, sessions []*Session) CleanupResult {
+	grace, budget := r.windows()
+	type settled struct{ complete, forced bool }
+	results := make(chan settled, len(sessions))
 	for _, s := range sessions {
-		grace := time.Until(deadline)
-		if grace > graceWindow {
-			grace = graceWindow
-		}
-		finished := waitClosed(ctx, s.done, grace)
-		if !finished {
-			if s.force != nil {
-				s.force()
+		go func(s *Session) {
+			graceAt, deadline := s.BeginCleanup(time.Now(), grace, budget)
+			finished := waitClosed(context.Background(), s.done, time.Until(graceAt))
+			forced := !finished
+			if !finished {
+				s.Force()
+				finished = waitClosed(context.Background(), s.done, time.Until(deadline))
 			}
-			remaining := time.Until(deadline)
-			if remaining > 0 {
-				finished = waitClosed(ctx, s.done, remaining)
+			if finished {
+				r.Done(s.ID)
 			}
+			results <- settled{finished, forced}
+		}(s)
+	}
+	result := CleanupResult{Complete: true}
+	for range sessions {
+		r := <-results
+		if r.forced {
+			result.Forced++
 		}
-		if finished {
-			// Done is idempotent, so the owning session may still call it. This
-			// guarantees the registry does not retain a revoked session.
-			r.Done(s.ID)
+		if !r.complete {
+			result.Pending++
+			result.Complete = false
 		}
 	}
+	return result
 }
 
 // RevokeUser marks and awaits in one call (convenience for callers without a

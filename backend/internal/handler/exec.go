@@ -45,11 +45,14 @@ func NewExecHandler(sshSvc *service.SSHService, opts ...ExecOptions) *ExecHandle
 			h.maxSecs = o.MaxTimeoutSeconds
 		}
 	}
+	h.maxSecs = min(h.maxSecs, 300)
+	h.defaultSecs = min(h.defaultSecs, h.maxSecs)
 	return h
 }
 
 // Execute handles POST /api/v1/servers/{id}/exec.
 func (h *ExecHandler) Execute(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	op := usage.FromContext(r.Context())
 	id, err := parseIDParam(r)
 	if err != nil {
@@ -86,7 +89,9 @@ func (h *ExecHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	op.SetMetadata("timeout_seconds", timeout)
 	op.Begin()
 
-	result, err := h.sshSvc.Exec(r.Context(), id, req.Command, time.Duration(timeout)*time.Second)
+	ctx, cancel := context.WithDeadlineCause(r.Context(), started.Add(time.Duration(timeout)*time.Second), server.ErrSSHTimeout)
+	defer cancel()
+	result, err := h.sshSvc.Exec(ctx, id, req.Command, time.Duration(timeout)*time.Second)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			op.SetResult("cancelled", "client_cancelled")

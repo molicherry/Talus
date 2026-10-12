@@ -57,14 +57,14 @@ func (c *Config) Validate() error {
 	if c.ExecTimeout <= 0 {
 		return fmt.Errorf("EXEC_TIMEOUT must be positive, got %d", c.ExecTimeout)
 	}
-	if c.ExecTimeoutMax <= 0 || c.ExecTimeoutMax < c.ExecTimeout {
-		return fmt.Errorf("EXEC_TIMEOUT_MAX must be >= EXEC_TIMEOUT and positive, got %d/%d", c.ExecTimeoutMax, c.ExecTimeout)
+	if c.ExecTimeoutMax <= 0 || c.ExecTimeoutMax < c.ExecTimeout || c.ExecTimeoutMax > 300 {
+		return fmt.Errorf("EXEC_TIMEOUT_MAX must be positive, >= EXEC_TIMEOUT and <= 300, got %d/%d", c.ExecTimeoutMax, c.ExecTimeout)
 	}
-	if c.ExecOutputLimit <= 0 {
-		return fmt.Errorf("EXEC_OUTPUT_LIMIT must be positive, got %d", c.ExecOutputLimit)
+	if c.ExecOutputLimit <= 0 || c.ExecOutputLimit > 8<<20 {
+		return fmt.Errorf("EXEC_OUTPUT_LIMIT must be positive and <= 8388608, got %d", c.ExecOutputLimit)
 	}
-	if c.ExecOutputStreamLimit <= 0 || c.ExecOutputStreamLimit > c.ExecOutputLimit {
-		return fmt.Errorf("EXEC_OUTPUT_STREAM_LIMIT must be positive and <= EXEC_OUTPUT_LIMIT, got %d/%d", c.ExecOutputStreamLimit, c.ExecOutputLimit)
+	if c.ExecOutputStreamLimit <= 0 || c.ExecOutputStreamLimit > c.ExecOutputLimit || c.ExecOutputStreamLimit > 4<<20 {
+		return fmt.Errorf("EXEC_OUTPUT_STREAM_LIMIT must be positive, <= EXEC_OUTPUT_LIMIT and <= 4194304, got %d/%d", c.ExecOutputStreamLimit, c.ExecOutputLimit)
 	}
 	if c.SSHTimeout <= 0 {
 		return fmt.Errorf("SSH_TIMEOUT must be positive, got %d", c.SSHTimeout)

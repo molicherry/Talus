@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
 
 	"github.com/vpsmanager/backend/internal/gate"
 	"github.com/vpsmanager/backend/internal/model"
@@ -24,6 +26,8 @@ const firstUserSetupLock int64 = 0x54414c5553415554 // "TALUSAUT", database-wide
 // satisfies it; tests may supply a stub.
 type userGate interface {
 	Admit(ctx context.Context, userID uint, fn func(version int64) error) error
+	Update(ctx context.Context, userID uint, fn func(context.Context, int64) (bool, error)) error
+	Recover(ctx context.Context, userID uint) error
 }
 
 // AuthService handles authentication including first-user bootstrap.
@@ -60,6 +64,7 @@ func NewAuthService(userRepo *repository.UserRepo, jwtSvc *token.JWTService, db 
 		userRepo: userRepo,
 		jwtSvc:   jwtSvc,
 		db:       db,
+		gate:     gate.New(userRepo.TokenVersion, userRepo.LockedTokenVersion),
 	}
 }
 
@@ -161,43 +166,57 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uint, currentPa
 		}
 		return nil
 	}
-	change := func() error {
-		_, err := s.userRepo.ChangePassword(ctx, userID, verify, string(hash))
+	var revoked []*gate.Session
+	changeErr := s.gate.Update(ctx, userID, func(updateCtx context.Context, _ int64) (bool, error) {
+		_, err := s.userRepo.ChangePassword(updateCtx, userID, verify, string(hash))
+		unknown := errors.Is(err, repository.ErrCommitUnknown)
+		// A lost acknowledgement may already have changed the password. Fence
+		// and revoke while still holding the admission lock, just as on success.
+		if (err == nil || unknown) && s.terminalRegistry != nil {
+			revoked = s.terminalRegistry.MarkRevoked(userID)
+		}
+		return unknown, err
+	})
+
+	unknown := errors.Is(changeErr, repository.ErrCommitUnknown)
+	var recovered chan error
+	if unknown {
+		recovered = make(chan error, 1)
+		go func() {
+			// HTTP cancellation cannot abandon reconciliation. Recover has its
+			// own bounded deadline and leaves the fence intact on failure.
+			recovered <- s.gate.Recover(context.WithoutCancel(ctx), userID)
+		}()
+	}
+	// Closing and joining happen outside the user lock and share the deadline
+	// frozen by MarkRevoked. A disconnected HTTP client cannot skip this work.
+	var cleanupErr error
+	if s.terminalRegistry != nil && len(revoked) > 0 {
+		result := s.terminalRegistry.Await(context.WithoutCancel(ctx), revoked)
+		if !result.Complete {
+			cleanupErr = fmt.Errorf("terminal cleanup deadline exceeded: %d sessions pending", result.Pending)
+			slog.Error("password revocation cleanup incomplete", "user_id", userID, "pending", result.Pending, "forced", result.Forced, "error", cleanupErr)
+		}
+	}
+	if recovered != nil {
+		if err := <-recovered; err != nil {
+			slog.Warn("password commit remains unresolved", "user_id", userID, "error", err)
+		}
+	}
+	if unknown {
+		err := server.NewAppErrorParams(http.StatusServiceUnavailable, server.ReasonUnavailable, map[string]any{"state": "password_commit_unknown"})
+		err.Err = errors.Join(changeErr, cleanupErr)
 		return err
 	}
-	// apply runs the change and, inside the gate, marks the user's existing JWT
-	// sessions revoked (COMMIT is the revocation linearization point).
-	apply := func() ([]*gate.Session, error) {
-		if err := change(); err != nil {
-			return nil, err
-		}
-		if s.terminalRegistry == nil {
-			return nil, nil
-		}
-		return s.terminalRegistry.MarkRevoked(userID), nil
+	if cleanupErr != nil {
+		err := server.NewAppErrorParams(http.StatusServiceUnavailable, server.ReasonUnavailable, map[string]any{"state": "terminal_cleanup_incomplete"})
+		err.Err = cleanupErr
+		return err
 	}
-
-	var revoked []*gate.Session
-	var changeErr error
-	if s.gate == nil {
-		// Legacy wiring without a gate: the repository transaction still makes the
-		// password update and version bump atomic.
-		revoked, changeErr = apply()
-	} else {
-		// The version is read after acquiring the gate, so it cannot be older than
-		// a concurrent update's commit.
-		changeErr = s.gate.Admit(ctx, userID, func(int64) error {
-			var err error
-			revoked, err = apply()
-			return err
-		})
+	if errors.Is(changeErr, gate.ErrUnavailable) || errors.Is(changeErr, context.DeadlineExceeded) || errors.Is(changeErr, context.Canceled) {
+		err := server.NewAppError(http.StatusServiceUnavailable, server.ReasonUnavailable)
+		err.Err = changeErr
+		return err
 	}
-	if changeErr != nil {
-		return changeErr
-	}
-	// Close and join outside the gate.
-	if s.terminalRegistry != nil && len(revoked) > 0 {
-		s.terminalRegistry.Await(ctx, revoked)
-	}
-	return nil
+	return changeErr
 }

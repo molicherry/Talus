@@ -55,6 +55,9 @@ export function loadAndValidate() {
     if (!SUITES.includes(r.suite)) fail(`run ${r.run_id}: suite must be one of ${SUITES.join("/")}`);
     if (!RUNNERS.includes(r.runner)) fail(`run ${r.run_id}: runner must be one of ${RUNNERS.join("/")}`);
     if (typeof r.cwd !== "string" || r.cwd === "") fail(`run ${r.run_id}: cwd must be a non-empty string`);
+    if (r.runner === "go-test" && (!Array.isArray(r.command) || r.command[0] !== "go" || r.command[1] !== "test")) {
+      fail(`run ${r.run_id}: go-test runner requires a native go test command`);
+    }
     if (r.runner === "manual") {
       if (r.command !== null) fail(`run ${r.run_id}: manual runner must use command=null`);
     } else {
@@ -108,6 +111,9 @@ export function loadAndValidate() {
       if (!runIds.has(impl.run_id)) fail(`implementation ${impl.implementation_id}: unknown run_id ${impl.run_id}`);
       if (!STATUSES.includes(impl.automation_status)) fail(`implementation ${impl.implementation_id}: bad automation_status`);
       if (typeof impl.required !== "boolean") fail(`implementation ${impl.implementation_id}: required must be boolean`);
+      if (impl.verification !== undefined && (typeof impl.verification !== "string" || impl.verification.trim().length < 20)) {
+        fail(`implementation ${impl.implementation_id}: verification must describe the tested behavior in English`);
+      }
       const run = doc.runs.find((r) => r.run_id === impl.run_id);
       if (impl.automation_status === "manual" && run.runner !== "manual") {
         fail(`implementation ${impl.implementation_id}: manual implementations must reference a manual runner`);
@@ -124,6 +130,15 @@ export function loadAndValidate() {
         }
         if (!existsSync(join(ROOT, impl.implementation.path))) {
           fail(`implementation ${impl.implementation_id}: path ${impl.implementation.path} does not exist`);
+        }
+        if (run.runner === "go-test") {
+          if (!/^Test[A-Za-z0-9_]+$/.test(impl.implementation.symbol) || !impl.implementation.path.endsWith("_test.go")) {
+            fail(`implementation ${impl.implementation_id}: go-test requires a native Test function in a _test.go file`);
+          }
+          const source = readFileSync(join(ROOT, impl.implementation.path), "utf8");
+          if (!new RegExp(`^func\\s+${impl.implementation.symbol}\\s*\\(`, "m").test(source)) {
+            fail(`implementation ${impl.implementation_id}: test symbol ${impl.implementation.symbol} does not exist`);
+          }
         }
       }
       if (impl.implementation !== null && (typeof impl.implementation.path !== "string" || typeof impl.implementation.symbol !== "string")) {
@@ -189,13 +204,13 @@ export function render(doc) {
   lines.push("");
   lines.push("## Cases");
   lines.push("");
-  lines.push("| case_id | requirement | status | run | implementation | required | scenario |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- |");
+  lines.push("| case_id | requirement | status | run | implementation | required | scenario | verification |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const c of doc.cases) {
     for (const impl of c.implementations) {
       const loc = impl.implementation ? `\`${impl.implementation.path}:${impl.implementation.symbol}\`` : "—";
       lines.push(
-        `| ${c.case_id} | ${c.requirement_ids.join(", ")} | ${impl.automation_status} | ${impl.run_id} | ${loc} | ${impl.required ? "yes" : "no"} | ${c.scenario} |`,
+        `| ${c.case_id} | ${c.requirement_ids.join(", ")} | ${impl.automation_status} | ${impl.run_id} | ${loc} | ${impl.required ? "yes" : "no"} | ${c.scenario} | ${impl.verification || c.scenario} |`,
       );
     }
   }

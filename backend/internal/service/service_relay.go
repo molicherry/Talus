@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -178,6 +179,10 @@ func (s *ServiceRelayService) Create(ctx context.Context, input CreateServiceInp
 func (s *ServiceRelayService) Get(ctx context.Context, id uint) (*model.Service, error) {
 	svc, err := s.repo.FindByID(ctx, id)
 	if err != nil {
+		if ctx.Value(relayBudgetKey{}) != nil && ctx.Err() != nil {
+			_, relayErr := relayContextError(ctx.Err())
+			return nil, relayErr
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, server.NewAppError(http.StatusNotFound, server.ReasonServiceNotFound)
 		}
@@ -296,43 +301,86 @@ type RelayResult struct {
 	Reason         string
 }
 
+// relayBudgetKey marks the budget frozen at the handler boundary. Service calls
+// reuse this context rather than restarting the clock after resource lookup.
+type relayBudgetKey struct{}
+
+// RelayContext validates the mode and freezes the total business deadline.
+// Handlers call it before resource/permission lookups; direct service callers
+// receive the same protection before their first repository operation.
+func (s *ServiceRelayService) RelayContext(ctx context.Context, mode string) (context.Context, context.CancelFunc, error) {
+	if !RelayModes[mode] {
+		return nil, nil, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest)
+	}
+	if mode == "" {
+		mode = "standard"
+	}
+	if existing, ok := ctx.Value(relayBudgetKey{}).(string); ok && existing == mode {
+		return ctx, func() {}, nil
+	}
+	budget := s.standardBudget
+	if budget <= 0 || budget > relayStandardBudget {
+		budget = relayStandardBudget
+	}
+	if mode == "bounded_stream" {
+		budget = s.boundedBudget
+		if budget <= 0 || budget > relayBoundedStreamBudget {
+			budget = relayBoundedStreamBudget
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	return context.WithValue(ctx, relayBudgetKey{}, mode), cancel, nil
+}
+
 func (s *ServiceRelayService) RelayWithResult(ctx context.Context, serviceID uint, input RelayInput, w http.ResponseWriter) (RelayResult, error) {
+	ctx, cancel, err := s.RelayContext(ctx, input.Mode)
+	if err != nil {
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonInvalidRequest}, err
+	}
+	defer cancel()
 	if input.Method == "" {
 		return RelayResult{Outcome: "rejected", Reason: server.ReasonMethodRequired}, server.NewAppError(http.StatusBadRequest, server.ReasonMethodRequired)
 	}
-
-	svc, err := s.repo.FindByID(ctx, serviceID)
+	svc, err := s.Get(ctx, serviceID)
 	if err != nil {
-		return RelayResult{Outcome: "rejected", Reason: server.ReasonServiceNotFound}, server.NewAppError(http.StatusNotFound, server.ReasonServiceNotFound)
+		if ctx.Err() != nil {
+			return relayContextError(ctx.Err())
+		}
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonServiceNotFound}, err
 	}
 	return s.relayFromService(ctx, svc, input, w)
 }
 
+func relayContextError(err error) (RelayResult, error) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return RelayResult{Outcome: "timeout", Reason: "relay_budget_exceeded"}, server.NewAppError(http.StatusGatewayTimeout, server.ReasonRelayTimeout)
+	}
+	return RelayResult{Outcome: "cancelled", Reason: "client_cancelled"}, err
+}
+
+var errRelayIdle = errors.New("relay idle timeout")
+
 func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.Service, input RelayInput, w http.ResponseWriter) (RelayResult, error) {
 	result := RelayResult{Outcome: "failed"}
-
-	// One business budget covers the whole relay (lookup, dial, headers, body);
-	// each stage takes the remaining time. An omitted mode is standard.
-	budget := s.standardBudget
-	if budget <= 0 {
-		budget = relayStandardBudget
+	ctx, budgetCancel, err := s.RelayContext(ctx, input.Mode)
+	if err != nil {
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonInvalidRequest}, err
 	}
-	if input.Mode == "bounded_stream" {
-		budget = s.boundedBudget
-		if budget <= 0 {
-			budget = relayBoundedStreamBudget
-		}
+	defer budgetCancel()
+	if ctx.Err() != nil {
+		return relayContextError(ctx.Err())
 	}
+	// Stage caps can only shorten the frozen deadline, never restart it.
 	headerWait := s.headerWait
-	if headerWait <= 0 {
+	if headerWait <= 0 || headerWait > relayHeaderWait {
 		headerWait = relayHeaderWait
 	}
 	idleTimeout := s.idleTimeout
-	if idleTimeout <= 0 {
+	if idleTimeout <= 0 || idleTimeout > relayIdleTimeout {
 		idleTimeout = relayIdleTimeout
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, budget)
-	defer cancel()
+	reqCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 
 	// Decrypt all credentials.
 	var key []byte
@@ -384,13 +432,12 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 
 	// Execute request. The header wait has its own cap and never resets the
 	// total budget.
-	headerTimer := time.AfterFunc(headerWait, cancel)
+	headerTimer := time.AfterFunc(headerWait, func() { cancel(context.DeadlineExceeded) })
 	resp, err := s.httpClient.Do(req)
 	headerTimer.Stop()
 	if err != nil {
 		if ctx.Err() != nil {
-			result.Outcome, result.Reason = "cancelled", "client_cancelled"
-			return result, ctx.Err()
+			return relayContextError(ctx.Err())
 		}
 		if isTimeout(err) || reqCtx.Err() != nil {
 			// Either the header wait or the total budget expired before headers.
@@ -409,55 +456,96 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 		return result, server.NewAppErrorParams(http.StatusBadGateway, server.ReasonRelayUnreachable, map[string]any{"detail": "protocol upgrade unsupported"})
 	}
 
-	// Copy response — bypasses the WriteJSON envelope for raw passthrough.
-	copyHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
-	result.HeadersWritten = true
-	// Flush the headers and each copied chunk. The bounded buffer preserves
-	// backpressure and lets a streaming response reach its client promptly.
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
+	// Install supervision before WriteHeader/Flush: even the first flush can
+	// block when the downstream stops reading. The watcher only touches transport
+	// deadlines, and is joined before returning so no worker outlives the handler.
+	controller := http.NewResponseController(w)
+	var deadlineMu sync.Mutex
+	setWriteDeadline := func() error {
+		deadlineMu.Lock()
+		defer deadlineMu.Unlock()
+		deadline := time.Now().Add(idleTimeout)
+		if total, ok := reqCtx.Deadline(); ok && total.Before(deadline) {
+			deadline = total
+		}
+		if reqCtx.Err() != nil {
+			deadline = time.Now()
+		}
+		err := controller.SetWriteDeadline(deadline)
+		// In-memory recorders do not have transport deadlines. Real net/http
+		// HTTP/1 and HTTP/2 writers support them, through middleware Unwrap.
+		if errors.Is(err, http.ErrNotSupported) {
+			return nil
+		}
+		return err
 	}
-	// Copy the body with an idle watchdog: when no bytes are forwarded for
-	// relayIdleTimeout the request is aborted. The watchdog shares reqCtx, so it
-	// can never extend the total budget.
 	var lastProgress atomic.Int64
 	lastProgress.Store(time.Now().UnixNano())
 	stopWatch := make(chan struct{})
 	watchReturned := make(chan struct{})
-	var idleCanceled atomic.Bool
 	go func() {
 		defer close(watchReturned)
-		interval := idleTimeout / 2
-		if interval > time.Second {
-			interval = time.Second
-		}
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+		timer := time.NewTimer(idleTimeout)
+		defer timer.Stop()
 		for {
 			select {
 			case <-stopWatch:
 				return
-			case <-ticker.C:
-				if time.Since(time.Unix(0, lastProgress.Load())) >= idleTimeout {
-					idleCanceled.Store(true)
-					cancel()
-					return
+			case <-reqCtx.Done():
+				deadlineMu.Lock()
+				_ = controller.SetWriteDeadline(time.Now())
+				deadlineMu.Unlock()
+				_ = resp.Body.Close()
+				return
+			case <-timer.C:
+				remaining := idleTimeout - time.Since(time.Unix(0, lastProgress.Load()))
+				if remaining <= 0 {
+					cancel(errRelayIdle)
+				} else {
+					timer.Reset(remaining)
 				}
 			}
 		}
 	}()
+	defer func() { close(stopWatch); <-watchReturned }()
 
-	flush := relayFlushWriter{w}
+	flush := func() error {
+		if err := setWriteDeadline(); err != nil {
+			return err
+		}
+		err := controller.Flush()
+		if errors.Is(err, http.ErrNotSupported) {
+			return nil
+		}
+		return err
+	}
+	if err := setWriteDeadline(); err != nil {
+		return result, err
+	}
+	copyHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	result.HeadersWritten = true
+	result.CopyError = flush()
 	buf := make([]byte, 32*1024)
-	for {
+	for result.CopyError == nil {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
-			if _, werr := flush.Write(buf[:n]); werr != nil {
+			if err := setWriteDeadline(); err != nil {
+				result.CopyError = err
+				break
+			}
+			written, werr := w.Write(buf[:n])
+			result.BytesCopied += int64(written)
+			if werr == nil && written != n {
+				werr = io.ErrShortWrite
+			}
+			if werr == nil {
+				werr = flush()
+			}
+			if werr != nil {
 				result.CopyError = werr
 				break
 			}
-			result.BytesCopied += int64(n)
 			lastProgress.Store(time.Now().UnixNano())
 		}
 		if rerr != nil {
@@ -467,20 +555,32 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 			break
 		}
 	}
-	close(stopWatch)
-	<-watchReturned
-
+	// Cancellation may close a body with EOF rather than a distinct read error.
+	if result.CopyError == nil && reqCtx.Err() != nil {
+		result.CopyError = reqCtx.Err()
+	}
+	// The clock may reach its deadline just before context cancellation is
+	// scheduled. EOF in that interval must not turn an expired stream into a
+	// successful usage record while net/http aborts its write-deadlined socket.
+	if deadline, ok := reqCtx.Deadline(); result.CopyError == nil && ok && !time.Now().Before(deadline) {
+		result.CopyError = context.DeadlineExceeded
+	}
 	if result.CopyError != nil {
+		ctxErr := ctx.Err()
+		deadline, hasDeadline := ctx.Deadline()
+		// net/http can cancel r.Context after a socket write deadline fires.
+		// Attribute that cancellation to the expired budget, not the client.
+		idleExpired := errors.Is(context.Cause(reqCtx), errRelayIdle) ||
+			(isTimeout(result.CopyError) && time.Since(time.Unix(0, lastProgress.Load())) >= idleTimeout)
 		switch {
-		case idleCanceled.Load():
-			result.Outcome, result.Reason = "timeout", "relay_idle_timeout"
-			if !result.HeadersWritten {
-				return result, server.NewAppError(http.StatusGatewayTimeout, server.ReasonRelayTimeout)
-			}
-		case ctx.Err() != nil:
-			result.Outcome, result.Reason = "cancelled", "client_cancelled"
-		case errors.Is(reqCtx.Err(), context.DeadlineExceeded):
+		case errors.Is(ctxErr, context.DeadlineExceeded), hasDeadline && !time.Now().Before(deadline):
 			result.Outcome, result.Reason = "timeout", "relay_budget_exceeded"
+		case idleExpired:
+			result.Outcome, result.Reason = "timeout", "relay_idle_timeout"
+		case ctxErr != nil:
+			result.Outcome, result.Reason = "cancelled", "client_cancelled"
+		case isTimeout(result.CopyError):
+			result.Outcome, result.Reason = "timeout", "relay_idle_timeout"
 		default:
 			result.Reason = "relay_copy_failed"
 		}
@@ -492,18 +592,6 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 	}
 	result.Outcome = "succeeded"
 	return result, nil
-}
-
-type relayFlushWriter struct{ writer http.ResponseWriter }
-
-func (w relayFlushWriter) Write(p []byte) (int, error) {
-	n, err := w.writer.Write(p)
-	if n > 0 {
-		if f, ok := w.writer.(http.Flusher); ok {
-			f.Flush()
-		}
-	}
-	return n, err
 }
 
 // substitute replaces all {{key}} placeholders in the input string.
@@ -603,8 +691,6 @@ func excerpt(s *string, max int) string {
 
 // isTimeout checks if the error represents a timeout.
 func isTimeout(err error) bool {
-	if ue, ok := err.(*url.Error); ok {
-		return ue.Timeout()
-	}
-	return false
+	var timeout interface{ Timeout() bool }
+	return errors.As(err, &timeout) && timeout.Timeout()
 }

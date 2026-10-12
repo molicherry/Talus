@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 type TerminalService struct {
 	sshSvc   *SSHService
 	registry *gate.Registry
+	userGate mw.UserGate
 }
 
 func NewTerminalService(sshSvc *SSHService) *TerminalService { return &TerminalService{sshSvc: sshSvc} }
@@ -24,6 +26,10 @@ func NewTerminalService(sshSvc *SSHService) *TerminalService { return &TerminalS
 // SetSessionRegistry wires the JWT terminal registry so a password change can
 // revoke in-flight sessions.
 func (s *TerminalService) SetSessionRegistry(r *gate.Registry) { s.registry = r }
+
+func (s *TerminalService) SetUserGate(g mw.UserGate) { s.userGate = g }
+
+var errTerminalRevoked = errors.New("terminal session revoked")
 
 type wsMessage struct {
 	Type string `json:"type"`
@@ -35,12 +41,13 @@ type wsMessage struct {
 // TerminalResult describes the first original event that ended a session.
 // Errors caused by closing its other pump cannot replace this event.
 type TerminalResult struct {
-	Outcome     string
-	Reason      string
-	CloseReason string
-	ReadyAt     time.Time
-	ClosedAt    time.Time
-	Forced      bool
+	Outcome        string
+	Reason         string
+	CloseReason    string
+	ReadyAt        time.Time
+	ClosedAt       time.Time
+	Forced         bool
+	CleanupPending bool
 }
 
 // sessionTeardownGrace bounds waiting for a peer that ignores channel close.
@@ -53,123 +60,272 @@ func (s *TerminalService) StartSession(ctx context.Context, serverID uint, wsCon
 	return err
 }
 
-func (s *TerminalService) StartSessionWithResult(ctx context.Context, serverID uint, wsConn *websocket.Conn) (result TerminalResult, err error) {
-	defer func() { result.ClosedAt = time.Now().UTC() }()
+var errTerminalCleanupPending = errors.New("terminal cleanup budget exhausted")
 
-	// A revoked session cancels this context; the pumps then tear down and the
-	// registry observes Done.
-	sessionCtx, revokeSession := context.WithCancel(ctx)
-	defer revokeSession()
-	var reg *gate.Session
-	if s.registry != nil {
-		if claims := mw.GetUserClaims(ctx); claims != nil && claims.TokenVersion != nil {
-			reg = s.registry.Register(claims.UserID, *claims.TokenVersion, revokeSession, func() { _ = wsConn.Close() })
-			defer s.registry.Done(reg.ID)
-		}
-	}
-	startFailed := func(reason string) {
-		result.Outcome, result.Reason, result.CloseReason = "failed", reason, "ssh_error"
-		if ctx.Err() != nil {
-			result.Outcome, result.Reason, result.CloseReason = "cancelled", "client_cancelled", "client_cancelled"
-		}
-	}
-	lease, err := s.sshSvc.AcquireLease(sessionCtx, serverID)
-	if err != nil {
-		startFailed("terminal_ssh_failed")
-		return result, err
-	}
-	client := lease.client()
+type terminalCompletion struct {
+	result TerminalResult
+	err    error
+}
 
-	discard := false
-	defer func() {
-		if discard || result.Forced || result.Outcome == "failed" || result.Outcome == "cancelled" {
-			lease.Discard()
-		} else {
-			lease.Release()
-		}
-	}()
-
-	// Cancellation also bounds setup RPCs before the pumps are ready. Closing
-	// this exclusively owned client unblocks a stalled NewSession/PTY/Shell.
-	stopPreparation := make(chan struct{})
-	preparationDone := make(chan struct{})
+// StartSessionWithResult bounds the HTTP owner while a background owner retains
+// the exclusive lease and registry entry until every local worker really joins.
+func (s *TerminalService) StartSessionWithResult(ctx context.Context, serverID uint, wsConn *websocket.Conn) (TerminalResult, error) {
+	completed := make(chan terminalCompletion, 1)
+	expired := make(chan terminalCompletion, 1)
 	go func() {
-		defer close(preparationDone)
+		result, err := s.runSession(ctx, serverID, wsConn, expired)
+		completed <- terminalCompletion{result, err}
+	}()
+	select {
+	case done := <-completed:
+		return done.result, done.err
+	case pending := <-expired:
+		return pending.result, pending.err
+	}
+}
+
+func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn *websocket.Conn, expired chan<- terminalCompletion) (result TerminalResult, err error) {
+	runtimeDone := make(chan struct{})
+	defer close(runtimeDone)
+	sessionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var reg *gate.Session
+	var lease *sshLease
+	var client *ssh.Client
+	var session *ssh.Session
+	var resourceMu sync.Mutex
+	forced, sealed := false, false
+	var readyAt time.Time
+	var transportDone chan struct{}
+	// Call under resourceMu; the actual Close always runs outside the lock.
+	// Tracking it prevents Done or pool settlement from overtaking a slow Close.
+	closeTransport := func() {
+		if client != nil && transportDone == nil {
+			transportDone = make(chan struct{})
+			current, done := client, transportDone
+			go func() { _ = current.Close(); close(done) }()
+		}
+	}
+	force := func() {
+		resourceMu.Lock()
+		defer resourceMu.Unlock()
+		if sealed {
+			return
+		}
+		forced = true
+		closeTransport()
+	}
+	claims := mw.GetUserClaims(ctx)
+	if claims != nil && claims.TokenVersion != nil {
+		if s.userGate == nil || s.registry == nil {
+			result.Outcome, result.Reason, result.CloseReason = "rejected", "terminal_auth_failed", "revoked"
+			result.ClosedAt = time.Now().UTC()
+			return result, gate.ErrUnavailable
+		}
+		err = s.userGate.Admit(sessionCtx, claims.UserID, func(version int64) error {
+			if *claims.TokenVersion != version {
+				return errTerminalRevoked
+			}
+			reg = s.registry.Register(claims.UserID, version, cancel, force)
+			return nil
+		})
+		if err != nil {
+			result.Outcome, result.Reason, result.CloseReason = "rejected", "terminal_auth_failed", "revoked"
+			result.ClosedAt = time.Now().UTC()
+			return result, err
+		}
+	}
+
+	ended, workflowDone, teardownDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var endOnce sync.Once
+	var event TerminalResult
+	end := func(outcome, reason, closeReason string) {
+		endOnce.Do(func() {
+			event.Outcome, event.Reason, event.CloseReason = outcome, reason, closeReason
+			close(ended)
+			cancel()
+		})
+	}
+	go func() {
+		defer close(teardownDone)
 		select {
+		case <-ended:
 		case <-sessionCtx.Done():
-			_ = client.Close()
-		case <-stopPreparation:
+			if reg != nil && reg.State() == gate.StateRevoked {
+				end("cancelled", "session_revoked", "revoked")
+			} else {
+				end("cancelled", "client_cancelled", "client_cancelled")
+			}
+		}
+		started := time.Now()
+		graceAt, deadline := started.Add(sessionTeardownGrace), started.Add(gate.CleanupBudget)
+		if reg != nil {
+			graceAt, deadline = reg.BeginCleanup(started, sessionTeardownGrace, gate.CleanupBudget)
+		}
+		// The absolute budget also includes joining force-close and returning the
+		// lease. Reporting pending never fabricates resource completion.
+		go func() {
+			timer := time.NewTimer(max(time.Until(deadline), 0))
+			defer timer.Stop()
+			select {
+			case <-runtimeDone:
+				return
+			case <-timer.C:
+				select {
+				case <-runtimeDone:
+					return
+				default:
+				}
+				pending := event
+				resourceMu.Lock()
+				pending.Forced, pending.ReadyAt = forced, readyAt
+				resourceMu.Unlock()
+				pending.ClosedAt, pending.CleanupPending = time.Now().UTC(), true
+				expired <- terminalCompletion{pending, errTerminalCleanupPending}
+			}
+		}()
+		// Closing a channel is itself a potentially blocked SSH write. Run it
+		// under the supervisor, never on the path that starts its grace timer.
+		closeDone := make(chan struct{})
+		go func() {
+			_ = wsConn.Close()
+			resourceMu.Lock()
+			current := session
+			resourceMu.Unlock()
+			if current != nil {
+				_ = current.Close()
+			}
+			close(closeDone)
+		}()
+		joined := make(chan struct{})
+		go func() {
+			<-workflowDone
+			<-closeDone
+			resourceMu.Lock()
+			sealed = true
+			transport := transportDone
+			resourceMu.Unlock()
+			if transport != nil {
+				<-transport
+			}
+			close(joined)
+		}()
+		timer := time.NewTimer(max(time.Until(graceAt), 0))
+		defer timer.Stop()
+		select {
+		case <-joined:
+			return
+		case <-timer.C:
+			if reg != nil {
+				reg.Force()
+			} else {
+				force()
+			}
+		}
+		// The deadline notifier returns pending independently if a transport
+		// implementation fails to unblock. This owner still must join workers.
+		<-joined
+	}()
+	defer func() {
+		close(workflowDone)
+		<-teardownDone
+		result.Outcome, result.Reason, result.CloseReason = event.Outcome, event.Reason, event.CloseReason
+		resourceMu.Lock()
+		result.Forced = forced
+		resourceMu.Unlock()
+		if lease != nil {
+			if result.Forced || result.Outcome == "failed" || result.Outcome == "cancelled" {
+				lease.Discard()
+			} else {
+				lease.Release()
+			}
+			<-lease.Done()
+		}
+		result.ClosedAt = time.Now().UTC()
+		if reg != nil {
+			s.registry.Done(reg.ID)
 		}
 	}()
-	var stopOnce sync.Once
-	stopPreparing := func() { stopOnce.Do(func() { close(stopPreparation); <-preparationDone }) }
-	defer stopPreparing()
-
-	session, err := client.NewSession()
+	startFailed := func(reason string) {
+		if reg != nil && reg.State() == gate.StateRevoked {
+			end("cancelled", "session_revoked", "revoked")
+		} else if ctx.Err() != nil {
+			end("cancelled", "client_cancelled", "client_cancelled")
+		} else {
+			end("failed", reason, "ssh_error")
+		}
+	}
+	lease, err = s.sshSvc.AcquireLease(sessionCtx, serverID)
 	if err != nil {
-		discard = true
 		startFailed("terminal_ssh_failed")
 		return result, err
 	}
-	defer session.Close()
+	resourceMu.Lock()
+	client = lease.client()
+	if forced {
+		closeTransport()
+	}
+	resourceMu.Unlock()
+	newSession, err := client.NewSession()
+	if err != nil {
+		startFailed("terminal_ssh_failed")
+		return result, err
+	}
+	resourceMu.Lock()
+	session = newSession
+	resourceMu.Unlock()
+	// Cancellation may have won just as NewSession succeeded, after the close
+	// worker took its snapshot. Force the transport instead of leaving a late
+	// channel alive; this occurs only on the already-cancelled setup path.
+	if sessionCtx.Err() != nil {
+		force()
+		startFailed("terminal_ssh_failed")
+		return result, sessionCtx.Err()
+	}
 	modes := ssh.TerminalModes{ssh.ECHO: 1, ssh.TTY_OP_ISPEED: 14400, ssh.TTY_OP_OSPEED: 14400}
 	if err := session.RequestPty("xterm-256color", 24, 80, modes); err != nil {
-		discard = true
 		startFailed("terminal_ssh_failed")
 		return result, err
 	}
 	stdin, err := session.StdinPipe()
 	if err != nil {
-		discard = true
 		startFailed("terminal_ssh_failed")
 		return result, err
 	}
 	stdout, err := session.StdoutPipe()
 	if err != nil {
-		discard = true
 		startFailed("terminal_ssh_failed")
 		return result, err
 	}
 	if err := session.Shell(); err != nil {
-		discard = true
 		startFailed("terminal_ssh_failed")
 		return result, err
 	}
+	if reg != nil {
+		err := s.userGate.Admit(sessionCtx, claims.UserID, func(version int64) error {
+			if version != reg.Version || !s.registry.Admit(reg.ID) {
+				return errTerminalRevoked
+			}
+			return nil
+		})
+		if err != nil {
+			end("cancelled", "session_revoked", "revoked")
+			return result, err
+		}
+	}
+	if sessionCtx.Err() != nil {
+		startFailed("terminal_ssh_failed")
+		return result, sessionCtx.Err()
+	}
 	if err := wsConn.WriteJSON(wsMessage{Type: "connected"}); err != nil {
-		discard = true
 		startFailed("terminal_output_failed")
 		return result, err
 	}
 	result.ReadyAt = time.Now().UTC()
+	resourceMu.Lock()
+	readyAt = result.ReadyAt
+	resourceMu.Unlock()
 	usage.FromContext(ctx).SetPhase("ready")
-	stopPreparing()
-
-	teardownStarted := make(chan struct{})
-	var closeOnce sync.Once
-	end := func(outcome, reason, closeReason string) {
-		closeOnce.Do(func() {
-			result.Outcome, result.Reason, result.CloseReason = outcome, reason, closeReason
-			// Publish the original event before teardown makes other reads fail.
-			close(teardownStarted)
-			_ = wsConn.Close()
-			_ = session.Close()
-		})
-	}
-	if reg != nil && !s.registry.Admit(reg.ID) {
-		// A revoke that committed during PTY setup must not obtain a ready
-		// admission or a new input permission.
-		end("cancelled", "session_revoked", "revoked")
-	}
-	stopWatch := make(chan struct{})
-	watchDone := make(chan struct{})
-	go func() {
-		defer close(watchDone)
-		select {
-		case <-sessionCtx.Done():
-			end("cancelled", "client_cancelled", "client_cancelled")
-		case <-stopWatch:
-		}
-	}()
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -196,7 +352,6 @@ func (s *TerminalService) StartSessionWithResult(ctx context.Context, serverID u
 	}()
 	go func() {
 		defer wg.Done()
-		// end starts the grace clock before stdin.Close can block on a write.
 		defer stdin.Close()
 		for {
 			var msg wsMessage
@@ -207,6 +362,23 @@ func (s *TerminalService) StartSessionWithResult(ctx context.Context, serverID u
 					end("failed", "terminal_transport_failed", "transport_error")
 				}
 				return
+			}
+			if msg.Type != "input" && msg.Type != "resize" {
+				continue
+			}
+			if reg != nil {
+				// Permission is serialized with password COMMIT; the potentially
+				// blocked write is performed after releasing the user gate.
+				err := s.userGate.Admit(sessionCtx, claims.UserID, func(version int64) error {
+					if version != reg.Version || !s.registry.InputPermit(reg.ID) {
+						return errTerminalRevoked
+					}
+					return nil
+				})
+				if err != nil {
+					end("cancelled", "session_revoked", "revoked")
+					return
+				}
 			}
 			switch msg.Type {
 			case "input":
@@ -222,23 +394,6 @@ func (s *TerminalService) StartSessionWithResult(ctx context.Context, serverID u
 			}
 		}
 	}()
-
-	joined := make(chan struct{})
-	go func() { wg.Wait(); close(joined) }()
-	select {
-	case <-joined:
-	case <-teardownStarted:
-		timer := time.NewTimer(sessionTeardownGrace)
-		defer timer.Stop()
-		select {
-		case <-joined:
-		case <-timer.C:
-			result.Forced = true
-			_ = client.Close()
-			<-joined
-		}
-	}
-	close(stopWatch)
-	<-watchDone
+	wg.Wait()
 	return result, nil
 }

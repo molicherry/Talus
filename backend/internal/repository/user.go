@@ -2,6 +2,11 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/vpsmanager/backend/internal/model"
 	"gorm.io/gorm"
@@ -66,28 +71,69 @@ func (r *UserRepo) TokenVersion(ctx context.Context, id uint) (int64, error) {
 	return user.TokenVersion, nil
 }
 
-// ChangePassword verifies the current password hash and bumps the session
-// version in one transaction. The row is locked FOR UPDATE, so concurrent
-// updates cannot interleave and cannot lose a version increment. It returns the
-// new version.
-func (r *UserRepo) ChangePassword(ctx context.Context, id uint, verify func(currentHash string) error, newHash string) (int64, error) {
-	var newVersion int64
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var user model.User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&user).Error; err != nil {
-			return err
-		}
-		if err := verify(user.PasswordHash); err != nil {
-			return err
-		}
-		if err := tx.Model(&model.User{}).Where("id = ?", id).
-			Updates(map[string]any{"password_hash": newHash, "token_version": gorm.Expr("token_version + 1")}).Error; err != nil {
-			return err
-		}
-		return tx.Model(&model.User{}).Where("id = ?", id).Select("token_version").Scan(&newVersion).Error
-	})
-	if err != nil {
+// LockedTokenVersion waits for any earlier password transaction to finish before
+// observing its final version. A plain SELECT can see the old MVCC row while
+// COMMIT is unresolved and must not be used for uncertainty recovery.
+func (r *UserRepo) LockedTokenVersion(ctx context.Context, id uint) (int64, error) {
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	defer tx.Rollback()
+	var user model.User
+	if err := tx.Select("id", "token_version").Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&user).Error; err != nil {
 		return 0, err
 	}
-	return newVersion, nil
+	return user.TokenVersion, nil
+}
+
+// ErrCommitUnknown distinguishes a lost COMMIT acknowledgement from a known
+// rollback. No caller may assume this error means the password stayed unchanged.
+var ErrCommitUnknown = errors.New("password transaction commit outcome unknown")
+
+// commitDefinitelyRolledBack recognizes explicit PostgreSQL rejection of COMMIT.
+// Transport failures (including EOF, canceled connections and timeouts) remain
+// uncertain, even if a driver also attempted a best-effort rollback.
+func commitDefinitelyRolledBack(err error) bool {
+	if errors.Is(err, pgx.ErrTxCommitRollback) {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "40001", "40P01", "25P02":
+			return true
+		}
+	}
+	return false
+}
+
+// ChangePassword locks, verifies and increments in one transaction. Begin and
+// statement errors precede COMMIT and are known failures; commit transport errors
+// are returned as ErrCommitUnknown for the admission fence and active revocation.
+func (r *UserRepo) ChangePassword(ctx context.Context, id uint, verify func(currentHash string) error, newHash string) (int64, error) {
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	defer tx.Rollback()
+	var user model.User
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&user).Error; err != nil {
+		return 0, err
+	}
+	if err := verify(user.PasswordHash); err != nil {
+		return 0, err
+	}
+	if err := tx.Model(&model.User{}).Where("id = ?", id).Updates(map[string]any{
+		"password_hash": newHash, "token_version": gorm.Expr("token_version + 1"),
+	}).Error; err != nil {
+		return 0, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		if commitDefinitelyRolledBack(err) {
+			return 0, err
+		}
+		return 0, fmt.Errorf("%w: %v", ErrCommitUnknown, err)
+	}
+	return user.TokenVersion + 1, nil
 }

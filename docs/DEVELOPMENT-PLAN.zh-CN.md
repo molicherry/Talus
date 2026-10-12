@@ -33,7 +33,7 @@
 
 **阶段测试范围（按阶段预先登记集合选择，不按实现状态筛选）**：每阶段在 coverage.json 中**预先登记**该门禁必须通过的 run/case 集合；本阶段 required 项无论是否实现都必须纳入——未实现或缺证据即**阻断门禁**；只有后续阶段的 required 项可从本门禁排除。
 - M1：`fast`（adapters-removed + coverage 工具用例 + T1.5/T1.6 骨架编译/单测）**加 T1.6 的隔离数据库子集**（迁移事务/锁/中断/并发，只从 `integration` 选这些 run）；不含其余 integration、ui、e2e。
-- M2：`fast` + `integration`（撤销/迁移）+ 约定 e2e 终端链路；TC-05/06/07 全集。
+- M2：`fast` + `integration`（撤销/迁移，含显式 `go-race` 全量检查）+ `terminal-e2e`（真实 HTTP/WS Handler、隔离 PostgreSQL、受控 SSH 对端）；TC-05/06/07 全集。协议 E2E 不代替 M4 的前端浏览器流程；每个必需 Go 实现必须有对应包/测试符号的实际通过事件，未选中或跳过即阻断。
 - M3：`integration`（镜像/迁移/Timescale）+ `ui`（图表）+ `fast`；TC-04/08 全集。
 - M4：`ui`（终端）+ 约定 e2e；TC-09。
 

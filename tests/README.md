@@ -30,6 +30,7 @@ node tests/render-coverage.mjs --check   # CI: fail on drift
 
 ```bash
 bash tests/run.sh --gate M1                               # pre-registered phase gate (recommended)
+bash tests/run.sh --gate M2                               # isolated DB, race, real HTTP/WS/SSH terminal chain
 bash tests/run.sh --suite fast --phase M1                 # classification, scoped to a phase
 bash tests/run.sh --suite integration --phase M2
 bash tests/run.sh --suite ui --phase M3
@@ -44,7 +45,7 @@ one phase's requirements. Use `--gate` for normal phase verification.
 Fail-closed rules enforced before any runner starts:
 
 1. `coverage.json` must validate: schema, unique ids, real requirement ids,
-   referenced runs, existing implementation paths, statuses, commands, and
+   referenced runs, existing implementation paths and Go test symbols, statuses, commands, and
    exemptions (a non-fixture exemption must be an existing file, not a
    directory).
 2. A **gate** must cover every in-scope required case with one of its runs;
@@ -56,6 +57,10 @@ Fail-closed rules enforced before any runner starts:
    `pending` and blocks.
 5. A selected run whose `environment.requires` is unmet fails explicitly; it is
    never silently skipped and never counted as passing.
+6. Go runs use native `go test -json -count=1` events. Every in-scope required
+   implementation must emit a passing event from its declared package and test
+   symbol. A missing test, a skipped test, or a skipped subscenario fails even
+   when Go itself exits zero. Execution artifacts preserve these checks.
 
 Each invocation writes `tests/.artifacts/exec-<execution_id>.json` (selector,
 commit, timestamps, per-run status, environment). That file is a **run result**
@@ -73,10 +78,32 @@ written back into `automation_status`.
 | `fast` | Go toolchain, Node | Adapter static check, coverage validation, Go unit tests, frontend Node tests |
 | `integration` | `TEST_DATABASE_URL` | Migration/lock/interrupt/concurrency subset; TimescaleDB and image-artifact checks |
 | `ui` | Playwright + Chromium | Production build against mock APIs; manual screen-reader records are listed separately |
-| `e2e` | `TEST_HUB_URL`, `TEST_DATABASE_URL` | Real frontend + Hub; SSH via a controlled peer |
+| `e2e` | `TEST_DATABASE_URL`; `TEST_HUB_URL` for the browser flow | M2 starts real HTTP/WS handlers and a controlled SSH peer in Go; M4 adds the real frontend + Hub flow |
 
 Mock-API browser checks are **UI regressions**, not real E2E. `e2e` is
 automated; only the screen-reader records are manual.
+
+M2 explicitly includes `go-race` and `terminal-e2e`. The latter drives the real
+authentication and terminal handlers over HTTP/WebSocket against PostgreSQL and
+a controlled SSH server; it is a protocol E2E test, not a mock browser test or a
+substitute for M4's frontend flow. Each acceptance case may have several
+required implementations, with an English `verification` explaining the behavior
+each one proves. A constants-only test does not prove bounded cancellation.
+
+Set `TEST_DATABASE_URL` to an isolated TimescaleDB instance for M1/M2 and the
+complete Go suite. The full-process startup regression creates a uniquely named
+database, runs the actual Hub entrypoint and migrations, verifies password
+revocation across a restart, and drops only that database afterward. The test
+database role therefore needs `CREATEDB` and permission to install the
+TimescaleDB extension. The supplied database's tables are not migrated by this
+startup test; other database tests use their own temporary schemas. CI uses the
+same TimescaleDB PostgreSQL 16 image family as `docker-compose.yml` with a
+test-only superuser. M1's migration prerequisite tests are separately indexed
+as `TC-02-03`, so skipping their database setup cannot satisfy the gate.
+
+CI runs M1 and M2 independently and publishes their execution artifacts. Changed
+deployment-covered code invalidates the old manual M1 evidence; M2 success does
+not clear that pending result or authorize a deployment.
 
 ## Static scan exemptions
 

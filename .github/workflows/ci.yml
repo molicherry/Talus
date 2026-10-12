@@ -39,10 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
-      # Plain Postgres is enough: the integration test migrates only the
-      # servers/ssh_credentials models into a throwaway schema.
+      # The startup regression exercises the real entrypoint in a separate
+      # database, including the TimescaleDB extension and model migrations.
       postgres:
-        image: postgres:16-alpine
+        image: timescale/timescaledb:latest-pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -148,7 +148,7 @@ jobs:
     timeout-minutes: 25
     services:
       postgres:
-        image: postgres:16-alpine
+        image: timescale/timescaledb:latest-pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -193,6 +193,22 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
         run: bash tests/run.sh --gate M1
+
+      # M2 is independently exercised even when M1 needs fresh deployment
+      # evidence. M1 remains failed/pending; this never overrides its result.
+      - name: Phase gate M2 (race and real terminal protocols)
+        if: ${{ !cancelled() }}
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+        run: bash tests/run.sh --gate M2
+
+      - name: Upload phase execution evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-gate-evidence
+          path: tests/.artifacts/exec-*.json
+          if-no-files-found: warn
 
   docker:
     name: Docker

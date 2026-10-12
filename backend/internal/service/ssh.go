@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,10 @@ type serverSource interface {
 }
 
 // SSHService provides SSH command execution and connection management.
+const maxExecTimeout = 300 * time.Second
+const maxExecOutput = 8 << 20
+const maxExecStreamOutput = 4 << 20
+
 type SSHService struct {
 	pool               *sshpool.Pool
 	serverRepo         serverSource
@@ -60,10 +65,10 @@ func NewSSHService(pool *sshpool.Pool, serverRepo serverSource, credSvc *Credent
 // SetOutputLimits sets the retained output caps (total and per stream).
 // Non-positive values are ignored so the safe defaults remain in place.
 func (s *SSHService) SetOutputLimits(total, perStream int64) {
-	if total > 0 {
+	if total > 0 && total <= maxExecOutput {
 		s.outputLimit = total
 	}
-	if perStream > 0 {
+	if perStream > 0 && perStream <= maxExecStreamOutput {
 		s.outputStreamLimit = perStream
 	}
 }
@@ -90,13 +95,22 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 	if timeout <= 0 {
 		timeout = s.execDefaultTimeout
 	}
+	if timeout > maxExecTimeout {
+		timeout = maxExecTimeout
+	}
 	start := time.Now()
-	lease, err := s.AcquireLease(ctx, serverID)
+	operation, cancel := context.WithTimeoutCause(ctx, timeout, server.ErrSSHTimeout)
+	defer cancel()
+	lease, err := s.AcquireLease(operation, serverID)
 	if err != nil {
+		if operation.Err() != nil {
+			return nil, fmt.Errorf("acquire SSH lease: %w", context.Cause(operation))
+		}
 		return nil, err
 	}
-
-	result, err := lease.Exec(ctx, command, timeout)
+	defer lease.Release()
+	result, err := lease.Exec(operation, command, timeout)
+	err = errors.Join(err, lease.releaseAndWait())
 	if result != nil {
 		result.DurationMs = time.Since(start).Milliseconds()
 	}
@@ -136,7 +150,7 @@ func (s *SSHService) AcquireLease(ctx context.Context, serverID uint) (*sshLease
 		return nil, err
 	}
 	if h.Client != nil {
-		return &sshLease{svc: s, h: h}, nil
+		return newSSHLease(s, h), nil
 	}
 
 	// Pool returned nil — dial a new connection.
@@ -206,7 +220,7 @@ func (s *SSHService) AcquireLease(ctx context.Context, serverID uint) (*sshLease
 	}
 
 	h.Client = client
-	return &sshLease{svc: s, h: h}, nil
+	return newSSHLease(s, h), nil
 }
 
 // serverFingerprint identifies everything a pooled SSH connection depends on.
@@ -293,7 +307,15 @@ func (s *SSHService) runCommand(parent context.Context, client *ssh.Client, comm
 	if completed && (errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)) && cancellation == nil {
 		cancellation = execCancellation(parent)
 	}
-	transportClosed := closeExecSession(client, ready, joined)
+	transportClosed, cleanupErr := closeSSHSession(client, ready, joined, sshTeardownDeadlines(ctx, execTeardownGrace))
+	if cleanupErr != nil {
+		if cancellation != nil {
+			// Preserve the reason frozen before teardown. A worker may return a
+			// generic context error after the server's own execution timeout.
+			return nil, errors.Join(cancellation, cleanupErr), true
+		}
+		return nil, errors.Join(cancellation, runErr, cleanupErr), true
+	}
 	if !completed {
 		// Run can publish a real exit while cancellation is closing its
 		// channel. Read it after joining instead of losing that exit status.
@@ -317,7 +339,7 @@ func (s *SSHService) runCommand(parent context.Context, client *ssh.Client, comm
 
 func execCancellation(parent context.Context) error {
 	if err := parent.Err(); err != nil {
-		return err
+		return context.Cause(parent)
 	}
 	return server.ErrSSHTimeout
 }
@@ -326,7 +348,48 @@ func execCancellation(parent context.Context) error {
 // the caller reads output or releases its pool slot. A blocked channel close,
 // NewSession, or unresponsive peer gets a bounded grace before its exclusively
 // borrowed transport is closed; healthy channel cancellation keeps the client.
-func closeExecSession(client *ssh.Client, ready <-chan *ssh.Session, joined <-chan struct{}) bool {
+const sshCleanupBudget = 3 * time.Second
+
+// sshCleanupPending means the response budget ended before all local workers
+// joined. The lease remains occupied until done closes; it must never expose
+// an in-use client to another borrower just to satisfy a response deadline.
+type sshCleanupPending struct{ done <-chan struct{} }
+
+func (*sshCleanupPending) Error() string { return "SSH cleanup exceeded its absolute 3s budget" }
+func (*sshCleanupPending) Unwrap() error {
+	// Cleanup is a server-side lifecycle failure, not caller cancellation. A
+	// joined command timeout retains its original error and HTTP status.
+	return server.NewAppErrorParams(http.StatusServiceUnavailable, server.ReasonUnavailable, map[string]any{"state": "ssh_cleanup_pending"})
+}
+
+// sshCleanupDeadlines is immutable and follows one teardown across all nested
+// cleanup stages. Neither entering a helper nor finishing a worker restarts it.
+type sshCleanupDeadlines struct{ grace, total time.Time }
+
+type sshCleanupClockKey struct{}
+type sshCleanupClock struct {
+	once  sync.Once
+	value sshCleanupDeadlines
+}
+
+func (c *sshCleanupClock) deadlines(grace time.Duration) sshCleanupDeadlines {
+	c.once.Do(func() { c.value = newSSHCleanupDeadlines(time.Now(), grace) })
+	return c.value
+}
+
+func sshTeardownDeadlines(ctx context.Context, grace time.Duration) sshCleanupDeadlines {
+	if clock, ok := ctx.Value(sshCleanupClockKey{}).(*sshCleanupClock); ok {
+		return clock.deadlines(grace)
+	}
+	return newSSHCleanupDeadlines(time.Now(), grace)
+}
+
+func newSSHCleanupDeadlines(start time.Time, grace time.Duration) sshCleanupDeadlines {
+	return sshCleanupDeadlines{grace: start.Add(grace), total: start.Add(sshCleanupBudget)}
+}
+
+// closeSSHSession only consumes the caller's remaining cleanup budget.
+func closeSSHSession(client *ssh.Client, ready <-chan *ssh.Session, joined <-chan struct{}, deadlines sshCleanupDeadlines) (bool, error) {
 	closed := make(chan struct{})
 	go func() {
 		defer close(closed)
@@ -334,8 +397,6 @@ func closeExecSession(client *ssh.Client, ready <-chan *ssh.Session, joined <-ch
 		select {
 		case session = <-ready:
 		case <-joined:
-			// NewSession may have completed before the worker exited. Closing
-			// that session still belongs to this supervisor.
 			select {
 			case session = <-ready:
 			default:
@@ -345,42 +406,32 @@ func closeExecSession(client *ssh.Client, ready <-chan *ssh.Session, joined <-ch
 			_ = session.Close()
 		}
 	}()
-
-	timer := time.NewTimer(execTeardownGrace)
-	defer timer.Stop()
-	worker, closer := joined, (<-chan struct{})(closed)
-	for worker != nil || closer != nil {
+	allJoined := make(chan struct{})
+	go func() { <-joined; <-closed; close(allJoined) }()
+	grace := time.NewTimer(max(time.Until(deadlines.grace), 0))
+	defer grace.Stop()
+	select {
+	case <-allJoined:
+		return false, nil
+	case <-grace.C:
 		select {
-		case <-worker:
-			worker = nil
-		case <-closer:
-			closer = nil
-		case <-timer.C:
-			// Prefer completed cleanup if it raced the grace deadline.
-			select {
-			case <-worker:
-				worker = nil
-			default:
-			}
-			select {
-			case <-closer:
-				closer = nil
-			default:
-			}
-			if worker == nil && closer == nil {
-				return false
-			}
-			_ = client.Close()
-			if worker != nil {
-				<-worker
-			}
-			if closer != nil {
-				<-closer
-			}
-			return true
+		case <-allJoined:
+			return false, nil
+		default:
 		}
 	}
-	return false
+	transportJoined := make(chan struct{})
+	go func() { _ = client.Close(); close(transportJoined) }()
+	settled := make(chan struct{})
+	go func() { <-allJoined; <-transportJoined; close(settled) }()
+	remaining := time.NewTimer(max(time.Until(deadlines.total), 0))
+	defer remaining.Stop()
+	select {
+	case <-settled:
+		return true, nil
+	case <-remaining.C:
+		return true, &sshCleanupPending{done: settled}
+	}
 }
 
 // buildAuthMethod creates the appropriate ssh.AuthMethod from decrypted credentials.
@@ -444,9 +495,14 @@ func isConnectionError(err error) bool {
 
 // CopyFile pipes a local file to a remote path over SSH.
 func (s *SSHService) CopyFile(ctx context.Context, serverID uint, localPath, remotePath string) error {
+	budget := min(s.execDefaultTimeout, maxExecTimeout)
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
 	lease, err := s.AcquireLease(ctx, serverID)
 	if err != nil {
 		return fmt.Errorf("copy file: %w", err)
 	}
-	return lease.Upload(ctx, localPath, remotePath, s.execDefaultTimeout)
+	defer lease.Release()
+	err = lease.Upload(ctx, localPath, remotePath, budget)
+	return errors.Join(err, lease.releaseAndWait())
 }

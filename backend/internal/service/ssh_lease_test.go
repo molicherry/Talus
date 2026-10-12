@@ -121,7 +121,14 @@ func TestCopyFileCancellationSettlesQuotaAndJoins(t *testing.T) {
 
 	// The bounded teardown may force-close the transport; re-seed so the next
 	// upload has a healthy client (the fake server source cannot dial).
-	seedPool(t, pool, 1, dialTestSSH(t, address, hostKey))
+	available, err := pool.Get(1, testFP(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Release(1, available)
+	if available == nil {
+		seedPool(t, pool, 1, dialTestSSH(t, address, hostKey))
+	}
 	if err := svc.CopyFile(context.Background(), 1, local, "/tmp/agent"); err != nil {
 		t.Fatalf("upload after cancellation: %v", err)
 	}
