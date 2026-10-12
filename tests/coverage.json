@@ -73,7 +73,7 @@
         "test",
         "./internal/repository/...",
         "-run",
-        "ApplyOnce|PrepareUserTokenVersion|DeltaRates|DeltaGapThreshold|PrepareMetricsRollup|RefreshRollups|PruneMetrics",
+        "ApplyOnce|PrepareUserTokenVersion|Delta|Rollup|Prune|Bucket|Peak|Deadline|RawSample",
         "-count=1"
       ],
       "timeout_seconds": 600,
@@ -458,10 +458,23 @@
       "scenario": "Compute averages and observed sample maxima correctly; retain maxima in long-range data.",
       "implementations": [
         {
-          "implementation_id": "impl-04-02",
+          "implementation_id": "impl-04-02a",
           "run_id": "migrate-hardening",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "backend/internal/repository/metric_budget_test.go",
+            "symbol": "TestAverageAndObservedPeakAreSeparateAndSurviveRollup"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-02b",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_rollup_test.go",
+            "symbol": "TestRefreshRollupsMaterializesBucketsAndCheckpoint"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -509,10 +522,43 @@
       "scenario": "Enforce 600-bucket and 12,000-raw-sample boundaries; share one 2-second deadline across probes and plans; verify strict/coarsen behavior and 422/503 errors without range truncation.",
       "implementations": [
         {
-          "implementation_id": "impl-04-05",
-          "run_id": "integration-agent",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation_id": "impl-04-05a",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_budget_test.go",
+            "symbol": "TestBucketBudgetBoundary"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05b",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_budget_test.go",
+            "symbol": "TestRawSampleBudgetBoundary"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05c",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_budget_test.go",
+            "symbol": "TestExpiredDeadlineIsReportedAsTimeout"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05d",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/metrics_budget_test.go",
+            "symbol": "TestMetricQueryErrorMapping"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]

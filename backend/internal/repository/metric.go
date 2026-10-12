@@ -104,6 +104,26 @@ type AggregatedMetric struct {
 	NetSentRate   *float64  `gorm:"column:net_sent_rate" json:"net_sent_rate"`
 	DiskReadRate  *float64  `gorm:"column:disk_read_rate" json:"disk_read_rate"`
 	DiskWriteRate *float64  `gorm:"column:disk_write_rate" json:"disk_write_rate"`
+
+	// Observed maxima of the sampled interval (§8.3): retained separately from the
+	// average so long-range charts can still show peaks.
+	CPUPeak      *float64 `gorm:"column:cpu_peak" json:"cpu_peak"`
+	MemoryPeak   *float64 `gorm:"column:memory_peak" json:"memory_peak"`
+	DiskPeak     *float64 `gorm:"column:disk_peak" json:"disk_peak"`
+	SwapPeak     *float64 `gorm:"column:swap_peak" json:"swap_peak"`
+	Load1Peak    *float64 `gorm:"column:load_1_peak" json:"load_1_peak"`
+	Load5Peak    *float64 `gorm:"column:load_5_peak" json:"load_5_peak"`
+	Load15Peak   *float64 `gorm:"column:load_15_peak" json:"load_15_peak"`
+	NetRecvPeak  *float64 `gorm:"column:net_recv_peak" json:"net_recv_peak"`
+	NetSentPeak  *float64 `gorm:"column:net_sent_peak" json:"net_sent_peak"`
+	DiskReadPeak *float64 `gorm:"column:disk_read_peak" json:"disk_read_peak"`
+	DiskWrtPeak  *float64 `gorm:"column:disk_write_peak" json:"disk_write_peak"`
+
+	// Valid coverage seconds behind the rate columns, so a gap is visible.
+	NetRecvCov  *float64 `gorm:"column:net_recv_coverage" json:"net_recv_coverage"`
+	NetSentCov  *float64 `gorm:"column:net_sent_coverage" json:"net_sent_coverage"`
+	DiskReadCov *float64 `gorm:"column:disk_read_coverage" json:"disk_read_coverage"`
+	DiskWrtCov  *float64 `gorm:"column:disk_write_coverage" json:"disk_write_coverage"`
 }
 
 // LatestMetricRow holds the most recent metric snapshot for a single server.
