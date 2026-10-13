@@ -7,6 +7,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 
 func main() {
 	runProtocol := flag.Bool("run-protocol", false, "execute the amd64 artifact and validate its JSON protocol fields")
+	versionInBinary := flag.Bool("version-in-binary", false, "require every artifact to embed its manifest build version (for architectures that cannot be executed)")
 	flag.Parse()
 	if flag.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: agentverify [-run-protocol] <artifacts-dir>")
@@ -41,6 +43,12 @@ func main() {
 			fail(err)
 		}
 		fmt.Println("protocol output OK: agent_version and protocol_version match the manifest")
+	}
+	if *versionInBinary {
+		if err := verifyVersionInBinary(dir, manifest); err != nil {
+			fail(err)
+		}
+		fmt.Println("binary version OK: every artifact embeds its manifest build version")
 	}
 }
 
@@ -80,4 +88,21 @@ func verifyProtocol(dir string, manifest *agentproto.Manifest) error {
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "agentverify:", err)
 	os.Exit(1)
+}
+
+// verifyVersionInBinary checks the build version stamped into each artifact. An
+// architecture the host cannot execute (arm64 on an amd64 builder) can still be
+// verified this way: the version is injected with -ldflags at build time, so a
+// mismatch means the artifact was not built from this source/version.
+func verifyVersionInBinary(dir string, manifest *agentproto.Manifest) error {
+	for _, artifact := range manifest.Agents {
+		raw, err := os.ReadFile(filepath.Join(dir, artifact.File))
+		if err != nil {
+			return fmt.Errorf("read %s: %w", artifact.File, err)
+		}
+		if !bytes.Contains(raw, []byte(artifact.BuildVersion)) {
+			return fmt.Errorf("%s does not embed build version %q", artifact.File, artifact.BuildVersion)
+		}
+	}
+	return nil
 }

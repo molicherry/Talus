@@ -258,27 +258,19 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: Build image variants for artifact verification
-        run: |
-          docker buildx build --platform linux/amd64 --load \
-            --build-arg VERSION=ci-agent-check \
-            -t talus-ci-root -f Dockerfile .
-          docker buildx build --platform linux/amd64 --load \
-            --build-arg VERSION=ci-agent-check \
-            -t talus-ci-backend -f backend/Dockerfile .
-
-      - name: Verify agent artifacts inside each Hub image
+      # Verify the agent artifacts of every image variant (TC-08-05). Each build
+      # verifies what it ships — manifest, both architectures, ELF class/machine,
+      # size, hash and the stamped version, plus the protocol smoke test for the
+      # architecture the builder can execute — so a mismatch fails the build.
+      - name: Verify agent artifacts in every image variant (2 Dockerfiles × 2 platforms)
         run: |
           set -euo pipefail
-          for image in talus-ci-root talus-ci-backend; do
-            echo "=== $image ==="
-            container="verify-${image}"
-            docker create --name "$container" "$image" >/dev/null
-            rm -rf "/tmp/${image}-agents" && mkdir -p "/tmp/${image}-agents"
-            docker cp "$container:/usr/local/bin/." "/tmp/${image}-agents/"
-            docker rm "$container" >/dev/null
-            ls -l "/tmp/${image}-agents"
-            (cd backend && go run ./cmd/agentverify -run-protocol "/tmp/${image}-agents")
+          for dockerfile in Dockerfile backend/Dockerfile; do
+            for platform in linux/amd64 linux/arm64; do
+              echo "=== $dockerfile $platform ==="
+              docker buildx build --platform "$platform" --target go-builder \
+                --build-arg VERSION=ci-agent-check -f "$dockerfile" .
+            done
           done
 
       - name: Build and push Hub

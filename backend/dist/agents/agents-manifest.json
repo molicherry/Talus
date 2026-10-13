@@ -1,8 +1,0 @@
-{
-  "build_version": "v0.0.0-dev",
-  "protocol_version": 1,
-  "agents": [
-    {"platform": "linux/amd64", "file": "vpsmanager-agent-linux-amd64", "sha256": "7e1437e02ae67badfbceb2611c4ccec4d05853177ebd870acb0ed338fc0ddc17", "size": 2949304, "build_version": "v0.0.0-dev", "protocol_version": 1},
-    {"platform": "linux/arm64", "file": "vpsmanager-agent-linux-arm64", "sha256": "9dabbc0f2d6dce28485876528a70a27e6476cd5193ab6e3ebeba734feca9d927", "size": 2883768, "build_version": "v0.0.0-dev", "protocol_version": 1}
-  ]
-}

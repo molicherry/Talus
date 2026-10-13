@@ -17,6 +17,12 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w
 # Both agent architectures plus their manifest ship in every Hub image: the
 # Hub refuses to start unless the manifest matches the artifacts (§8.2).
 RUN sh build/agents.sh "${VERSION}" /agents
+# Verify the artifacts this image will ship (TC-08-05): manifest, both agent
+# architectures, ELF class/machine, size, hash and the stamped build version. The
+# architecture this builder can execute additionally runs the protocol smoke test,
+# so every image/platform combination fails closed on a mismatch.
+RUN go run ./cmd/agentverify -version-in-binary /agents && \
+    if [ "$TARGETARCH" = "$(go env GOHOSTARCH)" ]; then go run ./cmd/agentverify -run-protocol /agents; fi
 
 FROM --platform=$BUILDPLATFORM node:24-alpine AS ui-builder
 ARG VERSION=dev

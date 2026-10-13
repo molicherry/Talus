@@ -258,6 +258,7 @@ type PrunePlan struct {
 type PruneResult struct {
 	RawRows        int64
 	RollupRows     int64
+	ChunksDropped  int
 	Paused         bool
 	SkippedServers []uint
 }
@@ -319,6 +320,14 @@ func (r *MetricRepo) PruneMetrics(ctx context.Context, plan PrunePlan) (PruneRes
 		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", "talus_metrics_retention").Error; err != nil {
 			return fmt.Errorf("lock retention: %w", err)
 		}
+		// Complete chunks are dropped whole, which is what actually releases disk
+		// space; row deletes only mark space reusable inside a chunk. A chunk is
+		// only dropped when the aggregation that covers its range is confirmed.
+		dropped, err := dropPrunableChunks(tx, plan)
+		if err != nil {
+			return err
+		}
+		result.ChunksDropped = dropped
 		exclusion, excludedArgs := serverExclusion(plan.Pending)
 		raw := tx.Exec(`DELETE FROM metrics WHERE time < ?`+exclusion,
 			append([]any{plan.Cutoff}, excludedArgs...)...)
@@ -369,4 +378,162 @@ func (r *MetricRepo) RollupRowFor(ctx context.Context, serverID uint, bucketStar
 		return nil, nil
 	}
 	return &row, nil
+}
+
+// chunkRange is one hypertable chunk candidate.
+type chunkRange struct {
+	Name       string
+	RangeStart time.Time
+	RangeEnd   time.Time
+}
+
+// dropPrunableChunks drops the longest prefix of complete chunks below the cutoff
+// whose range holds no raw data for a server whose aggregation is still pending.
+// It uses the official range API (drop_chunks only accepts a hypertable), so the
+// completeness guard and the physical reclamation stay consistent. Tables that are
+// not hypertables report no chunks and the caller falls back to row deletes.
+func dropPrunableChunks(tx *gorm.DB, plan PrunePlan) (int, error) {
+	var chunks []chunkRange
+	err := tx.Raw(`
+		SELECT chunk_name AS name, range_start, range_end
+		FROM timescaledb_information.chunks
+		WHERE hypertable_name = 'metrics' AND range_end <= ?
+		ORDER BY range_start`, plan.Cutoff).Scan(&chunks).Error
+	if err != nil {
+		// A plain (non-TimescaleDB) database has no chunk catalogue.
+		return 0, nil
+	}
+
+	var boundary time.Time
+	droppable := 0
+	for _, chunk := range chunks {
+		held, err := chunkHoldsPendingRaw(tx, chunk, plan.Pending)
+		if err != nil {
+			return droppable, err
+		}
+		if held {
+			// The prefix must stay contiguous: a later chunk is never dropped while
+			// an older one still holds unaggregated data.
+			break
+		}
+		boundary = chunk.RangeEnd
+		droppable++
+	}
+	if droppable == 0 {
+		return 0, nil
+	}
+	if err := tx.Exec(`SELECT drop_chunks('metrics', older_than => ?::timestamptz)`, boundary).Error; err != nil {
+		return 0, fmt.Errorf("drop chunks older than %v: %w", boundary, err)
+	}
+	return droppable, nil
+}
+
+// chunkHoldsPendingRaw reports whether a chunk contains raw data for a server
+// whose aggregation has not been confirmed yet.
+func chunkHoldsPendingRaw(tx *gorm.DB, chunk chunkRange, pending []uint) (bool, error) {
+	if len(pending) == 0 {
+		return false, nil
+	}
+	exclusion, args := serverExclusion(pending)
+	query := `SELECT EXISTS (SELECT 1 FROM metrics WHERE time >= ? AND time < ? AND server_id IN (` +
+		strings.TrimPrefix(exclusion, " AND server_id NOT IN (") + `)`
+	all := append([]any{chunk.RangeStart, chunk.RangeEnd}, args...)
+	var held bool
+	if err := tx.Raw(query, all...).Scan(&held).Error; err != nil {
+		return false, fmt.Errorf("check chunk %s completeness: %w", chunk.Name, err)
+	}
+	return held, nil
+}
+
+// StorageReport is the measured on-disk footprint of the metrics storage plus the
+// linear projection to the retention window (REQUIREMENTS §8.3.2).
+type StorageReport struct {
+	RawRows                 int64
+	RawTotalBytes           int64
+	RawTableBytes           int64
+	RawIndexBytes           int64
+	RawChunkBytes           int64
+	RollupRows              int64
+	RollupTotalBytes        int64
+	OldestRaw               *time.Time
+	NewestRaw               *time.Time
+	MeasuredWindow          time.Duration
+	ProjectedRetentionBytes int64
+}
+
+// StorageReport measures the storage instead of assuming a row width.
+func (r *MetricRepo) StorageReport(ctx context.Context) (*StorageReport, error) {
+	report := &StorageReport{}
+
+	var raw struct {
+		Rows       int64  `gorm:"column:raw_rows"`
+		TotalBytes int64  `gorm:"column:raw_total_bytes"`
+		TableBytes int64  `gorm:"column:raw_table_bytes"`
+		IndexBytes int64  `gorm:"column:raw_index_bytes"`
+		ChunkBytes *int64 `gorm:"column:raw_chunk_bytes"`
+	}
+	// hypertable_detailed_size only exists on TimescaleDB: fall back to the plain
+	// relation sizes when the metrics table is not a hypertable.
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT
+			(SELECT COUNT(*) FROM metrics) AS raw_rows,
+			(SELECT pg_total_relation_size('metrics')) AS raw_total_bytes,
+			(SELECT pg_relation_size('metrics')) AS raw_table_bytes,
+			(SELECT pg_indexes_size('metrics')) AS raw_index_bytes,
+			(SELECT COALESCE(SUM(total_bytes), 0) FROM hypertable_detailed_size('metrics')) AS raw_chunk_bytes`,
+	).Scan(&raw).Error
+	if err != nil {
+		err = r.db.WithContext(ctx).Raw(`
+			SELECT
+				(SELECT COUNT(*) FROM metrics) AS raw_rows,
+				(SELECT pg_total_relation_size('metrics')) AS raw_total_bytes,
+				(SELECT pg_relation_size('metrics')) AS raw_table_bytes,
+				(SELECT pg_indexes_size('metrics')) AS raw_index_bytes`).Scan(&raw).Error
+		if err != nil {
+			return nil, fmt.Errorf("storage report: %w", err)
+		}
+	}
+	report.RawRows = raw.Rows
+	report.RawTotalBytes = raw.TotalBytes
+	report.RawTableBytes = raw.TableBytes
+	report.RawIndexBytes = raw.IndexBytes
+	if raw.ChunkBytes != nil {
+		report.RawChunkBytes = *raw.ChunkBytes
+	}
+
+	var rollup struct {
+		Rows       int64      `gorm:"column:rollup_rows"`
+		TotalBytes int64      `gorm:"column:rollup_total_bytes"`
+		OldestRaw  *time.Time `gorm:"column:oldest_raw"`
+		NewestRaw  *time.Time `gorm:"column:newest_raw"`
+	}
+	if err := r.db.WithContext(ctx).Raw(`
+		SELECT
+			(SELECT COUNT(*) FROM metrics_rollup_6h) AS rollup_rows,
+			(SELECT pg_total_relation_size('metrics_rollup_6h')) AS rollup_total_bytes,
+			(SELECT MIN(time) FROM metrics) AS oldest_raw,
+			(SELECT MAX(time) FROM metrics) AS newest_raw`).Scan(&rollup).Error; err != nil {
+		return nil, fmt.Errorf("storage report: %w", err)
+	}
+	report.RollupRows = rollup.Rows
+	report.RollupTotalBytes = rollup.TotalBytes
+	report.OldestRaw = rollup.OldestRaw
+	report.NewestRaw = rollup.NewestRaw
+
+	if report.OldestRaw != nil && report.NewestRaw != nil {
+		report.MeasuredWindow = report.NewestRaw.Sub(*report.OldestRaw)
+		report.ProjectedRetentionBytes = ProjectStorage(report.RawTotalBytes, report.MeasuredWindow, MetricsRetention)
+	}
+	return report, nil
+}
+
+// ProjectStorage linearly projects a measured footprint onto a longer window. A
+// measurement window shorter than an hour is not extrapolated (it is dominated by
+// freshly written pages, not by steady-state row width).
+func ProjectStorage(measuredBytes int64, measuredWindow, targetWindow time.Duration) int64 {
+	if measuredBytes <= 0 || measuredWindow < time.Hour || targetWindow <= 0 {
+		return measuredBytes
+	}
+	scaled := float64(measuredBytes) * (float64(targetWindow) / float64(measuredWindow))
+	return int64(scaled)
 }

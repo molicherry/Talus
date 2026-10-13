@@ -346,6 +346,9 @@ func main() {
 	// Metrics storage maintenance (REQ-08 §8.3.1): hourly rollup refresh and the
 	// daily retention pass, joined on the same root context.
 	maintenance := service.NewMetricsMaintenance(metricRepo)
+	// Retention follows the documented rollout: disabled by default, a dry run
+	// reports the plan, and only enabled && !dry-run deletes.
+	maintenance.SetRetention(cfg.MetricsRetentionEnabled, cfg.MetricsRetentionDryRun)
 	maintenanceDone := make(chan struct{})
 	go func() {
 		defer close(maintenanceDone)

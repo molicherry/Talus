@@ -424,3 +424,103 @@ func TestReviewSampleTimeIsNotTheBucketStart(t *testing.T) {
 		t.Fatal("sampled_at must differ from the bucket start here")
 	}
 }
+
+// TestReviewRetentionDropsCompleteChunks pins gap A's physical reclamation: whole
+// complete chunks are dropped, and a chunk holding unaggregated raw data for a
+// pending server is kept.
+func TestReviewRetentionDropsCompleteChunks(t *testing.T) {
+	db := newTestDBWithExtensions(t)
+	ctx := context.Background()
+	// A hypertable with daily chunks, so the drop path is exercised for real:
+	// create the model's table first, then convert it.
+	if err := db.AutoMigrate(&model.Metric{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`SELECT create_hypertable('metrics', 'time', chunk_time_interval => interval '1 day', migrate_data => true)`).Error; err != nil {
+		t.Skipf("hypertable not available in this environment: %v", err)
+	}
+	if err := PrepareMetricsRollupSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewMetricRepo(db)
+
+	settled := time.Date(2026, 1, 2, 0, 10, 0, 0, time.UTC)
+	pending := time.Date(2026, 1, 3, 0, 10, 0, 0, time.UTC)
+	for _, row := range []model.Metric{
+		{ServerID: 91, Time: settled, CPUPercent: f64(10), NetBytesRecv: i64(0)},
+		{ServerID: 92, Time: pending, CPUPercent: f64(10), NetBytesRecv: i64(0)},
+	} {
+		sample := row
+		if err := db.Create(&sample).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Server 91's aggregation is confirmed past the cutoff; server 92's is not.
+	if err := db.Exec(`INSERT INTO metrics_rollup_checkpoints (server_id, completed_through, updated_at)
+		VALUES (91, ?, now())`, pending.Add(48*time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	plan, err := repo.PlanPrune(ctx, now, MetricsRetention)
+	if err != nil {
+		t.Fatalf("PlanPrune: %v", err)
+	}
+	if len(plan.Pending) != 1 || plan.Pending[0] != 92 {
+		t.Fatalf("pending = %v, want [92]", plan.Pending)
+	}
+	result, err := repo.PruneMetrics(ctx, plan)
+	if err != nil {
+		t.Fatalf("PruneMetrics: %v", err)
+	}
+	if result.ChunksDropped == 0 {
+		t.Fatal("a complete chunk with no pending server must be dropped, not row-deleted")
+	}
+	var remaining []uint
+	if err := db.Raw(`SELECT DISTINCT server_id FROM metrics ORDER BY server_id`).Scan(&remaining).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 1 || remaining[0] != 92 {
+		t.Fatalf("servers with raw data = %v, want only the pending server 92", remaining)
+	}
+}
+
+// TestReviewStorageReportMeasuresAndProjects pins gap A's capacity step: the
+// report measures real sizes and the projection is linear and window-based.
+func TestReviewStorageReportMeasuresAndProjects(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 50; i++ {
+		row := model.Metric{
+			ServerID: 93, Time: base.Add(time.Duration(i) * time.Minute),
+			CPUPercent: f64(10), NetBytesRecv: i64(int64(i * 60)),
+		}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report, err := repo.StorageReport(ctx)
+	if err != nil {
+		t.Fatalf("StorageReport: %v", err)
+	}
+	if report.RawRows != 50 {
+		t.Fatalf("raw rows = %d, want 50", report.RawRows)
+	}
+	if report.RawTotalBytes <= 0 || report.RawTableBytes <= 0 {
+		t.Fatalf("sizes are not measured: %+v", report)
+	}
+	if report.OldestRaw == nil || report.NewestRaw == nil {
+		t.Fatalf("sample boundaries missing: %+v", report)
+	}
+
+	// The projection is linear in the measured window and is not applied to a
+	// window too short to represent steady state.
+	if got := ProjectStorage(1000, 7*24*time.Hour, MetricsRetention); got != 5000 {
+		t.Fatalf("projection = %d, want 5000 (35d/7d × 1000)", got)
+	}
+	if got := ProjectStorage(1000, 30*time.Minute, MetricsRetention); got != 1000 {
+		t.Fatalf("short measurement = %d, want it not extrapolated", got)
+	}
+}

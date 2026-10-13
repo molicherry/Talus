@@ -2,7 +2,7 @@
 
 > Generated from `tests/coverage.json` by `tests/render-coverage.mjs`. Do not edit by hand.
 
-Cases: 33 · Runs: 12 · Schema: 1
+Cases: 33 · Runs: 13 · Schema: 1
 
 ## Runs
 
@@ -20,6 +20,7 @@ Cases: 33 · Runs: 12 · Schema: 1
 | e2e-core | e2e | shell | `.` | `bash tests/e2e/run.sh` | 1200s |
 | deploy-verify | integration | manual | `.` | _(manual)_ | — |
 | a11y-review | ui | manual | `.` | _(manual)_ | — |
+| image-agents | integration | shell | `.` | `bash tests/verify-agent-images.sh` | 2400s |
 
 ## Gates (pre-registered required runs)
 
@@ -164,6 +165,8 @@ Cases: 33 · Runs: 12 · Schema: 1
 | TC-08-04 | REQ-08 | implemented | go-unit | `backend/internal/service/monitor_review_regression_test.go:TestReviewFailedUploadCleansTemporaryArtifact` | yes | Probe the target OS and architecture before upload; preserve failure classes and perform zero uploads when probing or artifact selection fails. | Probe the target OS and architecture before upload; preserve failure classes and perform zero uploads when probing or artifact selection fails. |
 | TC-08-05 | REQ-08 | implemented | go-unit | `backend/internal/agentproto/agentproto_test.go:TestVerifyAcceptsMatchingArtifacts` | yes | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. |
 | TC-08-05 | REQ-08 | implemented | go-unit | `backend/cmd/agent/main_test.go:TestAgentOutputCarriesVersionContract` | yes | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. |
+| TC-08-05 | REQ-08 | implemented | image-agents | `tests/verify-agent-images.sh:verify-artifacts` | no | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. |
+| TC-08-05 | REQ-08 | implemented | image-agents | `tests/verify-agent-images.sh:protocol-smoke` | no | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. |
 | TC-08-06 | REQ-08 | implemented | migrate-hardening | `backend/internal/repository/metric_rollup_test.go:TestPrepareMetricsRollupSchemaIsIdempotent` | yes | Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs. | Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs. |
 | TC-08-06 | REQ-08 | implemented | migrate-hardening | `backend/internal/repository/metric_rollup_test.go:TestRefreshRollupsMaterializesBucketsAndCheckpoint` | yes | Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs. | Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs. |
 | TC-08-06 | REQ-08 | implemented | migrate-hardening | `backend/internal/repository/metric_rollup_test.go:TestPruneMetricsPausesUntilAggregationIsComplete` | yes | Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs. | Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs. |

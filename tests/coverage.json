@@ -206,6 +206,21 @@
         "profile": "manual-review",
         "requires": []
       }
+    },
+    {
+      "run_id": "image-agents",
+      "suite": "integration",
+      "runner": "shell",
+      "cwd": ".",
+      "command": [
+        "bash",
+        "tests/verify-agent-images.sh"
+      ],
+      "timeout_seconds": 2400,
+      "environment": {
+        "profile": "local",
+        "requires": []
+      }
     }
   ],
   "gates": {
@@ -1836,6 +1851,26 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-05c",
+          "run_id": "image-agents",
+          "implementation": {
+            "path": "tests/verify-agent-images.sh",
+            "symbol": "verify-artifacts"
+          },
+          "automation_status": "implemented",
+          "required": false
+        },
+        {
+          "implementation_id": "impl-08-05d",
+          "run_id": "image-agents",
+          "implementation": {
+            "path": "tests/verify-agent-images.sh",
+            "symbol": "protocol-smoke"
+          },
+          "automation_status": "implemented",
+          "required": false
         }
       ]
     },

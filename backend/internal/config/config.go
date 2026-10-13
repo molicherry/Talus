@@ -27,6 +27,12 @@ type Config struct {
 	// architecture-specific binaries (REQUIREMENTS §8.2).
 	AgentArtifactsDir string
 
+	// Metrics retention rollout (REQUIREMENTS §8.3.1 rollout: disabled by default,
+	// then an operator-visible dry run, then enabled). The dry run always plans
+	// and reports; only enabled && !dry-run deletes anything.
+	MetricsRetentionEnabled bool
+	MetricsRetentionDryRun  bool
+
 	// Monitoring
 	MonitorInterval int
 	// MonitorToleratedRounds and MonitorAllowedLatency derive the online/expired
@@ -107,6 +113,11 @@ func Load() *Config {
 	cfg.LogFormat = getEnvOrDefault("LOG_FORMAT", "json")
 	cfg.LogLevel = getEnvOrDefault("LOG_LEVEL", "info")
 	cfg.AgentArtifactsDir = getEnvOrDefault("AGENT_ARTIFACTS_DIR", "/usr/local/bin")
+	cfg.MetricsRetentionEnabled = getEnvBool("METRICS_RETENTION_ENABLED")
+	cfg.MetricsRetentionDryRun = true
+	if os.Getenv("METRICS_RETENTION_DRY_RUN") != "" {
+		cfg.MetricsRetentionDryRun = getEnvBool("METRICS_RETENTION_DRY_RUN")
+	}
 	cfg.MonitorInterval = getEnvIntOrDefault("MONITOR_INTERVAL", 60)
 	cfg.MonitorToleratedRounds = getEnvIntOrDefault("MONITOR_TOLERATED_ROUNDS", 1)
 	cfg.MonitorAllowedLatency = getEnvIntOrDefault("MONITOR_ALLOWED_LATENCY_SECONDS", 0)
