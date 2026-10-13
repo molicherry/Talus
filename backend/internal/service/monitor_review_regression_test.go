@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -99,7 +101,7 @@ func TestReviewGenerationInvalidationIsCancellationNotFailure(t *testing.T) {
 		return fmt.Errorf("lease: %w", sshpool.ErrStaleGeneration)
 	}, time.Minute)
 
-	if outcome := svc.runTask(context.Background(), 1); outcome != outcomeCancelled {
+	if outcome, _ := svc.runTask(context.Background(), 1); outcome != outcomeCancelled {
 		t.Fatalf("outcome = %v, want cancelled", outcome)
 	}
 }
@@ -180,22 +182,23 @@ func (l *stubLease) Discard()                                                   
 // bounded so shutdown cannot hang forever.
 func TestReviewMonitorShutdownWaitsForLeaseSettlement(t *testing.T) {
 	svc := NewMonitorService(nil, nil, nil, time.Minute)
+	svc.leaseSettleBudget = 120 * time.Millisecond
 
 	// Already settled: no wait.
 	settled := &stubLease{done: make(chan struct{})}
 	close(settled.done)
-	if !svc.awaitLeaseSettlement(context.Background(), settled) {
+	if !svc.awaitLeaseSettlement(settled) {
 		t.Fatal("a settled lease must be reported as reclaimed")
 	}
 
 	// Never settles: the bounded wait reports the owner as still pending.
 	pending := &stubLease{done: make(chan struct{})}
 	start := time.Now()
-	if svc.awaitLeaseSettlement(context.Background(), pending) {
+	if svc.awaitLeaseSettlement(pending) {
 		t.Fatal("an unsettled lease must not be reported as reclaimed")
 	}
-	if elapsed := time.Since(start); elapsed < monitorLeaseSettleBudget || elapsed > monitorLeaseSettleBudget+2*time.Second {
-		t.Fatalf("wait = %v, want the bounded cleanup budget %v", elapsed, monitorLeaseSettleBudget)
+	if elapsed := time.Since(start); elapsed < svc.leaseSettleBudget || elapsed > svc.leaseSettleBudget+500*time.Millisecond {
+		t.Fatalf("wait = %v, want the bounded cleanup budget %v", elapsed, svc.leaseSettleBudget)
 	}
 
 	// A settlement that completes during the wait is observed.
@@ -204,7 +207,7 @@ func TestReviewMonitorShutdownWaitsForLeaseSettlement(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		close(late.done)
 	}()
-	if !svc.awaitLeaseSettlement(context.Background(), late) {
+	if !svc.awaitLeaseSettlement(late) {
 		t.Fatal("a lease settled during the wait must be reported as reclaimed")
 	}
 }
@@ -262,5 +265,66 @@ func TestReviewFailedUploadCleansTemporaryArtifact(t *testing.T) {
 		if strings.Contains(path, ".upload-") {
 			t.Fatalf("temporary artifact left behind: %s", path)
 		}
+	}
+}
+
+// TestRereviewCleanupWaitSurvivesTaskCancellation pins F05: shutdown, node
+// deletion and a collection deadline all cancel the task context, and the cleanup
+// wait must not be abandoned because of it — otherwise the scheduler reports the
+// task finished while a transport is still closing.
+func TestRereviewCleanupWaitSurvivesTaskCancellation(t *testing.T) {
+	svc := NewMonitorService(nil, nil, nil, time.Minute)
+	svc.leaseSettleBudget = 150 * time.Millisecond
+
+	lease := &stubLease{done: make(chan struct{})}
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		close(lease.done)
+	}()
+	start := time.Now()
+	if !svc.awaitLeaseSettlement(lease) {
+		t.Fatal("a lease settled during the wait must be reported as reclaimed")
+	}
+	if elapsed := time.Since(start); elapsed < 60*time.Millisecond {
+		t.Fatalf("wait = %v, want it to observe the settlement", elapsed)
+	}
+}
+
+// TestRereviewRemoteCleanupExitFailureIsReported pins F04: a healthy transport
+// with a non-zero remote rm exit is a cleanup failure, not a silent success.
+func TestRereviewRemoteCleanupExitFailureIsReported(t *testing.T) {
+	deployer, h := newAgentDeployHarness(t, "v1.2.3")
+	h.remote.agentPayload = `{"agent_version":"v1.2.3","protocol_version":1}`
+	h.remote.uploadWriteThenFail = true
+	h.remote.removeExit = 1
+
+	var logs bytes.Buffer
+	deployer.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	deployer.telemetry = newMonitorTelemetry(nil, deployer.logger)
+
+	lease, err := h.svc.AcquireLease(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+
+	if _, err := deployer.Collect(context.Background(), lease); err == nil {
+		t.Fatal("a failed upload must fail the collection")
+	}
+	output := logs.String()
+	if !strings.Contains(output, "agent upload cleanup failed") {
+		t.Fatalf("a rejected rm must be reported as a cleanup failure:\n%s", output)
+	}
+	if !strings.Contains(output, `"exit_code":1`) {
+		t.Fatalf("the remote exit status must be recorded:\n%s", output)
+	}
+	leftOver := false
+	for _, path := range h.remote.fileKeys() {
+		if strings.Contains(path, ".upload-") {
+			leftOver = true
+		}
+	}
+	if !leftOver {
+		t.Fatal("the peer kept the file, so the state must be reported as pending")
 	}
 }

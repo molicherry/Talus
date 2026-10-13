@@ -40,7 +40,21 @@ var rateCounters = []string{"net_bytes_recv", "net_bytes_sent", "disk_read_bytes
 // threshold; the CTE also carries the observation window ($5=window start,
 // $6=window end) so callers can exclude the predecessor rows from statistics:
 // a predecessor is rate context, never an in-window observation.
-func deltaSamplesCTE(selectExtra string) string {
+// deltaSamplesCTE builds the shared adjacent-sample CTE: one row per raw sample
+// with, for every counter, an effective rate that is NULL when the pair must not
+// participate (counter reset/decrease, zero or negative time delta, or a gap
+// beyond the declared threshold) plus the *clipped* weight of that pair.
+//
+// The weight is the overlap of the pair interval with three bounds: the bucket it
+// is attributed to, the request window, and the sample times themselves. Weighting
+// by the full pair interval let time outside the requested window inflate both the
+// average and the reported coverage (F02). A real zero increment yields 0, not
+// NULL.
+//
+// Parameters: $1=server id, $2=scan start, $3=scan end (exclusive), $4=gap
+// threshold. Window bounds come from windowStartParam/windowEndParam, and the
+// bucket grid either from a literal bucketSeconds or from bucketIntervalParam.
+func deltaSamplesCTE(bucketSeconds int64, bucketIntervalParam, windowStartParam, windowEndParam string) string {
 	rate := func(counter string) string {
 		return fmt.Sprintf(`CASE
 			WHEN prev_%[1]s IS NULL OR %[1]s IS NULL THEN NULL
@@ -61,19 +75,34 @@ func deltaSamplesCTE(selectExtra string) string {
 	for _, counter := range rateCounters {
 		weighted += fmt.Sprintf(`,
 			CASE
-				WHEN %[1]s_rate IS NOT NULL THEN EXTRACT(EPOCH FROM (time - prev_time))
+				WHEN %[1]s_rate IS NOT NULL
+				THEN GREATEST(0, EXTRACT(EPOCH FROM (
+					LEAST(time, %[2]s::timestamptz)
+					- GREATEST(prev_time, %[3]s::timestamptz)
+				)))
 				ELSE 0
-			END AS %[1]s_weight`, counter)
+			END AS %[1]s_weight`, counter, windowEndParam, windowStartParam)
 	}
-	_ = weighted
-	_ = selectExtra
+	_ = bucketSeconds
+	_ = bucketIntervalParam
 	return fmt.Sprintf(`
 	WITH bounded AS (
-		SELECT time, memory_used, memory_total, disk_used, disk_total, swap_used, swap_total,
-		       cpu_percent, load_1, load_5, load_15,
-		       net_bytes_recv, net_bytes_sent, disk_read_bytes, disk_write_bytes
-		FROM metrics
-		WHERE server_id = $1 AND time >= $2 AND time < $3
+		(SELECT time, memory_used, memory_total, disk_used, disk_total, swap_used, swap_total,
+		        cpu_percent, load_1, load_5, load_15,
+		        net_bytes_recv, net_bytes_sent, disk_read_bytes, disk_write_bytes
+		 FROM metrics
+		 WHERE server_id = $1 AND time >= $2 AND time < $3)
+		UNION ALL
+		-- Exactly one predecessor row: rate context for the first in-window sample.
+		-- It is never aggregated (the window filter below excludes it), and it keeps
+		-- the planned input bounded without widening the gap semantics.
+		(SELECT time, memory_used, memory_total, disk_used, disk_total, swap_used, swap_total,
+		        cpu_percent, load_1, load_5, load_15,
+		        net_bytes_recv, net_bytes_sent, disk_read_bytes, disk_write_bytes
+		 FROM metrics
+		 WHERE server_id = $1 AND time < $2
+		 ORDER BY time DESC
+		 LIMIT 1)
 	),
 	lagged AS (
 		SELECT *,

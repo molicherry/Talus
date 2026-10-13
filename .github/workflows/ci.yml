@@ -262,13 +262,19 @@ jobs:
       # verifies what it ships — manifest, both architectures, ELF class/machine,
       # size, hash and the stamped version, plus the protocol smoke test for the
       # architecture the builder can execute — so a mismatch fails the build.
-      - name: Verify agent artifacts in every image variant (2 Dockerfiles × 2 platforms)
+      - name: Verify every image variant (2 Dockerfiles × 2 platforms)
         run: |
           set -euo pipefail
           for dockerfile in Dockerfile backend/Dockerfile; do
             for platform in linux/amd64 linux/arm64; do
               echo "=== $dockerfile $platform ==="
+              # The artifact stage verifies the manifest, both architectures, ELF
+              # class/machine, size, hash and the stamped version; the final stage
+              # executes the TARGETARCH agent and checks its protocol output (arm64
+              # under the QEMU binfmt registered above).
               docker buildx build --platform "$platform" --target go-builder \
+                --build-arg VERSION=ci-agent-check -f "$dockerfile" .
+              docker buildx build --platform "$platform" \
                 --build-arg VERSION=ci-agent-check -f "$dockerfile" .
             done
           done

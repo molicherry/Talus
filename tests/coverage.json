@@ -73,7 +73,7 @@
         "test",
         "./internal/repository/...",
         "-run",
-        "ApplyOnce|PrepareUserTokenVersion|Delta|Rollup|Prune|Bucket|Peak|Deadline|RawSample|Review",
+        "ApplyOnce|PrepareUserTokenVersion|Delta|Rollup|Prune|Bucket|Peak|Deadline|RawSample|Review|Rereview",
         "-count=1"
       ],
       "timeout_seconds": 600,
@@ -526,6 +526,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-04-01g",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-series.test.mjs",
+            "symbol": "a confirmed-empty bucket never becomes the newest sample"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -563,6 +573,26 @@
           "implementation": {
             "path": "frontend/tests/ui-regressions.browser.mjs",
             "symbol": "series toggles, chart description and the paged data view are keyboard accessible"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-02d",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewBucketStatisticsAreReturned"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-02e",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "window averages are sample-weighted, not the mean of bucket means"
           },
           "automation_status": "implemented",
           "required": true
@@ -1651,6 +1681,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-01h",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestRereviewCleanupWaitSurvivesTaskCancellation"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -1781,6 +1821,36 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-03g",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewPartialWindowClipsCounterWeights"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03h",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewShortCollectionPeriodRejectsLongGap"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03i",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewLongCollectionPeriodProducesValidRate"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -1828,6 +1898,16 @@
           "implementation": {
             "path": "backend/internal/service/monitor_review_regression_test.go",
             "symbol": "TestReviewFailedUploadCleansTemporaryArtifact"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-04e",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestRereviewRemoteCleanupExitFailureIsReported"
           },
           "automation_status": "implemented",
           "required": true
@@ -1991,6 +2071,36 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-06k",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/metrics_retention_test.go",
+            "symbol": "TestRereviewInvalidDryRunCannotEnableDeletion"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06l",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewCapacityUsesHypertableChunks"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06m",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewBootstrapDiscardPolicyIsExplicit"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -2068,6 +2178,56 @@
           "implementation": {
             "path": "backend/internal/service/telemetry_events_test.go",
             "symbol": "TestReviewDeploymentStageDurationsAreRecorded"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07h",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestRereviewCollectionReasonBelongsToItsAttempt"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07i",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestRereviewTimeoutReasonIsNotBorrowed"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07j",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestRereviewSkippedAdmissionsAreCounted"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07k",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestRereviewCollectionIDReachesTheDeployment"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07l",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestRereviewLeaseGaugeIsShared"
           },
           "automation_status": "implemented",
           "required": true

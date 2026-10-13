@@ -40,6 +40,15 @@ RUN adduser -D -H -s /sbin/nologin talus
 COPY --from=go-builder /hub /usr/local/bin/hub
 COPY --from=go-builder /agents/ /usr/local/bin/
 COPY --from=ui-builder /app/dist/ /static/
+# The final image proves it can run the agent for its own architecture: the
+# protocol smoke test executes the TARGETARCH binary (arm64 included, under
+# emulation in CI). Verification inside the build means a broken image cannot be
+# published (TC-08-05).
+ARG TARGETARCH
+RUN /usr/local/bin/vpsmanager-agent-linux-${TARGETARCH} --format json > /tmp/agent-probe.json \
+ && grep -q '"protocol_version": 1' /tmp/agent-probe.json \
+ && grep -q '"agent_version":' /tmp/agent-probe.json \
+ && rm -f /tmp/agent-probe.json
 EXPOSE 8080
 ENV STATIC_DIR=/static
 USER talus

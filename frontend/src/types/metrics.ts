@@ -23,6 +23,21 @@ export interface MetricPoint {
 	// Observed maxima of the sampled interval, retained separately from the
 	// average so long-range charts can still show peaks (REQ §8.3).
 	cpu_peak?: number | null;
+	// Per-bucket statistics; a window average is sum/count (F06).
+	cpu_sum?: number | null;
+	cpu_count?: number | null;
+	memory_percent_sum?: number | null;
+	memory_percent_count?: number | null;
+	disk_percent_sum?: number | null;
+	disk_percent_count?: number | null;
+	swap_percent_sum?: number | null;
+	swap_percent_count?: number | null;
+	load1_sum?: number | null;
+	load1_count?: number | null;
+	load5_sum?: number | null;
+	load5_count?: number | null;
+	load15_sum?: number | null;
+	load15_count?: number | null;
 	memory_peak?: number | null;
 	disk_peak?: number | null;
 	swap_peak?: number | null;

@@ -26,10 +26,12 @@ const WINDOW = {
   intervalMs: 60_000, // 10:00 .. 10:10 inclusive = 11 buckets
 };
 
-const at = (min, extra = {}) => ({
-  time: new Date(Date.UTC(2026, 8, 20, 10, min, 0)).toISOString(),
-  ...extra,
-});
+// A point from the API carries the bucket start and (for real samples) the
+// observation time inside it; freshness only ever uses the latter.
+const at = (min, extra = {}) => {
+  const time = new Date(Date.UTC(2026, 8, 20, 10, min, 0)).toISOString();
+  return { time, sampled_at: time, ...extra };
+};
 
 
 check("empty input still yields the full window grid", () => {
@@ -64,8 +66,8 @@ check("a real zero is preserved", () => {
 check("an explicit null value in a point stays null", () => {
   const out = buildAlignedSeries([at(6, { cpu_percent: null })], WINDOW, ["cpu_percent"]);
   assert.equal(out.series.cpu_percent[6], null);
-  // The sample still happened, so "last collected" advances.
-  assert.equal(out.lastSampleTime, at(6).time);
+  // A real sample happened at that bucket, so "last collected" advances.
+  assert.equal(out.lastSampleTime, at(6).sampled_at ?? at(6).time);
 });
 
 check("head and tail gaps are filled as empty buckets", () => {
@@ -110,7 +112,7 @@ check("invalid timestamps are skipped without throwing", () => {
   );
   assert.equal(out.series.cpu_percent[1], 20);
   assert.equal(out.series.cpu_percent.filter((x) => x !== null).length, 1);
-  assert.equal(out.lastSampleTime, at(1).time);
+  assert.equal(out.lastSampleTime, at(1).sampled_at ?? at(1).time);
 });
 
 check("points outside the window do not leak into the grid", () => {
@@ -125,11 +127,16 @@ check("points outside the window do not leak into the grid", () => {
 
 check("lastSampleTime is the raw sample time, not the bucket start", () => {
   const raw = "2026-09-20T10:07:30.000Z";
-  const out = buildAlignedSeries([{ time: raw, cpu_percent: 42 }], WINDOW, ["cpu_percent"]);
+  const bucket = "2026-09-20T10:07:00.000Z";
+  const out = buildAlignedSeries(
+    [{ time: bucket, sampled_at: raw, cpu_percent: 42 }],
+    WINDOW,
+    ["cpu_percent"],
+  );
   // Value lands in the 10:07 bucket...
-  assert.equal(out.times[7], "2026-09-20T10:07:00.000Z");
+  assert.equal(out.times[7], bucket);
   assert.equal(out.series.cpu_percent[7], 42);
-  // ...but "last collected" keeps the real instant.
+  // ...but "last collected" keeps the real instant (never the bucket start).
   assert.equal(out.lastSampleTime, raw);
 });
 
@@ -209,13 +216,34 @@ check("last collected uses the real sample time, not the bucket start", () => {
     ["cpu_percent"],
   );
   assert.equal(aligned.lastSampleTime, "2026-09-20T05:58:00.000Z");
-  // Without sampled_at the previous behaviour stays: the point's own time.
+  // A point without sampled_at carries no observation: a bucket start is not a
+  // sample time (F07).
   const legacy = buildAlignedSeries(
     [{ time: "2026-09-20T04:00:00.000Z", cpu_percent: 10 }],
     window,
     ["cpu_percent"],
   );
-  assert.equal(legacy.lastSampleTime, "2026-09-20T04:00:00.000Z");
+  assert.equal(legacy.lastSampleTime, null);
+});
+
+check("a confirmed-empty bucket never becomes the newest sample", () => {
+  const window = {
+    from: "2026-10-11T00:00:00.000Z",
+    to: "2026-10-13T06:00:00.000Z",
+    intervalMs: 6 * 3600 * 1000,
+  };
+  const aligned = buildAlignedSeries(
+    [
+      // The last real sample.
+      { time: "2026-10-11T18:00:00.000Z", sampled_at: "2026-10-11T23:58:00.000Z", cpu_percent: 10 },
+      // Later buckets that the backend confirmed empty: no sampled_at.
+      { time: "2026-10-12T00:00:00.000Z", cpu_percent: null },
+      { time: "2026-10-12T18:00:00.000Z", cpu_percent: null },
+    ],
+    window,
+    ["cpu_percent"],
+  );
+  assert.equal(aligned.lastSampleTime, "2026-10-11T23:58:00.000Z");
 });
 
 console.log(failures === 0 ? "\nmonitoring-series: ALL PASS" : `\nmonitoring-series: ${failures} FAILED`);

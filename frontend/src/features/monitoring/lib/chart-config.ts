@@ -352,3 +352,32 @@ export function coverageCell(
   const sampled = values.some((value) => value !== null && Number.isFinite(value));
   return { key: sampled ? "metrics.dataTable.sampled" : "metrics.dataTable.notSampled" };
 }
+
+/**
+ * Sample-weighted average over a window: Σsum/Σcount from the per-bucket
+ * statistics. Averaging bucket means would let a bucket with a single sample
+ * outweigh one with hundreds (F06), which is exactly the "平均桶均值" bug.
+ *
+ * Returns null when no bucket contributed a usable sum/count pair.
+ */
+export function weightedMean<T extends object>(
+  points: readonly T[],
+  sumField: string,
+  countField: string,
+): number | null {
+  let sum = 0;
+  let count = 0;
+  for (const point of points) {
+    const fields = point as Record<string, unknown>;
+    const bucketSum = fields[sumField];
+    const bucketCount = fields[countField];
+    if (
+      typeof bucketSum === "number" && Number.isFinite(bucketSum) &&
+      typeof bucketCount === "number" && Number.isFinite(bucketCount) && bucketCount > 0
+    ) {
+      sum += bucketSum;
+      count += bucketCount;
+    }
+  }
+  return count === 0 ? null : sum / count;
+}

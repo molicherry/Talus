@@ -10,6 +10,7 @@ import {
   metricLevelText,
   percentLevel,
 } from "../../../lib/metric-level";
+import { weightedMean } from "../lib/chart-config";
 import { cn } from "../../../lib/utils";
 import type { TimeRange } from "../../../types/metrics";
 import { useMetrics } from "../hooks/use-metrics";
@@ -98,13 +99,6 @@ function latestOf(values: Nullable[]): number | null {
     if (value !== null) return value;
   }
   return null;
-}
-
-/** Average over collected samples only — missing buckets are excluded. */
-function avgOf(values: Nullable[]): number | null {
-  const present = values.filter((v): v is number => v !== null);
-  if (present.length === 0) return null;
-  return present.reduce((acc, v) => acc + v, 0) / present.length;
 }
 
 function maxOf(values: Nullable[]): number | null {
@@ -523,25 +517,25 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
             <MetricStatCard
               label={t("monitoring.cpuUsage")}
               value={latestOf(pick(cpuPeak, cpu))}
-              avg={avgOf(cpu)}
+              avg={weightedMean(points ?? [], "cpu_sum", "cpu_count")}
               max={maxOf(cpuPeak)}
             />
             <MetricStatCard
               label={t("monitoring.memoryUsage")}
               value={latestOf(pick(memoryPeak, memory))}
-              avg={avgOf(memory)}
+              avg={weightedMean(points ?? [], "memory_percent_sum", "memory_percent_count")}
               max={maxOf(memoryPeak)}
             />
             <MetricStatCard
               label={t("monitoring.diskUsage")}
               value={latestOf(pick(diskPeak, disk))}
-              avg={avgOf(disk)}
+              avg={weightedMean(points ?? [], "disk_percent_sum", "disk_percent_count")}
               max={maxOf(diskPeak)}
             />
             <MetricStatCard
               label={t("monitoring.swapUsage")}
               value={latestOf(pick(swapPeak, swap))}
-              avg={avgOf(swap)}
+              avg={weightedMean(points ?? [], "swap_percent_sum", "swap_percent_count")}
               max={maxOf(swapPeak)}
             />
           </div>

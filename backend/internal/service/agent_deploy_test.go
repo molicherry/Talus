@@ -36,9 +36,12 @@ type fakeRemote struct {
 	// uploadWriteThenFail stores the upload and then reports failure, as a chmod
 	// or a partially applied command would.
 	uploadWriteThenFail bool
-	activateUnknown     bool
-	activateFailsSoft   bool
-	corruptUpload       bool
+	// removeExit makes the remote rm answer with a non-zero exit status while the
+	// transport stays healthy.
+	removeExit        int
+	activateUnknown   bool
+	activateFailsSoft bool
+	corruptUpload     bool
 
 	agentPayload string
 	agentExit    int
@@ -202,6 +205,12 @@ func (f *fakeRemote) handler() func(string, ssh.Channel, <-chan struct{}) {
 			exitStatus(ch, 0)
 		case removeRe.MatchString(command):
 			match := removeRe.FindStringSubmatch(command)
+			if f.removeExit != 0 {
+				// A rejected rm: the file stays and the transport is fine.
+				fmt.Fprintf(ch.Stderr(), "rm: cannot remove '%s': Permission denied\n", match[1])
+				exitStatus(ch, uint32(f.removeExit))
+				return
+			}
 			f.mu.Lock()
 			delete(f.files, match[1])
 			f.mu.Unlock()

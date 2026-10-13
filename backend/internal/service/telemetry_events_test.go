@@ -64,7 +64,7 @@ func TestReviewCollectionEventCountsExactlyOnce(t *testing.T) {
 
 	finished := time.Now()
 	for i := 0; i < 3; i++ {
-		svc.emitCollection(7, finished.Add(-2*time.Second), time.Time{}, finished.Add(-time.Second), finished, outcomeSuccess)
+		svc.emitCollection("mc-7-1", 7, finished.Add(-2*time.Second), time.Time{}, finished.Add(-time.Second), finished, outcomeSuccess, nil)
 	}
 	snapshot := registry.Snapshot()
 	key := `talus_monitor_collections_total{outcome=success,reason_class=none}`
@@ -130,5 +130,109 @@ func TestReviewDeploymentStageDurationsAreRecorded(t *testing.T) {
 		if !ok || observation.Count != 1 {
 			t.Fatalf("stage %s not recorded: %+v", stage, observations)
 		}
+	}
+}
+
+// TestRereviewCollectionReasonBelongsToItsAttempt pins F08: concurrent attempts
+// must not borrow each other's reason class. The old shared error slot let a
+// finished attempt pick up whatever another attempt had just returned.
+func TestRereviewCollectionReasonBelongsToItsAttempt(t *testing.T) {
+	registry := telemetry.NewRegistry()
+	svc := NewMonitorService(nil, nil, nil, time.Minute)
+	svc.SetTelemetry(registry)
+
+	now := time.Now()
+	// Attempt A failed with permission; attempt B failed with protocol. Both
+	// finished before A's final event was written, as concurrency allows.
+	svc.emitCollection("mc-1-1", 1, time.Time{}, time.Time{}, now.Add(-10*time.Millisecond), now, outcomeFailure,
+		deployError(ReasonAgentReadOnly, errors.New("read-only")))
+	svc.emitCollection("mc-2-1", 2, time.Time{}, time.Time{}, now.Add(-10*time.Millisecond), now, outcomeFailure,
+		deployError(ReasonAgentProtocolMismatch, errors.New("protocol")))
+
+	snapshot := registry.Snapshot()
+	if got := snapshot[`talus_monitor_collections_total{outcome=failure,reason_class=permission}`]; got != 1 {
+		t.Fatalf("permission count = %v, want 1 (%v)", got, snapshot)
+	}
+	if got := snapshot[`talus_monitor_collections_total{outcome=failure,reason_class=protocol}`]; got != 1 {
+		t.Fatalf("protocol count = %v, want 1 (%v)", got, snapshot)
+	}
+}
+
+// TestRereviewTimeoutReasonIsNotBorrowed pins the deadline case: a timeout attempt
+// keeps its own reason even if another attempt failed differently.
+func TestRereviewTimeoutReasonIsNotBorrowed(t *testing.T) {
+	registry := telemetry.NewRegistry()
+	svc := NewMonitorService(nil, nil, nil, time.Minute)
+	svc.SetTelemetry(registry)
+	now := time.Now()
+
+	svc.emitCollection("mc-1-2", 1, time.Time{}, time.Time{}, now, now, outcomeFailure, context.DeadlineExceeded)
+	svc.emitCollection("mc-2-2", 2, time.Time{}, time.Time{}, now, now, outcomeFailure, deployError(ReasonAgentHashMismatch, errors.New("hash")))
+
+	snapshot := registry.Snapshot()
+	if got := snapshot[`talus_monitor_collections_total{outcome=timeout,reason_class=timeout}`]; got != 1 {
+		t.Fatalf("timeout count = %v, want 1 (%v)", got, snapshot)
+	}
+	if got := snapshot[`talus_monitor_collections_total{outcome=failure,reason_class=integrity}`]; got != 1 {
+		t.Fatalf("integrity count = %v, want 1 (%v)", got, snapshot)
+	}
+}
+
+// TestRereviewSkippedAdmissionsAreCounted pins the production deferral path: a
+// missed slot is counted once with the frozen skipped/quota pair, and the count
+// follows the slots that were really missed rather than the scheduler passes.
+func TestRereviewSkippedAdmissionsAreCounted(t *testing.T) {
+	registry := telemetry.NewRegistry()
+	svc := NewMonitorService(nil, nil, nil, time.Minute)
+	svc.SetTelemetry(registry)
+
+	// Two nodes missed one slot each in one pass.
+	svc.reportTick(monitorTick{Queued: []uint{1, 2}, Deferred: 2})
+	snapshot := registry.Snapshot()
+	key := `talus_monitor_collections_total{outcome=skipped,reason_class=quota}`
+	if got := snapshot[key]; got != 0 {
+		t.Fatalf("skipped count = %v before any deferral: %v", got, snapshot)
+	}
+	if got := snapshot[`talus_operations_total{action=monitor.collect,outcome=skipped,reason_class=quota}`]; got != 2 {
+		t.Fatalf("skipped operations = %v, want 2", got)
+	}
+
+	// A pass that only skipped an in-flight node without a missed slot counts
+	// nothing new.
+	svc.reportTick(monitorTick{Skipped: []uint{1}})
+	if got := registry.Snapshot()[`talus_operations_total{action=monitor.collect,outcome=skipped,reason_class=quota}`]; got != 2 {
+		t.Fatalf("skipped operations = %v, want the count unchanged", got)
+	}
+}
+
+// TestRereviewCollectionIDReachesTheDeployment pins the correlation requirement:
+// the id generated for an attempt is available to the deployment and its stage
+// logs, instead of being created only when the final event is written.
+func TestRereviewCollectionIDReachesTheDeployment(t *testing.T) {
+	registry := telemetry.NewRegistry()
+	emitter := newMonitorTelemetry(registry, nil)
+	id := emitter.nextCollectionID(7)
+	ctx := WithCollectionID(context.Background(), id)
+	if got := CollectionIDFromContext(ctx); got != id {
+		t.Fatalf("collection id = %q, want %q", got, id)
+	}
+	if got := CollectionIDFromContext(context.Background()); got != "" {
+		t.Fatalf("a context without an attempt must have no collection id, got %q", got)
+	}
+}
+
+// TestRereviewLeaseGaugeIsShared pins the SSH lease gauge for the agent consumer.
+func TestRereviewLeaseGaugeIsShared(t *testing.T) {
+	registry := telemetry.NewRegistry()
+	emitter := newMonitorTelemetry(registry, nil)
+	emitter.leaseGauge("agent", 1)
+	emitter.leaseGauge("agent", -1)
+	key := `talus_ssh_leases_in_use{consumer=agent}`
+	if got := registry.Snapshot()[key]; got != 0 {
+		t.Fatalf("%s = %v, want 0 after acquire and release", key, got)
+	}
+	// The consumer label stays inside the frozen enum.
+	if err := registry.AddGauge("talus_ssh_leases_in_use", map[string]string{"consumer": "probe"}, 1); err == nil {
+		t.Fatal("an unknown consumer must be rejected")
 	}
 }

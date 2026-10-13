@@ -37,6 +37,23 @@ const MetricPointSchema = z.object({
   disk_read_peak: z.number().nullable().optional(),
   disk_write_peak: z.number().nullable().optional(),
 
+  // Per-bucket statistics (F06): the window average is Σsum/Σcount, so the
+  // client must keep them instead of letting the schema strip them.
+  cpu_sum: z.number().nullable().optional(),
+  cpu_count: z.number().nullable().optional(),
+  memory_percent_sum: z.number().nullable().optional(),
+  memory_percent_count: z.number().nullable().optional(),
+  disk_percent_sum: z.number().nullable().optional(),
+  disk_percent_count: z.number().nullable().optional(),
+  swap_percent_sum: z.number().nullable().optional(),
+  swap_percent_count: z.number().nullable().optional(),
+  load1_sum: z.number().nullable().optional(),
+  load1_count: z.number().nullable().optional(),
+  load5_sum: z.number().nullable().optional(),
+  load5_count: z.number().nullable().optional(),
+  load15_sum: z.number().nullable().optional(),
+  load15_count: z.number().nullable().optional(),
+
   net_recv_coverage: z.number().nullable().optional(),
   net_sent_coverage: z.number().nullable().optional(),
   disk_read_coverage: z.number().nullable().optional(),

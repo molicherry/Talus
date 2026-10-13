@@ -204,19 +204,22 @@ func (s *AgentDeploymentService) Collect(ctx context.Context, lease Lease) (*age
 		// countable next to the collection events.
 		started := time.Now()
 		s.logger.Info("agent deployment attempt",
-			"action", "agent.deploy", "server_id", lease.ServerID(), "platform", platform.String(),
+			"action", "agent.deploy", "collection_id", CollectionIDFromContext(ctx),
+			"server_id", lease.ServerID(), "platform", platform.String(),
 			"build_version", artifact.BuildVersion, "protocol_version", manifest.ProtocolVersion)
 		if err := s.deploy(ctx, lease, artifact); err != nil {
 			s.telemetry.agentUpdate(agentArch(platform.Arch), telOutcomeFailure, deploymentReasonClass(err))
 			s.logger.Warn("agent deployment failed",
-				"action", "agent.deploy", "outcome", "failure", "reason_class", ReasonFromError(err),
+				"action", "agent.deploy", "collection_id", CollectionIDFromContext(ctx),
+				"outcome", "failure", "reason_class", ReasonFromError(err),
 				"server_id", lease.ServerID(), "platform", platform.String(),
 				"duration_ms", time.Since(started).Milliseconds())
 			return nil, err
 		}
 		s.telemetry.agentUpdate(agentArch(platform.Arch), telOutcomeSuccess, telReasonNone)
 		s.logger.Info("agent deployment succeeded",
-			"action", "agent.deploy", "outcome", "success", "reason_class", "",
+			"action", "agent.deploy", "collection_id", CollectionIDFromContext(ctx),
+			"outcome", "success", "reason_class", "",
 			"server_id", lease.ServerID(), "platform", platform.String(),
 			"duration_ms", time.Since(started).Milliseconds())
 	}
@@ -307,9 +310,19 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 		if activated {
 			return
 		}
-		if _, err := lease.Exec(ctx, "rm -f "+tmpPath, s.execBudget); err != nil {
-			s.logger.Warn("agent upload cleanup left a temporary file",
-				"server_id", lease.ServerID(), "path", tmpPath, "error", err)
+		// Exec can report a clean transport with a non-zero remote exit: the file
+		// would stay and the failure would be invisible. Only exit 0 confirms the
+		// cleanup (F04).
+		result, err := lease.Exec(ctx, "rm -f "+tmpPath, s.execBudget)
+		if err != nil || result == nil || result.ExitCode != 0 {
+			exitCode := -1
+			if result != nil {
+				exitCode = result.ExitCode
+			}
+			s.logger.Warn("agent upload cleanup failed",
+				"action", "agent.deploy", "outcome", "failure", "reason_class", "permission",
+				"server_id", lease.ServerID(), "path", tmpPath,
+				"exit_code", exitCode, "error", err)
 		}
 	}()
 

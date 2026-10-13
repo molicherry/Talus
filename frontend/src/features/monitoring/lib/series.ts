@@ -72,12 +72,15 @@ export function buildAlignedSeries<T extends { time: string }>(
     const t = Date.parse(point.time);
     if (!Number.isFinite(t)) continue;
 
-    // The bucket start is an aggregation boundary; the real observation is
-    // `sampled_at` when the backend provides it (R18).
+    // The bucket start is an aggregation boundary and a confirmed-empty bucket
+    // carries no observation at all, so freshness only ever comes from a real
+    // `sampled_at`. Falling back to `point.time` let a later empty bucket claim to
+    // be the newest sample (F07).
     const sampledRaw = (point as unknown as { sampled_at?: string | null }).sampled_at;
-    const sampled = typeof sampledRaw === "string" ? Date.parse(sampledRaw) : Number.NaN;
-    const observation = Number.isFinite(sampled) ? sampled : t;
-    if (lastSampleMs === null || observation > lastSampleMs) lastSampleMs = observation;
+    const observation = typeof sampledRaw === "string" ? Date.parse(sampledRaw) : Number.NaN;
+    if (Number.isFinite(observation) && (lastSampleMs === null || observation > lastSampleMs)) {
+      lastSampleMs = observation;
+    }
 
     const bucket = Math.floor(t / interval) * interval;
     if (bucket < start || bucket > end) continue;

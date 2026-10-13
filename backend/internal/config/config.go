@@ -32,6 +32,9 @@ type Config struct {
 	// and reports; only enabled && !dry-run deletes anything.
 	MetricsRetentionEnabled bool
 	MetricsRetentionDryRun  bool
+	// MetricsRetentionParseError records an unparsable rollout switch so Validate
+	// rejects startup instead of silently changing the deletion behaviour.
+	MetricsRetentionParseError error
 
 	// Monitoring
 	MonitorInterval int
@@ -70,6 +73,9 @@ type Config struct {
 func (c *Config) Validate() error {
 	if c.MonitorInterval <= 0 {
 		return fmt.Errorf("MONITOR_INTERVAL must be a positive integer, got %d", c.MonitorInterval)
+	}
+	if c.MetricsRetentionParseError != nil {
+		return c.MetricsRetentionParseError
 	}
 	if c.MonitorToleratedRounds < 0 {
 		return fmt.Errorf("MONITOR_TOLERATED_ROUNDS must not be negative, got %d", c.MonitorToleratedRounds)
@@ -113,10 +119,22 @@ func Load() *Config {
 	cfg.LogFormat = getEnvOrDefault("LOG_FORMAT", "json")
 	cfg.LogLevel = getEnvOrDefault("LOG_LEVEL", "info")
 	cfg.AgentArtifactsDir = getEnvOrDefault("AGENT_ARTIFACTS_DIR", "/usr/local/bin")
-	cfg.MetricsRetentionEnabled = getEnvBool("METRICS_RETENTION_ENABLED")
+	// The retention rollout switches are parsed strictly: a value that cannot be
+	// interpreted must never turn the safe default (dry run) into deletion, and
+	// Validate refuses to start instead (F01). The safe defaults are installed
+	// first so a parse failure cannot leave the zero values (enabled=false,
+	// dryRun=false) in place — dryRun=false is the deleting configuration.
+	cfg.MetricsRetentionEnabled = false
 	cfg.MetricsRetentionDryRun = true
-	if os.Getenv("METRICS_RETENTION_DRY_RUN") != "" {
-		cfg.MetricsRetentionDryRun = getEnvBool("METRICS_RETENTION_DRY_RUN")
+	if enabled, err := getEnvBoolStrict("METRICS_RETENTION_ENABLED"); err != nil {
+		cfg.MetricsRetentionParseError = err
+	} else {
+		cfg.MetricsRetentionEnabled = enabled
+	}
+	if dryRun, err := getEnvBoolStrict("METRICS_RETENTION_DRY_RUN"); err != nil {
+		cfg.MetricsRetentionParseError = err
+	} else {
+		cfg.MetricsRetentionDryRun = dryRun
 	}
 	cfg.MonitorInterval = getEnvIntOrDefault("MONITOR_INTERVAL", 60)
 	cfg.MonitorToleratedRounds = getEnvIntOrDefault("MONITOR_TOLERATED_ROUNDS", 1)
@@ -194,4 +212,20 @@ func (c *Config) MonitorFreshnessThreshold() time.Duration {
 	}
 	return time.Duration(c.MonitorInterval*rounds)*time.Second +
 		time.Duration(c.MonitorAllowedLatency)*time.Second
+}
+
+// getEnvBoolStrict parses a boolean environment variable and reports a value it
+// cannot interpret. Callers that gate a destructive behaviour must use this: the
+// lenient getEnvBool would silently fall back to false, which for a dry-run switch
+// means "delete".
+func getEnvBoolStrict(key string) (bool, error) {
+	val := os.Getenv(key)
+	if val == "" {
+		return false, nil
+	}
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		return false, fmt.Errorf("%s=%q is not a valid boolean", key, val)
+	}
+	return parsed, nil
 }

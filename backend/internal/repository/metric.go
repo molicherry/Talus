@@ -26,20 +26,15 @@ func (r *MetricRepo) SetDeltaGapThreshold(interval time.Duration) {
 }
 
 // DeltaGapForInterval derives the sampling-gap threshold from the effective
-// collection interval (§8.3: the threshold is tied to the interval and the
-// acceptance fixture records the value).
+// collection interval: three intervals exactly, never clamped (§8.3 requires the
+// threshold to follow the configured period, and clamping changed the semantics of
+// legitimate periods — F03). The scan budget is protected by reading only the
+// actual predecessor row instead of widening the threshold.
 func DeltaGapForInterval(interval time.Duration) time.Duration {
 	if interval <= 0 {
 		return DefaultDeltaGapThreshold
 	}
-	threshold := 3 * interval
-	if threshold < time.Minute {
-		threshold = time.Minute
-	}
-	if threshold > time.Hour {
-		threshold = time.Hour
-	}
-	return threshold
+	return 3 * interval
 }
 
 // gapThreshold is the threshold in force for this repository.
@@ -159,6 +154,23 @@ type AggregatedMetric struct {
 	DiskReadPeak *float64 `gorm:"column:disk_read_peak" json:"disk_read_peak"`
 	DiskWrtPeak  *float64 `gorm:"column:disk_write_peak" json:"disk_write_peak"`
 
+	// Per-bucket sums and counts. A window average must be sample-weighted
+	// (sum/count), never the mean of bucket means (F06).
+	CPUSum             *float64 `gorm:"column:cpu_sum" json:"cpu_sum"`
+	CPUCount           int      `gorm:"column:cpu_count" json:"cpu_count"`
+	MemoryPercentSum   *float64 `gorm:"column:memory_percent_sum" json:"memory_percent_sum"`
+	MemoryPercentCount int      `gorm:"column:memory_percent_count" json:"memory_percent_count"`
+	DiskPercentSum     *float64 `gorm:"column:disk_percent_sum" json:"disk_percent_sum"`
+	DiskPercentCount   int      `gorm:"column:disk_percent_count" json:"disk_percent_count"`
+	SwapPercentSum     *float64 `gorm:"column:swap_percent_sum" json:"swap_percent_sum"`
+	SwapPercentCount   int      `gorm:"column:swap_percent_count" json:"swap_percent_count"`
+	Load1Sum           *float64 `gorm:"column:load1_sum" json:"load1_sum"`
+	Load1Count         int      `gorm:"column:load1_count" json:"load1_count"`
+	Load5Sum           *float64 `gorm:"column:load5_sum" json:"load5_sum"`
+	Load5Count         int      `gorm:"column:load5_count" json:"load5_count"`
+	Load15Sum          *float64 `gorm:"column:load15_sum" json:"load15_sum"`
+	Load15Count        int      `gorm:"column:load15_count" json:"load15_count"`
+
 	// Valid coverage seconds behind the rate columns, so a gap is visible.
 	NetRecvCov  *float64 `gorm:"column:net_recv_coverage" json:"net_recv_coverage"`
 	NetSentCov  *float64 `gorm:"column:net_sent_coverage" json:"net_sent_coverage"`
@@ -266,7 +278,7 @@ func (r *MetricRepo) Query(
 	// zero/negative time delta or a gap beyond the declared threshold yields an
 	// unknown value (a gap), while a real zero increment is a real zero. The scan
 	// starts one threshold early so the first bucket has a predecessor.
-	sql := fmt.Sprintf(deltaSamplesCTE("")+`,
+	sql := fmt.Sprintf(deltaSamplesCTE(0, "$5", "$6", "$7")+`,
 	aggregate AS (
 		SELECT
 			to_timestamp(floor(EXTRACT(EPOCH FROM time) / EXTRACT(EPOCH FROM $5::interval))
@@ -292,6 +304,7 @@ func (r *MetricRepo) Query(
 			%s AS disk_read_rate,
 			%s AS disk_write_rate
 		FROM samples
+		WHERE time >= $6 AND time < $7
 		GROUP BY bucket
 	)
 	SELECT bucket, cpu_percent, memory_percent, disk_percent, load_1, load_5, load_15,
@@ -305,8 +318,8 @@ func (r *MetricRepo) Query(
 
 	var results []AggregatedMetric
 	err := r.db.WithContext(ctx).Raw(sql,
-		serverID, from.Add(-r.gapThreshold()), to,
-		r.gapThreshold().String(), interval).Scan(&results).Error
+		serverID, from, to,
+		r.gapThreshold().String(), interval, from, to).Scan(&results).Error
 	if err != nil {
 		return nil, err
 	}

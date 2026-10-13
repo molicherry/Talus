@@ -86,6 +86,26 @@ func (t *monitorTelemetry) stage(action, stage string, duration time.Duration) {
 		map[string]string{"action": action, "stage": stage}, duration.Seconds())
 }
 
+// operations counts one outcome of an action without a collection id.
+func (t *monitorTelemetry) operations(action, outcome, reasonClass string) {
+	if t == nil || t.registry == nil {
+		return
+	}
+	_ = t.registry.IncCounter("talus_operations_total", map[string]string{
+		"action": action, "outcome": outcome, "reason_class": reasonClass,
+	})
+}
+
+// leaseGauge records the SSH leases in use for one consumer. The exec and
+// terminal consumers still own their gauges in the resource layer; the monitor
+// records the agent consumer it owns.
+func (t *monitorTelemetry) leaseGauge(consumer string, delta float64) {
+	if t == nil || t.registry == nil {
+		return
+	}
+	_ = t.registry.AddGauge("talus_ssh_leases_in_use", map[string]string{"consumer": consumer}, delta)
+}
+
 // workers records the in-flight worker gauge for a component.
 func (t *monitorTelemetry) workers(component string, delta float64) {
 	if t == nil || t.registry == nil {
@@ -207,4 +227,19 @@ func agentArch(arch string) string {
 	default:
 		return "unsupported"
 	}
+}
+
+// collectionIDKey carries one attempt's correlation id down to the deployment and
+// stage logs, so the whole attempt shares the id emitted with its final event.
+type collectionIDKey struct{}
+
+// WithCollectionID attaches a collection id to a task context.
+func WithCollectionID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, collectionIDKey{}, id)
+}
+
+// CollectionIDFromContext returns the collection id of the attempt, if any.
+func CollectionIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(collectionIDKey{}).(string)
+	return id
 }

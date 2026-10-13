@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -95,11 +96,8 @@ type MonitorService struct {
 	wake chan struct{}
 	// telemetry records the frozen operation/stage/lag vocabulary (§12.1/§12.2).
 	telemetry *monitorTelemetry
-	// lastErr keeps the collect error of an attempt available for classification.
-	lastErr struct {
-		mu  sync.Mutex
-		err error
-	}
+	// leaseSettleBudget bounds one settlement wait; zero uses the frozen default.
+	leaseSettleBudget time.Duration
 }
 
 // NewMonitorService creates a MonitorService with the given dependencies.
@@ -180,16 +178,18 @@ func (s *MonitorService) Start(ctx context.Context) {
 			cancels[id] = cancel
 			mu.Unlock()
 			due, queuedAt := sched.admissionTiming(id)
+			collectionID := s.telemetry.nextCollectionID(id)
+			taskCtx = WithCollectionID(taskCtx, collectionID)
 			s.telemetry.workers("monitor", 1)
 			wg.Add(1)
 			go func(id uint) {
 				defer wg.Done()
 				defer cancel()
-				outcome := s.runTask(taskCtx, id)
+				outcome, attemptErr := s.runTask(taskCtx, id)
 				finishedAt := s.clock.Now()
 				s.telemetry.workers("monitor", -1)
 				s.reportCompletion(id, sched.complete(id, outcome, finishedAt))
-				s.emitCollection(id, due, queuedAt, startedAt, finishedAt, outcome)
+				s.emitCollection(collectionID, id, due, queuedAt, startedAt, finishedAt, outcome, attemptErr)
 				mu.Lock()
 				delete(cancels, id)
 				mu.Unlock()
@@ -244,33 +244,33 @@ func (s *MonitorService) NotifyTopologyChange() {
 
 // runTask performs one collection and classifies its outcome, so only real
 // failures advance the node's backoff.
-func (s *MonitorService) runTask(ctx context.Context, serverID uint) (outcome monitorOutcome) {
+// runTask performs one collection and returns the attempt's own result. The error
+// travels with the attempt (never through shared state), so concurrent collections
+// cannot borrow each other's reason class (F08).
+func (s *MonitorService) runTask(ctx context.Context, serverID uint) (outcome monitorOutcome, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			s.logger.Error("monitor goroutine panicked", "server_id", serverID, "panic", r)
-			outcome = outcomeFailure
+			outcome, err = outcomeFailure, fmt.Errorf("monitor panic: %v", r)
 		}
 	}()
-	err := s.collectTask(ctx, serverID)
-	s.lastErr.mu.Lock()
-	s.lastErr.err = err
-	s.lastErr.mu.Unlock()
+	err = s.collectTask(ctx, serverID)
 	switch {
 	case ctx.Err() == context.DeadlineExceeded:
 		s.logger.Error("metrics collection exceeded its deadline", "server_id", serverID)
-		return outcomeFailure
+		return outcomeFailure, err
 	case ctx.Err() != nil:
 		// Application shutdown, node deletion or generation invalidation.
-		return outcomeCancelled
+		return outcomeCancelled, err
 	case errors.Is(err, sshpool.ErrStaleGeneration):
 		// The target changed under the lease: cancelled, never a failure.
 		s.logger.Info("monitor collection cancelled by a target change", "server_id", serverID)
-		return outcomeCancelled
+		return outcomeCancelled, err
 	case err != nil:
 		s.logger.Error("failed to collect metrics", "server_id", serverID, "error", err)
-		return outcomeFailure
+		return outcomeFailure, err
 	}
-	return outcomeSuccess
+	return outcomeSuccess, nil
 }
 
 // SetTelemetry wires the shared telemetry registry so the background paths record
@@ -300,11 +300,7 @@ func (s *MonitorService) collectTask(ctx context.Context, serverID uint) error {
 // emitCollection writes the final event of one collection attempt: the frozen
 // outcome/reason pair, the schedule lag and the capacity wait (REQUIREMENTS
 // §12.1/§12.2). Success is an event too, so a healthy cycle is observable.
-func (s *MonitorService) emitCollection(serverID uint, due, queuedAt, startedAt, finishedAt time.Time, outcome monitorOutcome) {
-	s.lastErr.mu.Lock()
-	err := s.lastErr.err
-	s.lastErr.mu.Unlock()
-
+func (s *MonitorService) emitCollection(collectionID string, serverID uint, due, queuedAt, startedAt, finishedAt time.Time, outcome monitorOutcome, err error) {
 	outcomeLabel, reasonLabel := collectionOutcome(outcome, err)
 	lag := time.Duration(0)
 	if !due.IsZero() && startedAt.After(due) {
@@ -315,7 +311,7 @@ func (s *MonitorService) emitCollection(serverID uint, due, queuedAt, startedAt,
 		wait = startedAt.Sub(queuedAt)
 	}
 	s.telemetry.collection(collectionEvent{
-		CollectionID: s.telemetry.nextCollectionID(serverID),
+		CollectionID: collectionID,
 		ServerID:     serverID,
 		Outcome:      outcomeLabel,
 		ReasonClass:  reasonLabel,
@@ -329,6 +325,11 @@ func (s *MonitorService) emitCollection(serverID uint, due, queuedAt, startedAt,
 // once per streak, as required by REQUIREMENTS §12.3. Node identity stays in the
 // log for correlation and is never a metric label.
 func (s *MonitorService) reportTick(tick monitorTick) {
+	// A deferred admission is a production outcome, not just a log line: count the
+	// slots that were really missed with the frozen vocabulary (skipped/quota).
+	for i := 0; i < tick.Deferred; i++ {
+		s.telemetry.operations("monitor.collect", telOutcomeSkipped, telReasonQuota)
+	}
 	if len(tick.Queued) > 0 || len(tick.Skipped) > 0 {
 		s.logger.Info("monitor admission deferred",
 			"action", "monitor.collect", "outcome", "deferred",
@@ -369,6 +370,8 @@ func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
 	if err != nil {
 		return err
 	}
+	s.telemetry.leaseGauge("agent", 1)
+	defer s.telemetry.leaseGauge("agent", -1)
 	defer lease.Release()
 
 	out, err := s.deployer.Collect(ctx, lease)
@@ -381,7 +384,7 @@ func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
 	// transport. Waiting here keeps shutdown honest: the scheduler must not
 	// report the task finished (and start its backoff) while a transport is still
 	// closing. The wait is bounded by the frozen 3s local cleanup budget.
-	if !s.awaitLeaseSettlement(ctx, lease) {
+	if !s.awaitLeaseSettlement(lease) {
 		s.logger.Warn("monitor lease settlement exceeded its cleanup budget", "server_id", serverID)
 	}
 	if err != nil {
@@ -395,21 +398,27 @@ func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
 const monitorLeaseSettleBudget = 3 * time.Second
 
 // awaitLeaseSettlement waits for the lease to report that its resources were
-// reclaimed, bounded by monitorLeaseSettleBudget and the task's own deadline.
-func (s *MonitorService) awaitLeaseSettlement(ctx context.Context, lease Lease) bool {
+// reclaimed. The wait is bounded by the frozen local cleanup budget and is not
+// abandoned when the task context is cancelled: shutdown, node deletion and a
+// collection deadline all cancel that context, and the resources are still being
+// closed (F05). The budget starts when settlement begins, matching the resource
+// layer's own absolute cleanup deadline.
+func (s *MonitorService) awaitLeaseSettlement(lease Lease) bool {
 	select {
 	case <-lease.Done():
 		return true
 	default:
 	}
-	timer := time.NewTimer(monitorLeaseSettleBudget)
+	budget := s.leaseSettleBudget
+	if budget <= 0 {
+		budget = monitorLeaseSettleBudget
+	}
+	timer := time.NewTimer(budget)
 	defer timer.Stop()
 	select {
 	case <-lease.Done():
 		return true
 	case <-timer.C:
-		return false
-	case <-ctx.Done():
 		return false
 	}
 }

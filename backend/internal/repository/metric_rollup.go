@@ -153,7 +153,7 @@ func (r *MetricRepo) rollupStart(ctx context.Context, serverID uint, closed, now
 // including buckets with no samples, which are recorded explicitly so the
 // checkpoint's completeness claim is verifiable.
 func materializeBuckets(tx *gorm.DB, repo *MetricRepo, serverID uint, from, to time.Time) (int, error) {
-	sql := deltaSamplesCTE("") + "," + `
+	sql := deltaSamplesCTE(intervalSeconds["6h"], "", "$5", "$6") + "," + `
 	aggregate AS (` + rollupAggregateSelect(rollupBucketExpr) + `
 	),
 	buckets AS (
@@ -494,11 +494,17 @@ func (r *MetricRepo) StorageReport(ctx context.Context) (*StorageReport, error) 
 		}
 	}
 	report.RawRows = raw.Rows
-	report.RawTotalBytes = raw.TotalBytes
 	report.RawTableBytes = raw.TableBytes
 	report.RawIndexBytes = raw.IndexBytes
 	if raw.ChunkBytes != nil {
+		// On TimescaleDB the hypertable's own relation size covers only the parent
+		// shell; the chunks hold the data. hypertable_detailed_size already reports
+		// the parent and every chunk, so it is the total — using the parent size
+		// alone understated capacity by orders of magnitude (F09).
 		report.RawChunkBytes = *raw.ChunkBytes
+		report.RawTotalBytes = *raw.ChunkBytes
+	} else {
+		report.RawTotalBytes = raw.TotalBytes
 	}
 
 	var rollup struct {

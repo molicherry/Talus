@@ -191,6 +191,22 @@ async function fixture(browser, mobile = false) {
           net_sent_coverage: 60,
           disk_read_coverage: 60,
           disk_write_coverage: 60,
+          // Per-bucket statistics: the window average is sum/count, never the mean
+          // of bucket means (F06).
+          cpu_sum: index === 0 ? 0 : 30,
+          cpu_count: 1,
+          memory_percent_sum: 25,
+          memory_percent_count: 1,
+          disk_percent_sum: 40,
+          disk_percent_count: 1,
+          swap_percent_sum: 0,
+          swap_percent_count: 1,
+          load1_sum: 1,
+          load1_count: 1,
+          load5_sum: 1,
+          load5_count: 1,
+          load15_sum: 1,
+          load15_count: 1,
         });
       }
       // The endpoint answers with the §4.2.1 envelope, never a bare array.

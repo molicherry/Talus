@@ -368,8 +368,21 @@ func TestReviewGapThresholdTracksConfiguredCollectionInterval(t *testing.T) {
 	if got := DeltaGapForInterval(600 * time.Second); got != 30*time.Minute {
 		t.Fatalf("600s interval → %v, want 30m", got)
 	}
-	if got := DeltaGapForInterval(2 * time.Second); got != time.Minute {
-		t.Fatalf("2s interval → %v, want the 1m floor", got)
+	// F03: the threshold follows the period exactly, without a clamp that would
+	// change the meaning of legitimate configurations.
+	if got := DeltaGapForInterval(2 * time.Second); got != 6*time.Second {
+		t.Fatalf("2s interval → %v, want exactly 3x = 6s", got)
+	}
+	if got := DeltaGapForInterval(7200 * time.Second); got != 6*time.Hour {
+		t.Fatalf("7200s interval → %v, want exactly 3x = 6h", got)
+	}
+	repo.SetDeltaGapThreshold(10 * time.Second)
+	if got := repo.gapThreshold(); got != 30*time.Second {
+		t.Fatalf("10s interval → %v, want 30s (a 40s gap must be a break)", got)
+	}
+	repo.SetDeltaGapThreshold(7200 * time.Second)
+	if got := repo.gapThreshold(); got != 6*time.Hour {
+		t.Fatalf("7200s interval → %v, want 6h (a healthy pair must count)", got)
 	}
 }
 
@@ -557,5 +570,254 @@ func TestReviewQueryBudgetIsSharedAcrossPlans(t *testing.T) {
 	var budget *QueryBudgetError
 	if !asBudgetError(err, &budget) || budget.Reason != ReasonQueryTimeout {
 		t.Fatalf("err = %v, want the timeout refusal", err)
+	}
+}
+
+// TestRereviewPartialWindowClipsCounterWeights pins F02: a rate pair's weight is
+// its overlap with the requested window, so time before the window can neither
+// inflate the average nor the reported coverage.
+func TestRereviewPartialWindowClipsCounterWeights(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	const server = uint(96)
+	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+
+	// Counters: 0s→0, 40s→400, 50s→1400; two pairs, 10 B/s and 100 B/s.
+	for _, sample := range []struct {
+		at    time.Duration
+		value int64
+	}{
+		{0, 0}, {40 * time.Second, 400}, {50 * time.Second, 1400},
+	} {
+		row := model.Metric{
+			ServerID: server, Time: base.Add(sample.at),
+			CPUPercent: f64(50), NetBytesRecv: i64(sample.value),
+		}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The window starts at 30s: each pair contributes exactly 10s of valid
+	// coverage, so the weighted average is (10*10 + 100*10) / 20 = 55.
+	result, err := repo.QueryWithBudget(ctx, QueryRequest{
+		ServerID: server, From: base.Add(30 * time.Second), To: base.Add(60 * time.Second), Requested: "6h",
+	})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(result.Points) != 1 || result.Points[0].NetRecvRate == nil {
+		t.Fatalf("points = %+v, want one bucket with a rate", result.Points)
+	}
+	if got := *result.Points[0].NetRecvRate; got < 54.9 || got > 55.1 {
+		t.Fatalf("weighted rate = %v, want 55 (window-clipped weights)", got)
+	}
+	if result.Points[0].NetRecvCov == nil || *result.Points[0].NetRecvCov < 19.9 || *result.Points[0].NetRecvCov > 20.1 {
+		t.Fatalf("coverage = %v, want 20s inside the 30s window", result.Points[0].NetRecvCov)
+	}
+}
+
+// TestRereviewShortCollectionPeriodRejectsLongGap pins F03's short-period case: a
+// 10s collection period must treat a 40s gap as a break, which the old 1m floor
+// silently accepted.
+func TestRereviewShortCollectionPeriodRejectsLongGap(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	const server = uint(97)
+	base := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
+	for _, sample := range []struct {
+		at    time.Duration
+		value int64
+	}{{0, 0}, {40 * time.Second, 400}} {
+		row := model.Metric{ServerID: server, Time: base.Add(sample.at), NetBytesRecv: i64(sample.value)}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo.SetDeltaGapThreshold(10 * time.Second) // threshold 30s
+	rows, err := repo.Query(ctx, server, base.Add(-time.Second), base.Add(time.Minute), "15m")
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	for _, row := range rows {
+		if row.NetRecvRate != nil {
+			t.Fatalf("rate = %v, want unknown for a 40s gap at a 10s period", *row.NetRecvRate)
+		}
+	}
+}
+
+// TestRereviewLongCollectionPeriodProducesValidRate pins F03's long-period case: a
+// healthy adjacent pair at a 2h period must still produce a rate, which the old 1h
+// cap suppressed.
+func TestRereviewLongCollectionPeriodProducesValidRate(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	const server = uint(98)
+	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	for _, sample := range []struct {
+		at    time.Duration
+		value int64
+	}{{0, 0}, {2 * time.Hour, 72000}} {
+		row := model.Metric{ServerID: server, Time: base.Add(sample.at), NetBytesRecv: i64(sample.value)}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo.SetDeltaGapThreshold(7200 * time.Second) // threshold 6h
+	rows, err := repo.Query(ctx, server, base.Add(-time.Second), base.Add(3*time.Hour), "6h")
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	found := false
+	for _, row := range rows {
+		if row.NetRecvRate != nil {
+			found = true
+			if *row.NetRecvRate < 9.9 || *row.NetRecvRate > 10.1 {
+				t.Fatalf("rate = %v, want 10 B/s", *row.NetRecvRate)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("a healthy pair at a 2h period must produce a rate")
+	}
+}
+
+// TestRereviewBucketStatisticsAreReturned pins the F06 contract: every bucket
+// carries sum/count so a window average can be sample-weighted.
+func TestRereviewBucketStatisticsAreReturned(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	const server = uint(99)
+	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	// Two samples in one bucket, one of them a real zero.
+	for i, cpu := range []float64{0, 100} {
+		row := model.Metric{
+			ServerID: server, Time: base.Add(time.Duration(i) * time.Minute),
+			CPUPercent: f64(cpu), NetBytesRecv: i64(int64(i) * 60),
+		}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := repo.QueryWithBudget(ctx, QueryRequest{
+		ServerID: server, From: base, To: base.Add(RollupBucket), Requested: "6h",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Points) != 1 {
+		t.Fatalf("points = %d, want 1", len(result.Points))
+	}
+	point := result.Points[0]
+	if point.CPUCount != 2 || point.CPUSum == nil || *point.CPUSum != 100 {
+		t.Fatalf("bucket statistics = sum %v count %d, want 100/2", point.CPUSum, point.CPUCount)
+	}
+	// The materialized bucket keeps the same statistics for long-range averages.
+	if _, err := repo.RefreshRollups(ctx, base.Add(RollupBucket).Add(time.Minute), RollupRefreshWindow); err != nil {
+		t.Fatal(err)
+	}
+	points, _, err := repo.queryRollupWithEdges(ctx, server, base, base.Add(RollupBucket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 1 || points[0].CPUCount != 2 || points[0].CPUSum == nil || *points[0].CPUSum != 100 {
+		t.Fatalf("rollup statistics = %+v, want 100/2", points)
+	}
+}
+
+// TestRereviewCapacityUsesHypertableChunks pins F09: on TimescaleDB the pieces
+// that hold the data are the chunks, so the measured total and the projection must
+// include them instead of the parent's shell size.
+func TestRereviewCapacityUsesHypertableChunks(t *testing.T) {
+	db := newTestDBWithExtensions(t)
+	ctx := context.Background()
+	if err := db.AutoMigrate(&model.Metric{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`SELECT create_hypertable('metrics', 'time', chunk_time_interval => interval '1 day', migrate_data => true)`).Error; err != nil {
+		t.Skipf("hypertable not available in this environment: %v", err)
+	}
+	if err := PrepareMetricsRollupSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewMetricRepo(db)
+	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	// Spread rows over several days so more than one chunk exists.
+	for i := 0; i < 200; i++ {
+		row := model.Metric{
+			ServerID: 100, Time: base.Add(time.Duration(i) * 3 * time.Hour),
+			CPUPercent: f64(10), NetBytesRecv: i64(int64(i * 60)),
+		}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report, err := repo.StorageReport(ctx)
+	if err != nil {
+		t.Fatalf("StorageReport: %v", err)
+	}
+	parentOnly := int64(0)
+	if err := db.Raw(`SELECT pg_total_relation_size('metrics')`).Scan(&parentOnly).Error; err != nil {
+		t.Fatal(err)
+	}
+	if report.RawChunkBytes <= 0 {
+		t.Fatalf("chunk bytes not measured: %+v", report)
+	}
+	if report.RawTotalBytes < report.RawChunkBytes {
+		t.Fatalf("total %d excludes chunks %d", report.RawTotalBytes, report.RawChunkBytes)
+	}
+	if report.RawTotalBytes <= parentOnly {
+		t.Fatalf("total %d is not larger than the parent shell %d (F09 regression)", report.RawTotalBytes, parentOnly)
+	}
+	if report.ProjectedRetentionBytes < report.RawTotalBytes {
+		t.Fatalf("projection %d below the measured footprint %d", report.ProjectedRetentionBytes, report.RawTotalBytes)
+	}
+}
+
+// TestRereviewBootstrapDiscardPolicyIsExplicit pins §4: raw older than the
+// aggregation backfill window is discarded without being aggregated, and that is
+// stated as an explicit policy rather than recorded as complete aggregation.
+func TestRereviewBootstrapDiscardPolicyIsExplicit(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	const server = uint(101)
+	now := time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC)
+	old := now.Add(-40 * 24 * time.Hour) // outside the 35d backfill window
+	recent := now.Add(-2 * time.Hour)
+
+	for _, sample := range []model.Metric{
+		{ServerID: server, Time: old, CPUPercent: f64(10), NetBytesRecv: i64(0)},
+		{ServerID: server, Time: recent, CPUPercent: f64(10), NetBytesRecv: i64(60)},
+	} {
+		row := sample
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The first refresh backfills only the documented window.
+	if _, err := repo.RefreshRollups(ctx, now, RollupBackfillWindow); err != nil {
+		t.Fatal(err)
+	}
+	oldBucket := BucketStart(old)
+	row, err := repo.RollupRowFor(ctx, server, oldBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row != nil {
+		t.Fatalf("raw outside the backfill window must not be materialized, got %+v", row)
+	}
+	// The retained window is aggregated, so the node is not pending and retention
+	// may proceed: the discard of the older raw is the explicit exception.
+	plan, err := repo.PlanPrune(ctx, now, MetricsRetention)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Pending) != 0 {
+		t.Fatalf("pending = %v, want none (the recent window is aggregated)", plan.Pending)
+	}
+	if plan.RawRows != 1 {
+		t.Fatalf("prunable rows = %d, want the single out-of-window sample", plan.RawRows)
 	}
 }

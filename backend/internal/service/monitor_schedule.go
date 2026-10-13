@@ -93,6 +93,9 @@ type monitorTick struct {
 	// threshold; RecoveredDefer lists nodes admitted again after such a streak.
 	WarnDeferred   []uint
 	RecoveredDefer []uint
+	// Deferred counts the admission slots actually missed in this pass, which is
+	// what the skipped counter must report (not one per pass per node).
+	Deferred int
 }
 
 // monitorScheduler owns the pure scheduling state. It never blocks and never
@@ -239,6 +242,7 @@ func (s *monitorScheduler) noteDeferLocked(node *monitorNode, tick *monitorTick,
 		return
 	}
 	node.defers++
+	tick.Deferred++
 	// Advance the missed slot so the same interval is counted exactly once; the
 	// next attempt is the following slot.
 	node.due = node.due.Add(s.interval)

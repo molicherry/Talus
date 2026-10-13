@@ -82,7 +82,10 @@ func (m *MetricsMaintenance) Run(ctx context.Context) {
 		case <-refreshTicker.C:
 			m.Refresh(ctx, repository.RollupRefreshWindow)
 		case <-pruneTicker.C:
+			// Measure before and after so the cleanup's physical effect is recorded.
+			m.StorageReport(ctx)
 			m.Prune(ctx)
+			m.StorageReport(ctx)
 		}
 	}
 }
@@ -167,6 +170,14 @@ func (m *MetricsMaintenance) Prune(ctx context.Context) {
 		return
 	}
 	m.telemetry.operation("metrics.retention", telOutcomeSuccess, telReasonNone)
+	if result.RawRows > 0 {
+		// Raw older than the aggregation backfill window is discarded without ever
+		// being materialized; that is a deliberate policy exception, not a claim of
+		// completeness (§8.3.1). It is logged so capacity and audit can see it.
+		m.logger.Info("metrics retention discarded raw outside the aggregation backfill window",
+			"cutoff", plan.Cutoff, "raw_rows", result.RawRows,
+			"aggregation_backfill_days", int(repository.RollupBackfillWindow.Hours()/24))
+	}
 	m.logger.Info("metrics retention applied",
 		"raw_rows", result.RawRows, "rollup_rows", result.RollupRows,
 		"chunks_dropped", result.ChunksDropped, "paused", result.Paused)

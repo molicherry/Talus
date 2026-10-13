@@ -23,6 +23,7 @@ import {
   seriesForStat,
   seriesLabelKey,
   seriesPattern,
+  weightedMean,
 } from "./.compiled-chart-config-standalone.mjs";
 import {
   TIME_RANGES,
@@ -251,6 +252,27 @@ check("the data view pages at 50 rows and clamps out-of-range pages", () => {
   assert.deepEqual([clamped.page, clamped.start, clamped.end], [3, 100, 120]);
   assert.deepEqual([pageSlice(120, 0).page, pageSlice(120, -5).page], [1, 1]);
   assert.deepEqual([pageSlice(0, 1).pages, pageSlice(0, 1).end], [1, 0]);
+});
+
+check("window averages are sample-weighted, not the mean of bucket means", () => {
+  // One bucket with a single 0% sample and one with 360 samples at 100%: the
+  // sample-weighted average is 99.7%, while averaging the bucket means gives 50%.
+  const points = [
+    { bucket: "a", cpu_sum: 0, cpu_count: 1 },
+    { bucket: "b", cpu_sum: 36000, cpu_count: 360 },
+  ];
+  const weighted = weightedMean(points, "cpu_sum", "cpu_count");
+  assert.ok(Math.abs(weighted - 99.723) < 0.01, `weighted = ${weighted}`);
+  const meanOfMeans = (0 / 1 + 36000 / 360) / 2;
+  assert.equal(meanOfMeans, 50);
+  assert.notEqual(Math.round(weighted), Math.round(meanOfMeans));
+});
+
+check("a window with no usable sum/count reports no average", () => {
+  assert.equal(weightedMean([], "cpu_sum", "cpu_count"), null);
+  assert.equal(weightedMean([{ cpu_sum: null, cpu_count: null }], "cpu_sum", "cpu_count"), null);
+  assert.equal(weightedMean([{ cpu_sum: 5, cpu_count: 0 }], "cpu_sum", "cpu_count"), null);
+  assert.equal(weightedMean([{ cpu_sum: Number.NaN, cpu_count: 2 }], "cpu_sum", "cpu_count"), null);
 });
 
 console.log(failures === 0 ? "\nmonitoring-chart-config: ALL PASS" : `\nmonitoring-chart-config: ${failures} FAILURES`);
