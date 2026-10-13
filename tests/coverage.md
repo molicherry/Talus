@@ -20,7 +20,7 @@ Cases: 33 · Runs: 14 · Schema: 1
 | e2e-core | e2e | shell | `.` | `bash tests/e2e/run.sh` | 1200s |
 | deploy-verify | integration | manual | `.` | _(manual)_ | — |
 | a11y-review | ui | manual | `.` | _(manual)_ | — |
-| image-agents | integration | shell | `.` | `bash tests/verify-agent-images.sh` | 2400s |
+| image-agents | integration | shell | `.` | `bash tests/verify-agent-images.sh` | 1800s |
 | static-agent-probe | fast | shell | `.` | `bash tests/static/agent-probe-check.sh` | 120s |
 
 ## Gates (pre-registered required runs)
