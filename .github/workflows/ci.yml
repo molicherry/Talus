@@ -145,7 +145,9 @@ jobs:
   unified:
     name: Unified test entry (tests/run.sh)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # M3 now includes the image acceptance run, which builds the four final images
+    # in this job as well.
+    timeout-minutes: 45
     services:
       postgres:
         image: timescale/timescaledb:latest-pg16
@@ -181,6 +183,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
         working-directory: frontend
+
+      # The M3 gate runs the ui-charts checks, which drive a real browser.
+      - name: Install Playwright chromium for the UI gate
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
 
       # The manifest is the single machine source; a stale generated report
       # must fail before any runner starts.
@@ -291,6 +298,12 @@ jobs:
                 --build-arg VERSION=ci-agent-check -f "$dockerfile" .
             done
           done
+
+      # The gate's own image acceptance run, executed here where the builds above
+      # left a warm cache: it builds each final image with the platform's own
+      # binary, then re-reads the version and protocol out of the shipped image.
+      - name: Agent image acceptance (tests/verify-agent-images.sh)
+        run: bash tests/verify-agent-images.sh
 
       - name: Build and push Hub
         uses: docker/build-push-action@v7

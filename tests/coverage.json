@@ -216,7 +216,7 @@
         "bash",
         "tests/verify-agent-images.sh"
       ],
-      "timeout_seconds": 2400,
+      "timeout_seconds": 1800,
       "environment": {
         "profile": "local",
         "requires": [
