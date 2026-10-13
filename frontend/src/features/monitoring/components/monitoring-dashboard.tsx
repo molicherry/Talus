@@ -517,25 +517,25 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
             <MetricStatCard
               label={t("monitoring.cpuUsage")}
               value={latestOf(pick(cpuPeak, cpu))}
-              avg={weightedMean(points ?? [], "cpu_sum", "cpu_count")}
+              avg={weightedMean(points ?? [], "cpu_sum", "cpu_count", "cpu_percent")}
               max={maxOf(cpuPeak)}
             />
             <MetricStatCard
               label={t("monitoring.memoryUsage")}
               value={latestOf(pick(memoryPeak, memory))}
-              avg={weightedMean(points ?? [], "memory_percent_sum", "memory_percent_count")}
+              avg={weightedMean(points ?? [], "memory_percent_sum", "memory_percent_count", "memory_percent")}
               max={maxOf(memoryPeak)}
             />
             <MetricStatCard
               label={t("monitoring.diskUsage")}
               value={latestOf(pick(diskPeak, disk))}
-              avg={weightedMean(points ?? [], "disk_percent_sum", "disk_percent_count")}
+              avg={weightedMean(points ?? [], "disk_percent_sum", "disk_percent_count", "disk_percent")}
               max={maxOf(diskPeak)}
             />
             <MetricStatCard
               label={t("monitoring.swapUsage")}
               value={latestOf(pick(swapPeak, swap))}
-              avg={weightedMean(points ?? [], "swap_percent_sum", "swap_percent_count")}
+              avg={weightedMean(points ?? [], "swap_percent_sum", "swap_percent_count", "swap_percent")}
               max={maxOf(swapPeak)}
             />
           </div>

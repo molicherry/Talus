@@ -358,12 +358,17 @@ export function coverageCell(
  * statistics. Averaging bucket means would let a bucket with a single sample
  * outweigh one with hundreds (F06), which is exactly the "平均桶均值" bug.
  *
- * Returns null when no bucket contributed a usable sum/count pair.
+ * Returns null when the window has no usable value at all.
+ *
+ * `fallbackField` covers payloads without statistics (a rollup written before the
+ * sums existed): the window then degrades to the flat mean of the collected
+ * values, which is the old behaviour rather than a missing average or NaN.
  */
 export function weightedMean<T extends object>(
   points: readonly T[],
   sumField: string,
   countField: string,
+  fallbackField?: string,
 ): number | null {
   let sum = 0;
   let count = 0;
@@ -379,5 +384,16 @@ export function weightedMean<T extends object>(
       count += bucketCount;
     }
   }
-  return count === 0 ? null : sum / count;
+  if (count > 0) return sum / count;
+  if (fallbackField === undefined) return null;
+  let seen = 0;
+  let total = 0;
+  for (const point of points) {
+    const value = (point as Record<string, unknown>)[fallbackField];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      total += value;
+      seen++;
+    }
+  }
+  return seen === 0 ? null : total / seen;
 }

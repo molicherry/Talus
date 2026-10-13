@@ -268,6 +268,17 @@ check("window averages are sample-weighted, not the mean of bucket means", () =>
   assert.notEqual(Math.round(weighted), Math.round(meanOfMeans));
 });
 
+check("payloads without statistics fall back to the flat mean", () => {
+  // A rollup written before the sums existed has values but no sum/count: the old
+  // behaviour (mean of the collected values) is kept instead of a missing average.
+  const legacy = [{ cpu_percent: 10 }, { cpu_percent: null }, { cpu_percent: 40 }];
+  assert.equal(weightedMean(legacy, "cpu_sum", "cpu_count", "cpu_percent"), 25);
+  // Statistics win whenever they are present, even mixed with legacy points.
+  const mixed = [{ cpu_percent: 10 }, { cpu_percent: 90, cpu_sum: 900, cpu_count: 10 }];
+  assert.equal(weightedMean(mixed, "cpu_sum", "cpu_count", "cpu_percent"), 90);
+  assert.equal(weightedMean([], "cpu_sum", "cpu_count", "cpu_percent"), null);
+});
+
 check("a window with no usable sum/count reports no average", () => {
   assert.equal(weightedMean([], "cpu_sum", "cpu_count"), null);
   assert.equal(weightedMean([{ cpu_sum: null, cpu_count: null }], "cpu_sum", "cpu_count"), null);
