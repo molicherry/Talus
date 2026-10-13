@@ -18,8 +18,41 @@ export interface TrendSeries {
   label: string;
   /** CSS colour value, e.g. `var(--color-primary)`. */
   color: string;
+  /**
+   * Non-colour distinction (REQUIREMENTS §4.5): an SVG dash pattern and a marker
+   * shape, so series stay distinguishable without relying on hue.
+   */
+  dash?: string;
+  marker?: "circle" | "square" | "triangle" | "diamond";
   /** One entry per time bucket; `null` marks a bucket with no sample. */
   values: Array<number | null>;
+}
+
+/** Small swatch showing a series' dash pattern and marker next to its colour. */
+export function SeriesSwatch({ series }: { series: TrendSeries }) {
+  const marker = series.marker ?? "circle";
+  return (
+    <svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true" className="shrink-0">
+      <line
+        x1="0"
+        y1="5"
+        x2="18"
+        y2="5"
+        stroke={series.color}
+        strokeWidth="1.75"
+        strokeDasharray={series.dash || undefined}
+      />
+      {marker === "square" ? (
+        <rect x="6" y="2" width="6" height="6" fill={series.color} rx="1" />
+      ) : marker === "triangle" ? (
+        <polygon points="9,1.5 14,8.5 4,8.5" fill={series.color} />
+      ) : marker === "diamond" ? (
+        <polygon points="9,1 14,5 9,9 4,5" fill={series.color} />
+      ) : (
+        <circle cx="9" cy="5" r="2.6" fill={series.color} />
+      )}
+    </svg>
+  );
 }
 
 interface TrendChartProps {
@@ -149,7 +182,7 @@ export function TrendChart({
           );
         });
         if (current.length > 0) segments.push(current.join(" "));
-        return { key: s.key, color: s.color, d: segments.join(" ") };
+        return { key: s.key, color: s.color, dash: s.dash, d: segments.join(" ") };
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }),
     // xAt/yAt are pure derivations of width/count/series/resolvedMax
@@ -228,11 +261,7 @@ export function TrendChart({
           key={s.key}
           className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
         >
-          <span
-            className="h-2 w-2 rounded-full"
-            style={{ backgroundColor: s.color }}
-            aria-hidden="true"
-          />
+          <SeriesSwatch series={s} />
           {s.label}
         </span>
       ))}
@@ -351,6 +380,7 @@ export function TrendChart({
               fill="none"
               stroke={p.color}
               strokeWidth={1.75}
+              strokeDasharray={p.dash || undefined}
               strokeLinejoin="round"
               strokeLinecap="round"
             />
@@ -441,11 +471,7 @@ export function TrendChart({
                 return (
                   <div key={s.key} className="flex items-center justify-between gap-3">
                     <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                      <span
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: s.color }}
-                        aria-hidden="true"
-                      />
+                      <SeriesSwatch series={s} />
                       {s.label}
                     </span>
                     <span className="font-mono tabular-nums text-foreground">

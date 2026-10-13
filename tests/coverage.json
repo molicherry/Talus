@@ -471,10 +471,23 @@
           "required": true
         },
         {
-          "implementation_id": "impl-04-01",
+          "implementation_id": "impl-04-01d",
           "run_id": "ui-charts",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "monitoring exposes the range/axis/statistic vocabulary with a data table"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-01e",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "monitoring controls stay reachable and touch-sized at 375px"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -518,10 +531,33 @@
       "scenario": "Ignore stale responses during rapid range changes; support touch, keyboard input, and visibility-aware refresh.",
       "implementations": [
         {
-          "implementation_id": "impl-04-03",
+          "implementation_id": "impl-04-03a",
           "run_id": "ui-charts",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "a late response from the previous range never replaces the current one"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-03b",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "chart keyboard navigation distinguishes gaps/zero and handles range changes"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-03c",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "touch chart supports horizontal drag without blocking vertical page scroll"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -555,10 +591,13 @@
           "required": true
         },
         {
-          "implementation_id": "impl-04-04",
+          "implementation_id": "impl-04-04c",
           "run_id": "ui-charts",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "light/dark link and focus colors retain sufficient contrast"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]

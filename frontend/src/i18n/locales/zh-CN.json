@@ -271,7 +271,12 @@
       "rollupSource": "当前显示 {{requested}} 的 {{actual}} 聚合历史（{{reason}}）"
     },
     "coverage": "数据覆盖率：{{percent}}",
-    "dataTable": "数据表"
+    "dataTable": "数据表",
+    "axisLabel": "纵轴",
+    "statLabel": "统计方式",
+    "time": "时间",
+    "showDataTable": "显示数据表",
+    "hideDataTable": "隐藏数据表"
   },
   "monitoring": {
     "title": "监控",

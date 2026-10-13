@@ -271,7 +271,12 @@
       "rollupSource": "Showing aggregated {{actual}} history for {{requested}} ({{reason}})"
     },
     "coverage": "Data coverage: {{percent}}",
-    "dataTable": "Data table"
+    "dataTable": "Data table",
+    "axisLabel": "Axis",
+    "statLabel": "Statistic",
+    "time": "Time",
+    "showDataTable": "Show data table",
+    "hideDataTable": "Hide data table"
   },
   "monitoring": {
     "title": "Monitoring",

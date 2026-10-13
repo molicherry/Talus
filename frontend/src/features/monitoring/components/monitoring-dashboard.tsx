@@ -14,6 +14,17 @@ import { cn } from "../../../lib/utils";
 import type { TimeRange } from "../../../types/metrics";
 import { useMetrics } from "../hooks/use-metrics";
 import { buildAlignedSeries } from "../lib/series";
+import {
+  AXIS_SERIES,
+  alignmentFields,
+  downsampleNotice,
+  formatBytesPerSecond as formatBytesPerSecondSI,
+  formatCoverage,
+  seriesForStat,
+  seriesLabelKey,
+  seriesPattern,
+} from "../lib/chart-config";
+import type { AxisMode, MetricStat } from "../../../types/metric-axes";
 import { EmptyState } from "./empty-state";
 import { ErrorState } from "./error-state";
 import { LoadingSkeleton } from "./loading-skeleton";
@@ -35,11 +46,27 @@ const SERIES_COLOR = {
   cpu: "var(--color-primary)",
   memory: "var(--color-success)",
   disk: "var(--color-warning)",
+  swap: "var(--color-danger)",
   rx: "var(--color-primary)",
   tx: "var(--color-success)",
   read: "var(--color-primary)",
   write: "var(--color-success)",
 } as const;
+
+/** Chart colour per axis series label (colour is secondary to the pattern). */
+const AXIS_COLOR: Record<string, string> = {
+  cpu: SERIES_COLOR.cpu,
+  memory: SERIES_COLOR.memory,
+  disk: SERIES_COLOR.disk,
+  swap: SERIES_COLOR.swap,
+  net_recv: SERIES_COLOR.rx,
+  net_sent: SERIES_COLOR.tx,
+  disk_read: SERIES_COLOR.read,
+  disk_write: SERIES_COLOR.write,
+  load_1: "var(--color-primary)",
+  load_5: "var(--color-success)",
+  load_15: "var(--color-warning)",
+};
 
 // Fields aligned onto the bucket grid for the cards and charts below.
 const SERIES_FIELDS = [
@@ -95,7 +122,7 @@ function makeTimeFormatter(range: TimeRange): (iso: string) => string {
   return (iso: string) => {
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return iso;
-    if (range === "7d") return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    if (range === "7d" || range === "30d") return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
     return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
   };
 }
@@ -107,7 +134,7 @@ interface MetricStatProps {
   max: Nullable;
 }
 
-function MetricStat({ label, value, avg, max }: MetricStatProps) {
+function MetricStatCard({ label, value, avg, max }: MetricStatProps) {
   const { t } = useTranslation();
   const level = percentLevel(value);
   return (
@@ -234,10 +261,51 @@ function LoadAvgCard({ load1, load5, load15 }: LoadAvgCardProps) {
 export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
   const { t } = useTranslation();
   const [timeRange, setTimeRange] = useState<TimeRange>("1h");
+  // The page shares one range, one axis and one statistic (REQ §4.3): the cards,
+  // the charts and the data table describe the same numbers.
+  const [axisMode, setAxisMode] = useState<AxisMode>("percent");
+  const [stat, setStat] = useState<MetricStat>("avg");
+  const [showDataTable, setShowDataTable] = useState(false);
   const { data, isLoading, isError, error, isRefetching, refetch } = useMetrics(
     serverId,
     timeRange,
+    { stat },
   );
+
+  // Align the card fields together with the selected axis, plus both statistics
+  // and the rate coverage columns so switching never needs a refetch.
+  const alignFields = useMemo(
+    () => Array.from(new Set<string>([...SERIES_FIELDS, ...alignmentFields(axisMode)])),
+    [axisMode],
+  );
+
+  // Axis presentation: a percentage axis is fixed at 100, the others scale to
+  // the data and carry their own unit.
+  const axisConfig = useMemo(() => {
+    switch (axisMode) {
+      case "percent":
+        return {
+          yMax: 100 as number | null,
+          formatValue: (value: number) => formatPercent(value, 1),
+          formatAxis: (value: number) => `${value.toFixed(0)}%`,
+        };
+      case "throughput":
+        return {
+          yMax: null as number | null,
+          formatValue: (value: number) => `${formatBytesPerSecondSI(value)}/s`,
+          formatAxis: (value: number) => formatBytesPerSecondSI(value),
+        };
+      default:
+        return {
+          yMax: null as number | null,
+          formatValue: (value: number) => value.toFixed(2),
+          formatAxis: (value: number) => value.toFixed(1),
+        };
+    }
+  }, [axisMode]);
+
+  const notice = downsampleNotice(data?.meta);
+  const coverage = formatCoverage(data?.meta?.coverage);
 
   const formatTime = makeTimeFormatter(timeRange);
   // `data.points`/`data.window` keep a stable reference between renders, so the
@@ -250,13 +318,13 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
   const aligned = useMemo(
     () =>
       window
-        ? buildAlignedSeries(points ?? [], window, SERIES_FIELDS)
+        ? buildAlignedSeries(points ?? [], window, alignFields)
         : {
             times: [] as string[],
             series: {} as Record<string, Nullable[]>,
             lastSampleTime: null,
           },
-    [points, window],
+    [points, window, alignFields],
   );
 
   const times = aligned.times;
@@ -274,6 +342,23 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
   const load1 = aligned.series.load_1 ?? [];
   const load5 = aligned.series.load_5 ?? [];
   const load15 = aligned.series.load_15 ?? [];
+
+  // Chart series for the selected axis and statistic, each distinguished by its
+  // dash pattern and marker as well as its colour.
+  const chartSeries = useMemo(() => {
+    const fields = seriesForStat(axisMode, stat);
+    return AXIS_SERIES[axisMode].map((axis, index) => {
+      const pattern = seriesPattern(index);
+      return {
+        key: axis.label,
+        label: t(seriesLabelKey(axisMode, index)),
+        color: AXIS_COLOR[axis.label] ?? SERIES_COLOR.cpu,
+        dash: pattern.dash,
+        marker: pattern.marker as "circle" | "square" | "triangle" | "diamond",
+        values: aligned.series[fields[index]] ?? [],
+      };
+    });
+  }, [aligned, axisMode, stat, t]);
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -286,6 +371,64 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
           </p>
         </div>
         <TimeRangeSelector selected={timeRange} onChange={setTimeRange} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div
+          role="group"
+          aria-label={t("metrics.axisLabel")}
+          className="inline-flex rounded-lg border border-border bg-muted/60 p-0.5"
+        >
+          {(["percent", "throughput", "load"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={axisMode === mode}
+              onClick={() => setAxisMode(mode)}
+              className={cn(
+                "touch-target rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                axisMode === mode
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+              )}
+            >
+              {t(`metrics.axis.${mode}`)}
+            </button>
+          ))}
+        </div>
+
+        <div
+          role="group"
+          aria-label={t("metrics.statLabel")}
+          className="inline-flex rounded-lg border border-border bg-muted/60 p-0.5"
+        >
+          {(["avg", "peak"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={stat === value}
+              onClick={() => setStat(value)}
+              className={cn(
+                "touch-target rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                stat === value
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+              )}
+            >
+              {t(`metrics.stat.${value}`)}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          aria-expanded={showDataTable}
+          aria-controls="monitoring-data-table"
+          onClick={() => setShowDataTable((open) => !open)}
+          className="touch-target rounded-lg border border-border bg-muted/60 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        >
+          {showDataTable ? t("metrics.hideDataTable") : t("metrics.showDataTable")}
+        </button>
       </div>
 
       {isLoading && <LoadingSkeleton />}
@@ -304,25 +447,25 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
       {data && (points?.length ?? 0) > 0 && (
         <>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <MetricStat
+            <MetricStatCard
               label={t("monitoring.cpuUsage")}
               value={latestOf(cpu)}
               avg={avgOf(cpu)}
               max={maxOf(cpu)}
             />
-            <MetricStat
+            <MetricStatCard
               label={t("monitoring.memoryUsage")}
               value={latestOf(memory)}
               avg={avgOf(memory)}
               max={maxOf(memory)}
             />
-            <MetricStat
+            <MetricStatCard
               label={t("monitoring.diskUsage")}
               value={latestOf(disk)}
               avg={avgOf(disk)}
               max={maxOf(disk)}
             />
-            <MetricStat
+            <MetricStatCard
               label={t("monitoring.swapUsage")}
               value={latestOf(swap)}
               avg={avgOf(swap)}
@@ -331,28 +474,70 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
           </div>
 
           <Card className="p-5">
-            <h3 className="text-sm font-semibold text-foreground">{t("monitoring.usageTrend")}</h3>
+            <h3 className="text-sm font-semibold text-foreground">
+              {t(`metrics.axis.${axisMode}`)}
+            </h3>
             <TrendChart
               className="mt-3"
               height={240}
               times={times}
-              yMax={100}
+              yMax={axisConfig.yMax}
               formatTime={formatTime}
-              formatValue={(v) => formatPercent(v, 1)}
-              formatAxis={(v) => `${v.toFixed(0)}%`}
-              ariaLabel={t("monitoring.usageTrend")}
-              series={[
-                { key: "cpu", label: t("monitoring.cpuUsage"), color: SERIES_COLOR.cpu, values: cpu },
-                {
-                  key: "memory",
-                  label: t("monitoring.memoryUsage"),
-                  color: SERIES_COLOR.memory,
-                  values: memory,
-                },
-                { key: "disk", label: t("monitoring.diskUsage"), color: SERIES_COLOR.disk, values: disk },
-              ]}
+              formatValue={axisConfig.formatValue}
+              formatAxis={axisConfig.formatAxis}
+              ariaLabel={t(`metrics.axis.${axisMode}`)}
+              series={chartSeries}
             />
           </Card>
+
+          {(notice || coverage) && (
+            <p role="status" className="text-xs text-muted-foreground">
+              {notice ? t(notice.key, notice.params) : null}
+              {notice && coverage ? " · " : null}
+              {coverage ? t("metrics.coverage", { percent: coverage }) : null}
+            </p>
+          )}
+
+          {showDataTable && (
+            <Card className="p-5">
+              <div id="monitoring-data-table" className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <caption className="sr-only">{t(`metrics.axis.${axisMode}`)}</caption>
+                  <thead>
+                    <tr className="text-left text-muted-foreground">
+                      <th scope="col" className="py-1 pr-3 font-medium">
+                        {t("metrics.time")}
+                      </th>
+                      {chartSeries.map((series) => (
+                        <th key={series.key} scope="col" className="py-1 pr-3 font-medium">
+                          {series.label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {times.map((time, index) => (
+                      <tr key={time} className="border-t border-border/60">
+                        <th scope="row" className="py-1 pr-3 font-normal text-muted-foreground">
+                          {formatTime(time)}
+                        </th>
+                        {chartSeries.map((series) => {
+                          const value = series.values[index];
+                          return (
+                            <td key={series.key} className="py-1 pr-3 font-mono tabular-nums">
+                              {value === null || value === undefined || !Number.isFinite(value)
+                                ? METRIC_MISSING_LABEL
+                                : axisConfig.formatValue(value)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <ThroughputCard
