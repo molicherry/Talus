@@ -221,7 +221,10 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       # Both builder stages are pinned to $BUILDPLATFORM and cross-compile, so
-      # QEMU is only needed for the final alpine stage's `apk add`. Only the
+      # QEMU is only needed for the final alpine stage: its `apk add` and the
+      # agent protocol probe, which executes the TARGETARCH binary (arm64 runs
+      # under binfmt, which is exactly the case a native host cannot cover).
+      # Only the
       # arch-independent ui-builder is shared between the two targets (one
       # `npm ci` + `npm run build`, and both final stages copy the same
       # /app/dist); go-builder runs once per target platform, natively and in
