@@ -56,6 +56,11 @@ func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if result.Points == nil {
 		result.Points = make([]repository.AggregatedMetric, 0)
 	}
+	if echo := request.EchoStat; echo == "max" {
+		// Echo the alias the caller used so a documented `stat=max` client sees
+		// the token it asked for.
+		result.Stat = "max"
+	}
 	server.WriteJSON(w, http.StatusOK, result)
 }
 
@@ -123,12 +128,22 @@ func parseMetricQuery(r *http.Request) (repository.QueryRequest, error) {
 		interval = "auto"
 	}
 
-	stat := q.Get("stat")
-	if stat != "" && stat != "avg" && stat != "peak" {
-		return request, errors.New("invalid stat: must be avg or peak")
-	}
+	// The frozen contract names the statistic `avg|max` (IMPLEMENTATION §3.4);
+	// the API's preferred spelling for the sampled maximum is `peak`, so `max` is
+	// accepted as a compatible alias and echoed back as requested (R20).
+	requestedStat := q.Get("stat")
+	stat := requestedStat
 	if stat == "" {
 		stat = "avg"
+	}
+	if stat == "max" {
+		stat = "peak"
+	}
+	if stat != "avg" && stat != "peak" {
+		return request, errors.New("invalid stat: must be avg, max or peak")
+	}
+	if requestedStat != "" && requestedStat != stat {
+		request.EchoStat = requestedStat
 	}
 
 	allowCoarsen := false

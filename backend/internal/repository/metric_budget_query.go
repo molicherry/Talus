@@ -34,6 +34,7 @@ func rawBucketAggregateSQL(intervalSeconds int64) string {
 	aggregate AS (
 		SELECT
 			%s AS bucket,
+			MAX(time) AS sampled_at,
 			AVG(cpu_percent) AS cpu_percent, MAX(cpu_percent) AS cpu_peak,
 			%s AS memory_percent, %s AS memory_peak,
 			%s AS disk_percent, %s AS disk_peak,
@@ -49,7 +50,7 @@ func rawBucketAggregateSQL(intervalSeconds int64) string {
 		WHERE time >= $5 AND time < $6
 		GROUP BY bucket
 	)
-	SELECT bucket, cpu_percent, cpu_peak, memory_percent, memory_peak, disk_percent, disk_peak,
+	SELECT bucket, sampled_at, cpu_percent, cpu_peak, memory_percent, memory_peak, disk_percent, disk_peak,
 	       load_1, load_1_peak, load_5, load_5_peak, load_15, load_15_peak, swap_percent, swap_peak,
 	       net_recv_rate, net_recv_peak, net_recv_coverage,
 	       net_sent_rate, net_sent_peak, net_sent_coverage,
@@ -211,8 +212,14 @@ func rollupRowToPoint(row RollupRow, bucketSeconds int64) AggregatedMetric {
 		value := *sum / float64(count)
 		return &value
 	}
+	var sampledAt *time.Time
+	if !row.LastSample.IsZero() {
+		sampled := row.LastSample.UTC()
+		sampledAt = &sampled
+	}
 	point := AggregatedMetric{
 		Time:          row.BucketStart.UTC(),
+		SampledAt:     sampledAt,
 		CPUPercent:    avg(row.CPUSum, row.CPUCount),
 		CPUPeak:       row.CPUMax,
 		MemoryPercent: avg(row.MemSum, row.MemCount),

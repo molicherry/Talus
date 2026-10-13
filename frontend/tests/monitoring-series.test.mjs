@@ -194,5 +194,29 @@ check("isolatedIndices on a filled grid with one gap bucket", () => {
   assert.deepEqual(isolatedIndices([1, null, null, 2]), [0, 3]);
 });
 
+check("last collected uses the real sample time, not the bucket start", () => {
+  const window = {
+    from: "2026-09-20T00:00:00.000Z",
+    to: "2026-09-20T06:00:00.000Z",
+    intervalMs: 6 * 3600 * 1000,
+  };
+  const aligned = buildAlignedSeries(
+    [
+      // A 6h bucket that starts at 00:00 but whose newest sample is at 05:58.
+      { time: "2026-09-20T00:00:00.000Z", sampled_at: "2026-09-20T05:58:00.000Z", cpu_percent: 10 },
+    ],
+    window,
+    ["cpu_percent"],
+  );
+  assert.equal(aligned.lastSampleTime, "2026-09-20T05:58:00.000Z");
+  // Without sampled_at the previous behaviour stays: the point's own time.
+  const legacy = buildAlignedSeries(
+    [{ time: "2026-09-20T04:00:00.000Z", cpu_percent: 10 }],
+    window,
+    ["cpu_percent"],
+  );
+  assert.equal(legacy.lastSampleTime, "2026-09-20T04:00:00.000Z");
+});
+
 console.log(failures === 0 ? "\nmonitoring-series: ALL PASS" : `\nmonitoring-series: ${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

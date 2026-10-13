@@ -103,3 +103,42 @@ func TestMetricQueryErrorPassesThroughUnknownErrors(t *testing.T) {
 		t.Fatalf("err = %v, want the original error", got)
 	}
 }
+
+// TestReviewDocumentedStatMaxAccepted pins R20: the frozen `stat=max` name is
+// accepted as an alias of the API's `peak` spelling, and unknown values are still
+// rejected.
+func TestReviewDocumentedStatMaxAccepted(t *testing.T) {
+	now := time.Now().UTC()
+	valid := "from=" + now.Add(-time.Hour).Format(time.RFC3339) + "&to=" + now.Format(time.RFC3339)
+
+	for _, tc := range []struct {
+		query  string
+		want   string
+		echo   string
+		reason string
+	}{
+		{"&stat=max", "peak", "max", ""},
+		{"&stat=peak", "peak", "", ""},
+		{"&stat=avg", "avg", "", ""},
+		{"", "avg", "", ""},
+		{"&stat=median", "", "", "invalid stat"},
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/servers/1/metrics?"+valid+tc.query, nil)
+		parsed, err := parseMetricQuery(request)
+		if tc.reason != "" {
+			if err == nil {
+				t.Fatalf("%q: expected a rejection", tc.query)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%q: %v", tc.query, err)
+		}
+		if parsed.Stat != tc.want {
+			t.Fatalf("%q: stat = %q, want %q", tc.query, parsed.Stat, tc.want)
+		}
+		if parsed.EchoStat != tc.echo {
+			t.Fatalf("%q: echo = %q, want %q", tc.query, parsed.EchoStat, tc.echo)
+		}
+	}
+}

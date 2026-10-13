@@ -76,8 +76,11 @@ type QueryRequest struct {
 	Requested    string
 	AllowCoarsen bool
 	// Stat selects which retained statistic the UI renders: "avg" (default) or
-	// "peak". Both are always returned.
+	// "peak" (the sampled maximum; the documented alias `max` is resolved by the
+	// caller). Both are always returned.
 	Stat string
+	// EchoStat is the spelling the caller used, when it differs from Stat.
+	EchoStat string
 }
 
 // QueryResult is the response contract of §4.2.1: the requested and actual

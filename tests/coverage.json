@@ -501,6 +501,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-04-01f",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-series.test.mjs",
+            "symbol": "last collected uses the real sample time, not the bucket start"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -528,6 +538,16 @@
           "implementation": {
             "path": "backend/internal/repository/metric_rollup_test.go",
             "symbol": "TestRefreshRollupsMaterializesBucketsAndCheckpoint"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-02c",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "series toggles, chart description and the paged data view are keyboard accessible"
           },
           "automation_status": "implemented",
           "required": true
@@ -765,6 +785,16 @@
           "implementation": {
             "path": "backend/internal/repository/metric_review_regression_test.go",
             "symbol": "TestReviewPredecessorCountsAgainstRawBudget"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05g",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/metrics_budget_test.go",
+            "symbol": "TestReviewDocumentedStatMaxAccepted"
           },
           "automation_status": "implemented",
           "required": true
@@ -1713,6 +1743,16 @@
           "implementation": {
             "path": "backend/internal/repository/metric_review_regression_test.go",
             "symbol": "TestReviewGapThresholdTracksConfiguredCollectionInterval"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03f",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewSampleTimeIsNotTheBucketStart"
           },
           "automation_status": "implemented",
           "required": true

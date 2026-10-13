@@ -3,6 +3,11 @@ import type { MetricStat, TimeRange } from "./metric-axes";
 
 export interface MetricPoint {
 	time: string;
+	/**
+	 * Latest real sample inside the bucket. Bucket starts are aggregation
+	 * boundaries, so freshness and "last collected" must use this when present.
+	 */
+	sampled_at?: string | null;
 	cpu_percent: number | null;
 	memory_percent: number | null;
 	disk_percent: number | null;

@@ -47,15 +47,18 @@ interface MonitoringDashboardProps {
  */
 type Nullable = number | null;
 
+// Chart series use the dedicated chart palette: those tokens are verified to
+// reach 3:1 against the card background in both themes (R19), while the UI accent
+// blue does not on light backgrounds.
 const SERIES_COLOR = {
-  cpu: "var(--color-primary)",
-  memory: "var(--color-success)",
-  disk: "var(--color-warning)",
-  swap: "var(--color-danger)",
-  rx: "var(--color-primary)",
-  tx: "var(--color-success)",
-  read: "var(--color-primary)",
-  write: "var(--color-success)",
+  cpu: "var(--color-chart-1)",
+  memory: "var(--color-chart-2)",
+  disk: "var(--color-chart-3)",
+  swap: "var(--color-chart-4)",
+  rx: "var(--color-chart-1)",
+  tx: "var(--color-chart-2)",
+  read: "var(--color-chart-1)",
+  write: "var(--color-chart-2)",
 } as const;
 
 /** Chart colour per axis series label (colour is secondary to the pattern). */
@@ -68,9 +71,9 @@ const AXIS_COLOR: Record<string, string> = {
   net_sent: SERIES_COLOR.tx,
   disk_read: SERIES_COLOR.read,
   disk_write: SERIES_COLOR.write,
-  load_1: "var(--color-primary)",
-  load_5: "var(--color-success)",
-  load_15: "var(--color-warning)",
+  load_1: "var(--color-chart-1)",
+  load_5: "var(--color-chart-2)",
+  load_15: "var(--color-chart-3)",
 };
 
 // Fields aligned onto the bucket grid for the cards and charts below.
@@ -278,11 +281,21 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
     { stat },
   );
 
-  // Align the card fields together with the selected axis, plus both statistics
-  // and the rate coverage columns so switching never needs a refetch.
+  // Align every column the page can render — all three axes and both statistics,
+  // including coverage — because the cards and the network/disk side charts are
+  // always visible. Restricting this to the selected axis left them empty when the
+  // statistic changed on another axis (R15).
   const alignFields = useMemo(
-    () => Array.from(new Set<string>([...SERIES_FIELDS, ...alignmentFields(axisMode)])),
-    [axisMode],
+    () =>
+      Array.from(
+        new Set<string>([
+          ...SERIES_FIELDS,
+          ...alignmentFields("percent"),
+          ...alignmentFields("throughput"),
+          ...alignmentFields("load"),
+        ]),
+      ),
+    [],
   );
 
   // Axis presentation: a percentage axis is fixed at 100, the others scale to
@@ -348,6 +361,20 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
   const load1 = aligned.series.load_1 ?? [];
   const load5 = aligned.series.load_5 ?? [];
   const load15 = aligned.series.load_15 ?? [];
+  // The sampled maxima are separate columns (REQ §8.3); the page-level statistic
+  // decides which column every card and side chart reads (R15).
+  const cpuPeak = aligned.series.cpu_peak ?? [];
+  const memoryPeak = aligned.series.memory_peak ?? [];
+  const diskPeak = aligned.series.disk_peak ?? [];
+  const swapPeak = aligned.series.swap_peak ?? [];
+  const netRecvPeak = aligned.series.net_recv_peak ?? [];
+  const netSentPeak = aligned.series.net_sent_peak ?? [];
+  const diskReadPeak = aligned.series.disk_read_peak ?? [];
+  const diskWritePeak = aligned.series.disk_write_peak ?? [];
+  const load1Peak = aligned.series.load_1_peak ?? [];
+  const load5Peak = aligned.series.load_5_peak ?? [];
+  const load15Peak = aligned.series.load_15_peak ?? [];
+  const pick = (peak: Nullable[], average: Nullable[]) => (stat === "peak" ? peak : average);
 
   // Chart series for the selected axis and statistic, each distinguished by its
   // dash pattern and marker as well as its colour.
@@ -495,27 +522,27 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <MetricStatCard
               label={t("monitoring.cpuUsage")}
-              value={latestOf(cpu)}
+              value={latestOf(pick(cpuPeak, cpu))}
               avg={avgOf(cpu)}
-              max={maxOf(cpu)}
+              max={maxOf(cpuPeak)}
             />
             <MetricStatCard
               label={t("monitoring.memoryUsage")}
-              value={latestOf(memory)}
+              value={latestOf(pick(memoryPeak, memory))}
               avg={avgOf(memory)}
-              max={maxOf(memory)}
+              max={maxOf(memoryPeak)}
             />
             <MetricStatCard
               label={t("monitoring.diskUsage")}
-              value={latestOf(disk)}
+              value={latestOf(pick(diskPeak, disk))}
               avg={avgOf(disk)}
-              max={maxOf(disk)}
+              max={maxOf(diskPeak)}
             />
             <MetricStatCard
               label={t("monitoring.swapUsage")}
-              value={latestOf(swap)}
+              value={latestOf(pick(swapPeak, swap))}
               avg={avgOf(swap)}
-              max={maxOf(swap)}
+              max={maxOf(swapPeak)}
             />
           </div>
 
@@ -637,30 +664,30 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
               times={times}
               formatTime={formatTime}
               primaryLabel={t("monitoring.rx")}
-              primaryValue={latestOf(netRecv)}
-              primaryValues={netRecv}
+              primaryValue={latestOf(pick(netRecvPeak, netRecv))}
+              primaryValues={pick(netRecvPeak, netRecv)}
               secondaryLabel={t("monitoring.tx")}
-              secondaryValue={latestOf(netSent)}
-              secondaryValues={netSent}
+              secondaryValue={latestOf(pick(netSentPeak, netSent))}
+              secondaryValues={pick(netSentPeak, netSent)}
             />
             <ThroughputCard
               title={t("monitoring.diskIo")}
               times={times}
               formatTime={formatTime}
               primaryLabel={t("monitoring.read")}
-              primaryValue={latestOf(diskRead)}
-              primaryValues={diskRead}
+              primaryValue={latestOf(pick(diskReadPeak, diskRead))}
+              primaryValues={pick(diskReadPeak, diskRead)}
               secondaryLabel={t("monitoring.write")}
-              secondaryValue={latestOf(diskWrite)}
-              secondaryValues={diskWrite}
+              secondaryValue={latestOf(pick(diskWritePeak, diskWrite))}
+              secondaryValues={pick(diskWritePeak, diskWrite)}
             />
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <LoadAvgCard
-              load1={latestOf(load1)}
-              load5={latestOf(load5)}
-              load15={latestOf(load15)}
+              load1={latestOf(pick(load1Peak, load1))}
+              load5={latestOf(pick(load5Peak, load5))}
+              load15={latestOf(pick(load15Peak, load15))}
             />
           </div>
 

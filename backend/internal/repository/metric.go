@@ -128,18 +128,22 @@ func (r *MetricRepo) Insert(
 
 // AggregatedMetric holds time-bucketed, averaged metrics for API responses.
 type AggregatedMetric struct {
-	Time          time.Time `gorm:"column:bucket" json:"time"`
-	CPUPercent    *float64  `gorm:"column:cpu_percent" json:"cpu_percent"`
-	MemoryPercent *float64  `gorm:"column:memory_percent" json:"memory_percent"`
-	DiskPercent   *float64  `gorm:"column:disk_percent" json:"disk_percent"`
-	Load1         *float64  `gorm:"column:load_1" json:"load_1"`
-	Load5         *float64  `gorm:"column:load_5" json:"load_5"`
-	Load15        *float64  `gorm:"column:load_15" json:"load_15"`
-	SwapPercent   *float64  `gorm:"column:swap_percent" json:"swap_percent"`
-	NetRecvRate   *float64  `gorm:"column:net_recv_rate" json:"net_recv_rate"`
-	NetSentRate   *float64  `gorm:"column:net_sent_rate" json:"net_sent_rate"`
-	DiskReadRate  *float64  `gorm:"column:disk_read_rate" json:"disk_read_rate"`
-	DiskWriteRate *float64  `gorm:"column:disk_write_rate" json:"disk_write_rate"`
+	Time time.Time `gorm:"column:bucket" json:"time"`
+	// SampledAt is the latest *real* sample time inside the bucket. A bucket start
+	// is an aggregation boundary, not an observation, so freshness must never be
+	// derived from it (R18).
+	SampledAt     *time.Time `gorm:"column:sampled_at" json:"sampled_at,omitempty"`
+	CPUPercent    *float64   `gorm:"column:cpu_percent" json:"cpu_percent"`
+	MemoryPercent *float64   `gorm:"column:memory_percent" json:"memory_percent"`
+	DiskPercent   *float64   `gorm:"column:disk_percent" json:"disk_percent"`
+	Load1         *float64   `gorm:"column:load_1" json:"load_1"`
+	Load5         *float64   `gorm:"column:load_5" json:"load_5"`
+	Load15        *float64   `gorm:"column:load_15" json:"load_15"`
+	SwapPercent   *float64   `gorm:"column:swap_percent" json:"swap_percent"`
+	NetRecvRate   *float64   `gorm:"column:net_recv_rate" json:"net_recv_rate"`
+	NetSentRate   *float64   `gorm:"column:net_sent_rate" json:"net_sent_rate"`
+	DiskReadRate  *float64   `gorm:"column:disk_read_rate" json:"disk_read_rate"`
+	DiskWriteRate *float64   `gorm:"column:disk_write_rate" json:"disk_write_rate"`
 
 	// Observed maxima of the sampled interval (§8.3): retained separately from the
 	// average so long-range charts can still show peaks.

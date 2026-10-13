@@ -163,6 +163,8 @@ async function fixture(browser, mobile = false) {
         if (index === 1) continue; // A gap must remain distinct from real zero.
         points.push({
           time: new Date(time).toISOString(),
+          // The newest sample inside the bucket, not the bucket start.
+          sampled_at: new Date(Math.min(time + interval - 1000, toMs)).toISOString(),
           cpu_percent: index === 0 ? 0 : 30,
           memory_percent: 25,
           disk_percent: 40,
@@ -618,6 +620,14 @@ try {
       const notice = page.locator('p[role="status"]').filter({ hasText: /6h/ });
       await notice.waitFor();
 
+      // Freshness comes from the real sample time, so a 6h bucket that started
+      // hours ago must not be reported as hours stale (R18).
+      const describedByLarge = await page.getByRole("slider").first().getAttribute("aria-describedby");
+      const largeDescription = await page.locator(`#${describedByLarge}`).textContent();
+      const freshness = /freshness (\d+)/.exec(largeDescription);
+      assert.ok(freshness, `no freshness in: ${largeDescription}`);
+      assert.ok(Number(freshness[1]) <= 5, `freshness = ${freshness[1]} minutes, want the latest sample`);
+
       // The axis choice changes what the chart plots and how it is labelled.
       await page.getByRole("button", { name: "Throughput", exact: true }).click();
       assert.equal(
@@ -625,11 +635,22 @@ try {
         "true",
       );
 
-      // The statistic is a page-level choice.
+      // The statistic is a page-level choice, and it applies to the cards as
+      // well as the chart: the mock reports 30% average but 60% peak for CPU.
       const peak = page.getByRole("button", { name: "Peak", exact: true });
       await peak.click();
       assert.equal(await peak.getAttribute("aria-pressed"), "true");
       await page.getByRole("slider").first().waitFor();
+      // The mock reports 30% average and 60% peak for CPU, so the card grid must
+      // show both: the peak as the current value and the average under Avg.
+      const cards = page.locator("div.grid", { hasText: "CPU Usage" }).first();
+      await cards.waitFor();
+      await page.waitForTimeout(150);
+      const cardText = await cards.textContent();
+      assert.match(cardText, /60\.0%/, `the card must follow the peak column: ${cardText}`);
+      // The average column stays the average of the average buckets (the mock's
+      // first bucket is a real zero), so it must not jump to the peak value.
+      assert.match(cardText, /29\.\d%/, `the average column must stay the average: ${cardText}`);
 
       // Series must stay distinguishable without colour: more than one dash
       // pattern has to be rendered.
@@ -919,7 +940,8 @@ try {
         document.documentElement.classList.toggle("dark", dark);
         const style = getComputedStyle(document.documentElement);
         return Object.fromEntries(
-          ["link", "link-hover", "ring", "card", "background", "primary-subtle"].map((key) => [
+          ["link", "link-hover", "ring", "card", "background", "primary-subtle",
+           "chart-1", "chart-2", "chart-3", "chart-4"].map((key) => [
             key,
             style.getPropertyValue(`--color-${key}`).trim(),
           ]),
@@ -931,6 +953,13 @@ try {
           `${colors.link} on ${colors[background]}`,
         );
       assert.ok(contrast(colors.ring, colors.background) >= 3);
+      // Informative chart graphics need 3:1 against the surface they are drawn on.
+      for (const key of ["chart-1", "chart-2", "chart-3", "chart-4"]) {
+        assert.ok(
+          contrast(colors[key], colors.card) >= 3,
+          `${key} ${colors[key]} on card ${colors.card} (${contrast(colors[key], colors.card).toFixed(2)}:1)`,
+        );
+      }
     }
   });
 } finally {

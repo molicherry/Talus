@@ -372,3 +372,55 @@ func TestReviewGapThresholdTracksConfiguredCollectionInterval(t *testing.T) {
 		t.Fatalf("2s interval → %v, want the 1m floor", got)
 	}
 }
+
+// TestReviewSampleTimeIsNotTheBucketStart pins R18: responses carry the real
+// sample time so freshness never has to be derived from an aggregation boundary.
+func TestReviewSampleTimeIsNotTheBucketStart(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	const server = uint(81)
+	bucket := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	lastSample := bucket.Add(2 * time.Minute)
+
+	for i, offset := range []time.Duration{time.Minute, 2 * time.Minute} {
+		row := model.Metric{
+			ServerID: server, Time: bucket.Add(offset), CPUPercent: f64(float64(10 * (i + 1))),
+			NetBytesRecv: i64(int64(60 * i)),
+		}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Raw path: sampled_at is the newest sample in the bucket.
+	result, err := repo.QueryWithBudget(ctx, QueryRequest{
+		ServerID: server, From: bucket, To: bucket.Add(RollupBucket), Requested: "6h",
+	})
+	if err != nil {
+		t.Fatalf("raw query: %v", err)
+	}
+	if len(result.Points) != 1 || result.Points[0].SampledAt == nil {
+		t.Fatalf("raw point = %+v, want a sampled_at", result.Points)
+	}
+	if !result.Points[0].SampledAt.UTC().Equal(lastSample) {
+		t.Fatalf("raw sampled_at = %v, want the newest sample %v", result.Points[0].SampledAt, lastSample)
+	}
+
+	// Rollup path: the materialized last_sample is preserved.
+	if _, err := repo.RefreshRollups(ctx, bucket.Add(RollupBucket).Add(time.Minute), RollupRefreshWindow); err != nil {
+		t.Fatal(err)
+	}
+	points, _, err := repo.queryRollupWithEdges(ctx, server, bucket, bucket.Add(RollupBucket))
+	if err != nil {
+		t.Fatalf("rollup query: %v", err)
+	}
+	if len(points) != 1 || points[0].SampledAt == nil {
+		t.Fatalf("rollup point = %+v, want a sampled_at", points)
+	}
+	if !points[0].SampledAt.UTC().Equal(lastSample) {
+		t.Fatalf("rollup sampled_at = %v, want %v", points[0].SampledAt, lastSample)
+	}
+	if points[0].SampledAt.UTC().Equal(points[0].Time.UTC()) {
+		t.Fatal("sampled_at must differ from the bucket start here")
+	}
+}

@@ -12,6 +12,7 @@ import { type MetricPoint, type MetricQueryMeta, TIME_RANGE_MAP } from "../../ty
 
 const MetricPointSchema = z.object({
   time: z.string(),
+  sampled_at: z.string().nullable().optional(),
   cpu_percent: z.number().nullable(),
   memory_percent: z.number().nullable(),
   disk_percent: z.number().nullable(),

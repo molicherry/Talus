@@ -72,7 +72,12 @@ export function buildAlignedSeries<T extends { time: string }>(
     const t = Date.parse(point.time);
     if (!Number.isFinite(t)) continue;
 
-    if (lastSampleMs === null || t > lastSampleMs) lastSampleMs = t;
+    // The bucket start is an aggregation boundary; the real observation is
+    // `sampled_at` when the backend provides it (R18).
+    const sampledRaw = (point as unknown as { sampled_at?: string | null }).sampled_at;
+    const sampled = typeof sampledRaw === "string" ? Date.parse(sampledRaw) : Number.NaN;
+    const observation = Number.isFinite(sampled) ? sampled : t;
+    if (lastSampleMs === null || observation > lastSampleMs) lastSampleMs = observation;
 
     const bucket = Math.floor(t / interval) * interval;
     if (bucket < start || bucket > end) continue;
