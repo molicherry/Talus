@@ -10,6 +10,7 @@ import (
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/repository"
+	"github.com/vpsmanager/backend/internal/telemetry"
 )
 
 // agentOutput mirrors the JSON output of the monitoring agent binary, including
@@ -92,6 +93,13 @@ type MonitorService struct {
 	taskFn func(ctx context.Context, serverID uint) error
 	// wake asks the scheduler to re-read the managed node list immediately.
 	wake chan struct{}
+	// telemetry records the frozen operation/stage/lag vocabulary (§12.1/§12.2).
+	telemetry *monitorTelemetry
+	// lastErr keeps the collect error of an attempt available for classification.
+	lastErr struct {
+		mu  sync.Mutex
+		err error
+	}
 }
 
 // NewMonitorService creates a MonitorService with the given dependencies.
@@ -111,6 +119,7 @@ func NewMonitorService(
 		rng:        newSeededMonitorRand(time.Now().UnixNano()),
 		taskBudget: monitorTaskBudget,
 		wake:       make(chan struct{}, 1),
+		telemetry:  newMonitorTelemetry(nil, nil),
 	}
 }
 
@@ -163,18 +172,24 @@ func (s *MonitorService) Start(ctx context.Context) {
 
 		tick := sched.plan(now)
 		for _, id := range tick.Admitted {
+			startedAt := s.clock.Now()
 			// The 30s budget starts at admission and covers the whole collection:
 			// quota wait, probe, deployment, execution, parsing and the write.
 			taskCtx, cancel := context.WithTimeout(ctx, s.taskBudget)
 			mu.Lock()
 			cancels[id] = cancel
 			mu.Unlock()
+			due, queuedAt := sched.admissionTiming(id)
+			s.telemetry.workers("monitor", 1)
 			wg.Add(1)
 			go func(id uint) {
 				defer wg.Done()
 				defer cancel()
 				outcome := s.runTask(taskCtx, id)
-				s.reportCompletion(id, sched.complete(id, outcome, s.clock.Now()))
+				finishedAt := s.clock.Now()
+				s.telemetry.workers("monitor", -1)
+				s.reportCompletion(id, sched.complete(id, outcome, finishedAt))
+				s.emitCollection(id, due, queuedAt, startedAt, finishedAt, outcome)
 				mu.Lock()
 				delete(cancels, id)
 				mu.Unlock()
@@ -237,6 +252,9 @@ func (s *MonitorService) runTask(ctx context.Context, serverID uint) (outcome mo
 		}
 	}()
 	err := s.collectTask(ctx, serverID)
+	s.lastErr.mu.Lock()
+	s.lastErr.err = err
+	s.lastErr.mu.Unlock()
 	switch {
 	case ctx.Err() == context.DeadlineExceeded:
 		s.logger.Error("metrics collection exceeded its deadline", "server_id", serverID)
@@ -255,10 +273,20 @@ func (s *MonitorService) runTask(ctx context.Context, serverID uint) (outcome mo
 	return outcomeSuccess
 }
 
+// SetTelemetry wires the shared telemetry registry so the background paths record
+// the frozen vocabulary instead of only free-form logs.
+func (s *MonitorService) SetTelemetry(registry *telemetry.Registry) {
+	s.telemetry = newMonitorTelemetry(registry, s.logger)
+	if s.deployer != nil {
+		s.deployer.SetTelemetry(registry, s.logger)
+	}
+}
+
 // SetAgentDeployer wires the agent deployment service that owns probing, upload
 // and protocol verification.
 func (s *MonitorService) SetAgentDeployer(deployer *AgentDeploymentService) {
 	s.deployer = deployer
+	s.deployer.SetTelemetry(s.telemetry.registry, s.logger)
 }
 
 // collectTask is the injectable collection step.
@@ -267,6 +295,34 @@ func (s *MonitorService) collectTask(ctx context.Context, serverID uint) error {
 		return s.taskFn(ctx, serverID)
 	}
 	return s.collectOne(ctx, serverID)
+}
+
+// emitCollection writes the final event of one collection attempt: the frozen
+// outcome/reason pair, the schedule lag and the capacity wait (REQUIREMENTS
+// §12.1/§12.2). Success is an event too, so a healthy cycle is observable.
+func (s *MonitorService) emitCollection(serverID uint, due, queuedAt, startedAt, finishedAt time.Time, outcome monitorOutcome) {
+	s.lastErr.mu.Lock()
+	err := s.lastErr.err
+	s.lastErr.mu.Unlock()
+
+	outcomeLabel, reasonLabel := collectionOutcome(outcome, err)
+	lag := time.Duration(0)
+	if !due.IsZero() && startedAt.After(due) {
+		lag = startedAt.Sub(due)
+	}
+	wait := time.Duration(0)
+	if !queuedAt.IsZero() && startedAt.After(queuedAt) {
+		wait = startedAt.Sub(queuedAt)
+	}
+	s.telemetry.collection(collectionEvent{
+		CollectionID: s.telemetry.nextCollectionID(serverID),
+		ServerID:     serverID,
+		Outcome:      outcomeLabel,
+		ReasonClass:  reasonLabel,
+		Duration:     finishedAt.Sub(startedAt),
+		ScheduleLag:  lag,
+		QueueWait:    wait,
+	})
 }
 
 // reportTick records deferred admissions (missed or late samples) and escalates

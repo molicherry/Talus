@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vpsmanager/backend/internal/agentproto"
+	"github.com/vpsmanager/backend/internal/telemetry"
 )
 
 // agentPath is where the deployed agent lives on a managed node. Activation
@@ -86,6 +87,8 @@ type AgentDeploymentService struct {
 	// logger emits the agent.deploy correlation events (§12.3): shared
 	// server_id with monitor.collect, never a metric label.
 	logger *slog.Logger
+	// telemetry records the frozen arch/outcome/reason vocabulary.
+	telemetry *monitorTelemetry
 }
 
 // NewAgentDeploymentService creates the deployment service over an artifacts
@@ -96,6 +99,16 @@ func NewAgentDeploymentService(ssh *SSHService, artifactsDir string) *AgentDeplo
 		artifactsDir: artifactsDir,
 		probeBudget:  probeBudget,
 		logger:       slog.Default().With("component", "agent-deploy"),
+		telemetry:    newMonitorTelemetry(nil, nil),
+	}
+}
+
+// SetTelemetry wires the shared registry so deployment attempts and stage
+// durations are recorded with the frozen vocabulary.
+func (s *AgentDeploymentService) SetTelemetry(registry *telemetry.Registry, logger *slog.Logger) {
+	s.telemetry = newMonitorTelemetry(registry, logger)
+	if logger != nil {
+		s.logger = logger.With("component", "agent-deploy")
 	}
 }
 
@@ -114,6 +127,7 @@ func (s *AgentDeploymentService) artifactFor(platform AgentPlatform) (agentproto
 			return artifact, nil
 		}
 	}
+	s.telemetry.agentUpdate(agentArch(platform.Arch), telOutcomeRejected, telReasonPlatform)
 	return agentproto.Artifact{}, deployError(ReasonAgentPlatformUnsupported,
 		fmt.Errorf("no bundled agent for %s", platform))
 }
@@ -121,6 +135,8 @@ func (s *AgentDeploymentService) artifactFor(platform AgentPlatform) (agentproto
 // Probe reads the target operating system and architecture with one composite
 // command. An unsupported platform is rejected before anything is uploaded.
 func (s *AgentDeploymentService) Probe(ctx context.Context, lease Lease) (AgentPlatform, error) {
+	started := time.Now()
+	defer func() { s.telemetry.stage("monitor.collect", "arch_probe", time.Since(started)) }()
 	result, err := lease.Exec(ctx, "uname -s; uname -m", s.probeBudget)
 	if err != nil {
 		return AgentPlatform{}, fmt.Errorf("probe target: %w", err)
@@ -191,12 +207,14 @@ func (s *AgentDeploymentService) Collect(ctx context.Context, lease Lease) (*age
 			"action", "agent.deploy", "server_id", lease.ServerID(), "platform", platform.String(),
 			"build_version", artifact.BuildVersion, "protocol_version", manifest.ProtocolVersion)
 		if err := s.deploy(ctx, lease, artifact); err != nil {
+			s.telemetry.agentUpdate(agentArch(platform.Arch), telOutcomeFailure, deploymentReasonClass(err))
 			s.logger.Warn("agent deployment failed",
 				"action", "agent.deploy", "outcome", "failure", "reason_class", ReasonFromError(err),
 				"server_id", lease.ServerID(), "platform", platform.String(),
 				"duration_ms", time.Since(started).Milliseconds())
 			return nil, err
 		}
+		s.telemetry.agentUpdate(agentArch(platform.Arch), telOutcomeSuccess, telReasonNone)
 		s.logger.Info("agent deployment succeeded",
 			"action", "agent.deploy", "outcome", "success", "reason_class", "",
 			"server_id", lease.ServerID(), "platform", platform.String(),
@@ -216,6 +234,8 @@ func (s *AgentDeploymentService) Collect(ctx context.Context, lease Lease) (*age
 
 // runAgent executes the deployed agent and parses its JSON payload.
 func (s *AgentDeploymentService) runAgent(ctx context.Context, lease Lease) (*agentOutput, error) {
+	started := time.Now()
+	defer func() { s.telemetry.stage("monitor.collect", "run", time.Since(started)) }()
 	result, err := lease.Exec(ctx, agentPath+" --format json", s.execBudget)
 	if err != nil {
 		return nil, classifyExecFailure(err)
@@ -293,14 +313,19 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 		}
 	}()
 
+	uploadStarted := time.Now()
 	if err := lease.Upload(ctx, localPath, tmpPath, s.execBudget); err != nil {
+		s.telemetry.stage("agent.deploy", "upload", time.Since(uploadStarted))
 		if reason := classifyRemoteStderr(err.Error()); reason != "" {
 			return deployError(reason, err)
 		}
 		return fmt.Errorf("upload agent: %w", err)
 	}
 
+	s.telemetry.stage("agent.deploy", "upload", time.Since(uploadStarted))
+	hashStarted := time.Now()
 	uploaded, err := s.remoteHash(ctx, lease, tmpPath)
+	s.telemetry.stage("agent.deploy", "hash_verify", time.Since(hashStarted))
 	if err != nil {
 		return err
 	}
@@ -311,6 +336,7 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 
 	// Activate with a same-filesystem rename so a partial upload can never be
 	// executed, and verify by hash when the result is unknown.
+	activateStarted := time.Now()
 	activate := fmt.Sprintf("chmod 0755 %s && mv -f %s %s", tmpPath, tmpPath, agentPath)
 	result, activateErr := lease.Exec(ctx, activate, s.execBudget)
 	// A non-zero exit or a lost reply both leave the activation outcome unknown;
@@ -327,6 +353,7 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 				fmt.Errorf("activate agent: exit=%v err=%v stderr=%q remote_hash=%q", exitCodeOf(result), activateErr, stderr, confirmed))
 		}
 	}
+	s.telemetry.stage("agent.deploy", "activate", time.Since(activateStarted))
 	activated = true
 	return nil
 }

@@ -6,6 +6,7 @@ package telemetry
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 )
@@ -197,14 +198,29 @@ func lookup(name string) (MetricDef, bool) {
 // it exists so call sites and tests share one bounded vocabulary, not to
 // replace an external monitoring platform.
 type Registry struct {
-	mu       sync.Mutex
-	counters map[string]float64
-	gauges   map[string]float64
+	mu         sync.Mutex
+	counters   map[string]float64
+	gauges     map[string]float64
+	histograms map[string]*Observation
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{counters: map[string]float64{}, gauges: map[string]float64{}}
+	return &Registry{
+		counters:   map[string]float64{},
+		gauges:     map[string]float64{},
+		histograms: map[string]*Observation{},
+	}
+}
+
+// Observation is the bounded summary of a histogram metric. It keeps count, sum
+// and the observed extremes rather than every sample, which is what the frozen
+// catalog needs for latency and lag distributions.
+type Observation struct {
+	Count int64   `json:"count"`
+	Sum   float64 `json:"sum"`
+	Min   float64 `json:"min"`
+	Max   float64 `json:"max"`
 }
 
 func (r *Registry) key(name string, labels map[string]string) (string, error) {
@@ -226,6 +242,11 @@ func (r *Registry) key(name string, labels map[string]string) (string, error) {
 		if vs := valueSetFor(k); vs != nil && !containsValue(vs, v) {
 			return "", fmt.Errorf("metric %q label %q has invalid value %q", name, k, v)
 		}
+	}
+	if len(def.Labels) == 0 {
+		// A metric without labels is identified by its name alone, not by empty
+		// braces.
+		return name, nil
 	}
 	parts := make([]string, 0, len(def.Labels))
 	for _, l := range def.Labels {
@@ -299,6 +320,51 @@ func (r *Registry) Snapshot() map[string]float64 {
 	}
 	for k, v := range r.gauges {
 		out[k] = v
+	}
+	return out
+}
+
+// ObserveHistogram records one observation of a histogram after validating the
+// metric and its labels. It mirrors IncCounter/AddGauge so every recorder path
+// shares the frozen vocabulary.
+func (r *Registry) ObserveHistogram(name string, labels map[string]string, value float64) error {
+	if def, ok := lookup(name); !ok {
+		return fmt.Errorf("unknown metric %q", name)
+	} else if def.Kind != KindHistogram {
+		return fmt.Errorf("metric %q is %s, not a histogram", name, def.Kind)
+	}
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return fmt.Errorf("metric %q observation is not finite", name)
+	}
+	k, err := r.key(name, labels)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	observation := r.histograms[k]
+	if observation == nil {
+		observation = &Observation{Min: value, Max: value}
+		r.histograms[k] = observation
+	}
+	observation.Count++
+	observation.Sum += value
+	if value < observation.Min {
+		observation.Min = value
+	}
+	if value > observation.Max {
+		observation.Max = value
+	}
+	return nil
+}
+
+// Observations returns a copy of every histogram recorded so far.
+func (r *Registry) Observations() map[string]Observation {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]Observation, len(r.histograms))
+	for k, v := range r.histograms {
+		out[k] = *v
 	}
 	return out
 }

@@ -813,6 +813,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-04-05h",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewQueryBudgetIsSharedAcrossPlans"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -1951,6 +1961,36 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-06h",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/metrics_maintenance_test.go",
+            "symbol": "TestReviewRetentionRolloutDecision"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06i",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewRetentionDropsCompleteChunks"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06j",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewStorageReportMeasuresAndProjects"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -1988,6 +2028,46 @@
           "implementation": {
             "path": "backend/internal/service/monitor_schedule_test.go",
             "symbol": "TestMonitorDeferEscalationIsExactlyOncePerStreak"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07d",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestReviewTelemetryVocabularyIsClosed"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07e",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestReviewCollectionEventCountsExactlyOnce"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07f",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestReviewAgentUpdateLabelsStayBounded"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07g",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestReviewDeploymentStageDurationsAreRecorded"
           },
           "automation_status": "implemented",
           "required": true

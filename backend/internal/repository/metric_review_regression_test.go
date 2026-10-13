@@ -524,3 +524,38 @@ func TestReviewStorageReportMeasuresAndProjects(t *testing.T) {
 		t.Fatalf("short measurement = %d, want it not extrapolated", got)
 	}
 }
+
+// TestReviewQueryBudgetIsSharedAcrossPlans pins the deadline rule: the total
+// budget is inherited from the caller and never restarted for a second plan, so a
+// request that already consumed its deadline is refused as a timeout instead of
+// being granted a fresh two seconds.
+func TestReviewQueryBudgetIsSharedAcrossPlans(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	from := base
+	to := base.Add(time.Hour)
+	if err := db.Create(&model.Metric{
+		ServerID: 95, Time: base.Add(time.Minute), CPUPercent: f64(10), NetBytesRecv: i64(0),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// A caller-supplied deadline shorter than the built-in budget must be honoured.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	time.Sleep(60 * time.Millisecond)
+
+	start := time.Now()
+	_, err := repo.QueryWithBudget(ctx, QueryRequest{ServerID: 95, From: from, To: to, Requested: "6h"})
+	elapsed := time.Since(start)
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("query ran for %v after its deadline: the budget was restarted", elapsed)
+	}
+	if err == nil {
+		t.Fatal("a query whose deadline already expired must be refused")
+	}
+	var budget *QueryBudgetError
+	if !asBudgetError(err, &budget) || budget.Reason != ReasonQueryTimeout {
+		t.Fatalf("err = %v, want the timeout refusal", err)
+	}
+}

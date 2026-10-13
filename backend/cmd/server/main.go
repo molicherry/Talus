@@ -21,6 +21,7 @@ import (
 	"github.com/vpsmanager/backend/internal/server"
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
+	"github.com/vpsmanager/backend/internal/telemetry"
 	"github.com/vpsmanager/backend/internal/usage"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -197,6 +198,10 @@ func main() {
 	// Dependency chain — Servers (needed before API Keys for server ID validation)
 	serverRepo := repository.NewServerRepo(db)
 	metricRepo := repository.NewMetricRepo(db)
+	// One shared telemetry registry for the background paths: the frozen
+	// vocabulary is validated at the call site, so an unknown label value fails
+	// closed instead of reaching the metrics.
+	telemetryRegistry := telemetry.NewRegistry()
 	serverSvc := service.NewServerService(serverRepo, metricRepo, sshPool)
 	serverSvc.SetFreshnessThreshold(cfg.MonitorFreshnessThreshold())
 
@@ -326,6 +331,7 @@ func main() {
 	metricRepo.SetDeltaGapThreshold(time.Duration(cfg.MonitorInterval) * time.Second)
 	monitorSvc := service.NewMonitorService(sshSvc, metricRepo, serverRepo, time.Duration(cfg.MonitorInterval)*time.Second)
 	monitorSvc.SetAgentDeployer(service.NewAgentDeploymentService(sshSvc, cfg.AgentArtifactsDir))
+	monitorSvc.SetTelemetry(telemetryRegistry)
 	metricsH := handler.NewMetricsHandler(metricRepo)
 
 	// The monitor joins the application root context so shutdown can stop the
@@ -349,6 +355,7 @@ func main() {
 	// Retention follows the documented rollout: disabled by default, a dry run
 	// reports the plan, and only enabled && !dry-run deletes.
 	maintenance.SetRetention(cfg.MetricsRetentionEnabled, cfg.MetricsRetentionDryRun)
+	maintenance.SetTelemetry(telemetryRegistry, nil)
 	maintenanceDone := make(chan struct{})
 	go func() {
 		defer close(maintenanceDone)

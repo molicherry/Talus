@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/vpsmanager/backend/internal/repository"
+	"github.com/vpsmanager/backend/internal/telemetry"
 )
 
 // MetricsMaintenance runs the periodic metrics storage jobs of REQ-08 §8.3.1:
@@ -26,6 +27,8 @@ type MetricsMaintenance struct {
 	// plan first, delete only when the operator enabled it.
 	retentionEnabled bool
 	retentionDryRun  bool
+	// telemetry records the frozen aggregate/retention vocabulary.
+	telemetry *monitorTelemetry
 }
 
 // NewMetricsMaintenance creates the maintenance jobs with their documented
@@ -39,7 +42,14 @@ func NewMetricsMaintenance(repo *repository.MetricRepo) *MetricsMaintenance {
 		jobBudget:       10 * time.Minute,
 		now:             func() time.Time { return time.Now().UTC() },
 		retentionDryRun: true,
+		telemetry:       newMonitorTelemetry(nil, nil),
 	}
+}
+
+// SetTelemetry wires the shared registry so maintenance cycles are recorded with
+// the frozen action/outcome vocabulary.
+func (m *MetricsMaintenance) SetTelemetry(registry *telemetry.Registry, logger *slog.Logger) {
+	m.telemetry = newMonitorTelemetry(registry, logger)
 }
 
 // SetRetention applies the rollout switches from the configuration.
@@ -84,13 +94,17 @@ func (m *MetricsMaintenance) Refresh(ctx context.Context, window time.Duration) 
 	}
 	jobCtx, cancel := context.WithTimeout(ctx, m.jobBudget)
 	defer cancel()
+	started := time.Now()
 	result, err := m.repo.RefreshRollups(jobCtx, m.now(), window)
+	m.telemetry.stage("metrics.aggregate", "aggregate", time.Since(started))
 	if err != nil {
 		// A failed cycle leaves the checkpoint untouched, so the next cycle
 		// recomputes the same range.
+		m.telemetry.operation("metrics.aggregate", telOutcomeFailure, telReasonDB)
 		m.logger.Error("metrics rollup refresh failed", "error", err, "window", window)
 		return
 	}
+	m.telemetry.operation("metrics.aggregate", telOutcomeSuccess, telReasonNone)
 	m.logger.Info("metrics rollup refreshed",
 		"servers", result.Servers, "buckets", result.Buckets, "through", result.Checkpoint)
 }
@@ -152,6 +166,7 @@ func (m *MetricsMaintenance) Prune(ctx context.Context) {
 		m.logger.Error("metrics retention failed", "error", err, "cutoff", plan.Cutoff)
 		return
 	}
+	m.telemetry.operation("metrics.retention", telOutcomeSuccess, telReasonNone)
 	m.logger.Info("metrics retention applied",
 		"raw_rows", result.RawRows, "rollup_rows", result.RollupRows,
 		"chunks_dropped", result.ChunksDropped, "paused", result.Paused)

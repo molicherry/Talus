@@ -359,6 +359,18 @@ func (s *monitorScheduler) backoffDelayLocked(failures int) time.Duration {
 	return delay
 }
 
+// admissionTiming reports when a node became eligible and, if it had to wait for
+// capacity, since when. Telemetry clamps both against the actual start.
+func (s *monitorScheduler) admissionTiming(id uint) (due, queuedAt time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	node := s.nodes[id]
+	if node == nil {
+		return time.Time{}, time.Time{}
+	}
+	return node.due, node.queuedAt
+}
+
 // hasAdmissible reports whether a pass right now could admit work: a due or
 // already-queued node exists and capacity is free. In-flight nodes alone never
 // make the caller wake immediately — they signal completion through the notify
