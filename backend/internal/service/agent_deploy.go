@@ -175,34 +175,36 @@ func (s *AgentDeploymentService) Collect(ctx context.Context, lease Lease) (*age
 		return nil, err
 	}
 
-	// Fast path: an already matching agent needs no upload.
-	out, err := s.runAgent(ctx, lease)
-	if err == nil {
-		if err := verifyProtocol(out, artifact, manifest.ProtocolVersion); err == nil {
-			return out, nil
-		}
-	}
-
-	// The fast path failed protocol verification or the agent was missing, so a
-	// deployment attempt follows. Deployments are reported as their own action so
-	// failures and skips stay countable next to the collection events.
-	started := time.Now()
-	s.logger.Info("agent deployment attempt",
-		"action", "agent.deploy", "server_id", lease.ServerID(), "platform", platform.String(),
-		"build_version", artifact.BuildVersion, "protocol_version", manifest.ProtocolVersion)
-	if err := s.deploy(ctx, lease, artifact); err != nil {
-		reason := ReasonFromError(err)
-		s.logger.Warn("agent deployment failed",
-			"action", "agent.deploy", "outcome", "failure", "reason_class", reason,
-			"server_id", lease.ServerID(), "platform", platform.String(),
-			"duration_ms", time.Since(started).Milliseconds())
+	// The deployed artifact is verified by hash before anything runs: a matching
+	// self-reported version is not evidence (a local rebuild, a reused version
+	// string or a foreign binary can all claim it), so only a missing or
+	// different artifact triggers a deployment (R10).
+	deployedHash, err := s.remoteHash(ctx, lease, agentPath)
+	if err != nil {
 		return nil, err
 	}
-	s.logger.Info("agent deployment succeeded",
-		"action", "agent.deploy", "outcome", "success", "reason_class", "",
-		"server_id", lease.ServerID(), "platform", platform.String(),
-		"duration_ms", time.Since(started).Milliseconds())
-	out, err = s.runAgent(ctx, lease)
+	if deployedHash != artifact.SHA256 {
+		// Deployments are reported as their own action so failures and skips stay
+		// countable next to the collection events.
+		started := time.Now()
+		s.logger.Info("agent deployment attempt",
+			"action", "agent.deploy", "server_id", lease.ServerID(), "platform", platform.String(),
+			"build_version", artifact.BuildVersion, "protocol_version", manifest.ProtocolVersion)
+		if err := s.deploy(ctx, lease, artifact); err != nil {
+			s.logger.Warn("agent deployment failed",
+				"action", "agent.deploy", "outcome", "failure", "reason_class", ReasonFromError(err),
+				"server_id", lease.ServerID(), "platform", platform.String(),
+				"duration_ms", time.Since(started).Milliseconds())
+			return nil, err
+		}
+		s.logger.Info("agent deployment succeeded",
+			"action", "agent.deploy", "outcome", "success", "reason_class", "",
+			"server_id", lease.ServerID(), "platform", platform.String(),
+			"duration_ms", time.Since(started).Milliseconds())
+	}
+
+	// Execution is verified independently of what the artifact claimed.
+	out, err := s.runAgent(ctx, lease)
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +279,20 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 	}
 
 	tmpPath := fmt.Sprintf("%s.upload-%d", agentPath, time.Now().UnixNano())
+	// A failed upload can still have written the file, and every retry uses a new
+	// name, so each failure path removes the temporary artifact. A cleanup that
+	// cannot complete is reported instead of being silently dropped (R11).
+	activated := false
+	defer func() {
+		if activated {
+			return
+		}
+		if _, err := lease.Exec(ctx, "rm -f "+tmpPath, s.execBudget); err != nil {
+			s.logger.Warn("agent upload cleanup left a temporary file",
+				"server_id", lease.ServerID(), "path", tmpPath, "error", err)
+		}
+	}()
+
 	if err := lease.Upload(ctx, localPath, tmpPath, s.execBudget); err != nil {
 		if reason := classifyRemoteStderr(err.Error()); reason != "" {
 			return deployError(reason, err)
@@ -289,8 +305,6 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 		return err
 	}
 	if uploaded != artifact.SHA256 {
-		// Leave nothing half-activated behind.
-		_, _ = lease.Exec(ctx, "rm -f "+tmpPath, s.execBudget)
 		return deployError(ReasonAgentHashMismatch,
 			fmt.Errorf("uploaded agent hash %s, want %s", uploaded, artifact.SHA256))
 	}
@@ -305,7 +319,6 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 	if activateErr != nil || result == nil || result.ExitCode != 0 {
 		confirmed, verifyErr := s.remoteHash(ctx, lease, agentPath)
 		if verifyErr != nil || confirmed != artifact.SHA256 {
-			_, _ = lease.Exec(ctx, "rm -f "+tmpPath, s.execBudget)
 			stderr := ""
 			if result != nil {
 				stderr = strings.TrimSpace(result.Stderr)
@@ -314,6 +327,7 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 				fmt.Errorf("activate agent: exit=%v err=%v stderr=%q remote_hash=%q", exitCodeOf(result), activateErr, stderr, confirmed))
 		}
 	}
+	activated = true
 	return nil
 }
 

@@ -316,13 +316,46 @@ func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
 	defer lease.Release()
 
 	out, err := s.deployer.Collect(ctx, lease)
+	if err != nil && isConnectionError(err) {
+		lease.Discard()
+	} else {
+		lease.Release()
+	}
+	// Settlement is what actually returns the quota and closes a broken
+	// transport. Waiting here keeps shutdown honest: the scheduler must not
+	// report the task finished (and start its backoff) while a transport is still
+	// closing. The wait is bounded by the frozen 3s local cleanup budget.
+	if !s.awaitLeaseSettlement(ctx, lease) {
+		s.logger.Warn("monitor lease settlement exceeded its cleanup budget", "server_id", serverID)
+	}
 	if err != nil {
-		if isConnectionError(err) {
-			lease.Discard()
-		}
 		return err
 	}
 	return s.metricRepo.InsertFull(ctx, s.metricFull(serverID, out))
+}
+
+// monitorLeaseSettleBudget is the frozen local cleanup budget for one
+// collection's SSH resources (REQUIREMENTS §7.1.1).
+const monitorLeaseSettleBudget = 3 * time.Second
+
+// awaitLeaseSettlement waits for the lease to report that its resources were
+// reclaimed, bounded by monitorLeaseSettleBudget and the task's own deadline.
+func (s *MonitorService) awaitLeaseSettlement(ctx context.Context, lease Lease) bool {
+	select {
+	case <-lease.Done():
+		return true
+	default:
+	}
+	timer := time.NewTimer(monitorLeaseSettleBudget)
+	defer timer.Stop()
+	select {
+	case <-lease.Done():
+		return true
+	case <-timer.C:
+		return false
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // metricFull maps the agent payload onto the stored metric row.

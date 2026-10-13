@@ -1576,6 +1576,26 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-01f",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestReviewDeletedCollectionKeepsCapacityUntilJoined"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01g",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestReviewMonitorShutdownWaitsForLeaseSettlement"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -1623,6 +1643,16 @@
           "implementation": {
             "path": "backend/internal/service/monitor_review_regression_test.go",
             "symbol": "TestReviewGenerationInvalidationPreventsActivation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-02e",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestReviewMatchingVersionStillRequiresArtifactHash"
           },
           "automation_status": "implemented",
           "required": true
@@ -1676,6 +1706,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-03e",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewGapThresholdTracksConfiguredCollectionInterval"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -1713,6 +1753,16 @@
           "implementation": {
             "path": "backend/internal/service/agent_deploy_test.go",
             "symbol": "TestAgentDeployReportsLostActivationAndRecoversIdempotently"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-04d",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestReviewFailedUploadCleansTemporaryArtifact"
           },
           "automation_status": "implemented",
           "required": true
@@ -1813,6 +1863,16 @@
           "implementation": {
             "path": "backend/internal/repository/metric_review_regression_test.go",
             "symbol": "TestReviewMissingRollupFallsBackToRaw"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06g",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewRetentionEventuallyPrunesOfflineServers"
           },
           "automation_status": "implemented",
           "required": true

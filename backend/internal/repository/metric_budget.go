@@ -260,7 +260,7 @@ func (r *MetricRepo) probeRawSamples(ctx context.Context, serverID uint, from, t
 	var keys []time.Time
 	err := r.db.WithContext(ctx).Raw(
 		`SELECT time FROM metrics WHERE server_id = ? AND time >= ? AND time < ? ORDER BY time LIMIT ?`,
-		serverID, from.Add(-DefaultDeltaGapThreshold), to, rawProbeLimit).Scan(&keys).Error
+		serverID, from.Add(-r.gapThreshold()), to, rawProbeLimit).Scan(&keys).Error
 	if err != nil {
 		return 0, false, classifyBudgetError(fmt.Errorf("probe raw samples: %w", err))
 	}

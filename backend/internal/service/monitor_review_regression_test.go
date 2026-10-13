@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -82,8 +83,10 @@ func TestReviewGenerationInvalidationPreventsActivation(t *testing.T) {
 	if got := h.remote.count("chmod 0755"); got != 0 {
 		t.Fatalf("activations = %d, want none after the target changed", got)
 	}
-	if got := h.remote.count(agentPath + " --format json"); got != 1 {
-		t.Fatalf("agent runs = %d, want only the initial probe run", got)
+	// The artifact is verified by hash before anything runs, so the invalidation
+	// prevents the upload, the activation and every execution.
+	if got := h.remote.count(agentPath + " --format json"); got != 0 {
+		t.Fatalf("agent runs = %d, want none after the target changed", got)
 	}
 }
 
@@ -114,4 +117,150 @@ func isStaleGeneration(err error) bool {
 		err = unwrapper.Unwrap()
 	}
 	return false
+}
+
+// TestReviewDeletedCollectionKeepsCapacityUntilJoined pins R12: deleting a node
+// whose worker is still running must not free its slot, or the real number of
+// workers can exceed the cap.
+func TestReviewDeletedCollectionKeepsCapacityUntilJoined(t *testing.T) {
+	sched, clock := newTestScheduler(t, 60*time.Second, 0.5)
+	live := make([]uint, 0, 17)
+	for id := uint(1); id <= 17; id++ {
+		live = append(live, id)
+	}
+	sched.sync(live, clock.Now())
+	now := clock.Now()
+
+	first := sched.plan(now)
+	if len(first.Admitted) != 16 || len(first.Queued) != 1 {
+		t.Fatalf("first pass: admitted=%d queued=%d, want 16/1", len(first.Admitted), len(first.Queued))
+	}
+	deleted := first.Admitted[0]
+
+	// The node is removed while its worker is still cleaning up.
+	if removed := sched.sync(live[1:], now); len(removed) != 1 || removed[0] != deleted {
+		t.Fatalf("removed = %v, want [%d]", removed, deleted)
+	}
+	if tick := sched.plan(now); len(tick.Admitted) != 0 {
+		t.Fatalf("admitted %v while a deleted worker still held its slot", tick.Admitted)
+	}
+	if got := sched.inFlightCount(); got > 16 {
+		t.Fatalf("live workers = %d, want at most 16", got)
+	}
+
+	// Only the worker's own completion frees the capacity.
+	sched.complete(deleted, outcomeCancelled, now)
+	tick := sched.plan(now)
+	if len(tick.Admitted) != 1 {
+		t.Fatalf("admitted %d nodes after the worker joined, want 1", len(tick.Admitted))
+	}
+	if got := sched.inFlightCount(); got > 16 {
+		t.Fatalf("live workers = %d, want at most 16", got)
+	}
+}
+
+// stubLease is a Lease whose settlement a test controls.
+type stubLease struct {
+	done chan struct{}
+}
+
+func (l *stubLease) Exec(context.Context, string, time.Duration) (*ExecResult, error) {
+	return nil, nil
+}
+func (l *stubLease) Upload(context.Context, string, string, time.Duration) error { return nil }
+func (l *stubLease) Cancel(string)                                               {}
+func (l *stubLease) Done() <-chan struct{}                                       { return l.done }
+func (l *stubLease) Generation() Generation                                      { return 0 }
+func (l *stubLease) ServerID() uint                                              { return 1 }
+func (l *stubLease) Release()                                                    {}
+func (l *stubLease) Discard()                                                    {}
+
+// TestReviewMonitorShutdownWaitsForLeaseSettlement pins R13: a collection is only
+// reported finished once its lease's resources are reclaimed, and the wait is
+// bounded so shutdown cannot hang forever.
+func TestReviewMonitorShutdownWaitsForLeaseSettlement(t *testing.T) {
+	svc := NewMonitorService(nil, nil, nil, time.Minute)
+
+	// Already settled: no wait.
+	settled := &stubLease{done: make(chan struct{})}
+	close(settled.done)
+	if !svc.awaitLeaseSettlement(context.Background(), settled) {
+		t.Fatal("a settled lease must be reported as reclaimed")
+	}
+
+	// Never settles: the bounded wait reports the owner as still pending.
+	pending := &stubLease{done: make(chan struct{})}
+	start := time.Now()
+	if svc.awaitLeaseSettlement(context.Background(), pending) {
+		t.Fatal("an unsettled lease must not be reported as reclaimed")
+	}
+	if elapsed := time.Since(start); elapsed < monitorLeaseSettleBudget || elapsed > monitorLeaseSettleBudget+2*time.Second {
+		t.Fatalf("wait = %v, want the bounded cleanup budget %v", elapsed, monitorLeaseSettleBudget)
+	}
+
+	// A settlement that completes during the wait is observed.
+	late := &stubLease{done: make(chan struct{})}
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		close(late.done)
+	}()
+	if !svc.awaitLeaseSettlement(context.Background(), late) {
+		t.Fatal("a lease settled during the wait must be reported as reclaimed")
+	}
+}
+
+// TestReviewMatchingVersionStillRequiresArtifactHash pins R10: a remote binary
+// that reports the expected version and protocol must still be replaced when its
+// bytes differ from the manifest's artifact.
+func TestReviewMatchingVersionStillRequiresArtifactHash(t *testing.T) {
+	deployer, h := newAgentDeployHarness(t, "v1.2.3")
+	h.remote.agentPayload = `{"agent_version":"v1.2.3","protocol_version":1}`
+	// A stale binary that happens to report the expected version.
+	h.remote.files[agentPath] = []byte("stale-binary-claiming-v1.2.3")
+
+	lease, err := h.svc.AcquireLease(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+
+	if _, err := deployer.Collect(context.Background(), lease); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if got := h.remote.count("cat > "); got != 1 {
+		t.Fatalf("uploads = %d, want the artifact replaced despite the matching version", got)
+	}
+	deployed, ok := h.remote.file(agentPath)
+	if !ok {
+		t.Fatal("the agent was not activated")
+	}
+	if string(deployed) != string(h.localArtifact(t, "amd64")) {
+		t.Fatal("the deployed bytes must match the manifest hash")
+	}
+}
+
+// TestReviewFailedUploadCleansTemporaryArtifact pins R11: an upload that wrote
+// bytes and then failed must not leave its temporary file behind.
+func TestReviewFailedUploadCleansTemporaryArtifact(t *testing.T) {
+	deployer, h := newAgentDeployHarness(t, "v1.2.3")
+	h.remote.agentPayload = `{"agent_version":"v1.2.3","protocol_version":1}`
+	h.remote.uploadWriteThenFail = true
+
+	lease, err := h.svc.AcquireLease(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+
+	if _, err := deployer.Collect(context.Background(), lease); err == nil {
+		t.Fatal("a failed upload must fail the collection")
+	}
+	if got := h.remote.count("rm -f "); got == 0 {
+		t.Fatal("the temporary upload was not cleaned up")
+	}
+	for _, path := range h.remote.fileKeys() {
+		if strings.Contains(path, ".upload-") {
+			t.Fatalf("temporary artifact left behind: %s", path)
+		}
+	}
 }

@@ -265,3 +265,110 @@ func TestReviewMissingRollupFallsBackToRaw(t *testing.T) {
 		t.Fatalf("average = %v, want 10 from the raw fallback", points[0].CPUPercent)
 	}
 }
+
+// TestReviewRetentionEventuallyPrunesOfflineServers pins R09: once a node stops
+// reporting, its already aggregated history must still be prunable — the
+// checkpoint is not required to keep following wall-clock time.
+func TestReviewRetentionEventuallyPrunesOfflineServers(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	const server = uint(61)
+	old := time.Date(2026, 1, 2, 0, 10, 0, 0, time.UTC)
+	if err := db.Create(&model.Metric{
+		ServerID: server, Time: old, CPUPercent: f64(10), NetBytesRecv: i64(0),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// First cycle materializes the bucket and advances the checkpoint.
+	first := time.Date(2026, 1, 2, 6, 1, 0, 0, time.UTC)
+	if _, err := repo.RefreshRollups(ctx, first, RollupRefreshWindow); err != nil {
+		t.Fatal(err)
+	}
+
+	// The node goes silent; 38 days later the sample is beyond retention.
+	later := first.Add(38 * 24 * time.Hour)
+	if _, err := repo.RefreshRollups(ctx, later, RollupRefreshWindow); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := repo.PlanPrune(ctx, later, MetricsRetention)
+	if err != nil {
+		t.Fatalf("PlanPrune: %v", err)
+	}
+	if len(plan.Pending) != 0 {
+		t.Fatalf("pending = %v, want an offline node's aggregated history to be prunable", plan.Pending)
+	}
+	if plan.RawRows != 1 {
+		t.Fatalf("prunable raw rows = %d, want 1", plan.RawRows)
+	}
+	result, err := repo.PruneMetrics(ctx, plan)
+	if err != nil {
+		t.Fatalf("PruneMetrics: %v", err)
+	}
+	if result.Paused || result.RawRows != 1 {
+		t.Fatalf("prune result = %+v, want an applied prune of 1 row", result)
+	}
+	var remaining int64
+	if err := db.Raw(`SELECT COUNT(*) FROM metrics WHERE server_id = ?`, server).Scan(&remaining).Error; err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("raw rows left = %d, want the expired sample pruned", remaining)
+	}
+}
+
+// TestReviewGapThresholdTracksConfiguredCollectionInterval pins R07: the
+// sampling-gap threshold follows the effective collection interval instead of a
+// fixed three minutes, in both directions.
+func TestReviewGapThresholdTracksConfiguredCollectionInterval(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	const server = uint(71)
+	base := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
+
+	// A healthy 600s cadence: 6000 bytes over 600s is 10 B/s.
+	for _, sample := range []model.Metric{
+		{ServerID: server, Time: base, NetBytesRecv: i64(0), CPUPercent: f64(1)},
+		{ServerID: server, Time: base.Add(600 * time.Second), NetBytesRecv: i64(6000), CPUPercent: f64(1)},
+	} {
+		row := sample
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	query := func() *float64 {
+		t.Helper()
+		rows, err := repo.Query(ctx, server, base.Add(-time.Second), base.Add(1200*time.Second), "15m")
+		if err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		for _, row := range rows {
+			if row.NetRecvRate != nil {
+				return row.NetRecvRate
+			}
+		}
+		return nil
+	}
+
+	// The default 3 minute threshold rejects the 10 minute spacing.
+	if rate := query(); rate != nil {
+		t.Fatalf("rate = %v with the default threshold, want unknown", *rate)
+	}
+	// A 600s collection interval tolerates it.
+	repo.SetDeltaGapThreshold(600 * time.Second)
+	if rate := query(); rate == nil || *rate != 10 {
+		t.Fatalf("rate = %v, want 10 B/s once the threshold follows the interval", rate)
+	}
+	// A dense 30s configuration must not accept a two-minute gap.
+	repo.SetDeltaGapThreshold(30 * time.Second)
+	if rate := query(); rate != nil {
+		t.Fatalf("rate = %v with a 30s configuration, want the gap rejected", *rate)
+	}
+	// The derived values themselves are clamped.
+	if got := DeltaGapForInterval(600 * time.Second); got != 30*time.Minute {
+		t.Fatalf("600s interval → %v, want 30m", got)
+	}
+	if got := DeltaGapForInterval(2 * time.Second); got != time.Minute {
+		t.Fatalf("2s interval → %v, want the 1m floor", got)
+	}
+}

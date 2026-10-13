@@ -33,9 +33,12 @@ type fakeRemote struct {
 	unameOS, unameArch string
 	noShaTool          bool
 	uploadError        string
-	activateUnknown    bool
-	activateFailsSoft  bool
-	corruptUpload      bool
+	// uploadWriteThenFail stores the upload and then reports failure, as a chmod
+	// or a partially applied command would.
+	uploadWriteThenFail bool
+	activateUnknown     bool
+	activateFailsSoft   bool
+	corruptUpload       bool
 
 	agentPayload string
 	agentExit    int
@@ -156,6 +159,15 @@ func (f *fakeRemote) handler() func(string, ssh.Channel, <-chan struct{}) {
 				return
 			}
 			data, _ := io.ReadAll(ch)
+			if f.uploadWriteThenFail {
+				// The bytes are on disk, but the command still failed.
+				f.mu.Lock()
+				f.files[match[1]] = data
+				f.mu.Unlock()
+				fmt.Fprintf(ch.Stderr(), "chmod: cannot access '%s': Permission denied\n", match[1])
+				exitStatus(ch, 1)
+				return
+			}
 			if f.corruptUpload {
 				data = append(data, []byte("corrupted")...)
 			}
@@ -538,7 +550,9 @@ func TestAgentDeployEventsCorrelateWithServerID(t *testing.T) {
 	deployer, h := newAgentDeployHarness(t, "v1.2.3")
 	var logs bytes.Buffer
 	deployer.logger = slog.New(slog.NewJSONHandler(&logs, nil))
-	h.remote.noShaTool = true // deterministic classified failure
+	// A read-only target fails the upload, which is a real deployment attempt (a
+	// missing hash tool would fail before any deployment is attempted).
+	h.remote.uploadError = "cat: /tmp/vpsmanager-agent.upload-1: Read-only file system"
 
 	lease, err := h.svc.AcquireLease(context.Background(), 1)
 	if err != nil {
@@ -553,7 +567,7 @@ func TestAgentDeployEventsCorrelateWithServerID(t *testing.T) {
 	for _, want := range []string{
 		`"action":"agent.deploy"`,
 		`"outcome":"failure"`,
-		`"reason_class":"agent_remote_tool_missing"`,
+		`"reason_class":"agent_target_read_only"`,
 		`"server_id":1`,
 		`"platform":"linux/amd64"`,
 	} {

@@ -108,6 +108,10 @@ type monitorScheduler struct {
 	nodes       map[uint]*monitorNode
 	order       []uint
 	cursor      int
+	// outstanding counts workers that have been admitted and have not reported
+	// completion yet, including workers whose node was deleted while running.
+	// Capacity must be held until the worker really finishes (R12).
+	outstanding int
 }
 
 func newMonitorScheduler(interval time.Duration, clock monitorClock, rng monitorRand) *monitorScheduler {
@@ -215,6 +219,7 @@ func (s *monitorScheduler) plan(now time.Time) monitorTick {
 			continue
 		}
 		node.inFlight, node.queued = true, false
+		s.outstanding++
 		if node.deferWarned {
 			tick.RecoveredDefer = append(tick.RecoveredDefer, id)
 		}
@@ -259,6 +264,11 @@ func (s *monitorScheduler) complete(id uint, outcome monitorOutcome, now time.Ti
 	// Only the owner of an admitted task reports completion: anything else (a
 	// queued node, a node whose task was already accounted for) must not have its
 	// pending slot or schedule rewritten.
+	// A deleted node's worker still occupies capacity: release it only now, when
+	// the worker actually reports completion.
+	if s.outstanding > 0 {
+		s.outstanding--
+	}
 	if node == nil || !node.inFlight {
 		return monitorCompletion{}
 	}
@@ -413,15 +423,10 @@ func (s *monitorScheduler) inFlightCount() int {
 	return s.inFlightLocked()
 }
 
-// inFlightLocked requires the caller to hold s.mu.
+// inFlightLocked requires the caller to hold s.mu. It reports the number of live
+// workers, including those whose node was removed while they were running.
 func (s *monitorScheduler) inFlightLocked() int {
-	count := 0
-	for _, node := range s.nodes {
-		if node.inFlight {
-			count++
-		}
-	}
-	return count
+	return s.outstanding
 }
 
 // queuedCount reports node states for assertions and telemetry: pending records

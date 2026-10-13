@@ -75,8 +75,8 @@ func (r *MetricRepo) queryRawBuckets(ctx context.Context, serverID uint, from, t
 	// has a predecessor, but only [from,to) is aggregated: the predecessor is
 	// rate context and must not contribute gauge observations or extra points.
 	err := r.db.WithContext(ctx).Raw(sql,
-		serverID, from.Add(-DefaultDeltaGapThreshold), to,
-		DefaultDeltaGapThreshold.String(), from, to).Scan(&points).Error
+		serverID, from.Add(-r.gapThreshold()), to,
+		r.gapThreshold().String(), from, to).Scan(&points).Error
 	if err != nil {
 		return nil, classifyBudgetError(fmt.Errorf("raw metrics query: %w", err))
 	}

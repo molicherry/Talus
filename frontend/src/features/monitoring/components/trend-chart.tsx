@@ -218,13 +218,16 @@ export function TrendChart({
       visibleSeries.map((s) => ({
         key: s.key,
         color: s.color,
+        marker: s.marker ?? "circle",
         points: isolatedIndices(s.values).map((index) => ({
           x: xAt(index),
           y: yAt(s.values[index] as number),
         })),
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [series, width, count, resolvedMax, plotH, timeMs, spanMs],
+    // visibleSeries, not series: hiding a series must also remove its isolated
+    // markers (R16), and the marker shape keeps them consistent with the legend.
+    [visibleSeries, width, count, resolvedMax, plotH, timeMs, spanMs],
   );
 
   const selectIndex = (index: number) => {
@@ -421,15 +424,33 @@ export function TrendChart({
           ))}
 
           {isolated.map((s) =>
-            s.points.map((point, index) => (
-              <circle
-                key={`${s.key}-isolated-${index}`}
-                cx={point.x}
-                cy={point.y}
-                r={2.5}
-                fill={s.color}
-              />
-            )),
+            s.points.map((point, index) => {
+              const key = `${s.key}-isolated-${index}`;
+              if (s.marker === "square") {
+                return (
+                  <rect key={key} x={point.x - 2.5} y={point.y - 2.5} width={5} height={5} fill={s.color} />
+                );
+              }
+              if (s.marker === "triangle") {
+                return (
+                  <polygon
+                    key={key}
+                    points={`${point.x},${point.y - 3} ${point.x + 3},${point.y + 2.5} ${point.x - 3},${point.y + 2.5}`}
+                    fill={s.color}
+                  />
+                );
+              }
+              if (s.marker === "diamond") {
+                return (
+                  <polygon
+                    key={key}
+                    points={`${point.x},${point.y - 3} ${point.x + 3},${point.y} ${point.x},${point.y + 3} ${point.x - 3},${point.y}`}
+                    fill={s.color}
+                  />
+                );
+              }
+              return <circle key={key} cx={point.x} cy={point.y} r={2.5} fill={s.color} />;
+            }),
           )}
 
           {hoverIndex !== null &&

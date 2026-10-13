@@ -322,6 +322,8 @@ func main() {
 	terminalH.SetUserGate(userGate)
 
 	// Dependency chain — Metrics
+	// The sampling-gap threshold follows the effective collection interval (R07).
+	metricRepo.SetDeltaGapThreshold(time.Duration(cfg.MonitorInterval) * time.Second)
 	monitorSvc := service.NewMonitorService(sshSvc, metricRepo, serverRepo, time.Duration(cfg.MonitorInterval)*time.Second)
 	monitorSvc.SetAgentDeployer(service.NewAgentDeploymentService(sshSvc, cfg.AgentArtifactsDir))
 	metricsH := handler.NewMetricsHandler(metricRepo)

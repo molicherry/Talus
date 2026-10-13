@@ -12,6 +12,42 @@ import (
 // MetricRepo provides database access for time-series metrics.
 type MetricRepo struct {
 	db *gorm.DB
+	// deltaGapThreshold is the largest spacing between two samples that may
+	// contribute a rate. It tracks the effective collection interval (R07); zero
+	// falls back to DefaultDeltaGapThreshold.
+	deltaGapThreshold time.Duration
+}
+
+// SetDeltaGapThreshold configures the gap threshold from the effective
+// collection interval: three intervals, clamped to [1m, 1h] so a pathological
+// configuration cannot widen the predecessor scan unboundedly.
+func (r *MetricRepo) SetDeltaGapThreshold(interval time.Duration) {
+	r.deltaGapThreshold = DeltaGapForInterval(interval)
+}
+
+// DeltaGapForInterval derives the sampling-gap threshold from the effective
+// collection interval (§8.3: the threshold is tied to the interval and the
+// acceptance fixture records the value).
+func DeltaGapForInterval(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return DefaultDeltaGapThreshold
+	}
+	threshold := 3 * interval
+	if threshold < time.Minute {
+		threshold = time.Minute
+	}
+	if threshold > time.Hour {
+		threshold = time.Hour
+	}
+	return threshold
+}
+
+// gapThreshold is the threshold in force for this repository.
+func (r *MetricRepo) gapThreshold() time.Duration {
+	if r.deltaGapThreshold > 0 {
+		return r.deltaGapThreshold
+	}
+	return DefaultDeltaGapThreshold
 }
 
 // NewMetricRepo creates a MetricRepo backed by the given database handle.
@@ -265,8 +301,8 @@ func (r *MetricRepo) Query(
 
 	var results []AggregatedMetric
 	err := r.db.WithContext(ctx).Raw(sql,
-		serverID, from.Add(-DefaultDeltaGapThreshold), to,
-		DefaultDeltaGapThreshold.String(), interval).Scan(&results).Error
+		serverID, from.Add(-r.gapThreshold()), to,
+		r.gapThreshold().String(), interval).Scan(&results).Error
 	if err != nil {
 		return nil, err
 	}

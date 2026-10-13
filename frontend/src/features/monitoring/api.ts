@@ -97,11 +97,15 @@ export async function getMetrics(
   const fromIso = from.toISOString();
   const toIso = now.toISOString();
 
-  const interval = options.interval ?? TIME_RANGE_INTERVALS[timeRange];
+  // The default request is `auto`: the backend picks the finest granularity the
+  // bucket budget allows, so a denser collection configuration (for example
+  // MONITOR_INTERVAL=30) can still be served from the 6h rollup instead of being
+  // refused with 422 (R14). A granularity the user picked explicitly is sent as
+  // such and the UI accepts coarsening, showing what was really used.
+  const interval = options.interval ?? "auto";
   const params = new URLSearchParams({ from: fromIso, to: toIso, interval, stat: options.stat ?? "avg" });
   if (options.interval) {
-    // An explicit granularity is strict unless the UI is allowed to coarsen it.
-    params.set("allow_coarsen", options.allowCoarsen ? "true" : "false");
+    params.set("allow_coarsen", options.allowCoarsen === false ? "false" : "true");
   }
 
   const res = await apiClient.get<unknown>(

@@ -394,12 +394,17 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
     return t(built.key, built.params);
   }, [axisMode, data?.meta?.actualInterval, data?.window.from, data?.window.to, stat, t]);
 
-  // A new range/axis/statistic starts the data view on its first page.
+  // Only a configuration change (range, axis, statistic) returns the data view to
+  // its first page: an automatic refresh must not move the reader (R17). The page
+  // is clamped below when the row count shrinks.
   useEffect(() => {
     setTablePage(1);
-  }, [axisMode, stat, timeRange, data?.window.from]);
+  }, [axisMode, stat, timeRange]);
 
   const tableRows = pageSlice(times.length, tablePage);
+  useEffect(() => {
+    if (tableRows.page !== tablePage) setTablePage(tableRows.page);
+  }, [tableRows.page, tablePage]);
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">

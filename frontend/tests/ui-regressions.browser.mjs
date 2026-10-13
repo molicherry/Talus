@@ -135,13 +135,29 @@ async function fixture(browser, mobile = false) {
     if (path === "/api/v1/servers/summary" || path === "/api/v1/servers")
       return reply(state.servers);
     if (/\/servers\/\d+\/metrics$/.test(path)) {
-      const requested = url.searchParams.get("interval") ?? "1m";
       const stat = url.searchParams.get("stat") ?? "avg";
+      const fromMs = Date.parse(url.searchParams.get("from"));
+      const toMs = Date.parse(url.searchParams.get("to"));
+      const requestedRaw = url.searchParams.get("interval") ?? "auto";
+      // The backend resolves "auto" to the finest granularity the budget allows;
+      // the mock mirrors that so the chart aligns to the same grid.
+      const effective =
+        requestedRaw === "auto"
+          ? toMs - fromMs <= 3600000
+            ? "1m"
+            : toMs - fromMs <= 21600000
+              ? "5m"
+              : toMs - fromMs <= 86400000
+                ? "15m"
+                : toMs - fromMs <= 604800000
+                  ? "1h"
+                  : "6h"
+          : requestedRaw;
+      const requested = requestedRaw;
       const interval =
-        { "1m": 60000, "5m": 300000, "15m": 900000, "1h": 3600000, "6h": 21600000 }[requested] ??
-        60000;
-      const first = Math.floor(Date.parse(url.searchParams.get("from")) / interval) * interval;
-      const last = Date.parse(url.searchParams.get("to"));
+        { "1m": 60000, "5m": 300000, "15m": 900000, "1h": 3600000, "6h": 21600000 }[effective] ?? 60000;
+      const first = Math.floor(fromMs / interval) * interval;
+      const last = toMs;
       const points = [];
       for (let time = first, index = 0; time <= last; time += interval, index++) {
         if (index === 1) continue; // A gap must remain distinct from real zero.
@@ -181,12 +197,12 @@ async function fixture(browser, mobile = false) {
         from: url.searchParams.get("from"),
         to: url.searchParams.get("to"),
         requested_interval: requested,
-        actual_interval: requested,
+        actual_interval: effective,
         coarsen_reason: "",
         stat,
         coverage: 0.75,
-        source: requested === "6h" ? "rollup" : "raw",
-        downsampled: requested === "6h",
+        source: effective === "6h" ? "rollup" : "raw",
+        downsampled: effective === "6h",
         points,
       });
     }

@@ -95,7 +95,7 @@ func (r *MetricRepo) RefreshRollups(ctx context.Context, now time.Time, window t
 				return fmt.Errorf("lock rollup refresh: %w", err)
 			}
 			var err error
-			buckets, err = materializeBuckets(tx, serverID, from, closed)
+			buckets, err = materializeBuckets(tx, r, serverID, from, closed)
 			if err != nil {
 				return err
 			}
@@ -152,7 +152,7 @@ func (r *MetricRepo) rollupStart(ctx context.Context, serverID uint, closed, now
 // materializeBuckets recomputes the closed buckets in [from,to) for one server,
 // including buckets with no samples, which are recorded explicitly so the
 // checkpoint's completeness claim is verifiable.
-func materializeBuckets(tx *gorm.DB, serverID uint, from, to time.Time) (int, error) {
+func materializeBuckets(tx *gorm.DB, repo *MetricRepo, serverID uint, from, to time.Time) (int, error) {
 	sql := deltaSamplesCTE("") + "," + `
 	aggregate AS (` + rollupAggregateSelect(rollupBucketExpr) + `
 	),
@@ -197,9 +197,13 @@ func materializeBuckets(tx *gorm.DB, serverID uint, from, to time.Time) (int, er
 
 	// The scan starts one gap threshold early so the first bucket's first sample
 	// still has a predecessor, and never reaches the open bucket.
+	threshold := DefaultDeltaGapThreshold
+	if repo != nil {
+		threshold = repo.gapThreshold()
+	}
 	err := tx.Exec(sql,
-		serverID, from.Add(-DefaultDeltaGapThreshold), to,
-		DefaultDeltaGapThreshold.String(), from, to, serverID).Error
+		serverID, from.Add(-threshold), to,
+		threshold.String(), from, to, serverID).Error
 	if err != nil {
 		return 0, fmt.Errorf("materialize rollup buckets: %w", err)
 	}
@@ -273,21 +277,30 @@ func (r *MetricRepo) PlanPrune(ctx context.Context, now time.Time, retention tim
 		`SELECT COUNT(*) FROM metrics_rollup_6h WHERE bucket_start < ?`, plan.Cutoff).Scan(&plan.RollupRows).Error; err != nil {
 		return plan, fmt.Errorf("count prunable rollup rows: %w", err)
 	}
-	// Aggregation completeness per server: a server with raw data older than the
-	// cutoff but no checkpoint covering it must not lose that raw data yet.
+	// Aggregation completeness per server: only raw data that the checkpoint has
+	// not covered is protected. A server that stopped reporting (offline or
+	// deleted) must not block its own retention forever just because its
+	// checkpoint no longer follows wall-clock time (R09).
 	var rows []struct {
-		ServerID  uint
-		CoveredTo *time.Time
+		ServerID        uint
+		CoveredTo       *time.Time
+		HasUnaggregated bool
 	}
 	if err := r.db.WithContext(ctx).Raw(`
-		SELECT m.server_id, c.completed_through AS covered_to
-		FROM (SELECT DISTINCT server_id FROM metrics WHERE time < ?) m
+		SELECT m.server_id, c.completed_through AS covered_to,
+		       EXISTS (
+		         SELECT 1 FROM metrics raw
+		         WHERE raw.server_id = m.server_id
+		           AND raw.time < $1
+		           AND (c.completed_through IS NULL OR raw.time >= c.completed_through)
+		       ) AS has_unaggregated
+		FROM (SELECT DISTINCT server_id FROM metrics WHERE time < $1) m
 		LEFT JOIN metrics_rollup_checkpoints c ON c.server_id = m.server_id`,
 		plan.Cutoff).Scan(&rows).Error; err != nil {
 		return plan, fmt.Errorf("check aggregation completeness: %w", err)
 	}
 	for _, row := range rows {
-		if row.CoveredTo == nil || row.CoveredTo.Before(plan.Cutoff) {
+		if row.HasUnaggregated {
 			plan.Pending = append(plan.Pending, row.ServerID)
 		}
 	}
