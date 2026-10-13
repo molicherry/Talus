@@ -278,8 +278,10 @@ func (r *MetricRepo) Query(
 	// zero/negative time delta or a gap beyond the declared threshold yields an
 	// unknown value (a gap), while a real zero increment is a real zero. The scan
 	// starts one threshold early so the first bucket has a predecessor.
-	sql := fmt.Sprintf(deltaSamplesCTE(0, "$5", "$6", "$7")+`,
-	aggregate AS (
+	// Gauges come from the per-sample rows (one bucket each) and rates from the
+	// per-bucket split pairs, so a boundary-crossing counter interval is weighted
+	// per bucket instead of being charged to the later one (N02).
+	gauge := `
 		SELECT
 			to_timestamp(floor(EXTRACT(EPOCH FROM time) / EXTRACT(EPOCH FROM $5::interval))
 			            * EXTRACT(EPOCH FROM $5::interval)) AS bucket,
@@ -298,23 +300,23 @@ func (r *MetricRepo) Query(
 			CASE WHEN SUM(CASE WHEN swap_total > 0 THEN 1 ELSE 0 END) > 0
 				 THEN SUM(CASE WHEN swap_total > 0 THEN swap_used * 100.0 / swap_total ELSE 0 END)
 				      / SUM(CASE WHEN swap_total > 0 THEN 1 ELSE 0 END)
-				 ELSE NULL END AS swap_percent,
-			%s AS net_recv_rate,
-			%s AS net_sent_rate,
-			%s AS disk_read_rate,
-			%s AS disk_write_rate
+				 ELSE NULL END AS swap_percent
 		FROM samples
 		WHERE time >= $6 AND time < $7
-		GROUP BY bucket
+		GROUP BY bucket`
+	sql := deltaSamplesCTE("$5::interval", "$6", "$7") + fmt.Sprintf(`,
+	aggregate AS (
+		SELECT COALESCE(g.bucket, r.bucket) AS bucket,
+		       g.cpu_percent, g.memory_percent, g.disk_percent,
+		       g.load_1, g.load_5, g.load_15, g.swap_percent,
+		       r.net_recv_rate, r.net_sent_rate, r.disk_read_rate, r.disk_write_rate
+		FROM ( %s ) g
+		FULL OUTER JOIN ( %s ) r ON r.bucket = g.bucket
 	)
 	SELECT bucket, cpu_percent, memory_percent, disk_percent, load_1, load_5, load_15,
 	       swap_percent, net_recv_rate, net_sent_rate, disk_read_rate, disk_write_rate
 	FROM aggregate
-	ORDER BY bucket ASC`,
-		metricRateExpression("net_bytes_recv"),
-		metricRateExpression("net_bytes_sent"),
-		metricRateExpression("disk_read_bytes"),
-		metricRateExpression("disk_write_bytes"))
+	ORDER BY bucket ASC`, gauge, rateAggregateSelect())
 
 	var results []AggregatedMetric
 	err := r.db.WithContext(ctx).Raw(sql,

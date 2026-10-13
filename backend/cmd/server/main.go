@@ -315,6 +315,13 @@ func main() {
 	sshDialTimeout := time.Duration(cfg.SSHTimeout) * time.Second
 	execDefaultTimeout := time.Duration(cfg.ExecTimeout) * time.Second
 	sshSvc := service.NewSSHService(sshPool, serverRepo, credSvc, sshDialTimeout, execDefaultTimeout)
+	// The SSH layer owns the in-use gauge: one increment per acquired pool slot and
+	// one decrement per real settlement, so the reading follows the resource and
+	// not a caller's foreground return (N03).
+	sshSvc.SetLeaseObserver(func(consumer service.LeaseConsumer, delta float64) {
+		_ = telemetryRegistry.AddGauge("talus_ssh_leases_in_use",
+			map[string]string{"consumer": string(consumer)}, delta)
+	})
 	sshSvc.SetOutputLimits(cfg.ExecOutputLimit, cfg.ExecOutputStreamLimit)
 	terminalSvc := service.NewTerminalService(sshSvc)
 	terminalSvc.SetSessionRegistry(terminalRegistry)

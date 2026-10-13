@@ -45,9 +45,22 @@ COPY --from=ui-builder /app/dist/ /static/
 # emulation in CI). Verification inside the build means a broken image cannot be
 # published (TC-08-05).
 ARG TARGETARCH
+# The probe is verified by value, not by substring: "protocol_version": 10 must not
+# satisfy a check for 1, and the reported agent version must equal the version this
+# image was built with (N07). Only POSIX tools are used - the image has no jq and no
+# python - so the check is an exact-field awk pass.
+ARG VERSION=dev
 RUN /usr/local/bin/vpsmanager-agent-linux-${TARGETARCH} --format json > /tmp/agent-probe.json \
- && grep -q '"protocol_version": 1' /tmp/agent-probe.json \
- && grep -q '"agent_version":' /tmp/agent-probe.json \
+ && awk -v want="${VERSION}" '\
+      function take(pattern,   s) { if (match($0, pattern)) { return substr($0, RSTART, RLENGTH) } return "" }\
+      {\
+        v = take("\"protocol_version\"[ \t]*:[ \t]*[0-9]+");\
+        if (v != "") { sub(/.*:[ \t]*/, "", v); if (v == "1") proto = 1 }\
+        ver = take("\"agent_version\"[ \t]*:[ \t]*\"[^\"]*\"");\
+        if (ver != "") { sub(/.*:[ \t]*"/, "", ver); sub(/"$/, "", ver); if (ver == want) version = 1 }\
+      }\
+      END { exit (proto && version) ? 0 : 1 }\
+    ' /tmp/agent-probe.json \
  && rm -f /tmp/agent-probe.json
 EXPOSE 8080
 ENV STATIC_DIR=/static

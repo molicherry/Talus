@@ -161,6 +161,15 @@ function checkEnvironment(run) {
       }
       continue;
     }
+    if (req === "docker") {
+      // The image check builds and runs real images. A missing daemon must block
+      // the gate instead of silently skipping the acceptance it exists to perform.
+      const probe = spawnSync("docker", ["info"], { stdio: "ignore", timeout: 20000 });
+      if (probe.error || probe.status !== 0) {
+        return { ok: false, reason: "requires a reachable docker daemon: the image acceptance check cannot be skipped" };
+      }
+      continue;
+    }
     if (!process.env[req]) {
       return { ok: false, reason: `requires env ${req} (export it or choose another suite)` };
     }

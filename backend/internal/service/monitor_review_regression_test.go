@@ -161,9 +161,12 @@ func TestReviewDeletedCollectionKeepsCapacityUntilJoined(t *testing.T) {
 	}
 }
 
-// stubLease is a Lease whose settlement a test controls.
+// stubLease is a Lease whose settlement a test controls. The default settlement
+// deadline is far in the future so the bounded test budget is what stops the wait;
+// a test may pin a nearer deadline to prove the wait consumes it (N03).
 type stubLease struct {
-	done chan struct{}
+	done     chan struct{}
+	deadline time.Time
 }
 
 func (l *stubLease) Exec(context.Context, string, time.Duration) (*ExecResult, error) {
@@ -172,10 +175,16 @@ func (l *stubLease) Exec(context.Context, string, time.Duration) (*ExecResult, e
 func (l *stubLease) Upload(context.Context, string, string, time.Duration) error { return nil }
 func (l *stubLease) Cancel(string)                                               {}
 func (l *stubLease) Done() <-chan struct{}                                       { return l.done }
-func (l *stubLease) Generation() Generation                                      { return 0 }
-func (l *stubLease) ServerID() uint                                              { return 1 }
-func (l *stubLease) Release()                                                    {}
-func (l *stubLease) Discard()                                                    {}
+func (l *stubLease) SettlementDeadline() time.Time {
+	if l.deadline.IsZero() {
+		return time.Now().Add(time.Hour)
+	}
+	return l.deadline
+}
+func (l *stubLease) Generation() Generation { return 0 }
+func (l *stubLease) ServerID() uint         { return 1 }
+func (l *stubLease) Release()               {}
+func (l *stubLease) Discard()               {}
 
 // TestReviewMonitorShutdownWaitsForLeaseSettlement pins R13: a collection is only
 // reported finished once its lease's resources are reclaimed, and the wait is
@@ -326,5 +335,35 @@ func TestRereviewRemoteCleanupExitFailureIsReported(t *testing.T) {
 	}
 	if !leftOver {
 		t.Fatal("the peer kept the file, so the state must be reported as pending")
+	}
+}
+
+// TestRereviewNestedCleanupDoesNotRestartTheBudget is the N03 reproduction: the
+// settlement wait consumes the lease's immutable deadline, so a nested wait cannot
+// add a second cleanup budget after the SSH layer already spent one.
+func TestRereviewNestedCleanupDoesNotRestartTheBudget(t *testing.T) {
+	svc := NewMonitorService(nil, nil, nil, time.Minute)
+
+	// The resource owner already spent almost all of its 3s budget: only ~50ms may
+	// remain, however long the default budget is.
+	pending := &stubLease{done: make(chan struct{}), deadline: time.Now().Add(50 * time.Millisecond)}
+	start := time.Now()
+	if svc.awaitLeaseSettlement(pending) {
+		t.Fatal("an unsettled lease must not be reported as reclaimed")
+	}
+	elapsed := time.Since(start)
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("nested wait took %v: it started a fresh cleanup budget instead of "+
+			"consuming the lease deadline (N03)", elapsed)
+	}
+
+	// The same deadline in the past returns immediately.
+	expired := &stubLease{done: make(chan struct{}), deadline: time.Now().Add(-time.Second)}
+	start = time.Now()
+	if svc.awaitLeaseSettlement(expired) {
+		t.Fatal("an unsettled lease must not be reported as reclaimed")
+	}
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Fatalf("wait on an expired budget took %v, want an immediate pending result", elapsed)
 	}
 }

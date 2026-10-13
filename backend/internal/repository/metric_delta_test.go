@@ -84,17 +84,22 @@ func TestDeltaRatesFollowRequirementRules(t *testing.T) {
 		}
 	}
 
-	assertRate(0, nil)               // first sample has no predecessor
-	assertRate(time.Minute, f64(10)) // stable increase
-	assertRate(2*time.Minute, f64(10))
-	assertRate(3*time.Minute, f64(0)) // a real zero increment is zero, not unknown
-	assertRate(4*time.Minute, nil)    // counter reset
-	// The first sample of the duplicate pair still forms a valid 60s delta from its
-	// predecessor (100 B over 60s); the duplicate itself has dt=0 and contributes
-	// nothing, so no divide-by-zero or infinite value can appear.
-	assertRate(5*time.Minute, f64(100.0/60.0))
-	assertRate(15*time.Minute, nil)     // gap beyond the 3× interval threshold
-	assertRate(16*time.Minute, f64(10)) // a fresh pair after the gap
+	// A rate is reported for exactly the seconds its pair covers: the pair that
+	// *starts* at a bucket boundary covers that bucket, and the pair that ends
+	// exactly there does not (N02 split, per-second buckets here).
+	assertRate(0, f64(10))            // covered by the pair 0s -> 60s
+	assertRate(time.Minute, f64(10))  // stable increase
+	assertRate(2*time.Minute, f64(0)) // the zero increment covers this second
+	assertRate(3*time.Minute, nil)    // the reset pair is invalid, so nothing covers it
+	assertRate(4*time.Minute, f64(100.0/60.0))
+	// Two invalid pairs cover the 5m second and neither yields a rate: the first
+	// sample of the duplicate pair has dt=0 (no interval at all), and the pair
+	// reaching 15m is beyond the gap threshold.
+	assertRate(5*time.Minute, nil)
+	assertRate(15*time.Minute, f64(10)) // a fresh pair covers this second
+	// The newest sample has no following pair: the last bucket is a gap, not a
+	// fabricated rate (the counter's next reading does not exist yet).
+	assertRate(16*time.Minute, nil)
 
 	for _, row := range rows {
 		if row.NetRecvRate == nil {

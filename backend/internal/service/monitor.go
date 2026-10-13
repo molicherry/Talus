@@ -96,7 +96,9 @@ type MonitorService struct {
 	wake chan struct{}
 	// telemetry records the frozen operation/stage/lag vocabulary (§12.1/§12.2).
 	telemetry *monitorTelemetry
-	// leaseSettleBudget bounds one settlement wait; zero uses the frozen default.
+	// leaseSettleBudget bounds one settlement wait in tests. It is zero in
+	// production, where the wait consumes the lease's own absolute deadline - the
+	// single 3s budget defined by the SSH resource layer (N03).
 	leaseSettleBudget time.Duration
 }
 
@@ -328,7 +330,7 @@ func (s *MonitorService) reportTick(tick monitorTick) {
 	// A deferred admission is a production outcome, not just a log line: count the
 	// slots that were really missed with the frozen vocabulary (skipped/quota).
 	for i := 0; i < tick.Deferred; i++ {
-		s.telemetry.operations("monitor.collect", telOutcomeSkipped, telReasonQuota)
+		s.telemetry.skippedCollection(telReasonQuota)
 	}
 	if len(tick.Queued) > 0 || len(tick.Skipped) > 0 {
 		s.logger.Info("monitor admission deferred",
@@ -366,12 +368,13 @@ func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
 	}
 	// One lease spans the probe, the upload and the execution so the whole
 	// collection is pinned to a single target generation (§8.2 step 3).
-	lease, err := s.sshSvc.AcquireLease(ctx, serverID)
+	lease, err := s.sshSvc.AcquireLease(ctx, serverID, LeaseConsumerAgent)
 	if err != nil {
 		return err
 	}
-	s.telemetry.leaseGauge("agent", 1)
-	defer s.telemetry.leaseGauge("agent", -1)
+	// The SSH layer owns the gauge: it starts when the pool slot is taken and ends
+	// when the slot is really back, so a foreground timeout that returns while the
+	// owner still holds the slot stays visible (N03).
 	defer lease.Release()
 
 	out, err := s.deployer.Collect(ctx, lease)
@@ -393,27 +396,35 @@ func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
 	return s.metricRepo.InsertFull(ctx, s.metricFull(serverID, out))
 }
 
-// monitorLeaseSettleBudget is the frozen local cleanup budget for one
-// collection's SSH resources (REQUIREMENTS §7.1.1).
-const monitorLeaseSettleBudget = 3 * time.Second
-
 // awaitLeaseSettlement waits for the lease to report that its resources were
-// reclaimed. The wait is bounded by the frozen local cleanup budget and is not
-// abandoned when the task context is cancelled: shutdown, node deletion and a
-// collection deadline all cancel that context, and the resources are still being
-// closed (F05). The budget starts when settlement begins, matching the resource
-// layer's own absolute cleanup deadline.
+// reclaimed. The wait is not abandoned when the task context is cancelled:
+// shutdown, node deletion and a collection deadline all cancel that context, and
+// the resources are still being closed (F05).
+//
+// The wait consumes the lease's own immutable settlement deadline, which the SSH
+// layer anchored when it began reclaiming the slot. A nested wait must not start a
+// fresh budget: the resource layer's teardown plus this wait have to stay inside
+// the single documented 3s bound (N03), and a lease that already spent it returns
+// pending immediately instead of buying another 3 seconds.
 func (s *MonitorService) awaitLeaseSettlement(lease Lease) bool {
 	select {
 	case <-lease.Done():
 		return true
 	default:
 	}
-	budget := s.leaseSettleBudget
-	if budget <= 0 {
-		budget = monitorLeaseSettleBudget
+	if s.leaseSettleBudget > 0 {
+		// Tests may pin a shorter budget; the deadline still wins when it is
+		// already inside that budget.
+		timer := time.NewTimer(s.leaseSettleBudget)
+		defer timer.Stop()
+		select {
+		case <-lease.Done():
+			return true
+		case <-timer.C:
+			return false
+		}
 	}
-	timer := time.NewTimer(budget)
+	timer := time.NewTimer(max(time.Until(lease.SettlementDeadline()), 0))
 	defer timer.Stop()
 	select {
 	case <-lease.Done():

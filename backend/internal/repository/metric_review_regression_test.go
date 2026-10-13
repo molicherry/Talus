@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -819,5 +820,197 @@ func TestRereviewBootstrapDiscardPolicyIsExplicit(t *testing.T) {
 	}
 	if plan.RawRows != 1 {
 		t.Fatalf("prunable rows = %d, want the single out-of-window sample", plan.RawRows)
+	}
+}
+
+// TestRereviewInternalBucketOverlapSplitsRate is the N02 reproduction: a counter
+// pair that crosses an internal bucket boundary must be split by overlap, not
+// charged entirely to the bucket of its later sample.
+//
+// Request 12:00-12:02 at 1m buckets; the counter reads 0 at 12:00:40, 300 at
+// 12:01:10 and 1300 at 12:01:20. The first pair is 10 B/s over 30s (20s of it in
+// the 12:00 bucket, 10s in the 12:01 bucket) and the second is 100 B/s over 10s.
+func TestRereviewInternalBucketOverlapSplitsRate(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	const server = uint(120)
+	base := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	for _, sample := range []struct {
+		at    time.Duration
+		value int64
+	}{
+		{40 * time.Second, 0},
+		{70 * time.Second, 300},  // 12:01:10
+		{80 * time.Second, 1300}, // 12:01:20
+	} {
+		row := model.Metric{ServerID: server, Time: base.Add(sample.at), NetBytesRecv: i64(sample.value)}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := repo.QueryWithBudget(ctx, QueryRequest{
+		ServerID: server, From: base, To: base.Add(2 * time.Minute), Requested: "1m",
+	})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	byBucket := map[string]AggregatedMetric{}
+	for _, point := range result.Points {
+		byBucket[point.Time.UTC().Format("15:04")] = point
+	}
+	first, ok := byBucket["12:00"]
+	if !ok {
+		t.Fatalf("no 12:00 bucket in %+v", result.Points)
+	}
+	if first.NetRecvRate == nil || math.Abs(*first.NetRecvRate-10) > 0.001 {
+		t.Fatalf("12:00 rate = %v, want 10 B/s (20s of the crossing pair)", first.NetRecvRate)
+	}
+	if first.NetRecvCov == nil || math.Abs(*first.NetRecvCov-20) > 0.001 {
+		t.Fatalf("12:00 coverage = %v, want 20s", first.NetRecvCov)
+	}
+	second, ok := byBucket["12:01"]
+	if !ok {
+		t.Fatalf("no 12:01 bucket in %+v", result.Points)
+	}
+	// (10 B/s × 10s + 100 B/s × 10s) / 20s = 55 B/s.
+	if second.NetRecvRate == nil || math.Abs(*second.NetRecvRate-55) > 0.001 {
+		t.Fatalf("12:01 rate = %v, want 55 B/s (weighted split)", second.NetRecvRate)
+	}
+	if second.NetRecvCov == nil || math.Abs(*second.NetRecvCov-20) > 0.001 {
+		t.Fatalf("12:01 coverage = %v, want 20s (not the whole 40s)", second.NetRecvCov)
+	}
+	// The gauges of the single 12:00 sample must not be duplicated into 12:01.
+	if second.CPUCount != 0 || second.CPUSum != nil {
+		t.Fatalf("12:01 gauges = count %d sum %v, want none: gauges are counted once",
+			second.CPUCount, second.CPUSum)
+	}
+}
+
+// TestRereviewInternalRollupBucketOverlapSplitsRate is the N02 reproduction for the
+// materialized path: a pair crossing a 6h boundary must be stored split, otherwise
+// the wrong weight is persisted and served to every long-range chart.
+func TestRereviewInternalRollupBucketOverlapSplitsRate(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	const server = uint(121)
+	// Samples straddle the 12:00 boundary: 11:59:40 → 0, 12:00:10 → 300 (10 B/s
+	// over 30s: 20s in the 06:00 bucket, 10s in the 12:00 bucket).
+	base := time.Date(2026, 1, 2, 11, 59, 40, 0, time.UTC)
+	for _, sample := range []struct {
+		at    time.Duration
+		value int64
+	}{{0, 0}, {30 * time.Second, 300}} {
+		row := model.Metric{ServerID: server, Time: base.Add(sample.at), NetBytesRecv: i64(sample.value)}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	to := time.Date(2026, 1, 2, 23, 0, 0, 0, time.UTC)
+	if _, err := repo.RefreshRollups(ctx, to, 24*time.Hour); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	var rows []RollupRow
+	if err := db.WithContext(ctx).Raw(
+		`SELECT * FROM metrics_rollup_6h WHERE server_id = ? AND bucket_start >= ? AND bucket_start < ?
+		 ORDER BY bucket_start`, server,
+		time.Date(2026, 1, 2, 6, 0, 0, 0, time.UTC), time.Date(2026, 1, 2, 18, 0, 0, 0, time.UTC),
+	).Scan(&rows).Error; err != nil {
+		t.Fatalf("rollup rows: %v", err)
+	}
+	var six, twelve *RollupRow
+	for i := range rows {
+		switch rows[i].BucketStart.UTC().Format("15:04") {
+		case "06:00":
+			six = &rows[i]
+		case "12:00":
+			twelve = &rows[i]
+		}
+	}
+	if six == nil || twelve == nil {
+		t.Fatalf("materialized rows = %+v, want the 06:00 and 12:00 buckets", rows)
+	}
+	if six.NetRecvRate == nil || math.Abs(*six.NetRecvRate-10) > 0.001 {
+		t.Fatalf("06:00 stored rate = %v, want 10 B/s", six.NetRecvRate)
+	}
+	if six.NetRecvCov == nil || math.Abs(*six.NetRecvCov-20) > 0.001 {
+		t.Fatalf("06:00 stored coverage = %v, want 20s", six.NetRecvCov)
+	}
+	if twelve.NetRecvRate == nil || math.Abs(*twelve.NetRecvRate-10) > 0.001 {
+		t.Fatalf("12:00 stored rate = %v, want 10 B/s for the crossing pair", twelve.NetRecvRate)
+	}
+	if twelve.NetRecvCov == nil || math.Abs(*twelve.NetRecvCov-10) > 0.001 {
+		t.Fatalf("12:00 stored coverage = %v, want 10s", twelve.NetRecvCov)
+	}
+}
+
+// TestRereviewHypertableComponentsComeFromDetailedSize is the N04 reproduction:
+// table and index bytes must be the real components of the hypertable, not the
+// parent shell's sizes reported next to a chunk-inclusive total.
+func TestRereviewHypertableComponentsComeFromDetailedSize(t *testing.T) {
+	db := newTestDBWithExtensions(t)
+	ctx := context.Background()
+	if err := db.AutoMigrate(&model.Metric{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`SELECT create_hypertable('metrics', 'time', chunk_time_interval => interval '1 day', migrate_data => true)`).Error; err != nil {
+		t.Skipf("hypertable not available in this environment: %v", err)
+	}
+	if err := PrepareMetricsRollupSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewMetricRepo(db)
+	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 2000; i++ {
+		row := model.Metric{
+			ServerID: 300, Time: base.Add(time.Duration(i) * time.Second),
+			CPUPercent: f64(float64(i % 100)), NetBytesRecv: i64(int64(i * 60)),
+		}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report, err := repo.StorageReport(ctx)
+	if err != nil {
+		t.Fatalf("StorageReport: %v", err)
+	}
+	// The authoritative components.
+	var want struct {
+		Total int64 `gorm:"column:total_bytes"`
+		Table int64 `gorm:"column:table_bytes"`
+		Index int64 `gorm:"column:index_bytes"`
+		Toast int64 `gorm:"column:toast_bytes"`
+	}
+	if err := db.Raw(`SELECT COALESCE(SUM(total_bytes),0) AS total_bytes,
+		COALESCE(SUM(table_bytes),0) AS table_bytes,
+		COALESCE(SUM(index_bytes),0) AS index_bytes,
+		COALESCE(SUM(toast_bytes),0) AS toast_bytes
+		FROM hypertable_detailed_size('metrics')`).Scan(&want).Error; err != nil {
+		t.Fatal(err)
+	}
+	parentTable := int64(0)
+	if err := db.Raw(`SELECT pg_relation_size('metrics')`).Scan(&parentTable).Error; err != nil {
+		t.Fatal(err)
+	}
+	if report.RawTableBytes != want.Table {
+		t.Fatalf("table bytes = %d, want %d (the parent shell reports %d)",
+			report.RawTableBytes, want.Table, parentTable)
+	}
+	if report.RawIndexBytes != want.Index {
+		t.Fatalf("index bytes = %d, want %d", report.RawIndexBytes, want.Index)
+	}
+	if report.RawToastBytes != want.Toast {
+		t.Fatalf("toast bytes = %d, want %d", report.RawToastBytes, want.Toast)
+	}
+	// The components must add up to the total the projection is based on.
+	if sum := report.RawTableBytes + report.RawIndexBytes + report.RawToastBytes; sum != report.RawTotalBytes {
+		t.Fatalf("components %d+%d+%d do not sum to the total %d",
+			report.RawTableBytes, report.RawIndexBytes, report.RawToastBytes, report.RawTotalBytes)
+	}
+	if want.Table <= parentTable {
+		t.Fatalf("fixture is not exercising the bug: detailed table bytes %d is not larger than "+
+			"the parent shell %d", want.Table, parentTable)
 	}
 }

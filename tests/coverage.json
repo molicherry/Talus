@@ -219,6 +219,23 @@
       "timeout_seconds": 2400,
       "environment": {
         "profile": "local",
+        "requires": [
+          "docker"
+        ]
+      }
+    },
+    {
+      "run_id": "static-agent-probe",
+      "suite": "fast",
+      "runner": "shell",
+      "cwd": ".",
+      "command": [
+        "bash",
+        "tests/static/agent-probe-check.sh"
+      ],
+      "timeout_seconds": 120,
+      "environment": {
+        "profile": "local",
         "requires": []
       }
     }
@@ -230,7 +247,8 @@
       "go-unit",
       "frontend-node",
       "migrate-hardening",
-      "deploy-verify"
+      "deploy-verify",
+      "static-agent-probe"
     ],
     "M2": [
       "coverage-tools",
@@ -240,14 +258,17 @@
       "migrate-hardening",
       "integration-agent",
       "go-race",
-      "terminal-e2e"
+      "terminal-e2e",
+      "static-agent-probe"
     ],
     "M3": [
+      "static-agent-probe",
       "go-unit",
       "frontend-node",
       "migrate-hardening",
       "integration-agent",
-      "ui-charts"
+      "ui-charts",
+      "image-agents"
     ],
     "M4": [
       "go-unit",
@@ -289,6 +310,16 @@
           "implementation": {
             "path": "tests/static/adapters-removed.sh",
             "symbol": "main"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-01-04",
+          "run_id": "static-adapters",
+          "implementation": {
+            "path": "tests/static/adapters-removed.sh",
+            "symbol": "identical exclusion scope with and without ripgrep"
           },
           "automation_status": "implemented",
           "required": true
@@ -1691,6 +1722,26 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-01i",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestRereviewSettlementDeadlineIsSharedWithTheOwner"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01j",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestRereviewLeaseGaugeFollowsThePoolSlot"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -1851,6 +1902,26 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-03j",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewInternalBucketOverlapSplitsRate"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03k",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewInternalRollupBucketOverlapSplitsRate"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -1950,7 +2021,7 @@
             "symbol": "verify-artifacts"
           },
           "automation_status": "implemented",
-          "required": false
+          "required": true
         },
         {
           "implementation_id": "impl-08-05d",
@@ -1960,7 +2031,27 @@
             "symbol": "protocol-smoke"
           },
           "automation_status": "implemented",
-          "required": false
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-05e",
+          "run_id": "static-agent-probe",
+          "implementation": {
+            "path": "tests/static/agent-probe-check.sh",
+            "symbol": "exact protocol and version acceptance"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-05f",
+          "run_id": "image-agents",
+          "implementation": {
+            "path": "tests/verify-agent-images.sh",
+            "symbol": "final-stage acceptance in the built image"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -2101,6 +2192,36 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-06n",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/metrics_retention_test.go",
+            "symbol": "TestRereviewEnabledRetentionWithoutDryRunStaysDry"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06o",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/metrics_maintenance_test.go",
+            "symbol": "TestRereviewOmittedDryRunKeepsTheRolloutDry"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06p",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewHypertableComponentsComeFromDetailedSize"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -2227,7 +2348,17 @@
           "run_id": "go-unit",
           "implementation": {
             "path": "backend/internal/service/telemetry_events_test.go",
-            "symbol": "TestRereviewLeaseGaugeIsShared"
+            "symbol": "TestRereviewLeaseGaugeVocabulary"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07m",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestRereviewNestedCleanupDoesNotRestartTheBudget"
           },
           "automation_status": "implemented",
           "required": true

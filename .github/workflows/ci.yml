@@ -202,6 +202,16 @@ jobs:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
         run: bash tests/run.sh --gate M2
 
+      # M3 is the hardening gate and now includes the image acceptance run, so the
+      # gate cannot pass while the four final images are never built and executed.
+      # The docker job below does the same builds with a warm cache, so this step is
+      # redundant on purpose: the gate is only meaningful if it runs the check.
+      - name: Phase gate M3 (migrate hardening, agent images)
+        if: ${{ !cancelled() }}
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+        run: bash tests/run.sh --gate M3
+
       - name: Upload phase execution evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4

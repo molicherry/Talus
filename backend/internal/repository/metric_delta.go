@@ -29,32 +29,31 @@ const (
 // rateCounters are the monotonic counters whose per-sample delta matters.
 var rateCounters = []string{"net_bytes_recv", "net_bytes_sent", "disk_read_bytes", "disk_write_bytes"}
 
-// deltaSamplesCTE builds the shared adjacent-sample CTE: one row per raw sample
-// with, for every counter, an effective rate that is NULL when the pair must not
-// participate (counter reset/decrease, zero or negative time delta, or a gap
-// beyond the declared threshold). A real zero increment yields 0, not NULL.
+// deltaSamplesCTE builds the shared adjacent-sample CTE. It exposes two
+// relations for the aggregators:
 //
-// The caller must scan one predecessor sample before the requested start so the
-// first bucket can be weighted correctly. $1=server id, $2=scan start (the
-// window start minus the gap threshold), $3=scan end (exclusive), $4=gap
-// threshold; the CTE also carries the observation window ($5=window start,
-// $6=window end) so callers can exclude the predecessor rows from statistics:
-// a predecessor is rate context, never an in-window observation.
-// deltaSamplesCTE builds the shared adjacent-sample CTE: one row per raw sample
-// with, for every counter, an effective rate that is NULL when the pair must not
-// participate (counter reset/decrease, zero or negative time delta, or a gap
-// beyond the declared threshold) plus the *clipped* weight of that pair.
+//   - samples: one row per sample (plus the single predecessor row), with the
+//     adjacent-pair rate of every counter. Gauges are aggregated from here, so a
+//     sample is counted exactly once in exactly one bucket — the bucket that
+//     contains its own timestamp.
+//   - pairs: one row per (pair, overlapping bucket) with the pair's rate and the
+//     weight it contributes to that bucket. Rates are aggregated from here.
 //
 // The weight is the overlap of the pair interval with three bounds: the bucket it
 // is attributed to, the request window, and the sample times themselves. Weighting
 // by the full pair interval let time outside the requested window inflate both the
-// average and the reported coverage (F02). A real zero increment yields 0, not
-// NULL.
+// average and the reported coverage (F02), and attributing a pair entirely to the
+// bucket of its later sample charged a boundary-crossing interval to one bucket
+// (N02). A pair whose counters reset, decrease or span a gap longer than the
+// threshold contributes no weight at all. A real zero increment yields 0, not NULL.
 //
 // Parameters: $1=server id, $2=scan start, $3=scan end (exclusive), $4=gap
-// threshold. Window bounds come from windowStartParam/windowEndParam, and the
-// bucket grid either from a literal bucketSeconds or from bucketIntervalParam.
-func deltaSamplesCTE(bucketSeconds int64, bucketIntervalParam, windowStartParam, windowEndParam string) string {
+// threshold. bucketIntervalExpr is the bucket width as an SQL interval expression
+// (a literal, or a bound parameter in the legacy Query API) and windowStartParam/
+// windowEndParam are the request window bounds.
+func deltaSamplesCTE(bucketIntervalExpr, windowStartParam, windowEndParam string) string {
+	step := bucketIntervalExpr
+	scale := fmt.Sprintf("EXTRACT(EPOCH FROM (%s))", bucketIntervalExpr)
 	rate := func(counter string) string {
 		return fmt.Sprintf(`CASE
 			WHEN prev_%[1]s IS NULL OR %[1]s IS NULL THEN NULL
@@ -64,27 +63,27 @@ func deltaSamplesCTE(bucketSeconds int64, bucketIntervalParam, windowStartParam,
 			ELSE (%[1]s - prev_%[1]s)::float8 / EXTRACT(EPOCH FROM (time - prev_time))
 		END AS %[1]s_rate`, counter)
 	}
-	out := ""
+	rates := ""
 	for i, counter := range rateCounters {
 		if i > 0 {
-			out += ",\n"
+			rates += ",\n"
 		}
-		out += "\t\t" + rate(counter)
+		rates += "\t\t" + rate(counter)
 	}
+	// Every counter of a pair is valid or invalid independently, but they share the
+	// pair interval, so one overlap expression feeds all four weights.
 	weighted := ""
 	for _, counter := range rateCounters {
 		weighted += fmt.Sprintf(`,
 			CASE
-				WHEN %[1]s_rate IS NOT NULL
+				WHEN r.%[1]s_rate IS NOT NULL
 				THEN GREATEST(0, EXTRACT(EPOCH FROM (
-					LEAST(time, %[2]s::timestamptz)
-					- GREATEST(prev_time, %[3]s::timestamptz)
+					LEAST(r.time, b.bucket_start + %[2]s, %[3]s::timestamptz)
+					- GREATEST(r.prev_time, b.bucket_start, %[4]s::timestamptz)
 				)))
 				ELSE 0
-			END AS %[1]s_weight`, counter, windowEndParam, windowStartParam)
+			END AS %[1]s_weight`, counter, step, windowEndParam, windowStartParam)
 	}
-	_ = bucketSeconds
-	_ = bucketIntervalParam
 	return fmt.Sprintf(`
 	WITH bounded AS (
 		(SELECT time, memory_used, memory_total, disk_used, disk_total, swap_used, swap_total,
@@ -116,13 +115,58 @@ func deltaSamplesCTE(bucketSeconds int64, bucketIntervalParam, windowStartParam,
 	),
 	rates AS (
 		SELECT *,
-%s
+%[1]s
 		FROM lagged
 	),
 	samples AS (
-		SELECT *%s
-		FROM rates
-	)`, out, weighted)
+		SELECT * FROM rates
+	),
+	-- The bucket grid of the request window, generated in SQL so any budget-
+	-- resolved interval (1m .. 6h) splits pairs without a bound bucket list.
+	-- Named apart from the rollup job's own bucket grid CTE.
+	pair_buckets AS (
+		SELECT generate_series(
+			to_timestamp(floor(EXTRACT(EPOCH FROM %[3]s::timestamptz) / (%[4]s)) * (%[4]s)),
+			to_timestamp(floor(EXTRACT(EPOCH FROM %[5]s::timestamptz) / (%[4]s)) * (%[4]s)),
+			%[6]s
+		) AS bucket_start
+	),
+	pairs AS (
+		SELECT b.bucket_start AS bucket,
+		       r.time AS sample_time,
+		       r.prev_time,
+		       r.net_bytes_recv_rate, r.net_bytes_sent_rate,
+		       r.disk_read_bytes_rate, r.disk_write_bytes_rate%[2]s
+		FROM rates r
+		JOIN pair_buckets b
+		  ON r.prev_time IS NOT NULL
+		 AND r.prev_time < b.bucket_start + %[6]s
+		 AND r.time > b.bucket_start
+		-- The pair must touch the window and the bucket at the same time: a pair
+		-- that only overlaps one of them contributes nothing anywhere.
+		WHERE r.prev_time < %[5]s::timestamptz
+		  AND r.time > %[3]s::timestamptz
+		  AND LEAST(r.time, b.bucket_start + %[6]s, %[5]s::timestamptz)
+		      > GREATEST(r.prev_time, b.bucket_start, %[3]s::timestamptz)
+	)`, rates, weighted, windowStartParam, scale, windowEndParam, step)
+}
+
+// rateAggregateSelect builds the per-bucket rate aggregate over the split pairs:
+// each pair contributes its rate for exactly the seconds it covers inside that
+// bucket, so a pair crossing a bucket boundary is split instead of being charged
+// entirely to the later bucket (N02).
+func rateAggregateSelect() string {
+	return fmt.Sprintf(`SELECT bucket,
+		%s AS net_recv_rate, %s AS net_recv_peak, %s AS net_recv_coverage,
+		%s AS net_sent_rate, %s AS net_sent_peak, %s AS net_sent_coverage,
+		%s AS disk_read_rate, %s AS disk_read_peak, %s AS disk_read_coverage,
+		%s AS disk_write_rate, %s AS disk_write_peak, %s AS disk_write_coverage
+	FROM pairs
+	GROUP BY bucket`,
+		metricRateExpression("net_bytes_recv"), metricPeakExpression("net_bytes_recv"), metricCoverageExpression("net_bytes_recv"),
+		metricRateExpression("net_bytes_sent"), metricPeakExpression("net_bytes_sent"), metricCoverageExpression("net_bytes_sent"),
+		metricRateExpression("disk_read_bytes"), metricPeakExpression("disk_read_bytes"), metricCoverageExpression("disk_read_bytes"),
+		metricRateExpression("disk_write_bytes"), metricPeakExpression("disk_write_bytes"), metricCoverageExpression("disk_write_bytes"))
 }
 
 // metricRateExpression yields the weighted-average expression for one counter's
@@ -145,8 +189,11 @@ func metricCoverageExpression(counter string) string {
 }
 
 // rollupAggregateSelect builds the bucket aggregation used by the 6h rollup job.
+// Gauges are aggregated per sample and rates per split pair, then joined, so a
+// boundary-crossing counter interval is materialized with the correct per-bucket
+// weight instead of being stored whole in the later bucket (N02).
 func rollupAggregateSelect(bucketExpr string) string {
-	return fmt.Sprintf(`
+	gauge := fmt.Sprintf(`
 	SELECT
 		%s AS bucket_start,
 		COUNT(*)::int AS samples,
@@ -164,18 +211,25 @@ func rollupAggregateSelect(bucketExpr string) string {
 		MAX(CASE WHEN swap_total > 0 THEN swap_used * 100.0 / swap_total END) AS swap_max,
 		SUM(load_1) AS load1_sum, COUNT(load_1)::int AS load1_count, MAX(load_1) AS load1_max,
 		SUM(load_5) AS load5_sum, COUNT(load_5)::int AS load5_count, MAX(load_5) AS load5_max,
-		SUM(load_15) AS load15_sum, COUNT(load_15)::int AS load15_count, MAX(load_15) AS load15_max,
-		%s AS net_recv_rate, %s AS net_recv_peak, %s AS net_recv_coverage,
-		%s AS net_sent_rate, %s AS net_sent_peak, %s AS net_sent_coverage,
-		%s AS disk_read_rate, %s AS disk_read_peak, %s AS disk_read_coverage,
-		%s AS disk_write_rate, %s AS disk_write_peak, %s AS disk_write_coverage
+		SUM(load_15) AS load15_sum, COUNT(load_15)::int AS load15_count, MAX(load_15) AS load15_max
 	FROM samples
-	GROUP BY bucket_start`,
-		bucketExpr,
-		metricRateExpression("net_bytes_recv"), metricPeakExpression("net_bytes_recv"), metricCoverageExpression("net_bytes_recv"),
-		metricRateExpression("net_bytes_sent"), metricPeakExpression("net_bytes_sent"), metricCoverageExpression("net_bytes_sent"),
-		metricRateExpression("disk_read_bytes"), metricPeakExpression("disk_read_bytes"), metricCoverageExpression("disk_read_bytes"),
-		metricRateExpression("disk_write_bytes"), metricPeakExpression("disk_write_bytes"), metricCoverageExpression("disk_write_bytes"))
+	GROUP BY bucket_start`, bucketExpr)
+	return fmt.Sprintf(`
+	SELECT COALESCE(g.bucket_start, r.bucket) AS bucket_start,
+		g.samples, g.first_sample, g.last_sample,
+		g.cpu_sum, g.cpu_count, g.cpu_max,
+		g.mem_sum, g.mem_count, g.mem_max,
+		g.disk_sum, g.disk_count, g.disk_max,
+		g.swap_sum, g.swap_count, g.swap_max,
+		g.load1_sum, g.load1_count, g.load1_max,
+		g.load5_sum, g.load5_count, g.load5_max,
+		g.load15_sum, g.load15_count, g.load15_max,
+		r.net_recv_rate, r.net_recv_peak, r.net_recv_coverage,
+		r.net_sent_rate, r.net_sent_peak, r.net_sent_coverage,
+		r.disk_read_rate, r.disk_read_peak, r.disk_read_coverage,
+		r.disk_write_rate, r.disk_write_peak, r.disk_write_coverage
+	FROM ( %s ) g
+	FULL OUTER JOIN ( %s ) r ON r.bucket = g.bucket_start`, gauge, rateAggregateSelect())
 }
 
 // rollupBucketExpr aligns a timestamp to the 6h UTC boundary.

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -186,22 +187,27 @@ func TestRereviewSkippedAdmissionsAreCounted(t *testing.T) {
 	svc := NewMonitorService(nil, nil, nil, time.Minute)
 	svc.SetTelemetry(registry)
 
-	// Two nodes missed one slot each in one pass.
+	// Two nodes missed one slot each in one pass: both counters describe the same
+	// two events, so they must agree (N05).
 	svc.reportTick(monitorTick{Queued: []uint{1, 2}, Deferred: 2})
 	snapshot := registry.Snapshot()
-	key := `talus_monitor_collections_total{outcome=skipped,reason_class=quota}`
-	if got := snapshot[key]; got != 0 {
-		t.Fatalf("skipped count = %v before any deferral: %v", got, snapshot)
-	}
 	if got := snapshot[`talus_operations_total{action=monitor.collect,outcome=skipped,reason_class=quota}`]; got != 2 {
 		t.Fatalf("skipped operations = %v, want 2", got)
 	}
+	if got := snapshot[`talus_monitor_collections_total{outcome=skipped,reason_class=quota}`]; got != 2 {
+		t.Fatalf("skipped collections = %v, want 2: the dedicated series covers attempts "+
+			"and skips, so it cannot stay at zero (N05)", got)
+	}
 
 	// A pass that only skipped an in-flight node without a missed slot counts
-	// nothing new.
+	// nothing new in either series.
 	svc.reportTick(monitorTick{Skipped: []uint{1}})
-	if got := registry.Snapshot()[`talus_operations_total{action=monitor.collect,outcome=skipped,reason_class=quota}`]; got != 2 {
+	snapshot = registry.Snapshot()
+	if got := snapshot[`talus_operations_total{action=monitor.collect,outcome=skipped,reason_class=quota}`]; got != 2 {
 		t.Fatalf("skipped operations = %v, want the count unchanged", got)
+	}
+	if got := snapshot[`talus_monitor_collections_total{outcome=skipped,reason_class=quota}`]; got != 2 {
+		t.Fatalf("skipped collections = %v, want the count unchanged", got)
 	}
 }
 
@@ -221,17 +227,25 @@ func TestRereviewCollectionIDReachesTheDeployment(t *testing.T) {
 	}
 }
 
-// TestRereviewLeaseGaugeIsShared pins the SSH lease gauge for the agent consumer.
-func TestRereviewLeaseGaugeIsShared(t *testing.T) {
+// TestRereviewLeaseGaugeVocabulary pins the frozen consumer vocabulary the SSH
+// resource owner reports through (N03): the three documented layers are accepted
+// and anything else is rejected, so a mislabeled borrow cannot reach the metrics.
+func TestRereviewLeaseGaugeVocabulary(t *testing.T) {
 	registry := telemetry.NewRegistry()
-	emitter := newMonitorTelemetry(registry, nil)
-	emitter.leaseGauge("agent", 1)
-	emitter.leaseGauge("agent", -1)
-	key := `talus_ssh_leases_in_use{consumer=agent}`
-	if got := registry.Snapshot()[key]; got != 0 {
-		t.Fatalf("%s = %v, want 0 after acquire and release", key, got)
+	for _, consumer := range []LeaseConsumer{LeaseConsumerExec, LeaseConsumerTerminal, LeaseConsumerAgent} {
+		key := fmt.Sprintf(`talus_ssh_leases_in_use{consumer=%s}`, consumer)
+		if err := registry.AddGauge("talus_ssh_leases_in_use",
+			map[string]string{"consumer": string(consumer)}, 1); err != nil {
+			t.Fatalf("consumer %q rejected: %v", consumer, err)
+		}
+		if err := registry.AddGauge("talus_ssh_leases_in_use",
+			map[string]string{"consumer": string(consumer)}, -1); err != nil {
+			t.Fatalf("consumer %q release rejected: %v", consumer, err)
+		}
+		if got := registry.Snapshot()[key]; got != 0 {
+			t.Fatalf("%s = %v, want 0 after acquire and release", key, got)
+		}
 	}
-	// The consumer label stays inside the frozen enum.
 	if err := registry.AddGauge("talus_ssh_leases_in_use", map[string]string{"consumer": "probe"}, 1); err == nil {
 		t.Fatal("an unknown consumer must be rejected")
 	}

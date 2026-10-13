@@ -452,3 +452,147 @@ func TestExecCleanupPendingPreservesOriginalReason(t *testing.T) {
 		})
 	}
 }
+
+// TestRereviewLeaseGaugeFollowsThePoolSlot is the N03 accounting reproduction: the
+// gauge is owned by the SSH layer, so it rises when the pool slot is taken and only
+// falls when the slot is really back. While a settlement is pending the foreground
+// result must not report the resource as reclaimed.
+func TestRereviewLeaseGaugeFollowsThePoolSlot(t *testing.T) {
+	address, hostKey := startExecSSHServer(t, func(_ string, _ ssh.Channel, _ <-chan struct{}) {})
+	raw, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := &leaseBlockedCloseConn{Conn: raw, entered: make(chan struct{}), resume: make(chan struct{})}
+	var unblockOnce sync.Once
+	unblock := func() { unblockOnce.Do(func() { close(conn.resume) }) }
+	defer unblock()
+	transport, channels, requests, err := ssh.NewClientConn(conn, address,
+		&ssh.ClientConfig{User: "test", HostKeyCallback: ssh.FixedHostKey(hostKey), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := newTestPool(t)
+	t.Cleanup(unblock)
+	seedPool(t, pool, 1, ssh.NewClient(transport, channels, requests))
+
+	var mu sync.Mutex
+	inUse := 0.0
+	svc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
+	svc.SetLeaseObserver(func(_ LeaseConsumer, delta float64) {
+		mu.Lock()
+		inUse += delta
+		mu.Unlock()
+	})
+	gauge := func() float64 {
+		mu.Lock()
+		defer mu.Unlock()
+		return inUse
+	}
+
+	lease, err := svc.AcquireLease(context.Background(), 1, LeaseConsumerAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gauge(); got != 1 {
+		t.Fatalf("gauge after acquire = %v, want 1", got)
+	}
+
+	// The transport close blocks, so the slot is still held while the foreground
+	// gives up on it.
+	lease.Cancel("collection abandoned")
+	select {
+	case <-conn.entered:
+	case <-time.After(time.Second):
+		t.Fatal("settlement did not reach the transport close")
+	}
+	select {
+	case <-lease.Done():
+		t.Fatal("settlement reported done while the close was still blocked")
+	default:
+	}
+	if got := gauge(); got != 1 {
+		t.Fatalf("gauge while settlement is pending = %v, want 1: returning the foreground "+
+			"result must not report the slot as reclaimed (N03)", got)
+	}
+
+	unblock()
+	select {
+	case <-lease.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("settlement did not finish after the transport close was unblocked")
+	}
+	if got := gauge(); got != 0 {
+		t.Fatalf("gauge after settlement = %v, want 0", got)
+	}
+	// Repeated release calls must not book the slot twice.
+	lease.Release()
+	lease.Cancel("duplicate")
+	if got := gauge(); got != 0 {
+		t.Fatalf("gauge after repeated release = %v, want 0", got)
+	}
+}
+
+// TestRereviewSettlementDeadlineIsSharedWithTheOwner is the N03 budget
+// reproduction: a lease that already spent its absolute budget reports a deadline
+// inside that same budget, and the monitor's wait consumes it instead of starting a
+// fresh 3s timer.
+func TestRereviewSettlementDeadlineIsSharedWithTheOwner(t *testing.T) {
+	address, hostKey := startExecSSHServer(t, func(_ string, _ ssh.Channel, _ <-chan struct{}) {})
+	raw, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := &leaseBlockedCloseConn{Conn: raw, entered: make(chan struct{}), resume: make(chan struct{})}
+	var unblockOnce sync.Once
+	unblock := func() { unblockOnce.Do(func() { close(conn.resume) }) }
+	defer unblock()
+	transport, channels, requests, err := ssh.NewClientConn(conn, address,
+		&ssh.ClientConfig{User: "test", HostKeyCallback: ssh.FixedHostKey(hostKey), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := newTestPool(t)
+	t.Cleanup(unblock)
+	seedPool(t, pool, 1, ssh.NewClient(transport, channels, requests))
+	svc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
+	lease, err := svc.AcquireLease(context.Background(), 1, LeaseConsumerAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a resource owner that already consumed all but ~80ms of the 3s
+	// absolute teardown budget.
+	start := time.Now().Add(-sshCleanupBudget + 80*time.Millisecond)
+	lease.mu.Lock()
+	lease.cleanup = &sshCleanupClock{}
+	lease.cleanup.once.Do(func() {
+		lease.cleanup.value = newSSHCleanupDeadlines(start, execTeardownGrace)
+	})
+	lease.mu.Unlock()
+
+	deadline := lease.SettlementDeadline()
+	if remaining := time.Until(deadline); remaining > 400*time.Millisecond {
+		t.Fatalf("settlement deadline is %v away, want the remainder of the original budget "+
+			"(the nested wait must not restart it)", remaining)
+	}
+
+	// The monitor's wait consumes that deadline: the transport close stays blocked,
+	// so the wait has to give up inside the remaining budget instead of 3 more
+	// seconds.
+	monitor := NewMonitorService(nil, nil, nil, time.Minute)
+	lease.Cancel("collection abandoned")
+	waitStart := time.Now()
+	if monitor.awaitLeaseSettlement(lease) {
+		t.Fatal("a lease whose settlement is blocked must be reported as pending")
+	}
+	if elapsed := time.Since(waitStart); elapsed > 700*time.Millisecond {
+		t.Fatalf("nested wait took %v: the SSH teardown plus the monitor wait must stay "+
+			"inside one 3s budget (N03)", elapsed)
+	}
+	unblock()
+	select {
+	case <-lease.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("settlement did not finish after unblocking")
+	}
+}

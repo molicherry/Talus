@@ -46,6 +46,10 @@ type SSHService struct {
 	// the remote never blocks on output backpressure (REQUIREMENTS §7.1.2).
 	outputLimit       int64
 	outputStreamLimit int64
+	// leaseObserver receives the in-use gauge deltas of the SSH pool slots this
+	// service hands out. It is called by the resource owner, once per real acquire
+	// and once per settlement (N03).
+	leaseObserver func(consumer LeaseConsumer, delta float64)
 }
 
 // NewSSHService creates an SSHService with the given dependencies.
@@ -90,6 +94,32 @@ type ExecResult struct {
 	StderrDiscarded int64 `json:"stderr_discarded_bytes"`
 }
 
+// LeaseConsumer identifies the layer that borrowed an SSH slot. It is the frozen
+// `consumer` label of talus_ssh_leases_in_use, and it is optional at the call
+// site so a non-production borrower (a test, tooling) cannot mislabel the
+// measurement.
+type LeaseConsumer string
+
+const (
+	LeaseConsumerExec     LeaseConsumer = "exec"
+	LeaseConsumerTerminal LeaseConsumer = "terminal"
+	LeaseConsumerAgent    LeaseConsumer = "agent"
+)
+
+// SetLeaseObserver wires the shared concurrency gauge. The SSH layer owns the
+// measurement because it owns the resource: the count follows the pool slot, not
+// the caller's foreground result (N03).
+func (s *SSHService) SetLeaseObserver(observer func(consumer LeaseConsumer, delta float64)) {
+	s.leaseObserver = observer
+}
+
+func (s *SSHService) observeLease(consumer LeaseConsumer, delta float64) {
+	if s.leaseObserver == nil || consumer == "" {
+		return
+	}
+	s.leaseObserver(consumer, delta)
+}
+
 // Exec runs a command on a target server via SSH.
 func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, timeout time.Duration) (*ExecResult, error) {
 	if timeout <= 0 {
@@ -101,7 +131,7 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 	start := time.Now()
 	operation, cancel := context.WithTimeoutCause(ctx, timeout, server.ErrSSHTimeout)
 	defer cancel()
-	lease, err := s.AcquireLease(operation, serverID)
+	lease, err := s.AcquireLease(operation, serverID, LeaseConsumerExec)
 	if err != nil {
 		if operation.Err() != nil {
 			return nil, fmt.Errorf("acquire SSH lease: %w", context.Cause(operation))
@@ -120,7 +150,7 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 // AcquireLease borrows a concurrency slot and returns a target-pinned lease,
 // dialing a new connection when no healthy cached client exists. The lease owns
 // the quota: callers must Release or Discard exactly once.
-func (s *SSHService) AcquireLease(ctx context.Context, serverID uint) (*sshLease, error) {
+func (s *SSHService) AcquireLease(ctx context.Context, serverID uint, consumer ...LeaseConsumer) (*sshLease, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -150,7 +180,7 @@ func (s *SSHService) AcquireLease(ctx context.Context, serverID uint) (*sshLease
 		return nil, err
 	}
 	if h.Client != nil {
-		return newSSHLease(s, h), nil
+		return newSSHLease(s, h, leaseConsumer(consumer)), nil
 	}
 
 	// Pool returned nil — dial a new connection.
@@ -220,7 +250,17 @@ func (s *SSHService) AcquireLease(ctx context.Context, serverID uint) (*sshLease
 	}
 
 	h.Client = client
-	return newSSHLease(s, h), nil
+	return newSSHLease(s, h, leaseConsumer(consumer)), nil
+}
+
+// leaseConsumer returns the first declared consumer, or "" when the borrower did
+// not declare one (a test or tooling): an unattributed slot is measured by nobody
+// rather than by the wrong label.
+func leaseConsumer(consumers []LeaseConsumer) LeaseConsumer {
+	if len(consumers) == 0 {
+		return ""
+	}
+	return consumers[0]
 }
 
 // serverFingerprint identifies everything a pooled SSH connection depends on.
@@ -498,7 +538,7 @@ func (s *SSHService) CopyFile(ctx context.Context, serverID uint, localPath, rem
 	budget := min(s.execDefaultTimeout, maxExecTimeout)
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	lease, err := s.AcquireLease(ctx, serverID)
+	lease, err := s.AcquireLease(ctx, serverID, LeaseConsumerExec)
 	if err != nil {
 		return fmt.Errorf("copy file: %w", err)
 	}

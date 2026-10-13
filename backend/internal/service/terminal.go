@@ -255,7 +255,7 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 			end("failed", reason, "ssh_error")
 		}
 	}
-	lease, err = s.sshSvc.AcquireLease(sessionCtx, serverID)
+	lease, err = s.sshSvc.AcquireLease(sessionCtx, serverID, LeaseConsumerTerminal)
 	if err != nil {
 		startFailed("terminal_ssh_failed")
 		return result, err

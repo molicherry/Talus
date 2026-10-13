@@ -126,15 +126,18 @@ func Load() *Config {
 	// dryRun=false) in place — dryRun=false is the deleting configuration.
 	cfg.MetricsRetentionEnabled = false
 	cfg.MetricsRetentionDryRun = true
+	// Only an explicitly set switch may override a default: a missing or empty
+	// variable reports "unset", which keeps the safe value installed above rather
+	// than reading it as an explicit false (N01).
 	if enabled, err := getEnvBoolStrict("METRICS_RETENTION_ENABLED"); err != nil {
 		cfg.MetricsRetentionParseError = err
-	} else {
-		cfg.MetricsRetentionEnabled = enabled
+	} else if enabled != nil {
+		cfg.MetricsRetentionEnabled = *enabled
 	}
 	if dryRun, err := getEnvBoolStrict("METRICS_RETENTION_DRY_RUN"); err != nil {
 		cfg.MetricsRetentionParseError = err
-	} else {
-		cfg.MetricsRetentionDryRun = dryRun
+	} else if dryRun != nil {
+		cfg.MetricsRetentionDryRun = *dryRun
 	}
 	cfg.MonitorInterval = getEnvIntOrDefault("MONITOR_INTERVAL", 60)
 	cfg.MonitorToleratedRounds = getEnvIntOrDefault("MONITOR_TOLERATED_ROUNDS", 1)
@@ -218,14 +221,18 @@ func (c *Config) MonitorFreshnessThreshold() time.Duration {
 // cannot interpret. Callers that gate a destructive behaviour must use this: the
 // lenient getEnvBool would silently fall back to false, which for a dry-run switch
 // means "delete".
-func getEnvBoolStrict(key string) (bool, error) {
+//
+// A nil pointer means the variable is unset (or empty), which is distinct from an
+// explicit false: a caller with a safe default must keep it in that case instead
+// of treating "not configured" as "configured to the unsafe value".
+func getEnvBoolStrict(key string) (*bool, error) {
 	val := os.Getenv(key)
 	if val == "" {
-		return false, nil
+		return nil, nil
 	}
 	parsed, err := strconv.ParseBool(val)
 	if err != nil {
-		return false, fmt.Errorf("%s=%q is not a valid boolean", key, val)
+		return nil, fmt.Errorf("%s=%q is not a valid boolean", key, val)
 	}
-	return parsed, nil
+	return &parsed, nil
 }

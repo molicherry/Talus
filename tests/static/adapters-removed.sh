@@ -50,16 +50,27 @@ have_rg() {
 }
 
 list_files_fallback() { # <root> <out>
+  # Same scope as the ripgrep path: only frontend/dist and node_modules are
+  # pruned, and any other directory called dist stays in the scan (N06).
   ( cd "$1" && find . -path ./.git -prune -o \
       -path '*/node_modules' -prune -o -path ./frontend/dist -prune -o \
       -name '.compiled-*' -prune -o -type f -print ) | sed 's|^\./||' > "$2"
 }
 
 grep_content_fallback() { # <root> <out> <err>
+  # The exclusion scope must match the ripgrep path exactly: only frontend/dist is
+  # generated output. Excluding every directory named dist would quietly widen the
+  # exemption and let residue under e.g. notes/dist pass (N06).
   ( cd "$1" && grep -rInE --exclude-dir=.git --exclude-dir=node_modules \
-      --exclude-dir=dist --exclude='.compiled-*' \
+      --exclude='.compiled-*' \
       -e "${PATTERNS[0]}" -e "${PATTERNS[1]}" -e "${PATTERNS[2]}" -e "${PATTERNS[3]}" -e "${PATTERNS[4]}" . ) \
     > "$2" 2> "$3"
+  # grep cannot express a path-qualified directory exclusion, so drop the one
+  # generated tree from the match list instead.
+  if [ -s "$2" ]; then
+    grep -v '^\./frontend/dist/' "$2" > "$2.filtered" 2>/dev/null || : > "$2.filtered"
+    mv "$2.filtered" "$2"
+  fi
 }
 
 # Prints "<kind>\t<path>"; exits 2 if the manifest is unreadable or malformed.
@@ -308,7 +319,9 @@ self_test() {
 }
 
 # --- main ---------------------------------------------------------------------
-need_rg
+# The scan uses git where it can and falls back to ripgrep or grep, so there is no
+# hard tool requirement to assert here; a tool that misbehaves during the scan is
+# reported as exit 2 by the scan itself (N08).
 if ! load_exemptions > "$TMP/exemptions.tsv"; then
   echo "✗ cannot load scan_exemptions from $COVERAGE" >&2
   exit 2

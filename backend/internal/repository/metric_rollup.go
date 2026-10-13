@@ -153,7 +153,7 @@ func (r *MetricRepo) rollupStart(ctx context.Context, serverID uint, closed, now
 // including buckets with no samples, which are recorded explicitly so the
 // checkpoint's completeness claim is verifiable.
 func materializeBuckets(tx *gorm.DB, repo *MetricRepo, serverID uint, from, to time.Time) (int, error) {
-	sql := deltaSamplesCTE(intervalSeconds["6h"], "", "$5", "$6") + "," + `
+	sql := deltaSamplesCTE(fmt.Sprintf("interval '%d seconds'", intervalSeconds["6h"]), "$5", "$6") + "," + `
 	aggregate AS (` + rollupAggregateSelect(rollupBucketExpr) + `
 	),
 	buckets AS (
@@ -448,11 +448,16 @@ func chunkHoldsPendingRaw(tx *gorm.DB, chunk chunkRange, pending []uint) (bool, 
 // StorageReport is the measured on-disk footprint of the metrics storage plus the
 // linear projection to the retention window (REQUIREMENTS §8.3.2).
 type StorageReport struct {
-	RawRows                 int64
-	RawTotalBytes           int64
-	RawTableBytes           int64
-	RawIndexBytes           int64
-	RawChunkBytes           int64
+	RawRows       int64
+	RawTotalBytes int64
+	RawTableBytes int64
+	RawIndexBytes int64
+	RawChunkBytes int64
+	// RawToastBytes is the TOAST component of the raw total. On TimescaleDB the
+	// table/index/toast components all come from hypertable_detailed_size, so they
+	// sum to RawTotalBytes; on a plain table PostgreSQL keeps TOAST inside the
+	// table's own size, so this stays zero.
+	RawToastBytes           int64
 	RollupRows              int64
 	RollupTotalBytes        int64
 	OldestRaw               *time.Time
@@ -470,16 +475,24 @@ func (r *MetricRepo) StorageReport(ctx context.Context) (*StorageReport, error) 
 		TotalBytes int64  `gorm:"column:raw_total_bytes"`
 		TableBytes int64  `gorm:"column:raw_table_bytes"`
 		IndexBytes int64  `gorm:"column:raw_index_bytes"`
+		ToastBytes int64  `gorm:"column:raw_toast_bytes"`
 		ChunkBytes *int64 `gorm:"column:raw_chunk_bytes"`
 	}
 	// hypertable_detailed_size only exists on TimescaleDB: fall back to the plain
 	// relation sizes when the metrics table is not a hypertable.
+	//
+	// On TimescaleDB the parent's own relation size covers only the shell, so every
+	// component - table, index, toast and therefore the total - comes from the
+	// detailed size, which already sums the parent and every chunk. Reporting the
+	// parent's table/index sizes next to a chunk-inclusive total mixed two different
+	// measurements and understated the components by orders of magnitude (F09, N04).
 	err := r.db.WithContext(ctx).Raw(`
 		SELECT
 			(SELECT COUNT(*) FROM metrics) AS raw_rows,
-			(SELECT pg_total_relation_size('metrics')) AS raw_total_bytes,
-			(SELECT pg_relation_size('metrics')) AS raw_table_bytes,
-			(SELECT pg_indexes_size('metrics')) AS raw_index_bytes,
+			(SELECT COALESCE(SUM(total_bytes), 0) FROM hypertable_detailed_size('metrics')) AS raw_total_bytes,
+			(SELECT COALESCE(SUM(table_bytes), 0) FROM hypertable_detailed_size('metrics')) AS raw_table_bytes,
+			(SELECT COALESCE(SUM(index_bytes), 0) FROM hypertable_detailed_size('metrics')) AS raw_index_bytes,
+			(SELECT COALESCE(SUM(toast_bytes), 0) FROM hypertable_detailed_size('metrics')) AS raw_toast_bytes,
 			(SELECT COALESCE(SUM(total_bytes), 0) FROM hypertable_detailed_size('metrics')) AS raw_chunk_bytes`,
 	).Scan(&raw).Error
 	if err != nil {
@@ -494,17 +507,18 @@ func (r *MetricRepo) StorageReport(ctx context.Context) (*StorageReport, error) 
 		}
 	}
 	report.RawRows = raw.Rows
-	report.RawTableBytes = raw.TableBytes
-	report.RawIndexBytes = raw.IndexBytes
 	if raw.ChunkBytes != nil {
-		// On TimescaleDB the hypertable's own relation size covers only the parent
-		// shell; the chunks hold the data. hypertable_detailed_size already reports
-		// the parent and every chunk, so it is the total — using the parent size
-		// alone understated capacity by orders of magnitude (F09).
+		// The detailed size already reports the parent and every chunk, so it is
+		// the measurement for every component (F09).
 		report.RawChunkBytes = *raw.ChunkBytes
-		report.RawTotalBytes = *raw.ChunkBytes
+		report.RawTotalBytes = raw.TotalBytes
+		report.RawTableBytes = raw.TableBytes
+		report.RawIndexBytes = raw.IndexBytes
+		report.RawToastBytes = raw.ToastBytes
 	} else {
 		report.RawTotalBytes = raw.TotalBytes
+		report.RawTableBytes = raw.TableBytes
+		report.RawIndexBytes = raw.IndexBytes
 	}
 
 	var rollup struct {

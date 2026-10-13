@@ -69,6 +69,11 @@ type Lease interface {
 	Upload(ctx context.Context, localPath, remotePath string, budget time.Duration) error
 	Cancel(reason string)
 	Done() <-chan struct{}
+	// SettlementDeadline is the immutable absolute deadline by which this lease's
+	// resource owner must have reclaimed the slot. A waiter that starts after the
+	// operation must consume *this* deadline instead of starting a fresh cleanup
+	// budget, otherwise a nested wait doubles the documented bound (N03).
+	SettlementDeadline() time.Time
 	ServerID() uint
 	Generation() Generation
 	Release()

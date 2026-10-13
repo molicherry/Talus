@@ -19,8 +19,6 @@ func bucketExpr(seconds int64) string {
 // returning both the average and the observed maximum of every series plus the
 // valid coverage seconds of the rate columns.
 func rawBucketAggregateSQL(intervalSeconds int64) string {
-	ratePeak := func(counter string) string { return fmt.Sprintf("MAX(%s_rate)", counter) }
-	rateCov := func(counter string) string { return fmt.Sprintf("SUM(%s_weight)", counter) }
 	percent := func(used, total string) string {
 		return fmt.Sprintf(`CASE WHEN SUM(CASE WHEN %[2]s > 0 THEN 1 ELSE 0 END) > 0
 				THEN SUM(CASE WHEN %[2]s > 0 THEN %[1]s * 100.0 / %[2]s ELSE 0 END)
@@ -30,9 +28,7 @@ func rawBucketAggregateSQL(intervalSeconds int64) string {
 	percentPeak := func(used, total string) string {
 		return fmt.Sprintf("MAX(CASE WHEN %[2]s > 0 THEN %[1]s * 100.0 / %[2]s END)", used, total)
 	}
-	return deltaSamplesCTE(intervalSeconds, "", "$5", "$6") + fmt.Sprintf(`,
-	aggregate AS (
-		SELECT
+	gauge := fmt.Sprintf(`SELECT
 			%s AS bucket,
 			MAX(time) AS sampled_at,
 			AVG(cpu_percent) AS cpu_percent, MAX(cpu_percent) AS cpu_peak,
@@ -51,14 +47,31 @@ func rawBucketAggregateSQL(intervalSeconds int64) string {
 			AVG(load_1) AS load_1, MAX(load_1) AS load_1_peak,
 			AVG(load_5) AS load_5, MAX(load_5) AS load_5_peak,
 			AVG(load_15) AS load_15, MAX(load_15) AS load_15_peak,
-			%s AS swap_percent, %s AS swap_peak,
-			%s AS net_recv_rate, %s AS net_recv_peak, %s AS net_recv_coverage,
-			%s AS net_sent_rate, %s AS net_sent_peak, %s AS net_sent_coverage,
-			%s AS disk_read_rate, %s AS disk_read_peak, %s AS disk_read_coverage,
-			%s AS disk_write_rate, %s AS disk_write_peak, %s AS disk_write_coverage
+			%s AS swap_percent, %s AS swap_peak
 		FROM samples
 		WHERE time >= $5 AND time < $6
-		GROUP BY bucket
+		GROUP BY bucket`,
+		bucketExpr(intervalSeconds),
+		percent("memory_used", "memory_total"), percentPeak("memory_used", "memory_total"),
+		percent("disk_used", "disk_total"), percentPeak("disk_used", "disk_total"),
+		percent("swap_used", "swap_total"), percentPeak("swap_used", "swap_total"))
+	return deltaSamplesCTE(fmt.Sprintf("interval '%d seconds'", intervalSeconds), "$5", "$6") + fmt.Sprintf(`,
+	aggregate AS (
+		SELECT
+			COALESCE(g.bucket, r.bucket) AS bucket,
+			g.sampled_at,
+			g.cpu_percent, g.cpu_peak, g.cpu_sum, g.cpu_count,
+			g.memory_percent, g.memory_peak, g.memory_percent_sum, g.memory_percent_count,
+			g.disk_percent, g.disk_peak, g.disk_percent_sum, g.disk_percent_count,
+			g.swap_percent, g.swap_peak, g.swap_percent_sum, g.swap_percent_count,
+			g.load1_sum, g.load1_count, g.load5_sum, g.load5_count, g.load15_sum, g.load15_count,
+			g.load_1, g.load_1_peak, g.load_5, g.load_5_peak, g.load_15, g.load_15_peak,
+			r.net_recv_rate, r.net_recv_peak, r.net_recv_coverage,
+			r.net_sent_rate, r.net_sent_peak, r.net_sent_coverage,
+			r.disk_read_rate, r.disk_read_peak, r.disk_read_coverage,
+			r.disk_write_rate, r.disk_write_peak, r.disk_write_coverage
+		FROM ( %s ) g
+		FULL OUTER JOIN ( %s ) r ON r.bucket = g.bucket
 	)
 	SELECT bucket, sampled_at, cpu_percent, cpu_peak, cpu_sum, cpu_count,
 	       memory_percent, memory_peak, memory_percent_sum, memory_percent_count,
@@ -71,15 +84,7 @@ func rawBucketAggregateSQL(intervalSeconds int64) string {
 	       disk_read_rate, disk_read_peak, disk_read_coverage,
 	       disk_write_rate, disk_write_peak, disk_write_coverage
 	FROM aggregate
-	ORDER BY bucket ASC`,
-		bucketExpr(intervalSeconds),
-		percent("memory_used", "memory_total"), percentPeak("memory_used", "memory_total"),
-		percent("disk_used", "disk_total"), percentPeak("disk_used", "disk_total"),
-		percent("swap_used", "swap_total"), percentPeak("swap_used", "swap_total"),
-		metricRateExpression("net_bytes_recv"), ratePeak("net_bytes_recv"), rateCov("net_bytes_recv"),
-		metricRateExpression("net_bytes_sent"), ratePeak("net_bytes_sent"), rateCov("net_bytes_sent"),
-		metricRateExpression("disk_read_bytes"), ratePeak("disk_read_bytes"), rateCov("disk_read_bytes"),
-		metricRateExpression("disk_write_bytes"), ratePeak("disk_write_bytes"), rateCov("disk_write_bytes"))
+	ORDER BY bucket ASC`, gauge, rateAggregateSelect())
 }
 
 // queryRawBuckets aggregates bounded raw samples at the requested granularity.

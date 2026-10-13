@@ -28,10 +28,19 @@ type sshLease struct {
 	cancel    context.CancelCauseFunc
 	cleanup   *sshCleanupClock
 	done      chan struct{}
+	// consumer is the frozen gauge label of the borrowing layer ("" when the
+	// borrower did not declare one), and observed guards the single release of
+	// this slot's gauge entry.
+	consumer LeaseConsumer
+	observed bool
 }
 
-func newSSHLease(s *SSHService, h *sshpool.Handle) *sshLease {
-	return &sshLease{svc: s, h: h, done: make(chan struct{})}
+func newSSHLease(s *SSHService, h *sshpool.Handle, consumer LeaseConsumer) *sshLease {
+	lease := &sshLease{svc: s, h: h, consumer: consumer, done: make(chan struct{})}
+	// The slot is already held: the gauge starts here, not when the caller's
+	// foreground operation returns (N03).
+	s.observeLease(consumer, 1)
+	return lease
 }
 
 func (l *sshLease) client() *ssh.Client { return l.h.Client }
@@ -79,8 +88,39 @@ func (l *sshLease) settleLocked() {
 		} else {
 			l.svc.pool.ReleaseHandle(l.h)
 		}
+		// The slot is back in the pool now, so the gauge follows the real
+		// settlement rather than the caller's earlier foreground return (N03).
+		l.mu.Lock()
+		if !l.observed {
+			l.observed = true
+			consumer := l.consumer
+			l.mu.Unlock()
+			l.svc.observeLease(consumer, -1)
+		} else {
+			l.mu.Unlock()
+		}
 		close(l.done)
 	}()
+}
+
+// SettlementDeadline reports the immutable absolute deadline of this lease's
+// cleanup budget. It is the same deadline the resource owner uses for its own
+// teardown wait, so a second waiter consumes the remainder instead of restarting
+// the budget (N03).
+func (l *sshLease) SettlementDeadline() time.Time {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.cleanupDeadlinesLocked().total
+}
+
+// cleanupDeadlinesLocked lazily anchors the cleanup clock. The first caller - the
+// teardown path or the settlement waiter - starts the documented bound, and every
+// later caller reads the same absolute deadline.
+func (l *sshLease) cleanupDeadlinesLocked() sshCleanupDeadlines {
+	if l.cleanup == nil {
+		l.cleanup = &sshCleanupClock{}
+	}
+	return l.cleanup.deadlines(execTeardownGrace)
 }
 
 // releaseAndWait is used by one-shot operations. Settlement consumes the same
@@ -88,13 +128,8 @@ func (l *sshLease) settleLocked() {
 func (l *sshLease) releaseAndWait() error {
 	l.Release()
 	l.mu.Lock()
-	clock := l.cleanup
-	if clock == nil {
-		clock = &sshCleanupClock{}
-		l.cleanup = clock
-	}
+	deadline := l.cleanupDeadlinesLocked().total
 	l.mu.Unlock()
-	deadline := clock.deadlines(execTeardownGrace).total
 	timer := time.NewTimer(max(time.Until(deadline), 0))
 	defer timer.Stop()
 	select {
