@@ -271,12 +271,25 @@
       "rollupSource": "当前显示 {{requested}} 的 {{actual}} 聚合历史（{{reason}}）"
     },
     "coverage": "数据覆盖率：{{percent}}",
-    "dataTable": "数据表",
     "axisLabel": "纵轴",
     "statLabel": "统计方式",
     "time": "时间",
     "showDataTable": "显示数据表",
-    "hideDataTable": "隐藏数据表"
+    "hideDataTable": "隐藏数据表",
+    "chart": {
+      "description": "{{title}}。范围 {{from}} 至 {{to}}（{{timezone}}），粒度 {{interval}}，统计方式 {{stat}}，单位 {{unit}}，新鲜度 {{freshness}} 分钟。"
+    },
+    "seriesToggle": "系列开关",
+    "dataTable": {
+      "caption": "{{title}} 数据表：{{from}} 至 {{to}}，粒度 {{interval}}，统计方式 {{stat}}，单位 {{unit}}",
+      "coverage": "覆盖",
+      "coverageFraction": "{{percent}}%",
+      "sampled": "有采样",
+      "notSampled": "无采样",
+      "prev": "上一页",
+      "next": "下一页",
+      "page": "第 {{page}} / {{pages}} 页"
+    }
   },
   "monitoring": {
     "title": "监控",

@@ -583,6 +583,86 @@
       "scenario": "Distinguish series without color, meet contrast thresholds, preserve visible focus, and expose equivalent chart data to keyboard and screen-reader users.",
       "implementations": [
         {
+          "implementation_id": "impl-04-04-c1",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "series toggles, chart description and the paged data view are keyboard accessible"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c2",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "series toggles, chart description and the paged data view are keyboard accessible"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c3",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "series toggles, chart description and the paged data view are keyboard accessible"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c4",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "monitoring controls stay reachable and touch-sized at 375px"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c5",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "the chart description carries name, range, granularity, statistic, unit and freshness"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c6",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "the data view pages at 50 rows and clamps out-of-range pages"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c7",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "coverage cells distinguish partial sampling from no sample"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c8",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "the data table caption names the range, granularity, statistic and unit"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
           "implementation_id": "impl-04-04a",
           "run_id": "frontend-node",
           "implementation": {

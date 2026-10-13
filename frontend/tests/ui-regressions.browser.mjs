@@ -665,11 +665,83 @@ try {
         const control = page.getByRole("button", { name, exact: true });
         await control.waitFor();
         const box = await control.boundingBox();
-        assert.ok(box && box.height >= 32, `${name} is only ${box?.height}px tall`);
+        assert.ok(box && box.height >= 44, `${name} is only ${box?.height}px tall, want >= 44px`);
       }
     },
     true,
   );
+
+  await test("series toggles, chart description and the paged data view are keyboard accessible", async ({
+    page,
+    goto,
+  }) => {
+    await goto("/servers/1");
+    const chart = page.getByRole("slider").first();
+    await chart.waitFor();
+
+    // The chart announces its own configuration (§4.5): range, granularity,
+    // statistic, unit and freshness, not just a usage hint.
+    const describedBy = await chart.getAttribute("aria-describedby");
+    const description = await page.locator(`#${describedBy}`).textContent();
+    for (const needle of ["granularity", "statistic", "unit", "freshness"]) {
+      assert.ok(description.includes(needle), `chart description lacks "${needle}": ${description}`);
+    }
+    assert.match(description, /granularity 1m/, description);
+
+    // Series toggles: a keyboard-operable group that exposes its pressed state
+    // and actually removes the series from the plot.
+    const toggle = page.getByRole("button", { name: "CPU", exact: true });
+    assert.equal(await toggle.getAttribute("aria-pressed"), "true");
+    const pathsBefore = await page.locator('svg path[fill="none"]').count();
+    await toggle.click();
+    assert.equal(await toggle.getAttribute("aria-pressed"), "false");
+    assert.equal(
+      await page.locator('svg path[fill="none"]').count(),
+      pathsBefore - 1,
+      "a hidden series must stop being drawn",
+    );
+    await toggle.focus();
+    await page.keyboard.press("Space");
+    assert.equal(await toggle.getAttribute("aria-pressed"), "true", "Space must toggle the series");
+    assert.equal(await page.locator('svg path[fill="none"]').count(), pathsBefore);
+
+    // The data view pages at 50 rows and names what it contains.
+    await page.getByRole("button", { name: "7d", exact: true }).click();
+    await page.getByRole("button", { name: "Show data table", exact: true }).click();
+    const table = page.locator("#monitoring-data-table table");
+    await table.waitFor();
+    const caption = await table.locator("caption").textContent();
+    for (const needle of ["granularity", "statistic", "unit"]) {
+      assert.ok(caption.includes(needle), `caption lacks "${needle}": ${caption}`);
+    }
+    const headers = await table.locator("thead th").allInnerTexts();
+    assert.ok(headers.includes("Coverage"), `coverage column missing: ${JSON.stringify(headers)}`);
+
+    const firstPageRows = await table.locator("tbody tr").count();
+    assert.equal(firstPageRows, 50, "the first page holds exactly 50 rows");
+    const firstCell = await table.locator("tbody tr").first().locator("td").last().innerText();
+    assert.match(firstCell, /%|sampled|no sample/, `coverage cell = ${firstCell}`);
+
+    const pager = page.getByRole("button", { name: "Next page", exact: true });
+    await pager.click();
+    await page.waitForTimeout(100);
+    assert.equal(await table.locator("tbody tr").count(), 50);
+    assert.match(await page.locator('span[aria-live="polite"]').first().innerText(), /Page 2 of \d+/);
+
+    // Paging to the end keeps the remainder and disables Next.
+    let guard = 0;
+    while (!(await pager.isDisabled()) && guard++ < 10) {
+      await pager.click();
+      await page.waitForTimeout(50);
+    }
+    const lastPageRows = await table.locator("tbody tr").count();
+    assert.ok(lastPageRows > 0 && lastPageRows <= 50, `last page rows = ${lastPageRows}`);
+    assert.equal(await pager.isDisabled(), true, "Next must be disabled on the last page");
+    assert.equal(
+      await page.getByRole("button", { name: "Previous page", exact: true }).isEnabled(),
+      true,
+    );
+  });
 
   await test("a late response from the previous range never replaces the current one", async ({
     page,

@@ -69,6 +69,8 @@ interface TrendChartProps {
   formatTime: (iso: string) => string;
   className?: string;
   ariaLabel?: string;
+  /** Screen-reader description: name, range, granularity, statistic, unit, freshness. */
+  description?: string;
 }
 
 const PAD = { top: 10, right: 14, bottom: 26, left: 56 } as const;
@@ -93,6 +95,7 @@ export function TrendChart({
   formatTime,
   className,
   ariaLabel,
+  description,
 }: TrendChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(640);
@@ -100,6 +103,23 @@ export function TrendChart({
   const helpId = useId();
   // Preserve selection by timestamp when polling shifts or replaces the grid.
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  // Per-series visibility (REQUIREMENTS §4.5): the legend is a keyboard-operable
+  // group of toggle buttons exposing their pressed state.
+  const [hiddenKeys, setHiddenKeys] = useState<ReadonlySet<string>>(new Set());
+  const toggleSeries = (key: string) =>
+    setHiddenKeys((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  const visibleSeries = useMemo(
+    () => series.filter((s) => !hiddenKeys.has(s.key)),
+    [series, hiddenKeys],
+  );
   const selectedIndex = selectedTime === null ? -1 : times.indexOf(selectedTime);
   const hoverIndex = selectedIndex < 0 ? null : selectedIndex;
 
@@ -126,13 +146,13 @@ export function TrendChart({
   const resolvedMax = useMemo(() => {
     if (yMax !== undefined && yMax !== null) return yMax;
     let max = 0;
-    for (const s of series) {
+    for (const s of visibleSeries) {
       for (const v of s.values) {
         if (v !== null && Number.isFinite(v) && v > max) max = v;
       }
     }
     return niceMax(max);
-  }, [series, yMax]);
+  }, [visibleSeries, yMax]);
 
   // Every x position comes from the bucket's real timestamp, so the plot stays
   // proportional to time. Scaling by index would silently compress gaps.
@@ -168,7 +188,7 @@ export function TrendChart({
   /** Contiguous non-null runs, so gaps show as a break rather than a drop to 0. */
   const paths = useMemo(
     () =>
-      series.map((s) => {
+      visibleSeries.map((s) => {
         const segments: string[] = [];
         let current: string[] = [];
         s.values.forEach((value, index) => {
@@ -187,7 +207,7 @@ export function TrendChart({
       }),
     // xAt/yAt are pure derivations of width/count/series/resolvedMax
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [series, width, count, resolvedMax, plotH, timeMs, spanMs],
+    [visibleSeries, width, count, resolvedMax, plotH, timeMs, spanMs],
   );
 
   // A run of exactly one sample cannot be drawn as a line segment (M without
@@ -195,7 +215,7 @@ export function TrendChart({
   // isolated real sample looks empty even though the card shows a value.
   const isolated = useMemo(
     () =>
-      series.map((s) => ({
+      visibleSeries.map((s) => ({
         key: s.key,
         color: s.color,
         points: isolatedIndices(s.values).map((index) => ({
@@ -255,16 +275,29 @@ export function TrendChart({
   };
 
   const legend = (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-      {series.map((s) => (
-        <span
-          key={s.key}
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
-        >
-          <SeriesSwatch series={s} />
-          {s.label}
-        </span>
-      ))}
+    <div
+      role="group"
+      aria-label={t("metrics.seriesToggle")}
+      className="flex flex-wrap items-center gap-x-2 gap-y-1"
+    >
+      {series.map((s) => {
+        const visible = !hiddenKeys.has(s.key);
+        return (
+          <button
+            key={s.key}
+            type="button"
+            aria-pressed={visible}
+            onClick={() => toggleSeries(s.key)}
+            className={cn(
+              "touch-target inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs transition-colors",
+              visible ? "text-muted-foreground" : "text-muted-foreground/60 line-through",
+            )}
+          >
+            <SeriesSwatch series={s} />
+            {s.label}
+          </button>
+        );
+      })}
     </div>
   );
 
@@ -287,7 +320,7 @@ export function TrendChart({
   const currentIndex = hoverIndex ?? count - 1;
   const valueText = [
     formatTime(times[currentIndex]),
-    ...series.map((s) => {
+    ...visibleSeries.map((s) => {
       const value = s.values[currentIndex];
       return `${s.label}: ${value == null || !Number.isFinite(value) ? t("monitoring.noSample") : formatValue(value)}`;
     }),
@@ -297,6 +330,7 @@ export function TrendChart({
     <div className={cn("w-full", className)}>
       {legend}
       <p id={helpId} className="sr-only">
+        {description ? `${description} ` : ""}
         {t("monitoring.chartHelp")}
       </p>
       <div
@@ -399,7 +433,7 @@ export function TrendChart({
           )}
 
           {hoverIndex !== null &&
-            series.map((s) => {
+            visibleSeries.map((s) => {
               const value = s.values[hoverIndex];
               if (value === null || value === undefined || !Number.isFinite(value)) return null;
               return (
@@ -466,7 +500,7 @@ export function TrendChart({
           >
             <p className="font-medium text-foreground">{formatTime(times[hoverIndex])}</p>
             <div className="mt-1 space-y-0.5">
-              {series.map((s) => {
+              {visibleSeries.map((s) => {
                 const value = s.values[hoverIndex];
                 return (
                   <div key={s.key} className="flex items-center justify-between gap-3">

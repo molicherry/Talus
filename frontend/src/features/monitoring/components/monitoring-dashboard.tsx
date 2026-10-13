@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 
 import { translateApiError } from "../../../lib/api-error";
 import { Card } from "../../../components/ui/card";
@@ -23,6 +23,11 @@ import {
   seriesForStat,
   seriesLabelKey,
   seriesPattern,
+  axisUnit,
+  chartDescription,
+  coverageCell,
+  dataTableCaption,
+  pageSlice,
 } from "../lib/chart-config";
 import type { AxisMode, MetricStat } from "../../../types/metric-axes";
 import { EmptyState } from "./empty-state";
@@ -266,6 +271,7 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
   const [axisMode, setAxisMode] = useState<AxisMode>("percent");
   const [stat, setStat] = useState<MetricStat>("avg");
   const [showDataTable, setShowDataTable] = useState(false);
+  const [tablePage, setTablePage] = useState(1);
   const { data, isLoading, isError, error, isRefetching, refetch } = useMetrics(
     serverId,
     timeRange,
@@ -359,6 +365,41 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
       };
     });
   }, [aligned, axisMode, stat, t]);
+
+  // Screen-reader description of the chart (REQUIREMENTS §4.5) and the caption of
+  // the equivalent data view.
+  const description = useMemo(() => {
+    const built = chartDescription({
+      title: t(`metrics.axis.${axisMode}`),
+      from: data?.window.from ?? "",
+      to: data?.window.to ?? "",
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      actualInterval: data?.meta?.actualInterval ?? "",
+      stat,
+      unit: axisUnit(axisMode),
+      lastSampleAt: aligned.lastSampleTime,
+    });
+    return t(built.key, built.params);
+  }, [aligned.lastSampleTime, axisMode, data?.meta?.actualInterval, data?.window.from, data?.window.to, stat, t]);
+
+  const caption = useMemo(() => {
+    const built = dataTableCaption({
+      title: t(`metrics.axis.${axisMode}`),
+      from: data?.window.from ?? "",
+      to: data?.window.to ?? "",
+      interval: data?.meta?.actualInterval ?? "",
+      stat,
+      unit: axisUnit(axisMode),
+    });
+    return t(built.key, built.params);
+  }, [axisMode, data?.meta?.actualInterval, data?.window.from, data?.window.to, stat, t]);
+
+  // A new range/axis/statistic starts the data view on its first page.
+  useEffect(() => {
+    setTablePage(1);
+  }, [axisMode, stat, timeRange, data?.window.from]);
+
+  const tableRows = pageSlice(times.length, tablePage);
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -486,6 +527,7 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
               formatValue={axisConfig.formatValue}
               formatAxis={axisConfig.formatAxis}
               ariaLabel={t(`metrics.axis.${axisMode}`)}
+              description={description}
               series={chartSeries}
             />
           </Card>
@@ -502,7 +544,7 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
             <Card className="p-5">
               <div id="monitoring-data-table" className="overflow-x-auto">
                 <table className="w-full text-xs">
-                  <caption className="sr-only">{t(`metrics.axis.${axisMode}`)}</caption>
+                  <caption className="pb-2 text-left text-muted-foreground">{caption}</caption>
                   <thead>
                     <tr className="text-left text-muted-foreground">
                       <th scope="col" className="py-1 pr-3 font-medium">
@@ -513,28 +555,73 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
                           {series.label}
                         </th>
                       ))}
+                      <th scope="col" className="py-1 pr-3 font-medium">
+                        {t("metrics.dataTable.coverage")}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {times.map((time, index) => (
-                      <tr key={time} className="border-t border-border/60">
-                        <th scope="row" className="py-1 pr-3 font-normal text-muted-foreground">
-                          {formatTime(time)}
-                        </th>
-                        {chartSeries.map((series) => {
-                          const value = series.values[index];
-                          return (
-                            <td key={series.key} className="py-1 pr-3 font-mono tabular-nums">
-                              {value === null || value === undefined || !Number.isFinite(value)
-                                ? METRIC_MISSING_LABEL
-                                : axisConfig.formatValue(value)}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
+                    {times.slice(tableRows.start, tableRows.end).map((time, offset) => {
+                      const index = tableRows.start + offset;
+                      const rowValues = chartSeries.map((series) => series.values[index] ?? null);
+                      const coverages = AXIS_SERIES[axisMode]
+                        .map((axis) =>
+                          axis.coverageField ? (aligned.series[axis.coverageField]?.[index] ?? null) : null,
+                        )
+                        .filter((value): value is number => value !== null);
+                      const coverage = coverageCell(
+                        axisMode,
+                        rowValues,
+                        coverages.length > 0 ? Math.max(...coverages) : null,
+                        window?.intervalMs ?? 0,
+                      );
+                      return (
+                        <tr key={time} className="border-t border-border/60">
+                          <th scope="row" className="py-1 pr-3 font-normal text-muted-foreground">
+                            {formatTime(time)}
+                          </th>
+                          {chartSeries.map((series, seriesIndex) => {
+                            const value = rowValues[seriesIndex];
+                            return (
+                              <td key={series.key} className="py-1 pr-3 font-mono tabular-nums">
+                                {value === null || value === undefined || !Number.isFinite(value)
+                                  ? METRIC_MISSING_LABEL
+                                  : axisConfig.formatValue(value)}
+                              </td>
+                            );
+                          })}
+                          <td className="py-1 pr-3 text-muted-foreground">
+                            {t(coverage.key, coverage.params)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
+              </div>
+
+              <div className="mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span aria-live="polite">
+                  {t("metrics.dataTable.page", { page: tableRows.page, pages: tableRows.pages })}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTablePage((page) => Math.max(1, page - 1))}
+                    disabled={tableRows.page <= 1}
+                    className="touch-target rounded-md border border-border px-3 py-1.5 font-medium transition-colors hover:bg-secondary disabled:opacity-50"
+                  >
+                    {t("metrics.dataTable.prev")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTablePage((page) => Math.min(tableRows.pages, page + 1))}
+                    disabled={tableRows.page >= tableRows.pages}
+                    className="touch-target rounded-md border border-border px-3 py-1.5 font-medium transition-colors hover:bg-secondary disabled:opacity-50"
+                  >
+                    {t("metrics.dataTable.next")}
+                  </button>
+                </div>
               </div>
             </Card>
           )}

@@ -8,6 +8,12 @@ import assert from "node:assert/strict";
 
 import {
   AXIS_SERIES,
+  DATA_TABLE_PAGE_SIZE,
+  axisUnit,
+  chartDescription,
+  coverageCell,
+  dataTableCaption,
+  pageSlice,
   alignmentFields,
   bucketCoverage,
   downsampleNotice,
@@ -168,6 +174,83 @@ check("every axis series has a label key", () => {
       assert.match(key, /^metrics\.series\./);
     });
   }
+});
+
+check("the chart description carries name, range, granularity, statistic, unit and freshness", () => {
+  const built = chartDescription({
+    title: "Usage (%)",
+    from: "2026-01-02T00:00:00.000Z",
+    to: "2026-01-02T06:00:00.000Z",
+    timeZone: "UTC",
+    actualInterval: "6h",
+    stat: "peak",
+    unit: "%",
+    lastSampleAt: "2026-01-02T05:30:00.000Z",
+    now: new Date("2026-01-02T06:00:00.000Z"),
+  });
+  assert.equal(built.key, "metrics.chart.description");
+  for (const field of ["title", "from", "to", "timezone", "interval", "stat", "unit", "freshness"]) {
+    assert.ok(built.params[field] !== undefined, `missing ${field}`);
+  }
+  assert.equal(built.params.interval, "6h");
+  assert.equal(built.params.stat, "peak");
+  assert.equal(built.params.unit, "%");
+  assert.equal(built.params.freshness, "30");
+});
+
+check("a never-collected chart reports its freshness as unknown", () => {
+  const built = chartDescription({
+    title: "Load", from: "a", to: "b", timeZone: "UTC", actualInterval: "1m",
+    stat: "avg", unit: "", lastSampleAt: null,
+  });
+  assert.equal(built.params.freshness, "never");
+});
+
+check("axis units match the axis mode", () => {
+  assert.equal(axisUnit("percent"), "%");
+  assert.equal(axisUnit("throughput"), "B/s");
+  assert.equal(axisUnit("load"), "");
+});
+
+check("the data table caption names the range, granularity, statistic and unit", () => {
+  const built = dataTableCaption({
+    title: "Throughput",
+    from: "2026-01-02T00:00:00.000Z",
+    to: "2026-01-02T06:00:00.000Z",
+    interval: "5m",
+    stat: "avg",
+    unit: "B/s",
+  });
+  assert.equal(built.key, "metrics.dataTable.caption");
+  assert.equal(built.params.interval, "5m");
+  assert.equal(built.params.stat, "avg");
+  assert.equal(built.params.unit, "B/s");
+  assert.match(built.params.from, /2026-01-02 00:00Z/);
+});
+
+check("coverage cells distinguish partial sampling from no sample", () => {
+  // A rate axis with half the bucket covered.
+  const half = coverageCell("throughput", [10], 30, 60_000);
+  assert.equal(half.key, "metrics.dataTable.coverageFraction");
+  assert.equal(half.params.percent, "50");
+  // No coverage seconds at all: not sampled, never 0%.
+  assert.equal(coverageCell("throughput", [10], null, 60_000).key, "metrics.dataTable.notSampled");
+  assert.equal(coverageCell("throughput", [10], 0, 60_000).key, "metrics.dataTable.notSampled");
+  // Gauge axes report sample presence instead.
+  assert.equal(coverageCell("percent", [1, null], null, 60_000).key, "metrics.dataTable.sampled");
+  assert.equal(coverageCell("percent", [null, null], null, 60_000).key, "metrics.dataTable.notSampled");
+});
+
+check("the data view pages at 50 rows and clamps out-of-range pages", () => {
+  assert.equal(DATA_TABLE_PAGE_SIZE, 50);
+  const first = pageSlice(120, 1);
+  assert.deepEqual([first.start, first.end, first.pages, first.page], [0, 50, 3, 1]);
+  const last = pageSlice(120, 3);
+  assert.deepEqual([last.start, last.end], [100, 120]);
+  const clamped = pageSlice(120, 99);
+  assert.deepEqual([clamped.page, clamped.start, clamped.end], [3, 100, 120]);
+  assert.deepEqual([pageSlice(120, 0).page, pageSlice(120, -5).page], [1, 1]);
+  assert.deepEqual([pageSlice(0, 1).pages, pageSlice(0, 1).end], [1, 0]);
 });
 
 console.log(failures === 0 ? "\nmonitoring-chart-config: ALL PASS" : `\nmonitoring-chart-config: ${failures} FAILURES`);

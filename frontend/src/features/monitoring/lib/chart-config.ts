@@ -228,3 +228,127 @@ export function seriesPattern(index: number): { dash: string; marker: string } {
 		];
 	return { dash: pattern.dash, marker: pattern.marker };
 }
+
+/** Rows per page of the accessible data view (REQUIREMENTS §4.5). */
+export const DATA_TABLE_PAGE_SIZE = 50;
+
+/** Page slice of a row count, clamped to the available pages. */
+export function pageSlice(total: number, page: number, size: number = DATA_TABLE_PAGE_SIZE): {
+  start: number;
+  end: number;
+  pages: number;
+  page: number;
+} {
+  const pages = Math.max(1, Math.ceil(total / size));
+  const current = Math.min(Math.max(1, Math.trunc(page) || 1), pages);
+  const start = (current - 1) * size;
+  return { start, end: Math.min(start + size, total), pages, page: current };
+}
+
+/**
+ * Screen-reader description of one chart (REQUIREMENTS §4.5): name, range with
+ * its time zone, the granularity the backend actually served, the statistic, the
+ * unit and how fresh the data is. Returns an i18n key plus its parameters so the
+ * wording stays translatable.
+ */
+export function chartDescription(input: {
+  title: string;
+  from: string;
+  to: string;
+  timeZone: string;
+  actualInterval: string;
+  stat: MetricStat;
+  unit: string;
+  lastSampleAt: string | null;
+  now?: Date;
+}): { key: string; params: Record<string, string> } {
+  const locale = "en-GB";
+  const format = (iso: string) => {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    return date.toLocaleString(locale, { hour12: false });
+  };
+  let freshness = "never";
+  if (input.lastSampleAt) {
+    const age = (input.now ?? new Date()).getTime() - Date.parse(input.lastSampleAt);
+    freshness = Number.isFinite(age) ? `${Math.max(0, Math.round(age / 60000))}` : "unknown";
+  }
+  return {
+    key: "metrics.chart.description",
+    params: {
+      title: input.title,
+      from: format(input.from),
+      to: format(input.to),
+      timezone: input.timeZone,
+      interval: input.actualInterval,
+      stat: input.stat,
+      unit: input.unit,
+      freshness,
+    },
+  };
+}
+
+/** Unit label for an axis mode, used by the description and the data table. */
+export function axisUnit(mode: AxisMode): string {
+  switch (mode) {
+    case "percent":
+      return "%";
+    case "throughput":
+      return "B/s";
+    default:
+      return "";
+  }
+}
+
+/**
+ * Caption of the accessible data view: range, granularity, statistic and unit
+ * (REQUIREMENTS §4.5), as an i18n key with parameters.
+ */
+export function dataTableCaption(input: {
+  title: string;
+  from: string;
+  to: string;
+  interval: string;
+  stat: MetricStat;
+  unit: string;
+}): { key: string; params: Record<string, string> } {
+  const short = (iso: string) => {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    return date.toISOString().replace("T", " ").slice(0, 16) + "Z";
+  };
+  return {
+    key: "metrics.dataTable.caption",
+    params: {
+      title: input.title,
+      from: short(input.from),
+      to: short(input.to),
+      interval: input.interval,
+      stat: input.stat,
+      unit: input.unit || "—",
+    },
+  };
+}
+
+/**
+ * One row's coverage cell: the valid sampled fraction of the bucket for rate
+ * axes, or a sampled/not-sampled marker for the others, so the table never
+ * implies data that was not collected.
+ */
+export function coverageCell(
+  mode: AxisMode,
+  values: readonly (number | null)[],
+  coverageSeconds: number | null,
+  intervalMs: number,
+): { key: string; params?: Record<string, string> } {
+  if (mode === "throughput") {
+    if (coverageSeconds === null || !Number.isFinite(coverageSeconds) || intervalMs <= 0) {
+      return { key: "metrics.dataTable.notSampled" };
+    }
+    const fraction = Math.max(0, Math.min(1, coverageSeconds / (intervalMs / 1000)));
+    const base = { key: "metrics.dataTable.coverageFraction", params: { percent: `${Math.round(fraction * 100)}` } };
+    return fraction === 0 ? { key: "metrics.dataTable.notSampled" } : base;
+  }
+  const sampled = values.some((value) => value !== null && Number.isFinite(value));
+  return { key: sampled ? "metrics.dataTable.sampled" : "metrics.dataTable.notSampled" };
+}

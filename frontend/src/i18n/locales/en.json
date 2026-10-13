@@ -271,12 +271,25 @@
       "rollupSource": "Showing aggregated {{actual}} history for {{requested}} ({{reason}})"
     },
     "coverage": "Data coverage: {{percent}}",
-    "dataTable": "Data table",
     "axisLabel": "Axis",
     "statLabel": "Statistic",
     "time": "Time",
     "showDataTable": "Show data table",
-    "hideDataTable": "Hide data table"
+    "hideDataTable": "Hide data table",
+    "chart": {
+      "description": "{{title}}. Range {{from}} to {{to}} ({{timezone}}), granularity {{interval}}, statistic {{stat}}, unit {{unit}}, freshness {{freshness}} minutes."
+    },
+    "seriesToggle": "Series",
+    "dataTable": {
+      "caption": "{{title}} data, {{from}} to {{to}}, granularity {{interval}}, statistic {{stat}}, unit {{unit}}",
+      "coverage": "Coverage",
+      "coverageFraction": "{{percent}}%",
+      "sampled": "sampled",
+      "notSampled": "no sample",
+      "prev": "Previous page",
+      "next": "Next page",
+      "page": "Page {{page}} of {{pages}}"
+    }
   },
   "monitoring": {
     "title": "Monitoring",
