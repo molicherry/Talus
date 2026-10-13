@@ -184,6 +184,12 @@ jobs:
         run: npm ci
         working-directory: frontend
 
+      # The M3 gate includes the image acceptance run: it builds each final image
+      # for its own platform and executes the agent inside it, so the arm64 build
+      # needs binfmt handlers on this runner too.
+      - name: Set up QEMU (M3 builds arm64 images)
+        uses: docker/setup-qemu-action@v4
+
       # The M3 gate runs the ui-charts checks, which drive a real browser.
       - name: Install Playwright chromium for the UI gate
         working-directory: frontend
