@@ -171,7 +171,7 @@ func TestChangePasswordUnresolvedCommitFencesUntilLockedRecovery(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("COMMIT fault not reached")
 			}
-			defer tx.Rollback()
+			defer func() { _ = tx.Rollback() }()
 			// An ordinary read returns version 0 while the transaction is open.
 			if version, err := repo.TokenVersion(context.Background(), user.ID); err != nil || version != 0 {
 				t.Fatalf("MVCC read = %d, %v", version, err)

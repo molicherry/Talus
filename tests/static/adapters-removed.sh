@@ -42,8 +42,24 @@ PATTERNS=(
 
 EXCLUDES=(--glob '!.git/**' --glob '!**/node_modules/**' --glob '!frontend/dist/**' --glob '!**/.compiled-*')
 
-need_rg() {
-  command -v rg >/dev/null 2>&1 || { echo "rg (ripgrep) is required" >&2; exit 2; }
+# The shipped tree is scanned with git (ls-files/grep), so ripgrep is not
+# required at all there — it is only the fallback for a non-git fixture tree, and
+# even that degrades to grep so the check runs on a stock runner.
+have_rg() {
+  command -v rg >/dev/null 2>&1
+}
+
+list_files_fallback() { # <root> <out>
+  ( cd "$1" && find . -path ./.git -prune -o \
+      -path '*/node_modules' -prune -o -path ./frontend/dist -prune -o \
+      -name '.compiled-*' -prune -o -type f -print ) | sed 's|^\./||' > "$2"
+}
+
+grep_content_fallback() { # <root> <out> <err>
+  ( cd "$1" && grep -rInE --exclude-dir=.git --exclude-dir=node_modules \
+      --exclude-dir=dist --exclude='.compiled-*' \
+      -e "${PATTERNS[0]}" -e "${PATTERNS[1]}" -e "${PATTERNS[2]}" -e "${PATTERNS[3]}" -e "${PATTERNS[4]}" . ) \
+    > "$2" 2> "$3"
 }
 
 # Prints "<kind>\t<path>"; exits 2 if the manifest is unreadable or malformed.
@@ -96,8 +112,10 @@ scan_content() {
   set +e
   if [ "$is_git" = 1 ]; then
     ( cd "$root" && git ls-files ) > "$TMP/files" 2> "$TMP/err"
-  else
+  elif have_rg; then
     ( cd "$root" && rg --files --hidden --no-ignore "${EXCLUDES[@]}" . ) > "$TMP/files" 2> "$TMP/err"
+  else
+    list_files_fallback "$root" "$TMP/files" 2> "$TMP/err"
   fi
   rc=$?
   set -e
@@ -112,10 +130,12 @@ scan_content() {
   if [ "$is_git" = 1 ]; then
     ( cd "$root" && git grep -n -I -e "${PATTERNS[0]}" -e "${PATTERNS[1]}" -e "${PATTERNS[2]}" -e "${PATTERNS[3]}" -e "${PATTERNS[4]}" -- . ) \
       > "$TMP/matches" 2> "$TMP/err"
-  else
+  elif have_rg; then
     ( cd "$root" && rg --no-heading --line-number --color never --hidden --no-ignore "${EXCLUDES[@]}" \
         -e "${PATTERNS[0]}" -e "${PATTERNS[1]}" -e "${PATTERNS[2]}" -e "${PATTERNS[3]}" -e "${PATTERNS[4]}" . ) \
       > "$TMP/matches" 2> "$TMP/err"
+  else
+    grep_content_fallback "$root" "$TMP/matches" "$TMP/err"
   fi
   rc=$?
   set -e

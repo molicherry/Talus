@@ -29,11 +29,11 @@ func TestRelayLookupUsesFrozenBudget(t *testing.T) {
 		lookupEntered = true
 		if _, ok := tx.Statement.Context.Deadline(); !ok {
 			t.Error("service lookup has no business deadline")
-			tx.AddError(context.DeadlineExceeded)
+			_ = tx.AddError(context.DeadlineExceeded)
 			return
 		}
 		<-tx.Statement.Context.Done()
-		tx.AddError(tx.Statement.Context.Err())
+		_ = tx.AddError(tx.Statement.Context.Err())
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -136,14 +136,6 @@ func newMonitorScheduler(interval time.Duration, clock monitorClock, rng monitor
 	}
 }
 
-// capacity is the global in-flight limit for the current node count: min(N,16),
-// and zero when nothing is managed.
-func (s *monitorScheduler) capacity() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.capacityLocked()
-}
-
 // capacityLocked requires the caller to hold s.mu.
 func (s *monitorScheduler) capacityLocked() int {
 	n := len(s.nodes)

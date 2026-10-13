@@ -46,7 +46,7 @@ func TestUploadCancellationDuringChannelOpen(t *testing.T) {
 		for range channels {
 			// Deliberately neither Accept nor Reject the channel-open request.
 			close(opened)
-			transport.Wait()
+			_ = transport.Wait()
 			return
 		}
 	}()

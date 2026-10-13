@@ -163,7 +163,7 @@ func TestRelayHandlerLookupTimeoutReturnsGatewayTimeout(t *testing.T) {
 			return
 		}
 		<-tx.Statement.Context.Done()
-		tx.AddError(tx.Statement.Context.Err())
+		_ = tx.AddError(tx.Statement.Context.Err())
 	}); err != nil {
 		t.Fatal(err)
 	}

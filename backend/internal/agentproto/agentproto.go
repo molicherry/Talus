@@ -161,7 +161,7 @@ func fileSHA256(path string) (string, error) {
 // checkELF rejects a binary that is not a 64-bit ELF for the declared platform,
 // which is what catches a mis-stamped or cross-wired artifact.
 func checkELF(path, platform string) error {
-	want := elf.EM_X86_64
+	var want elf.Machine
 	switch platform {
 	case "linux/amd64":
 		want = elf.EM_X86_64
