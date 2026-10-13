@@ -194,6 +194,18 @@
         "profile": "tx-deploy",
         "requires": []
       }
+    },
+    {
+      "run_id": "a11y-review",
+      "suite": "ui",
+      "runner": "manual",
+      "cwd": ".",
+      "command": null,
+      "timeout_seconds": null,
+      "environment": {
+        "profile": "manual-review",
+        "requires": []
+      }
     }
   ],
   "gates": {
@@ -599,6 +611,13 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-manual",
+          "run_id": "a11y-review",
+          "implementation": null,
+          "automation_status": "manual",
+          "required": false
         }
       ]
     },

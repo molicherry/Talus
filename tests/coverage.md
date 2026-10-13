@@ -2,7 +2,7 @@
 
 > Generated from `tests/coverage.json` by `tests/render-coverage.mjs`. Do not edit by hand.
 
-Cases: 33 · Runs: 11 · Schema: 1
+Cases: 33 · Runs: 12 · Schema: 1
 
 ## Runs
 
@@ -19,6 +19,7 @@ Cases: 33 · Runs: 11 · Schema: 1
 | ui-charts | ui | playwright | `frontend` | `npm run test:ui` | 900s |
 | e2e-core | e2e | shell | `.` | `bash tests/e2e/run.sh` | 1200s |
 | deploy-verify | integration | manual | `.` | _(manual)_ | — |
+| a11y-review | ui | manual | `.` | _(manual)_ | — |
 
 ## Gates (pre-registered required runs)
 
@@ -63,6 +64,7 @@ Cases: 33 · Runs: 11 · Schema: 1
 | TC-04-04 | REQ-04 | implemented | frontend-node | `frontend/tests/monitoring-chart-config.test.mjs:series stay distinguishable without colour` | yes | Distinguish series without color, meet contrast thresholds, preserve visible focus, and expose equivalent chart data to keyboard and screen-reader users. | Distinguish series without color, meet contrast thresholds, preserve visible focus, and expose equivalent chart data to keyboard and screen-reader users. |
 | TC-04-04 | REQ-04 | implemented | frontend-node | `frontend/tests/monitoring-chart-config.test.mjs:a coarsened or downsampled response is never silent` | yes | Distinguish series without color, meet contrast thresholds, preserve visible focus, and expose equivalent chart data to keyboard and screen-reader users. | Distinguish series without color, meet contrast thresholds, preserve visible focus, and expose equivalent chart data to keyboard and screen-reader users. |
 | TC-04-04 | REQ-04 | implemented | ui-charts | `frontend/tests/ui-regressions.browser.mjs:light/dark link and focus colors retain sufficient contrast` | yes | Distinguish series without color, meet contrast thresholds, preserve visible focus, and expose equivalent chart data to keyboard and screen-reader users. | Distinguish series without color, meet contrast thresholds, preserve visible focus, and expose equivalent chart data to keyboard and screen-reader users. |
+| TC-04-04 | REQ-04 | manual | a11y-review | — | no | Distinguish series without color, meet contrast thresholds, preserve visible focus, and expose equivalent chart data to keyboard and screen-reader users. | Distinguish series without color, meet contrast thresholds, preserve visible focus, and expose equivalent chart data to keyboard and screen-reader users. |
 | TC-04-05 | REQ-04 | implemented | migrate-hardening | `backend/internal/repository/metric_budget_test.go:TestBucketBudgetBoundary` | yes | Enforce 600-bucket and 12,000-raw-sample boundaries; share one 2-second deadline across probes and plans; verify strict/coarsen behavior and 422/503 errors without range truncation. | Enforce 600-bucket and 12,000-raw-sample boundaries; share one 2-second deadline across probes and plans; verify strict/coarsen behavior and 422/503 errors without range truncation. |
 | TC-04-05 | REQ-04 | implemented | migrate-hardening | `backend/internal/repository/metric_budget_test.go:TestRawSampleBudgetBoundary` | yes | Enforce 600-bucket and 12,000-raw-sample boundaries; share one 2-second deadline across probes and plans; verify strict/coarsen behavior and 422/503 errors without range truncation. | Enforce 600-bucket and 12,000-raw-sample boundaries; share one 2-second deadline across probes and plans; verify strict/coarsen behavior and 422/503 errors without range truncation. |
 | TC-04-05 | REQ-04 | implemented | migrate-hardening | `backend/internal/repository/metric_budget_test.go:TestExpiredDeadlineIsReportedAsTimeout` | yes | Enforce 600-bucket and 12,000-raw-sample boundaries; share one 2-second deadline across probes and plans; verify strict/coarsen behavior and 422/503 errors without range truncation. | Enforce 600-bucket and 12,000-raw-sample boundaries; share one 2-second deadline across probes and plans; verify strict/coarsen behavior and 422/503 errors without range truncation. |
