@@ -200,7 +200,7 @@ func (s *monitorScheduler) plan(now time.Time) monitorTick {
 		}
 		if node.inFlight {
 			tick.Skipped = append(tick.Skipped, id)
-			s.noteDeferLocked(node, &tick)
+			s.noteDeferLocked(node, &tick, now)
 			continue
 		}
 		if !s.dueLocked(node, now) {
@@ -211,7 +211,7 @@ func (s *monitorScheduler) plan(now time.Time) monitorTick {
 				node.queued, node.queuedAt = true, now
 			}
 			tick.Queued = append(tick.Queued, id)
-			s.noteDeferLocked(node, &tick)
+			s.noteDeferLocked(node, &tick, now)
 			continue
 		}
 		node.inFlight, node.queued = true, false
@@ -225,9 +225,18 @@ func (s *monitorScheduler) plan(now time.Time) monitorTick {
 	return tick
 }
 
-// noteDeferLocked counts a deferred admission and escalates once per streak.
-func (s *monitorScheduler) noteDeferLocked(node *monitorNode, tick *monitorTick) {
+// noteDeferLocked counts one missed scheduling slot and escalates once per
+// streak. A node whose slot has not been passed yet (for example an in-flight
+// collection that is still inside its interval) is not a missed collection, and
+// counting per scheduler pass would inflate the streak during a burst of wake-ups.
+func (s *monitorScheduler) noteDeferLocked(node *monitorNode, tick *monitorTick, now time.Time) {
+	if node.due.After(now) {
+		return
+	}
 	node.defers++
+	// Advance the missed slot so the same interval is counted exactly once; the
+	// next attempt is the following slot.
+	node.due = node.due.Add(s.interval)
 	if node.defers >= monitorWarnAfter && !node.deferWarned {
 		node.deferWarned = true
 		tick.WarnDeferred = append(tick.WarnDeferred, node.id)
@@ -340,19 +349,56 @@ func (s *monitorScheduler) backoffDelayLocked(failures int) time.Duration {
 	return delay
 }
 
+// hasAdmissible reports whether a pass right now could admit work: a due or
+// already-queued node exists and capacity is free. In-flight nodes alone never
+// make the caller wake immediately — they signal completion through the notify
+// channel, and a zero-delay wake-up would spin (R01).
+func (s *monitorScheduler) hasAdmissible(now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inFlightLocked() >= s.capacityLocked() {
+		return false
+	}
+	for _, id := range s.order {
+		node := s.nodes[id]
+		if node == nil || node.inFlight {
+			continue
+		}
+		if node.queued || !node.due.After(now) {
+			return true
+		}
+	}
+	return false
+}
+
 // earliestDue is the next wake-up time, or zero when a node is already due or
 // queued (the caller should run another pass immediately).
 func (s *monitorScheduler) earliestDue(now time.Time) time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A due node may only be admitted while capacity is free. Otherwise an
+	// in-flight or queued node must not make the caller wake immediately: it is
+	// already running and will signal completion through the notify channel.
+	if s.inFlightLocked() < s.capacityLocked() {
+		for _, id := range s.order {
+			node := s.nodes[id]
+			if node == nil || node.inFlight || node.queued {
+				continue
+			}
+			if !node.due.After(now) {
+				return time.Time{}
+			}
+		}
+	}
 	var earliest time.Time
 	for _, id := range s.order {
 		node := s.nodes[id]
-		if node == nil {
+		if node == nil || node.inFlight || node.queued {
 			continue
 		}
-		if node.queued || !node.due.After(now) {
-			return time.Time{}
+		if !node.due.After(now) {
+			// Blocked by capacity: wait for a completion or for the discovery cap.
+			continue
 		}
 		if earliest.IsZero() || node.due.Before(earliest) {
 			earliest = node.due

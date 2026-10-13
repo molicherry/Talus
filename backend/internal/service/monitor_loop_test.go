@@ -68,6 +68,8 @@ func (c *manualClock) Advance(d time.Duration) { c.AdvanceTo(c.Now().Add(d)) }
 type fakeServerSource struct {
 	mu  sync.Mutex
 	ids []uint
+	// lists counts FindAll calls, so a busy loop becomes observable.
+	lists int32
 }
 
 func (f *fakeServerSource) set(ids ...uint) {
@@ -77,6 +79,7 @@ func (f *fakeServerSource) set(ids ...uint) {
 }
 
 func (f *fakeServerSource) FindAll(context.Context) ([]model.Server, error) {
+	atomic.AddInt32(&f.lists, 1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	servers := make([]model.Server, 0, len(f.ids))

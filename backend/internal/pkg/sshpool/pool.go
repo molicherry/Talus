@@ -244,6 +244,21 @@ func (p *Pool) Discard(serverID uint, client *ssh.Client) {
 	}
 }
 
+// IsCurrent reports whether a generation captured earlier is still the target's
+// current generation. A lease must consult this before every primitive: an
+// invalidation (host, port or credential change, deletion) makes the pinned
+// connection unusable, and Release-time checking alone would let an operation
+// start against the old target.
+func (p *Pool) IsCurrent(serverID uint, generation uint64) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	entry, ok := p.conns[serverID]
+	if !ok {
+		return false
+	}
+	return entry.generation == generation
+}
+
 // Invalidate drops any cached connection for the server. Call it when the
 // server's connection parameters change (host/port/credential) or it is
 // deleted, so the next Get cannot reuse a connection dialed with the old

@@ -40,6 +40,9 @@ type fakeRemote struct {
 	agentPayload string
 	agentExit    int
 	agentStderr  string
+	// afterUpload runs once the upload has been stored remotely, so a test can
+	// invalidate the target generation between the upload and the activation.
+	afterUpload func()
 }
 
 func newFakeRemote() *fakeRemote {
@@ -158,7 +161,11 @@ func (f *fakeRemote) handler() func(string, ssh.Channel, <-chan struct{}) {
 			}
 			f.mu.Lock()
 			f.files[match[1]] = data
+			hook := f.afterUpload
 			f.mu.Unlock()
+			if hook != nil {
+				hook()
+			}
 			exitStatus(ch, 0)
 		case activateRe.MatchString(command):
 			match := activateRe.FindStringSubmatch(command)

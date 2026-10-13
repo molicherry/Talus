@@ -73,7 +73,7 @@
         "test",
         "./internal/repository/...",
         "-run",
-        "ApplyOnce|PrepareUserTokenVersion|Delta|Rollup|Prune|Bucket|Peak|Deadline|RawSample",
+        "ApplyOnce|PrepareUserTokenVersion|Delta|Rollup|Prune|Bucket|Peak|Deadline|RawSample|Review",
         "-count=1"
       ],
       "timeout_seconds": 600,
@@ -745,6 +745,26 @@
           "implementation": {
             "path": "backend/internal/handler/metrics_budget_test.go",
             "symbol": "TestMetricQueryErrorMapping"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05e",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewRollupEdgesUseRequestBounds"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05f",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewPredecessorCountsAgainstRawBudget"
           },
           "automation_status": "implemented",
           "required": true
@@ -1546,6 +1566,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-01e",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestReviewMonitorDoesNotBusyPollDuringHealthyCollection"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -1586,6 +1616,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-02d",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestReviewGenerationInvalidationPreventsActivation"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -1613,6 +1653,26 @@
           "implementation": {
             "path": "backend/internal/repository/metric_delta_test.go",
             "symbol": "TestDeltaGapThresholdIsThreeCollectionIntervals"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03c",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewPredecessorIsRateContextOnly"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03d",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewFractionalEndpointCountsAllBuckets"
           },
           "automation_status": "implemented",
           "required": true
@@ -1723,6 +1783,36 @@
           "implementation": {
             "path": "backend/internal/repository/metric_rollup_test.go",
             "symbol": "TestPruneMetricsPausesUntilAggregationIsComplete"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06d",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewRefreshRecoversGapBeyond48Hours"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06e",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewRefreshRecomputesRecentClosedBuckets"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06f",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewMissingRollupFallsBackToRaw"
           },
           "automation_status": "implemented",
           "required": true

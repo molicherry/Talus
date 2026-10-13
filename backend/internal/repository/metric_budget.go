@@ -104,8 +104,12 @@ func bucketCount(from, to time.Time, interval string) int {
 	if seconds <= 0 || !to.After(from) {
 		return 0
 	}
-	first := from.UTC().Unix() / seconds
-	last := (to.UTC().Unix() - 1) / seconds
+	// Nanosecond arithmetic: an RFC3339 endpoint with fractional seconds must not
+	// drop a partial bucket (for example 12:00:00.500 → 22:00:00.500 still covers
+	// 601 one-minute buckets, not 600).
+	size := seconds * int64(time.Second)
+	first := from.UTC().UnixNano() / size
+	last := (to.UTC().UnixNano() - 1) / size
 	if last < first {
 		return 0
 	}
@@ -251,10 +255,12 @@ func (r *MetricRepo) QueryWithBudget(ctx context.Context, req QueryRequest) (*Qu
 // probeRawSamples reads at most 12,001 candidate keys, so an over-budget range is
 // detected without an unbounded COUNT or a full scan.
 func (r *MetricRepo) probeRawSamples(ctx context.Context, serverID uint, from, to time.Time) (int, bool, error) {
+	// The planned raw input starts one gap threshold before the window (the
+	// predecessor scan), so the probe must cover the same rows the query reads.
 	var keys []time.Time
 	err := r.db.WithContext(ctx).Raw(
 		`SELECT time FROM metrics WHERE server_id = ? AND time >= ? AND time < ? ORDER BY time LIMIT ?`,
-		serverID, from, to, rawProbeLimit).Scan(&keys).Error
+		serverID, from.Add(-DefaultDeltaGapThreshold), to, rawProbeLimit).Scan(&keys).Error
 	if err != nil {
 		return 0, false, classifyBudgetError(fmt.Errorf("probe raw samples: %w", err))
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
+	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/repository"
 )
 
@@ -188,12 +189,13 @@ func (s *MonitorService) Start(ctx context.Context) {
 		// Wake at the next due slot, but never later than one interval so newly
 		// added nodes are discovered promptly.
 		delay := s.interval
-		if wait := sched.earliestDue(s.clock.Now()); wait.IsZero() {
+		scheduled := s.clock.Now()
+		if sched.hasAdmissible(scheduled) {
 			delay = 0
-		} else if until := wait.Sub(now); until <= 0 {
-			delay = 0
-		} else if until < s.interval {
-			delay = until
+		} else if wait := sched.earliestDue(scheduled); !wait.IsZero() {
+			if until := wait.Sub(scheduled); until > 0 && until < s.interval {
+				delay = until
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -241,6 +243,10 @@ func (s *MonitorService) runTask(ctx context.Context, serverID uint) (outcome mo
 		return outcomeFailure
 	case ctx.Err() != nil:
 		// Application shutdown, node deletion or generation invalidation.
+		return outcomeCancelled
+	case errors.Is(err, sshpool.ErrStaleGeneration):
+		// The target changed under the lease: cancelled, never a failure.
+		s.logger.Info("monitor collection cancelled by a target change", "server_id", serverID)
 		return outcomeCancelled
 	case err != nil:
 		s.logger.Error("failed to collect metrics", "server_id", serverID, "error", err)

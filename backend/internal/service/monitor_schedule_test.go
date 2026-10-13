@@ -299,19 +299,28 @@ func TestMonitorDeferEscalationIsExactlyOncePerStreak(t *testing.T) {
 	if tick := sched.plan(now); len(tick.Admitted) != 16 || len(tick.Queued) != 1 {
 		t.Fatalf("first pass: admitted=%d queued=%d, want 16/1", len(tick.Admitted), len(tick.Queued))
 	}
+	// Each further deferral must correspond to a slot that was really missed, so
+	// time advances by one interval between passes.
+	now = now.Add(time.Minute)
 	if tick := sched.plan(now); len(tick.WarnDeferred) != 0 { // defer #2
 		t.Fatalf("warned after two deferrals: %v", tick.WarnDeferred)
 	}
+	now = now.Add(time.Minute)
 	tick := sched.plan(now) // defer #3 escalates exactly once
 	if len(tick.WarnDeferred) != 1 || tick.WarnDeferred[0] != deferredID {
 		t.Fatalf("warned = %v, want the deferred node %d", tick.WarnDeferred, deferredID)
 	}
-	// A further deferral of the same node must not warn twice. Other nodes may
-	// legitimately escalate on their own streaks, so check this node only.
+	// A further missed slot must not warn twice for the same node. Other nodes
+	// may legitimately escalate on their own streaks, so check this node only.
+	now = now.Add(time.Minute)
 	for _, id := range sched.plan(now).WarnDeferred {
 		if id == deferredID {
 			t.Fatalf("node %d warned twice in the same streak", deferredID)
 		}
+	}
+	// A pass at the same instant cannot count the same missed slot twice.
+	if again := sched.plan(now); len(again.WarnDeferred) != 0 {
+		t.Fatalf("a repeated pass warned again: %v", again.WarnDeferred)
 	}
 
 	// Freeing a slot admits the deferred node and reports recovery once.

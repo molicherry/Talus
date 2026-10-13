@@ -46,6 +46,7 @@ func rawBucketAggregateSQL(intervalSeconds int64) string {
 			%s AS disk_read_rate, %s AS disk_read_peak, %s AS disk_read_coverage,
 			%s AS disk_write_rate, %s AS disk_write_peak, %s AS disk_write_coverage
 		FROM samples
+		WHERE time >= $5 AND time < $6
 		GROUP BY bucket
 	)
 	SELECT bucket, cpu_percent, cpu_peak, memory_percent, memory_peak, disk_percent, disk_peak,
@@ -70,9 +71,12 @@ func rawBucketAggregateSQL(intervalSeconds int64) string {
 func (r *MetricRepo) queryRawBuckets(ctx context.Context, serverID uint, from, to time.Time, interval string) ([]AggregatedMetric, error) {
 	sql := rawBucketAggregateSQL(intervalSeconds[interval])
 	var points []AggregatedMetric
+	// The scan starts one gap threshold early so the first in-window sample still
+	// has a predecessor, but only [from,to) is aggregated: the predecessor is
+	// rate context and must not contribute gauge observations or extra points.
 	err := r.db.WithContext(ctx).Raw(sql,
 		serverID, from.Add(-DefaultDeltaGapThreshold), to,
-		DefaultDeltaGapThreshold.String()).Scan(&points).Error
+		DefaultDeltaGapThreshold.String(), from, to).Scan(&points).Error
 	if err != nil {
 		return nil, classifyBudgetError(fmt.Errorf("raw metrics query: %w", err))
 	}
@@ -97,33 +101,51 @@ func (r *MetricRepo) queryRollupWithEdges(ctx context.Context, serverID uint, fr
 	if err != nil {
 		return nil, false, err
 	}
+	// The checkpoint claims a range is materialized; the rows must back that
+	// claim. A confirmed bucket without a row is read from raw instead of being
+	// reported as an empty hole.
+	var rows []RollupRow
+	if err := r.db.WithContext(ctx).Raw(
+		`SELECT * FROM metrics_rollup_6h WHERE server_id = ? AND bucket_start >= ? AND bucket_start < ? ORDER BY bucket_start`,
+		serverID, start, to).Scan(&rows).Error; err != nil {
+		return nil, false, classifyBudgetError(fmt.Errorf("rollup metrics query: %w", err))
+	}
+	materialized := make(map[time.Time]bool, len(rows))
+	for _, row := range rows {
+		materialized[row.BucketStart.UTC()] = true
+	}
 	type span struct{ from, to time.Time }
 	var rawSpans []span
 	rollupBuckets := map[time.Time]bool{}
 	for cursor := start; cursor.Before(to); cursor = cursor.Add(RollupBucket) {
 		bucketEnd := cursor.Add(RollupBucket)
 		rangeOK := !cursor.Before(from) && !bucketEnd.After(to) && !bucketEnd.After(closed)
-		if rangeOK && confirmed[cursor] {
+		if rangeOK && confirmed[cursor] && materialized[cursor] {
 			rollupBuckets[cursor] = true
 			continue
 		}
-		if len(rawSpans) > 0 && rawSpans[len(rawSpans)-1].to.Equal(cursor) {
-			rawSpans[len(rawSpans)-1].to = bucketEnd
+		// A partial edge bucket is only observed inside the requested window, so
+		// statistics never include samples before from or after to.
+		clippedFrom, clippedTo := cursor, bucketEnd
+		if clippedFrom.Before(from) {
+			clippedFrom = from
+		}
+		if clippedTo.After(to) {
+			clippedTo = to
+		}
+		if !clippedFrom.Before(clippedTo) {
 			continue
 		}
-		rawSpans = append(rawSpans, span{from: cursor, to: bucketEnd})
+		if len(rawSpans) > 0 && rawSpans[len(rawSpans)-1].to.Equal(clippedFrom) {
+			rawSpans[len(rawSpans)-1].to = clippedTo
+			continue
+		}
+		rawSpans = append(rawSpans, span{from: clippedFrom, to: clippedTo})
 	}
 
 	var points []AggregatedMetric
 	usedRollup := false
 	if len(rollupBuckets) > 0 {
-		var rows []RollupRow
-		err := r.db.WithContext(ctx).Raw(
-			`SELECT * FROM metrics_rollup_6h WHERE server_id = ? AND bucket_start >= ? AND bucket_start < ? ORDER BY bucket_start`,
-			serverID, start, to).Scan(&rows).Error
-		if err != nil {
-			return nil, false, classifyBudgetError(fmt.Errorf("rollup metrics query: %w", err))
-		}
 		for _, row := range rows {
 			if !rollupBuckets[row.BucketStart.UTC()] {
 				continue

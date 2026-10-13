@@ -75,7 +75,7 @@ func (r *MetricRepo) RefreshRollups(ctx context.Context, now time.Time, window t
 	}
 	result.Checkpoint = closed
 
-	servers, err := r.serversWithMetrics(ctx, closed.Add(-window))
+	servers, err := r.serversNeedingRollup(ctx, closed.Add(-window), closed)
 	if err != nil {
 		return result, err
 	}
@@ -128,11 +128,25 @@ func (r *MetricRepo) rollupStart(ctx context.Context, serverID uint, closed, now
 	if err != nil {
 		return time.Time{}, err
 	}
-	floor := BucketStart(now.Add(-window))
-	if checkpoint.IsZero() || checkpoint.Before(floor) {
-		return floor, nil
+	// Never recompute below the retention floor: once raw data has been pruned an
+	// empty scan must not overwrite materialized history with zeros.
+	retentionFloor := BucketStart(now.Add(-MetricsRetention))
+	start := BucketStart(now.Add(-window))
+	if start.Before(retentionFloor) {
+		start = retentionFloor
 	}
-	return BucketStart(checkpoint), nil
+	if !checkpoint.IsZero() {
+		// Resume from the oldest unconfirmed bucket (a failure gap may be older
+		// than the normal window) while still recomputing the whole recent window,
+		// so late or backfilled samples are folded into already closed buckets.
+		if resumed := BucketStart(checkpoint); resumed.Before(start) {
+			start = resumed
+			if start.Before(retentionFloor) {
+				start = retentionFloor
+			}
+		}
+	}
+	return start, nil
 }
 
 // materializeBuckets recomputes the closed buckets in [from,to) for one server,
@@ -178,7 +192,8 @@ func materializeBuckets(tx *gorm.DB, serverID uint, from, to time.Time) (int, er
 		net_recv_rate = EXCLUDED.net_recv_rate, net_recv_peak = EXCLUDED.net_recv_peak, net_recv_coverage = EXCLUDED.net_recv_coverage,
 		net_sent_rate = EXCLUDED.net_sent_rate, net_sent_peak = EXCLUDED.net_sent_peak, net_sent_coverage = EXCLUDED.net_sent_coverage,
 		disk_read_rate = EXCLUDED.disk_read_rate, disk_read_peak = EXCLUDED.disk_read_peak, disk_read_coverage = EXCLUDED.disk_read_coverage,
-		disk_write_rate = EXCLUDED.disk_write_rate, disk_write_peak = EXCLUDED.disk_write_peak, disk_write_coverage = EXCLUDED.disk_write_coverage`
+		disk_write_rate = EXCLUDED.disk_write_rate, disk_write_peak = EXCLUDED.disk_write_peak, disk_write_coverage = EXCLUDED.disk_write_coverage
+	WHERE NOT (EXCLUDED.samples = 0 AND metrics_rollup_6h.samples > 0)`
 
 	// The scan starts one gap threshold early so the first bucket's first sample
 	// still has a predecessor, and never reaches the open bucket.
@@ -196,11 +211,32 @@ func materializeBuckets(tx *gorm.DB, serverID uint, from, to time.Time) (int, er
 	return int(written), nil
 }
 
-func (r *MetricRepo) serversWithMetrics(ctx context.Context, since time.Time) ([]uint, error) {
+// serversNeedingRollup selects the nodes a refresh cycle must serve: those with
+// recent samples, those whose checkpoint is behind (a failure gap or a quiet
+// node), and those that hold retained samples but were never materialized at
+// all. Selecting only "recently active" nodes would leave a backlog unaggregated
+// forever, which later blocks retention (REQ §8.3.1).
+func (r *MetricRepo) serversNeedingRollup(ctx context.Context, since, closed time.Time) ([]uint, error) {
 	var ids []uint
-	err := r.db.WithContext(ctx).Raw(
-		`SELECT DISTINCT server_id FROM metrics WHERE time >= ? ORDER BY server_id`, since).Scan(&ids).Error
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT server_id FROM metrics WHERE time >= $1
+		UNION
+		SELECT server_id FROM metrics_rollup_checkpoints WHERE completed_through < $2
+		UNION
+		SELECT DISTINCT m.server_id FROM metrics m
+			LEFT JOIN metrics_rollup_checkpoints c ON c.server_id = m.server_id
+			WHERE c.server_id IS NULL AND m.time >= $3
+		ORDER BY server_id`,
+		since, closed, closed.Add(-window_or_default(RollupBackfillWindow))).Scan(&ids).Error
 	return ids, err
+}
+
+// window_or_default keeps the helper usable from a single expression.
+func window_or_default(window time.Duration) time.Duration {
+	if window <= 0 || window > RollupBackfillWindow {
+		return RollupBackfillWindow
+	}
+	return window
 }
 
 // PrunePlan is the dry-run result for retention: the cutoff and the rows that

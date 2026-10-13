@@ -116,6 +116,13 @@ func (l *sshLease) begin(ctx context.Context) (context.Context, error) {
 	if l.closing || l.settled || l.unhealthy {
 		return nil, errors.New("SSH lease is closed or unusable")
 	}
+	// Admission is the short critical section that races with Invalidate: once the
+	// pinned generation is stale no stage (probe, upload, hash check, activation,
+	// execution) may start against the old target.
+	if !l.svc.pool.IsCurrent(l.h.ServerID(), l.h.Generation()) {
+		l.unhealthy = true
+		return nil, fmt.Errorf("SSH lease target generation changed: %w", sshpool.ErrStaleGeneration)
+	}
 	if l.active {
 		return nil, errors.New("SSH lease already has an active operation")
 	}

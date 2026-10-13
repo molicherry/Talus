@@ -35,8 +35,11 @@ var rateCounters = []string{"net_bytes_recv", "net_bytes_sent", "disk_read_bytes
 // beyond the declared threshold). A real zero increment yields 0, not NULL.
 //
 // The caller must scan one predecessor sample before the requested start so the
-// first bucket can be weighted correctly; $1=server id, $2=scan start,
-// $3=scan end (exclusive), $4=gap threshold.
+// first bucket can be weighted correctly. $1=server id, $2=scan start (the
+// window start minus the gap threshold), $3=scan end (exclusive), $4=gap
+// threshold; the CTE also carries the observation window ($5=window start,
+// $6=window end) so callers can exclude the predecessor rows from statistics:
+// a predecessor is rate context, never an in-window observation.
 func deltaSamplesCTE(selectExtra string) string {
 	rate := func(counter string) string {
 		return fmt.Sprintf(`CASE
