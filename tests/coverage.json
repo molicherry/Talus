@@ -9,6 +9,7 @@
       "command": [
         "node",
         "--test",
+        "--test-reporter=./tests/lib/node-test-report.mjs",
         "tests/coverage-tools.test.mjs"
       ],
       "timeout_seconds": 120,

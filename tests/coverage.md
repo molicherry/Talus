@@ -8,7 +8,7 @@ Cases: 33 · Runs: 13 · Schema: 1
 
 | run_id | suite | runner | cwd | command | timeout |
 | --- | --- | --- | --- | --- | ---: |
-| coverage-tools | fast | node-test | `.` | `node --test tests/coverage-tools.test.mjs` | 120s |
+| coverage-tools | fast | node-test | `.` | `node --test --test-reporter=./tests/lib/node-test-report.mjs tests/coverage-tools.test.mjs` | 120s |
 | static-adapters | fast | shell | `.` | `bash tests/static/adapters-removed.sh` | 120s |
 | go-unit | fast | go-test | `backend` | `go test ./...` | 600s |
 | frontend-node | fast | node-test | `frontend` | `bash tests/run.sh` | 600s |

@@ -197,24 +197,10 @@ function inspectUIResults(doc, run, scope, reportDir, stdout = "") {
       if (name && ok) passedByFile.add(`${file}::${name}`);
     }
   }
-  // A runner may report executed cases on stdout instead (node --test's TAP or spec
-  // reporter, the frontend suite's own lines). Those carry no file, so they only count
-  // for a registered file the run's command actually names.
-  const stdoutCases = new Set();
-  for (const line of stdout.split("\n")) {
-    const trimmed = line.trim();
-    const tap = /^(?:ok|not ok) \d+ - (.+)$/.exec(trimmed);
-    if (tap) stdoutCases.add(tap[1].trim());
-    const spec = /^[✔✖]\s+(.+?)(?:\s+\(\d+(?:\.\d+)?ms\))?$/.exec(trimmed);
-    if (spec) stdoutCases.add(spec[1].trim());
-    const plain = /^ok: (.+)$/.exec(trimmed);
-    if (plain) stdoutCases.add(plain[1].trim());
-  }
-  const command = run.command.join(" ");
-  const namedByCommand = (path) => {
-    const normalized = normalize(path);
-    return command.includes(normalized) || command.includes(normalized.split("/").pop() ?? normalized);
-  };
+  // stdout is logged, never evidence: names there are global to the output, so a
+  // same-named test in another directory - or a skipped test with a same-named pass
+  // elsewhere - could stand in for the required implementation (S03). Native
+  // `node --test` runs write the same structured report the browser suites write.
   return implementations.map((implementation) => {
     const path = normalize(implementation.implementation?.path ?? "");
     const symbol = implementation.implementation?.symbol ?? "(unnamed)";
@@ -229,12 +215,11 @@ function inspectUIResults(doc, run, scope, reportDir, stdout = "") {
         report.failed === 0 &&
         (report.executed ?? 0) > 0,
     );
-    const byStdout = stdoutCases.has(symbol) && namedByCommand(path);
     return {
       implementation_id: implementation.implementation_id,
       test: symbol,
       file: path,
-      status: byFile || fileLevel || byStdout ? "pass" : "not_run",
+      status: byFile || fileLevel ? "pass" : "not_run",
     };
   });
 }
