@@ -256,6 +256,7 @@
       "go-unit",
       "frontend-node",
       "ui-charts",
+      "terminal-e2e",
       "e2e-core"
     ]
   },
@@ -2436,10 +2437,123 @@
       "scenario": "Provide usable toolbar controls, search, font sizing, fullscreen, clipboard actions, and client-side clearing.",
       "implementations": [
         {
-          "implementation_id": "impl-09-01",
+          "implementation_id": "impl-09-01a",
           "run_id": "ui-charts",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "toolbar shows the server identity, connection state and controls"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01b",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "connect, disconnect and reconnect are explicit user actions"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01c",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "an automatic retry is announced, counted and can be cancelled"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01d",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "font size can be changed, reset and is remembered across a reload"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01e",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "search runs locally, reports misses and closes with Esc"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01f",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "clipboard actions are explicit and multi-line pastes are confirmed"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01g",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "clearing the screen only changes the local display"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01h",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "fullscreen and shortcuts are wired to the terminal, and Ctrl+C is not stolen"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01i",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-controls.test.mjs",
+            "symbol": "font size is clamped into the usable range"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01j",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-controls.test.mjs",
+            "symbol": "a multi-line paste is described before it is sent"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01k",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-controls.test.mjs",
+            "symbol": "the advertised shortcuts cover copy, paste, search and clear"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01l",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-controls.test.mjs",
+            "symbol": "each connection state is distinct and actionable"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]
@@ -2453,10 +2567,63 @@
       "scenario": "Support 375px and landscape layouts, PTY resizing, stable focus, and reconnect cleanup.",
       "implementations": [
         {
-          "implementation_id": "impl-09-02",
-          "run_id": "e2e-core",
-          "implementation": null,
-          "automation_status": "planned",
+          "implementation_id": "impl-09-02a",
+          "run_id": "terminal-e2e",
+          "implementation": {
+            "path": "backend/internal/handler/terminal_e2e_test.go",
+            "symbol": "TestTerminalE2EWindowChangeReachesThePTY"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02b",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "PTY resizes are debounced and follow font-size changes"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02c",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "repeated reconnects and leaving the page never stack sockets or timers"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02d",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "375px and landscape keep the terminal usable with 44px controls"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02e",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "landscape phones keep the toolbar and terminal visible"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02f",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-controls.test.mjs",
+            "symbol": "a reconnect announces a new session, never a restored one"
+          },
+          "automation_status": "implemented",
           "required": true
         }
       ]

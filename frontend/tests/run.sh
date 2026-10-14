@@ -42,6 +42,9 @@ compile src/features/usage-logs/types.ts usage-types
 sed 's|"../types"|"./.compiled-usage-types.mjs"|g' tests/.compiled-usage-session.mjs > tests/.compiled-usage-session-imports.mjs
 mv tests/.compiled-usage-session-imports.mjs tests/.compiled-usage-session.mjs
 compile src/features/services/lib/credential-rows.ts credential-rows
+compile src/features/terminal/lib/terminal-preferences.ts terminal-preferences
+compile src/features/terminal/lib/terminal-input.ts terminal-input
+compile src/features/terminal/lib/connection-status.ts connection-status
 
 # 2. Run every test file under tests/ (skip this runner + compiled artifacts).
 FAIL=0

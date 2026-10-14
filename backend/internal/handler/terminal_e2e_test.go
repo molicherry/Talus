@@ -66,11 +66,14 @@ type terminalE2EFixture struct {
 	shellEntered chan struct{}
 	shellResume  chan struct{}
 	input        chan string
+	// resizes records the PTY window size the Hub sent (cols, rows), so a resize
+	// frame from the browser can be observed at the SSH boundary (TC-09-02).
+	resizes chan [2]int
 }
 
 func newTerminalE2EFixture(t *testing.T) *terminalE2EFixture {
 	t.Helper()
-	f := &terminalE2EFixture{registry: gate.NewRegistry(), source: &terminalE2ESource{}, shellEntered: make(chan struct{}), shellResume: make(chan struct{}), input: make(chan string, 8)}
+	f := &terminalE2EFixture{registry: gate.NewRegistry(), source: &terminalE2ESource{}, shellEntered: make(chan struct{}), shellResume: make(chan struct{}), input: make(chan string, 8), resizes: make(chan [2]int, 8)}
 	f.userGate = gate.New(func(context.Context, uint) (int64, error) { return f.version.Load(), nil })
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -110,6 +113,17 @@ func newTerminalE2EFixture(t *testing.T) *terminalE2EFixture {
 					if req.Type == "shell" {
 						shellOnce.Do(func() { close(f.shellEntered) })
 						<-f.shellResume
+					}
+					if req.Type == "window-change" {
+						// The SSH window-change payload is four uint32s: cols, rows,
+						// width and height in pixels.
+						var size struct{ Cols, Rows, Width, Height uint32 }
+						if err := ssh.Unmarshal(req.Payload, &size); err == nil {
+							select {
+							case f.resizes <- [2]int{int(size.Cols), int(size.Rows)}:
+							default:
+							}
+						}
 					}
 					_ = req.Reply(req.Type == "shell" || req.Type == "pty-req" || req.Type == "window-change", nil)
 				}
@@ -465,4 +479,67 @@ func TestTerminalE2EPasswordChangeThroughHTTP(t *testing.T) {
 	}
 	newJWT := login("new-password")
 	request(http.MethodGet, "/api/v1/auth/profile", newJWT, "", http.StatusOK)
+}
+
+// TestTerminalE2EWindowChangeReachesThePTY pins the protocol half of TC-09-02: a
+// resize frame from the client is forwarded to the SSH PTY as a window-change
+// request, and the session keeps working afterwards.
+func TestTerminalE2EWindowChangeReachesThePTY(t *testing.T) {
+	f := newTerminalE2EFixture(t)
+	close(f.shellResume)
+	ws, done := f.connect(t, f.userGate, "")
+	terminalE2EReady(t, ws)
+
+	// The service owns the post-handshake wire format, which carries cols/rows; the
+	// handler's wsMessage is only the auth frame.
+	type resizeFrame struct {
+		Type string `json:"type"`
+		Cols int    `json:"cols"`
+		Rows int    `json:"rows"`
+	}
+	for _, size := range [][2]int{{120, 40}, {80, 24}} {
+		if err := ws.WriteJSON(resizeFrame{Type: "resize", Cols: size[0], Rows: size[1]}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case got := <-f.resizes:
+			if got != size {
+				t.Fatalf("PTY window = %v, want %v", got, size)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("resize %v never reached the PTY", size)
+		}
+	}
+
+	// A resize must not disturb the session: input still flows.
+	if err := ws.WriteJSON(wsMessage{Type: "input", Data: "after-resize"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-f.input:
+		if got != "after-resize" {
+			t.Fatalf("input after resize = %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("input after resize was not forwarded")
+	}
+
+	// An unsupported frame type is ignored without killing the session.
+	if err := ws.WriteJSON(wsMessage{Type: "unsupported"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteJSON(wsMessage{Type: "input", Data: "still-alive"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-f.input:
+		if got != "still-alive" {
+			t.Fatalf("input after an unknown frame = %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("an unknown frame type ended the session")
+	}
+
+	_ = ws.Close()
+	terminalE2EWait(t, done)
 }
