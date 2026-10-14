@@ -184,6 +184,7 @@ GET /api/v1/servers/{id}/metrics
 | 全局采集并发 / 30s deadline / backoff | min(N,16) / 30s / base=min(I×2^(k−1),max(I,300s)) ±10% jitter（需求 §8.1.1） | 已冻结 |
 | auth 主库查询 deadline | 2s（故障截止） | 已决议 |
 | metrics raw / 6h rollup 保留 | 35d / 35d（需求 §8.3.1） | 已定 |
+| 首次迁移/检查点失效的聚合下界 | `now − 35d`；更早 raw 未聚合即删除，属需求 §8.3.1 的显式例外，清理日志含窗口与行数 | 已定 |
 
 ---
 
