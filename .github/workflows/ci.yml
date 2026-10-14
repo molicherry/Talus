@@ -225,6 +225,15 @@ jobs:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
         run: bash tests/run.sh --gate M3
 
+      # M4 is the terminal-acceptance gate. Its end-to-end run boots the Hub, its own
+      # scratch database and a controlled SSH peer, so the whole browser flow runs here
+      # rather than against an externally provided deployment.
+      - name: Phase gate M4 (terminal UI, PTY resize, lifecycle)
+        if: ${{ !cancelled() }}
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+        run: bash tests/run.sh --gate M4
+
       # The records live in tests/.artifacts, a hidden directory: without
       # include-hidden-files the upload silently finds nothing, and a "successful"
       # upload step then proves nothing (P2-05). Missing records are an error here,
@@ -261,15 +270,6 @@ jobs:
               process.exit(1);
             }
           '
-
-      # M4 is the terminal-acceptance gate. Its end-to-end run boots the Hub, its own
-      # scratch database and a controlled SSH peer, so the whole browser flow runs here
-      # rather than against an externally provided deployment.
-      - name: Phase gate M4 (terminal UI, PTY resize, lifecycle)
-        if: ${{ !cancelled() }}
-        env:
-          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
-        run: bash tests/run.sh --gate M4
 
       - name: Upload phase execution evidence
         if: ${{ !cancelled() }}
