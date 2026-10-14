@@ -255,12 +255,21 @@ jobs:
               if (doc.selector && doc.selector.gate) gates.add(doc.selector.gate);
             }
             console.log(`records: ${files.length}, gates: ${[...gates].sort().join(",")}, commit: ${expected.slice(0, 7)}`);
-            const missing = ["M1", "M2", "M3"].filter((gate) => !gates.has(gate));
+            const missing = ["M1", "M2", "M3", "M4"].filter((gate) => !gates.has(gate));
             if (missing.length > 0) {
               console.error(`missing execution records for: ${missing.join(",")}`);
               process.exit(1);
             }
           '
+
+      # M4 is the terminal-acceptance gate. Its end-to-end run boots the Hub, its own
+      # scratch database and a controlled SSH peer, so the whole browser flow runs here
+      # rather than against an externally provided deployment.
+      - name: Phase gate M4 (terminal UI, PTY resize, lifecycle)
+        if: ${{ !cancelled() }}
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+        run: bash tests/run.sh --gate M4
 
       - name: Upload phase execution evidence
         if: ${{ !cancelled() }}
