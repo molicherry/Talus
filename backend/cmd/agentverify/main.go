@@ -32,11 +32,17 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	if err := manifest.Verify(dir); err != nil {
-		fail(err)
+	// -check-json only needs the manifest's declared protocol and version: the
+	// report it validates may come from a container (or an extracted manifest), so
+	// the artifact files themselves need not be present. Every other mode verifies
+	// the artifacts it is about to trust.
+	if *checkJSON == "" {
+		if err := manifest.Verify(dir); err != nil {
+			fail(err)
+		}
+		fmt.Printf("artifacts OK: build_version=%s protocol_version=%d agents=%d\n",
+			manifest.BuildVersion, manifest.ProtocolVersion, len(manifest.Agents))
 	}
-	fmt.Printf("artifacts OK: build_version=%s protocol_version=%d agents=%d\n",
-		manifest.BuildVersion, manifest.ProtocolVersion, len(manifest.Agents))
 
 	if *checkJSON != "" {
 		// The same strict rule the in-image acceptance applies, so a captured report
