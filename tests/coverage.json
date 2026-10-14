@@ -2644,6 +2644,36 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-09-01v",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "each keyboard paste action produces exactly one remote payload"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01w",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a native paste keeps its own payload and needs no second clipboard read"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01x",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/terminal_e2e_test.go",
+            "symbol": "TestTerminalE2EStaleTokenVersionIsAnnounced"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -2831,6 +2861,26 @@
           "implementation": {
             "path": "frontend/tests/terminal-controls.test.mjs",
             "symbol": "a reconnect announces a new session, never a restored one"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02s",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a selection survives the scrollback buffer trimming older lines"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02t",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/e2efixture/main_test.go",
+            "symbol": "TestReplaceDatabasePathKeepsConnectionOptions"
           },
           "automation_status": "implemented",
           "required": true

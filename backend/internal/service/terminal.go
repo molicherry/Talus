@@ -29,11 +29,47 @@ func (w *terminalWriter) writeJSON(message wsMessage) error {
 	return w.conn.WriteJSON(message)
 }
 
-func (w *terminalWriter) closeWith(code int, reason string) {
-	w.mu.Lock()
+// tryWriteJSON writes only if the writer is free within budget. The teardown uses it
+// so a peer that stopped reading (an output pump stuck inside a write) cannot stop the
+// session from closing: the notice is best effort, the close is not (R08).
+func (w *terminalWriter) tryWriteJSON(message wsMessage, budget time.Duration) bool {
+	acquired := make(chan struct{})
+	go func() {
+		w.mu.Lock()
+		close(acquired)
+	}()
+	select {
+	case <-acquired:
+	case <-time.After(budget):
+		return false
+	}
 	defer w.mu.Unlock()
-	_ = w.conn.WriteControl(websocket.CloseMessage,
-		websocket.FormatCloseMessage(code, reason), time.Now().Add(time.Second))
+	return w.conn.WriteJSON(message) == nil
+}
+
+// closeWith announces the close code when the writer is free, and never waits for a
+// blocked writer: a stuck output write must not delay the session ending (R08).
+func (w *terminalWriter) closeWith(code int, reason string, budget time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		_ = w.conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(code, reason), time.Now().Add(time.Second))
+	}()
+	select {
+	case <-done:
+	case <-time.After(budget):
+	}
+}
+
+// forceClose closes the underlying transport, which unblocks any writer caught in a
+// write and guarantees the socket is gone even when the notice could not be sent.
+func (w *terminalWriter) forceClose() {
+	if conn := w.conn.UnderlyingConn(); conn != nil {
+		_ = conn.Close()
+	}
 }
 
 type TerminalService struct {
@@ -51,6 +87,14 @@ func (s *TerminalService) SetSessionRegistry(r *gate.Registry) { s.registry = r 
 func (s *TerminalService) SetUserGate(g mw.UserGate) { s.userGate = g }
 
 var errTerminalRevoked = errors.New("terminal session revoked")
+
+// refuseTerminal announces a refusal before the session had a teardown: the client
+// must be able to tell "sign in again" from a dropped connection (R03).
+func refuseTerminal(writer *terminalWriter, code int, reason, message string) {
+	writer.tryWriteJSON(wsMessage{Type: "error", Reason: reason, Data: message}, 100*time.Millisecond)
+	writer.closeWith(code, reason, 100*time.Millisecond)
+	writer.forceClose()
+}
 
 // terminalRevokedCloseCode is the application close code for a session ended by
 // revocation. 4000-4999 is the private range, so it can never be confused with a
@@ -144,11 +188,17 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 		forced = true
 		closeTransport()
 	}
+	// One writer per socket: the pumps and the teardown notice all write to it, and
+	// gorilla panics on concurrent writes. It exists before admission so an early
+	// refusal can still tell the client why (R03).
+	writer := &terminalWriter{conn: wsConn}
+
 	claims := mw.GetUserClaims(ctx)
 	if claims != nil && claims.TokenVersion != nil {
 		if s.userGate == nil || s.registry == nil {
 			result.Outcome, result.Reason, result.CloseReason = "rejected", "terminal_auth_failed", "revoked"
 			result.ClosedAt = time.Now().UTC()
+			refuseTerminal(writer, terminalRevokedCloseCode, "revoked", "session revoked")
 			return result, gate.ErrUnavailable
 		}
 		err = s.userGate.Admit(sessionCtx, claims.UserID, func(version int64) error {
@@ -159,16 +209,17 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 			return nil
 		})
 		if err != nil {
+			// The token version is stale: the credentials are valid but revoked. Without
+			// an explicit refusal the browser only sees an abnormal close and retries
+			// with the same token forever (R03).
 			result.Outcome, result.Reason, result.CloseReason = "rejected", "terminal_auth_failed", "revoked"
 			result.ClosedAt = time.Now().UTC()
+			refuseTerminal(writer, terminalRevokedCloseCode, "revoked", "session revoked")
 			return result, err
 		}
 	}
 
 	ended, workflowDone, teardownDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	// One writer per socket: the pumps and the teardown notice all write to it, and
-	// gorilla panics on concurrent writes.
-	writer := &terminalWriter{conn: wsConn}
 
 	var endOnce sync.Once
 	var event TerminalResult
@@ -223,14 +274,32 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 		go func() {
 			// Say why the session is ending *before* the socket goes away: an abnormal
 			// close (1006, no reason) is indistinguishable from a dropped network, and
-			// retrying a revoked session can only fail (F07).
-			switch event.Reason {
-			case "session_revoked":
-				_ = writer.writeJSON(wsMessage{Type: "error", Reason: "revoked", Data: "session revoked"})
-				writer.closeWith(terminalRevokedCloseCode, "revoked")
-			case "client_cancelled":
-				_ = writer.writeJSON(wsMessage{Type: "disconnected"})
-				writer.closeWith(websocket.CloseNormalClosure, "")
+			// the client would retry a session that ended for good (F07, R03). The
+			// notice is bounded, so a blocked output write cannot stop the close (R08).
+			const noticeBudget = 100 * time.Millisecond
+			notified := true
+			switch {
+			case event.Reason == "session_revoked":
+				notified = writer.tryWriteJSON(wsMessage{Type: "error", Reason: "revoked", Data: "session revoked"}, noticeBudget)
+				writer.closeWith(terminalRevokedCloseCode, "revoked", noticeBudget)
+			case event.Reason == "client_cancelled":
+				notified = writer.tryWriteJSON(wsMessage{Type: "disconnected"}, noticeBudget)
+				writer.closeWith(websocket.CloseNormalClosure, "", noticeBudget)
+			case event.Outcome == "succeeded" || event.CloseReason == "remote_closed":
+				// The shell exited on its own: a normal end, not a failure, and it must
+				// not be retried as if the connection had dropped (R03).
+				notified = writer.tryWriteJSON(wsMessage{Type: "disconnected"}, noticeBudget)
+				writer.closeWith(websocket.CloseNormalClosure, "", noticeBudget)
+			default:
+				// A failure is already reported by the outcome; the notice is best effort
+				// and its result changes nothing here.
+				_ = writer.tryWriteJSON(wsMessage{Type: "error", Reason: "failed", Data: event.Reason}, noticeBudget)
+				writer.closeWith(websocket.CloseInternalServerErr, "failed", noticeBudget)
+			}
+			if !notified {
+				// A peer that stopped reading must still lose the socket, otherwise the
+				// session owner waits for a write that will never finish.
+				writer.forceClose()
 			}
 			_ = wsConn.Close()
 			resourceMu.Lock()

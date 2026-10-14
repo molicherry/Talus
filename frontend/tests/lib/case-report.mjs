@@ -33,6 +33,9 @@ export function writeReport(extra = {}) {
       `${JSON.stringify(
         {
           suite,
+          // The run this evidence belongs to: the gate only accepts reports from the
+          // run it just started (R05).
+          run_id: process.env.TALUS_UI_RUN_ID ?? null,
           cases: executed,
           executed: executed.length,
           filtered: Boolean(process.env.UI_TEST_FILTER),

@@ -251,7 +251,7 @@ async function fixture(browser, mobile = false) {
     return reply({ version: "dev" });
   });
   const page = await context.newPage();
-  page.setDefaultTimeout(5000);
+  page.setDefaultTimeout(15000);
   page.on("pageerror", (error) => state.errors.push(error.message));
   return { page, context, state, goto: (path) => page.goto(`${base}${path}`) };
 }

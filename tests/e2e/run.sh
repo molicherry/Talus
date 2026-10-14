@@ -29,7 +29,10 @@ command -v curl >/dev/null 2>&1 || fail "curl is required"
 WORK="$(mktemp -d)"
 DB="talus_e2e_$(date +%s)_$$"
 HUB_PORT="${E2E_HUB_PORT:-$((20000 + RANDOM % 20000))}"
-VERSION="e2e-$(git rev-parse --short HEAD 2>/dev/null || echo local)"
+# The build identity is unique per run: a static e2e-<commit> would let another
+# instance built from the same commit satisfy the readiness check while this run's Hub
+# fails to bind (R07).
+VERSION="e2e-$(git rev-parse --short HEAD 2>/dev/null || echo local)-$(date +%s)-$$"
 PIDS=()
 
 cleanup() {
@@ -103,7 +106,8 @@ for _ in $(seq 1 300); do
   if ! kill -0 "$HUB_PID" 2>/dev/null; then
     fail "the Hub exited before it became ready (port $HUB_PORT may be taken): $(tail -5 "$WORK/hub.log" 2>/dev/null)"
   fi
-  if curl -fsS "http://127.0.0.1:$HUB_PORT/api/v1/version" 2>/dev/null | grep -qE "\"version\"[[:space:]]*:[[:space:]]*\"$VERSION\""; then
+  # Only this run's instance answers with this run's nonce.
+  if curl -fsS "http://127.0.0.1:$HUB_PORT/api/v1/version" 2>/dev/null | grep -qF "\"$VERSION\""; then
     ready=1
     break
   fi

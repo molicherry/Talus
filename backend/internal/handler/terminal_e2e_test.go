@@ -600,3 +600,43 @@ func TestTerminalE2ERevocationAnnouncesItself(t *testing.T) {
 		t.Fatal("a revoked terminal leaked its registry entry")
 	}
 }
+
+// TestTerminalE2EStaleTokenVersionIsAnnounced pins R03: a valid JWT with an outdated
+// token version is refused *before* a session exists, and the client is told why - a
+// bare close (1006) would make it retry with the same revoked credentials forever.
+func TestTerminalE2EStaleTokenVersionIsAnnounced(t *testing.T) {
+	f := newTerminalE2EFixture(t)
+	close(f.shellResume)
+	// The user's current version is 1; the token was issued at version 0.
+	f.version.Store(1)
+	raw, err := f.jwt.GenerateToken(7, "test", "admin", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, done := f.connect(t, f.userGate, raw)
+
+	var announced bool
+	for {
+		var frame struct {
+			Type   string `json:"type"`
+			Reason string `json:"reason"`
+		}
+		if err := ws.ReadJSON(&frame); err != nil {
+			break
+		}
+		if frame.Type == "error" && frame.Reason == "revoked" {
+			announced = true
+			break
+		}
+	}
+	terminalE2EWait(t, done)
+	if !announced {
+		t.Fatal("a stale token version must be announced as revoked, not dropped as 1006")
+	}
+	if f.registry.LiveCount() != 0 {
+		t.Fatal("a refused terminal must not leave a registry entry")
+	}
+}
+
+// closeShellChannels ends every accepted channel the way a shell that exits does:
+// exit-status 0 first, then the channel close.

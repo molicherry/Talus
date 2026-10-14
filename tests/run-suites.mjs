@@ -9,7 +9,7 @@
 //   node tests/run-suites.mjs --list
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loadAndValidate } from "./render-coverage.mjs";
@@ -160,31 +160,36 @@ const UI_RUNNERS = new Set(["playwright", "node-test"]);
 const SELECTION_ENV = ["UI_TEST_FILTER"];
 
 // inspectUIResults verifies that every required implementation registered for this
-// run actually executed: the report is written per case, so a filtered or skipped
-// suite is visible even though its exit code was zero (F12).
-function inspectUIResults(doc, run, scope, root, stdout = "") {
+// run actually executed, using evidence from *this* execution only: the reports live
+// in a per-execution directory, must belong to this run_id and must have executed at
+// least one case. A stale or foreign report can no longer stand in for a missing case
+// (R05).
+function inspectUIResults(doc, run, scope, reportDir, stdout = "") {
   const implementations = doc.cases
+    .filter((testCase) => inScope(testCase, scope))
     .flatMap((testCase) => testCase.implementations)
     .filter((implementation) => implementation.run_id === run.run_id)
-    .filter((implementation) => implementation.required !== false)
-    .filter((implementation) => !scope || scope === (implementation.phase ?? scope));
-  const dir = join(root, "tests", ".artifacts");
-  const reports = existsSync(dir)
-    ? readdirSync(dir)
+    .filter((implementation) => implementation.required !== false);
+  const reports = existsSync(reportDir)
+    ? readdirSync(reportDir)
         .filter((name) => name.startsWith("ui-") && name.endsWith(".json"))
         .map((name) => {
           try {
-            return JSON.parse(readFileSync(join(dir, name), "utf8"));
+            return JSON.parse(readFileSync(join(reportDir, name), "utf8"));
           } catch {
             return null;
           }
         })
         .filter(Boolean)
+        // Only this run's reports count, and only ones that really ran something.
+        .filter((report) => report.run_id === run.run_id && (report.executed ?? 0) > 0)
     : [];
   const executed = new Set(reports.flatMap((report) => report.cases ?? []));
-  // Runners that use their own harness (node --test, the frontend suite) report
-  // executed cases on stdout: TAP lines, node's spec reporter lines, and the
-  // frontend suite's own "ok: <name>" lines.
+  // A registration may name the suite itself (a file-level verification such as
+  // "auth-session"): that is satisfied by that suite having run cases.
+  const suites = new Set(reports.map((report) => report.suite));
+  // Runners that use their own harness report executed cases on stdout: TAP lines,
+  // node's spec reporter lines, and the frontend suite's "ok: <name>" lines.
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     const tap = /^(?:ok|not ok) \d+ - (.+)$/.exec(trimmed);
@@ -193,12 +198,6 @@ function inspectUIResults(doc, run, scope, root, stdout = "") {
     if (spec) executed.add(spec[1].trim());
     const plain = /^ok: (.+)$/.exec(trimmed);
     if (plain) executed.add(plain[1].trim());
-  }
-  // A registration may name the suite itself (a file-level verification such as
-  // "auth-session"): that is satisfied by the suite having run at all.
-  const suites = new Set(reports.map((report) => report.suite));
-  for (const report of reports) {
-    if ((report.executed ?? 0) > 0) suites.add(report.suite);
   }
   return implementations.map((implementation) => ({
     implementation_id: implementation.implementation_id,
@@ -233,6 +232,8 @@ function checkEnvironment(run) {
   }
   return { ok: true };
 }
+
+let uiReportDir = "";
 
 function main() {
   const doc = loadAndValidate();
@@ -290,6 +291,9 @@ function main() {
       break;
     }
     const cwd = run.cwd === "." ? ROOT : join(ROOT, run.cwd);
+    uiReportDir = join(ROOT, "tests", ".artifacts", `ui-${executionID}`);
+    rmSync(uiReportDir, { recursive: true, force: true });
+    mkdirSync(uiReportDir, { recursive: true });
     // A gate must exercise its whole required set: a selection filter would let
     // required cases be skipped while the run still exits zero (F12).
     if (gate && SELECTION_ENV.some((name) => (process.env[name] ?? "") !== "")) {
@@ -312,7 +316,13 @@ function main() {
       stdio: captureOutput ? ["inherit", "pipe", "inherit"] : "inherit",
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, TALUS_UI_REPORT_DIR: join(ROOT, "tests", ".artifacts") },
+      env: {
+        ...process.env,
+        // Evidence is per execution and per run: a shared directory let a stale or
+        // foreign report satisfy this run's required cases (R05).
+        TALUS_UI_REPORT_DIR: uiReportDir,
+        TALUS_UI_RUN_ID: run.run_id,
+      },
       timeout: run.timeout_seconds * 1000,
     });
     // Keep native test output readable while preserving structured evidence.
@@ -343,7 +353,7 @@ function main() {
     let checks;
     if (UI_RUNNERS.has(run.runner)) {
       try {
-        checks = inspectUIResults(doc, run, scope, ROOT, res.stdout ?? "");
+        checks = inspectUIResults(doc, run, scope, uiReportDir, res.stdout ?? "");
         const missing = checks.filter((check) => check.status !== "pass");
         if (missing.length) {
           const reason = `required cases did not run: ${missing

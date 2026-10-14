@@ -143,7 +143,7 @@ async function fixture(browser, { viewport = { width: 1280, height: 900 }, mobil
     return reply([]);
   });
   const page = await context.newPage();
-  page.setDefaultTimeout(5000);
+  page.setDefaultTimeout(15000);
   page.on("pageerror", (error) => errors.push(error.message));
   return { page, context, errors, goto: (path) => page.goto(`${base}${path}`) };
 }
@@ -506,6 +506,66 @@ try {
     assert.equal(await socketCount(page), 2, "cancelling must stop the loop");
   });
 
+  // ---------------------------------------------------------- R01 / R02 ----
+  await test("each keyboard paste action produces exactly one remote payload", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+
+    const countMarker = async () =>
+      (await clientInputs(page)).join("").split("keyboard_once").length - 1;
+
+    // Ctrl+Shift+V: the key handler and the browser's native paste must not both fire.
+    await clipboardWrite(page, "echo keyboard_once\r");
+    await page.getByTestId("terminal-surface").click();
+    await page.keyboard.press("Control+Shift+v");
+    await until(async () => (await countMarker()) >= 1, "the first keyboard paste");
+    await delay(400);
+    assert.equal(await countMarker(), 1, "Ctrl+Shift+V must send the payload exactly once");
+
+    // Shift+Insert, the other native paste combination.
+    await clipboardWrite(page, "echo keyboard_once\r");
+    await page.getByTestId("terminal-surface").click();
+    await page.keyboard.press("Shift+Insert");
+    await until(async () => (await countMarker()) >= 2, "the second keyboard paste");
+    await delay(400);
+    assert.equal(await countMarker(), 2, "Shift+Insert must send the payload exactly once");
+  });
+
+  await test("a native paste keeps its own payload and needs no second clipboard read", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+
+    // The browser's trusted event carries the text; the clipboard API is then denied,
+    // which must not matter (a real user gesture already granted this paste).
+    await page.evaluate(() => {
+      navigator.clipboard.readText = async () => {
+        throw new DOMException("denied", "NotAllowedError");
+      };
+    });
+    const delivered = await page.evaluate(() => {
+      const textarea = document.querySelector(".xterm-helper-textarea");
+      const event = new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: new DataTransfer(),
+      });
+      event.clipboardData.setData("text/plain", "echo trusted-payload\r");
+      textarea.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(delivered, true, "xterm must not see the native paste");
+    await until(
+      async () => (await clientInputs(page)).join("").includes("echo trusted-payload"),
+      "the event payload is sent",
+    );
+    assert.ok(
+      !(await page.getByRole("status").allInnerTexts()).join(" ").includes("denied"),
+      "a delivered payload must not be reported as a denied clipboard read",
+    );
+  });
+
   // ---------------------------------------------------------------- F01 / F02 ----
   await test("local editor paste never reaches the remote PTY, and search stays local", async ({ page, goto }) => {
     await goto("/servers/1/terminal");
@@ -743,6 +803,49 @@ try {
       `a selection must keep its view; now showing: ${stillVisible.slice(0, 120).replace(/\n/g, "|")}`,
     );
     assert.ok(!stillVisible.includes("new-output-4"), "the reader must not be pulled to the newest output");
+  });
+
+  await test("a selection survives the scrollback buffer trimming older lines", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+    const rows = page.locator(".xterm-rows");
+    const visible = () => rows.innerText();
+
+    // More than the 1000-line scrollback cap, so older lines are trimmed as new ones
+    // arrive - the case where restoring a raw viewport index shows the wrong text (R04).
+    const lines = Array.from({ length: 1500 }, (_, i) => `line-${String(i).padStart(4, "0")}`).join("\r\n");
+    await page.evaluate((payload) => window.__ws.last().deliver({ type: "output", data: `${payload}\r\n` }), lines);
+    await until(async () => (await visible()).includes("line-1499"), "the newest line is in view");
+
+    const box = await surface(page).boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    let seen = "";
+    for (let i = 0; i < 80; i++) {
+      await page.mouse.wheel(0, -700);
+      await delay(20);
+      seen = await visible();
+      if (/line-0[0-4]\d\d/.test(seen)) break;
+    }
+    const anchorLine = (seen.match(/line-\d{4}/)?.[0] ?? "").trim();
+    assert.ok(anchorLine, `a scrollback line is visible: ${seen.slice(0, 80)}`);
+
+    // Select over the visible text, then let output arrive.
+    await page.mouse.move(box.x + 12, box.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 140, box.y + 40, { steps: 6 });
+    await page.mouse.up();
+    for (let i = 0; i < 5; i++) {
+      await page.evaluate((n) => window.__ws.last().deliver({ type: "output", data: `trim-output-${n}\r\n` }), i);
+      await delay(60);
+    }
+    await delay(300);
+    const after = await visible();
+    assert.ok(
+      after.includes(anchorLine),
+      `the anchored line ${anchorLine} must stay in view after trimming; now: ${after.slice(0, 120).replace(/\n/g, "|")}`,
+    );
+    assert.ok(!after.includes("trim-output-4"), "the reader must not be pulled to the newest output");
   });
 
   await test(

@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "../../../i18n";
 import { Link } from "react-router-dom";
 import { describeConnection } from "../lib/connection-status";
-import { TERMINAL_SHORTCUTS } from "../lib/terminal-input";
+import { classifyPaste, TERMINAL_SHORTCUTS } from "../lib/terminal-input";
 import { useTerminal } from "../hooks/use-terminal";
 
 const MAX_RETRIES = 5;
@@ -76,6 +76,10 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
   } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // The generation is read through a ref inside the shortcut callbacks, which are
+  // installed once per terminal.
+  const generationRefForPaste = useRef(generation);
+  generationRefForPaste.current = generation;
 
   useEffect(() => {
     connect();
@@ -127,6 +131,32 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
     else setNotice(t("terminal.copied", { bytes: outcome.bytes }));
   }, [copySelection, t]);
 
+  /** Applies a payload that is already in hand (a native event or a confirmed read). */
+  const applyPaste = useCallback(
+    (text: string, generation?: number) => {
+      const shape = classifyPaste(text);
+      if (shape.kind === "empty") {
+        setNotice(t("terminal.pasteEmpty"));
+        return;
+      }
+      if (shape.kind === "multi-line") {
+        // Multi-line payloads are confirmed first, and the confirmation is bound to
+        // the connection generation it was read in (F03).
+        setPendingPaste({
+          text,
+          lines: shape.lines,
+          preview: shape.preview,
+          generation: generation ?? -1,
+        });
+        return;
+      }
+      pasteText(text, generation);
+      setNotice(t("terminal.pasted", { lines: shape.lines }));
+      focusTerminal();
+    },
+    [pasteText, focusTerminal, t],
+  );
+
   const runPaste = useCallback(async () => {
     const outcome = await readClipboard();
     switch (outcome.kind) {
@@ -160,8 +190,9 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
 
   const confirmPaste = useCallback(() => {
     if (pendingPaste) {
-      // pasteText drops the payload when the session it was read in is gone (F03).
-      pasteText(pendingPaste.text, pendingPaste.generation);
+      // pasteText drops the payload when the session it was read in is gone (F03);
+      // a payload from a native event carries the generation captured at delivery.
+      pasteText(pendingPaste.text, pendingPaste.generation >= 0 ? pendingPaste.generation : undefined);
       setNotice(t("terminal.pasted", { lines: pendingPaste.lines }));
       focusTerminal();
     }
@@ -200,10 +231,13 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
       onSearch: () => setSearchOpen(true),
       onCopy: () => void runCopy(),
       onPaste: () => void runPaste(),
+      // A native event's payload skips the clipboard API entirely (R02); the
+      // generation is captured here so a reconnect still invalidates the payload.
+      onPastePayload: (text: string) => applyPaste(text, generationRefForPaste.current),
       onClear: clearTerminal,
     });
     return () => setShortcuts(null);
-  }, [setShortcuts, runCopy, runPaste, clearTerminal]);
+  }, [setShortcuts, runCopy, runPaste, applyPaste, clearTerminal]);
 
   const statusIcon = () => {
     if (view.tone === "ok") return <Wifi className="h-3.5 w-3.5 text-green-400" aria-hidden />;

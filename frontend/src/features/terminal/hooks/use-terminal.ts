@@ -17,6 +17,9 @@ import { createTerminalSocket, sendTerminalMessage } from "../socket";
 const MAX_RETRIES = 5;
 const BASE_DELAY_MS = 2000;
 const RESIZE_DEBOUNCE_MS = 300;
+// How long a keyboard-initiated paste suppresses the native paste event for the same
+// keystroke. Browsers fire it within the same task, so this is generous.
+const PASTE_DEDUPE_MS = 400;
 
 /** The outcome of a copy, so the toolbar can explain what happened. */
 export type CopyOutcome =
@@ -37,7 +40,10 @@ export type PasteOutcome =
 export interface ShortcutHandlers {
   onSearch: () => void;
   onCopy: () => void;
+  /** Paste via the clipboard API (the toolbar button and keyboard shortcuts). */
   onPaste: () => void;
+  /** Paste a payload a native event already delivered (no second clipboard read). */
+  onPastePayload?: (text: string) => void;
   onClear: () => void;
 }
 
@@ -95,6 +101,10 @@ export function useTerminal(serverId: number): UseTerminalReturn {
   const pendingResizeRef = useRef(false);
   // Shortcut handlers are installed per terminal by the component (F01).
   const shortcutsRef = useRef<ShortcutHandlers | null>(null);
+  // A paste keystroke is handled by the key handler; the native paste event the same
+  // keystroke produces is ignored until this deadline, so one action sends one payload
+  // (R01).
+  const suppressNativePasteRef = useRef(0);
   // Set when the server refused the session, so the close is not retried (F07).
   const terminateRef = useRef(false);
   // The most specific failure text reported for this session: the server's own
@@ -140,13 +150,28 @@ export function useTerminal(serverId: number): UseTerminalReturn {
     containerObserverRef.current = null;
   }, []);
 
-  /** Routes a native paste event through the same flow as the toolbar button. */
+  /**
+   * Handles a native paste event. The event carries the text the browser already
+   * granted, so that payload is used directly: re-reading the global clipboard can
+   * return something else, or fail on a permission the user already granted for this
+   * paste (R02). Only the toolbar button falls back to the clipboard API.
+   */
   const onNativePaste = useCallback((event: Event) => {
-    // Cancel xterm's own handling first: the payload is only sent after the review
-    // flow (single line) or the confirmation (multi-line).
     event.preventDefault();
     event.stopPropagation();
-    shortcutsRef.current?.onPaste();
+    if (Date.now() < suppressNativePasteRef.current) {
+      // The keyboard handler already handled this keystroke's paste (R01).
+      return;
+    }
+    const clipboardEvent = event as ClipboardEvent;
+    const payload = clipboardEvent.clipboardData?.getData("text/plain") ?? "";
+    if (payload.length === 0) {
+      // No payload on the event (a synthetic dispatcher, or a browser that only
+      // exposes the API): fall back to the button's flow.
+      shortcutsRef.current?.onPaste();
+      return;
+    }
+    shortcutsRef.current?.onPastePayload?.(payload);
   }, []);
 
   const disconnect = useCallback(() => {
@@ -326,16 +351,23 @@ export function useTerminal(serverId: number): UseTerminalReturn {
           // Follow new output only while the user is already at the bottom *and* is
           // not selecting: reading or selecting history must not be yanked away.
           const buffer = term.buffer.active;
-          const readPosition = buffer.viewportY;
-          const pinned = readPosition >= buffer.baseY && !term.hasSelection();
+          const pinned = buffer.viewportY >= buffer.baseY && !term.hasSelection();
+          // While reading, remember the *content* at the top of the viewport, not its
+          // index: once the scrollback is full, xterm trims old lines and every index
+          // shifts, so restoring a number would show different text (R04). A marker
+          // moves with the trimming.
+          // Marker offsets are relative to the cursor line (absolute baseY + cursorY),
+          // so landing on the top visible line (absolute viewportY) means this offset.
+          const anchor = pinned ? null : term.registerMarker(buffer.viewportY - buffer.baseY - buffer.cursorY);
           term.write(msg.data ?? "", () => {
             if (pinned) {
               term.scrollToBottom();
-            } else if (buffer.baseY > readPosition) {
-              // xterm scrolls on write when new lines arrive; put the reader back
-              // where they were (F11).
-              term.scrollToLine(readPosition);
+              return;
             }
+            if (anchor && !anchor.isDisposed) {
+              term.scrollToLine(anchor.line);
+            }
+            anchor?.dispose();
           });
         } else if (msg.type === "disconnected") {
           term.writeln("\r\n\x1b[33m[Disconnected]\x1b[0m");
@@ -407,6 +439,8 @@ export function useTerminal(serverId: number): UseTerminalReturn {
         return false;
       }
       if (mod && event.shiftKey && key === "v") {
+        event.preventDefault();
+        suppressNativePasteRef.current = Date.now() + PASTE_DEDUPE_MS;
         handlers.onPaste();
         return false;
       }
@@ -414,8 +448,12 @@ export function useTerminal(serverId: number): UseTerminalReturn {
         handlers.onClear();
         return false;
       }
-      // Shift+Insert is the other paste combination xterm understands natively.
+      // Shift+Insert is the other paste combination xterm understands natively. The
+      // browser fires a native paste event for the same keystroke, so it is deduped
+      // below instead of being handled twice (R01).
       if (event.shiftKey && key === "insert") {
+        event.preventDefault();
+        suppressNativePasteRef.current = Date.now() + PASTE_DEDUPE_MS;
         handlers.onPaste();
         return false;
       }

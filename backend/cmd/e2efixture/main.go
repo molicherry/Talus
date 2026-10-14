@@ -428,9 +428,14 @@ func generateKeyPair(path string) error {
 }
 
 // replaceDatabasePath swaps the database component of a PostgreSQL URL while keeping
-// the scheme, credentials, host, port, encoding and every query parameter (sslmode,
+// the scheme, credentials, host, port, encoding and every connection option (sslmode,
 // connect_timeout, application_name, ...). Truncating the query silently downgraded
 // the connection policy the caller asked for (F15).
+//
+// PostgreSQL and pgx also accept the database name as a `dbname`/`database` query
+// parameter, and those override the path. Rewriting only the path would return a URL
+// that still connects to the caller's original database - which for a scratch run
+// means migrating the wrong one (R06).
 func replaceDatabasePath(raw, name string) (string, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
@@ -440,5 +445,16 @@ func replaceDatabasePath(raw, name string) (string, error) {
 		return "", fmt.Errorf("database url %q has no scheme or host", raw)
 	}
 	parsed.Path = "/" + name
+	query := parsed.Query()
+	rewritten := false
+	for _, key := range []string{"dbname", "database"} {
+		if _, ok := query[key]; ok {
+			query.Set(key, name)
+			rewritten = true
+		}
+	}
+	if rewritten {
+		parsed.RawQuery = query.Encode()
+	}
 	return parsed.String(), nil
 }
