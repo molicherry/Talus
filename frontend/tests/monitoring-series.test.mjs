@@ -12,11 +12,12 @@ import { buildAlignedSeries, isolatedIndices } from "./.compiled-series.mjs";
 
 let failures = 0;
 function check(name, fn) {
-  recordCase(name);
   try {
     fn();
+    recordCase(name, true);
     console.log(`  ok: ${name}`);
   } catch (err) {
+    recordCase(name, false);
     failures++;
     console.log(`  FAIL: ${name}\n    ${err.message}`);
   }
@@ -249,7 +250,7 @@ check("a confirmed-empty bucket never becomes the newest sample", () => {
 });
 
 console.log(failures === 0 ? "\nmonitoring-series: ALL PASS" : `\nmonitoring-series: ${failures} FAILED`);
-nameSuite("monitoring-series");
+nameSuite("monitoring-series", import.meta.url);
 writeReport();
 
 process.exit(failures === 0 ? 0 : 1);

@@ -160,10 +160,10 @@ const UI_RUNNERS = new Set(["playwright", "node-test"]);
 const SELECTION_ENV = ["UI_TEST_FILTER"];
 
 // inspectUIResults verifies that every required implementation registered for this
-// run actually executed, using evidence from *this* execution only: the reports live
-// in a per-execution directory, must belong to this run_id and must have executed at
-// least one case. A stale or foreign report can no longer stand in for a missing case
-// (R05).
+// run actually passed, using evidence from *this* execution only. A case counts when a
+// report written by the registered implementation file lists it as passed: matching by
+// name alone would let another file's same-named test stand in for a missing case
+// (R05, S03). Reports live in a per-execution directory and must belong to this run.
 function inspectUIResults(doc, run, scope, reportDir, stdout = "") {
   const implementations = doc.cases
     .filter((testCase) => inScope(testCase, scope))
@@ -181,32 +181,66 @@ function inspectUIResults(doc, run, scope, reportDir, stdout = "") {
           }
         })
         .filter(Boolean)
-        // Only this run's reports count, and only ones that really ran something.
         .filter((report) => report.run_id === run.run_id && (report.executed ?? 0) > 0)
     : [];
-  const executed = new Set(reports.flatMap((report) => report.cases ?? []));
-  // A registration may name the suite itself (a file-level verification such as
-  // "auth-session"): that is satisfied by that suite having run cases.
-  const suites = new Set(reports.map((report) => report.suite));
-  // Runners that use their own harness report executed cases on stdout: TAP lines,
-  // node's spec reporter lines, and the frontend suite's "ok: <name>" lines.
+  // path::symbol -> passed, so the identity of the implementation file travels with
+  // the evidence.
+  // Report paths are relative to the run's cwd, the manifest's are repository paths.
+  const runRoot = run.cwd === "." ? "" : run.cwd;
+  const fromRun = (path) => normalize(join(runRoot, path));
+  const passedByFile = new Set();
+  for (const report of reports) {
+    const file = fromRun(report.file ?? "");
+    for (const entry of report.cases ?? []) {
+      const name = typeof entry === "string" ? entry : entry?.name;
+      const ok = typeof entry === "string" ? true : entry?.ok !== false;
+      if (name && ok) passedByFile.add(`${file}::${name}`);
+    }
+  }
+  // A runner may report executed cases on stdout instead (node --test's TAP or spec
+  // reporter, the frontend suite's own lines). Those carry no file, so they only count
+  // for a registered file the run's command actually names.
+  const stdoutCases = new Set();
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     const tap = /^(?:ok|not ok) \d+ - (.+)$/.exec(trimmed);
-    if (tap) executed.add(tap[1].trim());
+    if (tap) stdoutCases.add(tap[1].trim());
     const spec = /^[✔✖]\s+(.+?)(?:\s+\(\d+(?:\.\d+)?ms\))?$/.exec(trimmed);
-    if (spec) executed.add(spec[1].trim());
+    if (spec) stdoutCases.add(spec[1].trim());
     const plain = /^ok: (.+)$/.exec(trimmed);
-    if (plain) executed.add(plain[1].trim());
+    if (plain) stdoutCases.add(plain[1].trim());
   }
-  return implementations.map((implementation) => ({
-    implementation_id: implementation.implementation_id,
-    test: implementation.implementation?.symbol ?? "(unnamed)",
-    status:
-      executed.has(implementation.implementation?.symbol) || suites.has(implementation.implementation?.symbol)
-        ? "pass"
-        : "not_run",
-  }));
+  const command = run.command.join(" ");
+  const namedByCommand = (path) => {
+    const normalized = normalize(path);
+    return command.includes(normalized) || command.includes(normalized.split("/").pop() ?? normalized);
+  };
+  return implementations.map((implementation) => {
+    const path = normalize(implementation.implementation?.path ?? "");
+    const symbol = implementation.implementation?.symbol ?? "(unnamed)";
+    const byFile = passedByFile.has(`${path}::${symbol}`);
+    // A registration may name the suite itself (a file-level verification such as
+    // "auth-session"): only then does "that file produced passing cases" stand for the
+    // implementation, and never for a case-level symbol (S03).
+    const fileLevel = reports.some(
+      (report) =>
+        fromRun(report.file ?? "") === path &&
+        report.suite === symbol &&
+        report.failed === 0 &&
+        (report.executed ?? 0) > 0,
+    );
+    const byStdout = stdoutCases.has(symbol) && namedByCommand(path);
+    return {
+      implementation_id: implementation.implementation_id,
+      test: symbol,
+      file: path,
+      status: byFile || fileLevel || byStdout ? "pass" : "not_run",
+    };
+  });
+}
+
+function normalize(path) {
+  return path.replace(/^\.\//, "").split("\\").join("/");
 }
 
 function checkEnvironment(run) {

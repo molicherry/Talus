@@ -18,50 +18,60 @@ import (
 // terminalWriter serializes every frame written to one terminal socket. The output
 // pump and the session-teardown notice both write, and gorilla's websocket panics on
 // concurrent writes, so each socket has exactly one writer.
+//
+// Ownership is a semaphore rather than a mutex: a bounded attempt that times out
+// leaves no waiter behind (a goroutine blocked on a mutex would acquire it later with
+// nobody left to release it), and every bounded write also sets the connection's write
+// deadline, so the budget covers the network write and not only the wait (S01, S02).
 type terminalWriter struct {
-	mu   sync.Mutex
+	sem  chan struct{}
 	conn *websocket.Conn
 }
 
+func newTerminalWriter(conn *websocket.Conn) *terminalWriter {
+	return &terminalWriter{sem: make(chan struct{}, 1), conn: conn}
+}
+
+// writeJSON is the output pump's path: it waits for its turn and writes in full. A
+// peer that stopped reading is unblocked by forceClose during teardown.
 func (w *terminalWriter) writeJSON(message wsMessage) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	w.sem <- struct{}{}
+	defer func() { <-w.sem }()
 	return w.conn.WriteJSON(message)
 }
 
-// tryWriteJSON writes only if the writer is free within budget. The teardown uses it
-// so a peer that stopped reading (an output pump stuck inside a write) cannot stop the
-// session from closing: the notice is best effort, the close is not (R08).
-func (w *terminalWriter) tryWriteJSON(message wsMessage, budget time.Duration) bool {
-	acquired := make(chan struct{})
-	go func() {
-		w.mu.Lock()
-		close(acquired)
-	}()
+// acquire takes the writer if it is free within budget. A timeout leaves nothing
+// behind: no goroutine, no ownership.
+func (w *terminalWriter) acquire(budget time.Duration) bool {
 	select {
-	case <-acquired:
+	case w.sem <- struct{}{}:
+		return true
 	case <-time.After(budget):
 		return false
 	}
-	defer w.mu.Unlock()
+}
+
+// tryWriteJSON writes a notice within budget, covering the network write itself.
+func (w *terminalWriter) tryWriteJSON(message wsMessage, budget time.Duration) bool {
+	if !w.acquire(budget) {
+		return false
+	}
+	defer func() { <-w.sem }()
+	_ = w.conn.SetWriteDeadline(time.Now().Add(budget))
+	defer func() { _ = w.conn.SetWriteDeadline(time.Time{}) }()
 	return w.conn.WriteJSON(message) == nil
 }
 
-// closeWith announces the close code when the writer is free, and never waits for a
-// blocked writer: a stuck output write must not delay the session ending (R08).
+// closeWith announces the close code within the same bounded ownership. gorilla's
+// WriteControl waits on the connection's own write lock, so it must never be called
+// while a blocked data write owns the writer.
 func (w *terminalWriter) closeWith(code int, reason string, budget time.Duration) {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		w.mu.Lock()
-		defer w.mu.Unlock()
-		_ = w.conn.WriteControl(websocket.CloseMessage,
-			websocket.FormatCloseMessage(code, reason), time.Now().Add(time.Second))
-	}()
-	select {
-	case <-done:
-	case <-time.After(budget):
+	if !w.acquire(budget) {
+		return
 	}
+	defer func() { <-w.sem }()
+	_ = w.conn.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(code, reason), time.Now().Add(budget))
 }
 
 // forceClose closes the underlying transport, which unblocks any writer caught in a
@@ -191,7 +201,7 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 	// One writer per socket: the pumps and the teardown notice all write to it, and
 	// gorilla panics on concurrent writes. It exists before admission so an early
 	// refusal can still tell the client why (R03).
-	writer := &terminalWriter{conn: wsConn}
+	writer := newTerminalWriter(wsConn)
 
 	claims := mw.GetUserClaims(ctx)
 	if claims != nil && claims.TokenVersion != nil {

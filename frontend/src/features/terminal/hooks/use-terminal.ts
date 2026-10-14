@@ -17,9 +17,6 @@ import { createTerminalSocket, sendTerminalMessage } from "../socket";
 const MAX_RETRIES = 5;
 const BASE_DELAY_MS = 2000;
 const RESIZE_DEBOUNCE_MS = 300;
-// How long a keyboard-initiated paste suppresses the native paste event for the same
-// keystroke. Browsers fire it within the same task, so this is generous.
-const PASTE_DEDUPE_MS = 400;
 
 /** The outcome of a copy, so the toolbar can explain what happened. */
 export type CopyOutcome =
@@ -101,10 +98,7 @@ export function useTerminal(serverId: number): UseTerminalReturn {
   const pendingResizeRef = useRef(false);
   // Shortcut handlers are installed per terminal by the component (F01).
   const shortcutsRef = useRef<ShortcutHandlers | null>(null);
-  // A paste keystroke is handled by the key handler; the native paste event the same
-  // keystroke produces is ignored until this deadline, so one action sends one payload
-  // (R01).
-  const suppressNativePasteRef = useRef(0);
+
   // Set when the server refused the session, so the close is not retried (F07).
   const terminateRef = useRef(false);
   // The most specific failure text reported for this session: the server's own
@@ -159,10 +153,6 @@ export function useTerminal(serverId: number): UseTerminalReturn {
   const onNativePaste = useCallback((event: Event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (Date.now() < suppressNativePasteRef.current) {
-      // The keyboard handler already handled this keystroke's paste (R01).
-      return;
-    }
     const clipboardEvent = event as ClipboardEvent;
     const payload = clipboardEvent.clipboardData?.getData("text/plain") ?? "";
     if (payload.length === 0) {
@@ -358,7 +348,13 @@ export function useTerminal(serverId: number): UseTerminalReturn {
           // moves with the trimming.
           // Marker offsets are relative to the cursor line (absolute baseY + cursorY),
           // so landing on the top visible line (absolute viewportY) means this offset.
-          const anchor = pinned ? null : term.registerMarker(buffer.viewportY - buffer.baseY - buffer.cursorY);
+          const cursorLine = buffer.baseY + buffer.cursorY;
+          const anchor = pinned ? null : term.registerMarker(buffer.viewportY - cursorLine);
+          // A selection can outlive the top line: when trimming removes the anchor but
+          // the selected text survives, the selection is the position to keep in view
+          // (S05).
+          const selection = pinned ? null : term.getSelectionPosition();
+          const selectionAnchor = selection ? term.registerMarker(selection.start.y - cursorLine) : null;
           term.write(msg.data ?? "", () => {
             if (pinned) {
               term.scrollToBottom();
@@ -366,8 +362,11 @@ export function useTerminal(serverId: number): UseTerminalReturn {
             }
             if (anchor && !anchor.isDisposed) {
               term.scrollToLine(anchor.line);
+            } else if (selectionAnchor && !selectionAnchor.isDisposed) {
+              term.scrollToLine(selectionAnchor.line);
             }
             anchor?.dispose();
+            selectionAnchor?.dispose();
           });
         } else if (msg.type === "disconnected") {
           term.writeln("\r\n\x1b[33m[Disconnected]\x1b[0m");
@@ -403,9 +402,14 @@ export function useTerminal(serverId: number): UseTerminalReturn {
         terminateRef.current = false;
         clearTimers();
         setStatus("disconnected");
-        // The reason the server sent (frame or close reason) is shown when there is
-        // one; a bare abnormal close still gets a readable line (F05/F07).
-        reportError(event.reason || (verdict === "revoked" ? "session revoked" : "session ended"));
+        if (verdict === "revoked") {
+          // A refusal must be readable outside the terminal (F05/F07).
+          reportError(event.reason || "session revoked");
+        } else {
+          // A session that simply ended is not a failure: reporting an error here made
+          // the toolbar show "Connection failed" after a clean shell exit (S06).
+          clearError();
+        }
       },
       (_evt: Event) => {
         setError("WebSocket error");
@@ -439,8 +443,10 @@ export function useTerminal(serverId: number): UseTerminalReturn {
         return false;
       }
       if (mod && event.shiftKey && key === "v") {
+        // Cancelling the default action is what keeps this to one payload: the browser
+        // then does not also deliver a native paste for the same keystroke. A time
+        // window would additionally swallow the user's *next*, unrelated paste (S04).
         event.preventDefault();
-        suppressNativePasteRef.current = Date.now() + PASTE_DEDUPE_MS;
         handlers.onPaste();
         return false;
       }
@@ -448,12 +454,10 @@ export function useTerminal(serverId: number): UseTerminalReturn {
         handlers.onClear();
         return false;
       }
-      // Shift+Insert is the other paste combination xterm understands natively. The
-      // browser fires a native paste event for the same keystroke, so it is deduped
-      // below instead of being handled twice (R01).
+      // Shift+Insert is the other paste combination xterm understands natively; the
+      // default action is cancelled for the same reason as above (R01, S04).
       if (event.shiftKey && key === "insert") {
         event.preventDefault();
-        suppressNativePasteRef.current = Date.now() + PASTE_DEDUPE_MS;
         handlers.onPaste();
         return false;
       }

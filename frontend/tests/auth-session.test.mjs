@@ -94,7 +94,7 @@ stop();
 auth.clearAuthToken();
 console.log("auth-session: ALL PASS");
 
-nameSuite("auth-session");
+nameSuite("auth-session", import.meta.url);
 // This suite is a single file-level verification, registered under its own name.
-recordCase("auth-session");
+recordCase("auth-session", true);
 writeReport();

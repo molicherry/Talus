@@ -274,6 +274,7 @@ async function test(name, run, mobile = false) {
     passed++;
     console.log(`PASS ${name}`);
   } catch (error) {
+    recordCase(name, false);
     failed++;
     console.error(`FAIL ${name}: ${error.stack}`);
   } finally {
@@ -986,7 +987,7 @@ try {
   if (browser) await browser.close();
   server.kill();
 }
-nameSuite("ui-regressions");
+nameSuite("ui-regressions", import.meta.url);
 writeReport({ passed, failed });
 console.log(`UI regressions: ${passed} passed, ${failed} failed`);
 if (failed) process.exitCode = 1;

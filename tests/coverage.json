@@ -2674,6 +2674,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-09-01y",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a separate native paste is preserved after a keyboard paste"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -2881,6 +2891,26 @@
           "implementation": {
             "path": "backend/cmd/e2efixture/main_test.go",
             "symbol": "TestReplaceDatabasePathKeepsConnectionOptions"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02u",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a surviving selection stays visible when the top anchor is trimmed"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02v",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a session that ended normally is not shown as a failure"
           },
           "automation_status": "implemented",
           "required": true

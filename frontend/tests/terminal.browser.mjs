@@ -153,9 +153,6 @@ let passed = 0;
 let failed = 0;
 async function test(name, run, options) {
   if (process.env.UI_TEST_FILTER && !new RegExp(process.env.UI_TEST_FILTER).test(name)) return;
-  // The gate verifies required cases against this record, so it is written per case
-  // and not only on success (F12).
-  recordCase(name);
   browser = await chromium.launch({
     headless: true,
     executablePath: process.env.CHROMIUM_EXECUTABLE || undefined,
@@ -165,9 +162,12 @@ async function test(name, run, options) {
   try {
     await run(f);
     assert.deepEqual(f.errors, [], "No uncaught page errors");
+    // Evidence is written after the case ran, with its outcome (F12, S03).
+    recordCase(name, true);
     passed++;
     console.log(`PASS ${name}`);
   } catch (error) {
+    recordCase(name, false);
     failed++;
     console.error(`FAIL ${name}: ${error.stack}`);
   } finally {
@@ -504,6 +504,92 @@ try {
     );
     await delay(2200);
     assert.equal(await socketCount(page), 2, "cancelling must stop the loop");
+  });
+
+  // ---------------------------------------------------------- S04 - S06 ----
+  await test("a separate native paste is preserved after a keyboard paste", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+    const inputs = async () => (await clientInputs(page)).join("");
+
+    await clipboardWrite(page, "first-shortcut-paste\r");
+    await page.getByTestId("terminal-surface").click();
+    await page.keyboard.press("Shift+Insert");
+    await until(async () => (await inputs()).includes("first-shortcut-paste"), "the keyboard paste");
+
+    // A different paste immediately afterwards is a new user action and must not be
+    // swallowed by a dedupe window (S04).
+    const prevented = await page.evaluate(() => {
+      const textarea = document.querySelector(".xterm-helper-textarea");
+      const event = new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: new DataTransfer(),
+      });
+      event.clipboardData.setData("text/plain", "distinct-browser-paste\r");
+      textarea.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(prevented, true, "xterm must not see the paste");
+    await until(async () => (await inputs()).includes("distinct-browser-paste"), "the separate paste is sent");
+  });
+
+  await test("a surviving selection stays visible when the top anchor is trimmed", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+    const rows = page.locator(".xterm-rows");
+    const visible = () => rows.innerText();
+
+    const lines = Array.from({ length: 1500 }, (_, i) => `anchor-${String(i).padStart(4, "0")}`).join("\r\n");
+    await page.evaluate((payload) => window.__ws.last().deliver({ type: "output", data: `${payload}\r\n` }), lines);
+    await until(async () => (await visible()).includes("anchor-1499"), "the newest line is in view");
+
+    // Select the newest content, as a reader does when they copy the last output: the
+    // selection survives the next burst (it stays the newest line), while the viewport's
+    // top line does not.
+    const box = await surface(page).boundingBox();
+    const shown = await visible();
+    const selected = (shown.match(/anchor-14\d\d/g) ?? []).at(-1) ?? "";
+    assert.ok(selected, `a newest line is visible: ${shown.slice(-80)}`);
+    await page.mouse.move(box.x + 12, box.y + box.height - 24);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 150, box.y + box.height - 8, { steps: 6 });
+    await page.mouse.up();
+
+    // One frame large enough to trim the whole viewport (1030 lines), exactly the case
+    // where the top anchor dies but the selected line is still in the buffer (S05).
+    const burst = Array.from({ length: 1030 }, () => "x").join("\r\n");
+    await page.evaluate((payload) => window.__ws.last().deliver({ type: "output", data: `${payload}\r\n` }), burst);
+    await delay(400);
+    const after = await visible();
+    assert.ok(
+      after.includes(selected),
+      `the selected line ${selected} must stay visible after the trim: ${after.slice(0, 80).replace(/\n/g, "|")}`,
+    );
+  });
+
+  await test("a session that ended normally is not shown as a failure", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+    await until(
+      async () => (await page.locator("[data-connection-status]").getAttribute("data-connection-status")) === "connected",
+      "connected",
+    );
+    // The backend's normal end: a disconnected frame and a normal close (S06).
+    await page.evaluate(() => {
+      window.__ws.last().deliver({ type: "disconnected" });
+      window.__ws.last().closeWith(1000, "");
+    });
+    await until(
+      async () => (await page.locator("[data-connection-status]").getAttribute("data-connection-status")) === "disconnected",
+      "the terminal reports disconnected",
+    );
+    const tone = await page.locator("[data-connection-status]").getAttribute("data-tone");
+    assert.notEqual(tone, "error", "a normal end must not be reported as a failure");
+    assert.deepEqual(await page.getByRole("alert").allInnerTexts(), [], "no failure banner for a normal end");
   });
 
   // ---------------------------------------------------------- R01 / R02 ----
@@ -935,7 +1021,7 @@ try {
   if (browser) await browser.close();
 }
 
-nameSuite("terminal");
+nameSuite("terminal", import.meta.url);
 writeReport({ passed, failed });
 console.log(`Terminal UI: ${passed} passed, ${failed} failed`);
 if (failed) process.exitCode = 1;

@@ -15,8 +15,8 @@ cd "$(dirname "$0")/../.."
 ROOT="$PWD"
 
 fail() { # setup/tooling problem: never confused with an assertion failure
-  echo "✗ e2e setup: $*" >&2
-  exit 2
+	echo "✗ e2e setup: $*" >&2
+	exit 2
 }
 
 TEST_DATABASE_URL="${TEST_DATABASE_URL:-}"
@@ -36,39 +36,39 @@ VERSION="e2e-$(git rev-parse --short HEAD 2>/dev/null || echo local)-$(date +%s)
 PIDS=()
 
 cleanup() {
-  status=$?
-  cleanup_failed=""
-  cleanup_detail=""
-  # Remove the playwright resolution symlink the spec relies on.
-  rm -f tests/e2e/node_modules
-  for pid in ${PIDS[@]:-}; do
-    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
-  done
-  # The Hub must be gone before its database is dropped.
-  for pid in ${PIDS[@]:-}; do
-    [ -n "$pid" ] && wait "$pid" 2>/dev/null || true
-  done
-  if [ -x "$WORK/e2efixture" ]; then
-    if ! cleanup_detail="$("$WORK/e2efixture" -mode db-drop -database "$TEST_DATABASE_URL" -name "$DB" 2>&1)"; then
-      cleanup_failed="the scratch database $DB could not be dropped"
-      echo "✗ e2e cleanup: $cleanup_failed" >&2
-      echo "$cleanup_detail" >&2
-    fi
-  fi
-  rm -rf "$WORK"
-  if [ -n "$cleanup_failed" ] && [ "$status" -eq 0 ]; then
-    # A passing run whose cleanup failed is not a pass: the scratch database would be
-    # left behind and the next run could reuse it (N01).
-    echo "✗ e2e: the run passed but cleanup failed: $cleanup_failed" >&2
-    exit 1
-  fi
-  exit "$status"
+	status=$?
+	cleanup_failed=""
+	cleanup_detail=""
+	# Remove the playwright resolution symlink the spec relies on.
+	rm -f tests/e2e/node_modules
+	for pid in ${PIDS[@]:-}; do
+		[ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+	done
+	# The Hub must be gone before its database is dropped.
+	for pid in ${PIDS[@]:-}; do
+		[ -n "$pid" ] && wait "$pid" 2>/dev/null || true
+	done
+	if [ -x "$WORK/e2efixture" ]; then
+		if ! cleanup_detail="$("$WORK/e2efixture" -mode db-drop -database "$TEST_DATABASE_URL" -name "$DB" 2>&1)"; then
+			cleanup_failed="the scratch database $DB could not be dropped"
+			echo "✗ e2e cleanup: $cleanup_failed" >&2
+			echo "$cleanup_detail" >&2
+		fi
+	fi
+	rm -rf "$WORK"
+	if [ -n "$cleanup_failed" ] && [ "$status" -eq 0 ]; then
+		# A passing run whose cleanup failed is not a pass: the scratch database would be
+		# left behind and the next run could reuse it (N01).
+		echo "✗ e2e: the run passed but cleanup failed: $cleanup_failed" >&2
+		exit 1
+	fi
+	exit "$status"
 }
 trap cleanup EXIT
 
 echo "▶ building the Hub, the agent bundle, the fixture and the SPA"
 (cd backend && go build -ldflags "-X github.com/vpsmanager/backend/internal/server.Version=$VERSION" \
-  -o "$WORK/hub" ./cmd/server && go build -o "$WORK/e2efixture" ./cmd/e2efixture) || fail "cannot build the backend"
+	-o "$WORK/hub" ./cmd/server && go build -o "$WORK/e2efixture" ./cmd/e2efixture) || fail "cannot build the backend"
 (cd backend && sh build/agents.sh "$VERSION" "$WORK/agents" >/dev/null) || fail "cannot build the agent bundle"
 (cd frontend && npm run build >/dev/null) || fail "cannot build the SPA"
 [ -f frontend/dist/index.html ] || fail "the SPA build produced no index.html"
@@ -80,38 +80,38 @@ DB_URL="$("$WORK/e2efixture" -mode db-create -database "$TEST_DATABASE_URL" -nam
 echo "▶ starting the controlled SSH peer"
 "$WORK/e2efixture" -mode genkey -name "$WORK/client_key" >/dev/null
 "$WORK/e2efixture" -mode serve -addr 127.0.0.1:0 -log "$WORK/peer.jsonl" \
-  -host-key "$WORK/peer_host_key" -authorized-key "$WORK/client_key.pub" >"$WORK/peer.out" 2>&1 &
+	-host-key "$WORK/peer_host_key" -authorized-key "$WORK/client_key.pub" >"$WORK/peer.out" 2>&1 &
 PIDS+=($!)
 for _ in $(seq 1 100); do
-  grep -q '^ADDR=' "$WORK/peer.out" 2>/dev/null && break
-  sleep 0.1
+	grep -q '^ADDR=' "$WORK/peer.out" 2>/dev/null && break
+	sleep 0.1
 done
 PEER_ADDR="$(sed -n 's/^ADDR=//p' "$WORK/peer.out" | head -1)"
 [ -n "$PEER_ADDR" ] || fail "the SSH peer did not start: $(cat "$WORK/peer.out" 2>/dev/null)"
 
 echo "▶ starting the Hub on 127.0.0.1:$HUB_PORT"
 DATABASE_URL="$DB_URL" \
-  JWT_SECRET="e2e-jwt-secret-0123456789abcdef" \
-  VPSMANAGER_MASTER_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" \
-  STATIC_DIR="$ROOT/frontend/dist" \
-  AGENT_ARTIFACTS_DIR="$WORK/agents" \
-  PORT="$HUB_PORT" \
-  "$WORK/hub" >"$WORK/hub.log" 2>&1 &
+	JWT_SECRET="e2e-jwt-secret-0123456789abcdef" \
+	VPSMANAGER_MASTER_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" \
+	STATIC_DIR="$ROOT/frontend/dist" \
+	AGENT_ARTIFACTS_DIR="$WORK/agents" \
+	PORT="$HUB_PORT" \
+	"$WORK/hub" >"$WORK/hub.log" 2>&1 &
 HUB_PID=$!
 PIDS+=("$HUB_PID")
 ready=""
 for _ in $(seq 1 300); do
-  # A foreign process on this port would answer /version too: the answer has to be the
-  # version this run just built, and the child has to still be alive (F16).
-  if ! kill -0 "$HUB_PID" 2>/dev/null; then
-    fail "the Hub exited before it became ready (port $HUB_PORT may be taken): $(tail -5 "$WORK/hub.log" 2>/dev/null)"
-  fi
-  # Only this run's instance answers with this run's nonce.
-  if curl -fsS "http://127.0.0.1:$HUB_PORT/api/v1/version" 2>/dev/null | grep -qF "\"$VERSION\""; then
-    ready=1
-    break
-  fi
-  sleep 0.1
+	# A foreign process on this port would answer /version too: the answer has to be the
+	# version this run just built, and the child has to still be alive (F16).
+	if ! kill -0 "$HUB_PID" 2>/dev/null; then
+		fail "the Hub exited before it became ready (port $HUB_PORT may be taken): $(tail -5 "$WORK/hub.log" 2>/dev/null)"
+	fi
+	# Only this run's instance answers with this run's nonce.
+	if curl -fsS "http://127.0.0.1:$HUB_PORT/api/v1/version" 2>/dev/null | grep -qF "\"$VERSION\""; then
+		ready=1
+		break
+	fi
+	sleep 0.1
 done
 [ -n "$ready" ] || fail "the Hub did not serve its own build version $VERSION on port $HUB_PORT (another process may own the port): $(tail -5 "$WORK/hub.log" 2>/dev/null)"
 
@@ -120,9 +120,9 @@ echo "▶ running the browser flow"
 # frontend's installed tree.
 ln -sfn ../../frontend/node_modules tests/e2e/node_modules
 HUB_URL="http://127.0.0.1:$HUB_PORT" \
-  PEER_LOG="$WORK/peer.jsonl" \
-  PEER_PORT="${PEER_ADDR##*:}" \
-  CLIENT_KEY="$WORK/client_key" \
-  node tests/e2e/terminal.spec.mjs || exit 1
+	PEER_LOG="$WORK/peer.jsonl" \
+	PEER_PORT="${PEER_ADDR##*:}" \
+	CLIENT_KEY="$WORK/client_key" \
+	node tests/e2e/terminal.spec.mjs || exit 1
 
 echo "✓ terminal e2e passed (Hub on :$HUB_PORT, SSH peer $PEER_ADDR, database $DB)"

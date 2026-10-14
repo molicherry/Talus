@@ -36,11 +36,12 @@ import {
 
 let failures = 0;
 function check(name, fn) {
-  recordCase(name);
   try {
     fn();
+    recordCase(name, true);
     console.log(`  ok: ${name}`);
   } catch (err) {
+    recordCase(name, false);
     failures++;
     console.log(`  FAIL: ${name}\n    ${err.message}`);
   }
@@ -289,7 +290,7 @@ check("a window with no usable sum/count reports no average", () => {
 });
 
 console.log(failures === 0 ? "\nmonitoring-chart-config: ALL PASS" : `\nmonitoring-chart-config: ${failures} FAILURES`);
-nameSuite("monitoring-chart-config");
+nameSuite("monitoring-chart-config", import.meta.url);
 writeReport();
 
 process.exit(failures === 0 ? 0 : 1);
