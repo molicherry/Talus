@@ -305,6 +305,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-01-05",
+          "run_id": "static-adapters",
+          "implementation": {
+            "path": "tests/static/adapters-removed.sh",
+            "symbol": "failing scan tool is a tool error"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -1724,6 +1734,26 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-01k",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestRereviewQuotaGaugeCountsTheProbePhase"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01l",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestRereviewQuotaGaugeBalancesFailedAcquire"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -1901,6 +1931,26 @@
           "implementation": {
             "path": "backend/internal/repository/metric_review_regression_test.go",
             "symbol": "TestRereviewInternalRollupBucketOverlapSplitsRate"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03l",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewGapIsNotReportedAsFullCoverage"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03m",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewRateOnlyBucketStillCounts"
           },
           "automation_status": "implemented",
           "required": true
