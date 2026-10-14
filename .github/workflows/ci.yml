@@ -225,13 +225,51 @@ jobs:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
         run: bash tests/run.sh --gate M3
 
+      # The records live in tests/.artifacts, a hidden directory: without
+      # include-hidden-files the upload silently finds nothing, and a "successful"
+      # upload step then proves nothing (P2-05). Missing records are an error here,
+      # not a warning, because the evidence is the point of running the gates.
+      - name: Verify the phase-gate execution records exist
+        if: ${{ !cancelled() }}
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const dir = "tests/.artifacts";
+            const files = fs.readdirSync(dir).filter((f) => /^exec-.*\.json$/.test(f));
+            if (files.length === 0) {
+              console.error("no phase-gate execution records were written");
+              process.exit(1);
+            }
+            const expected = process.env.EXPECTED_COMMIT;
+            const gates = new Set();
+            for (const file of files) {
+              const doc = JSON.parse(fs.readFileSync(`${dir}/${file}`, "utf8"));
+              // A record from another commit would not describe this run.
+              if (expected && doc.commit !== expected) {
+                console.error(`${file} records commit ${doc.commit}, expected ${expected}`);
+                process.exit(1);
+              }
+              if (doc.selector && doc.selector.gate) gates.add(doc.selector.gate);
+            }
+            console.log(`records: ${files.length}, gates: ${[...gates].sort().join(",")}, commit: ${expected.slice(0, 7)}`);
+            const missing = ["M1", "M2", "M3"].filter((gate) => !gates.has(gate));
+            if (missing.length > 0) {
+              console.error(`missing execution records for: ${missing.join(",")}`);
+              process.exit(1);
+            }
+          '
+
       - name: Upload phase execution evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: phase-gate-evidence
           path: tests/.artifacts/exec-*.json
-          if-no-files-found: warn
+          include-hidden-files: true
+          if-no-files-found: error
 
   docker:
     name: Docker

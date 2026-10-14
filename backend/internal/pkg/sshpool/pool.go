@@ -32,9 +32,11 @@ type Pool struct {
 	maxIdle     time.Duration
 	maxConns    int
 	slotTimeout time.Duration
-	done        chan struct{}
-	closed      bool
-	closeOnce   sync.Once
+	// quotaObserver reports slot reservations and releases (nil disables it).
+	quotaObserver QuotaObserver
+	done          chan struct{}
+	closed        bool
+	closeOnce     sync.Once
 	// probe reports whether a pooled connection is still usable. It is
 	// overridable in tests; the default performs a keepalive round-trip.
 	probe func(*ssh.Client) bool
@@ -129,6 +131,13 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 		waitErr = ErrClosed
 	}
 
+	consumer := quotaConsumer(ctx)
+	if waitErr == nil {
+		// The slot is ours: report it now, before the cached-connection probe and
+		// any dial, so a borrow that is stuck there is still counted (P2-02).
+		p.notifyQuota(consumer, 1)
+	}
+
 	p.mu.Lock()
 	entry.waiters--
 	if waitErr != nil {
@@ -141,7 +150,7 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 			waitErr = ErrClosed
 		}
 		p.mu.Unlock()
-		<-entry.sem
+		p.releaseSlot(entry.sem, consumer)
 		return nil, waitErr
 	}
 	client := entry.client
@@ -164,17 +173,17 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 		case <-ctx.Done():
 			_ = client.Close()
 			<-probed // the probe cannot retain ownership after returning
-			<-entry.sem
+			p.releaseSlot(entry.sem, consumer)
 			return nil, ctx.Err()
 		case <-p.done:
 			_ = client.Close()
 			<-probed
-			<-entry.sem
+			p.releaseSlot(entry.sem, consumer)
 			return nil, ErrClosed
 		}
 		if err := ctx.Err(); err != nil {
 			_ = client.Close()
-			<-entry.sem
+			p.releaseSlot(entry.sem, consumer)
 			return nil, err
 		}
 		if !healthy {
@@ -190,7 +199,7 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 		if client != nil {
 			_ = client.Close()
 		}
-		<-entry.sem
+		p.releaseSlot(entry.sem, consumer)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -224,7 +233,9 @@ func (p *Pool) Release(serverID uint, client *ssh.Client) {
 	}
 	p.mu.Unlock()
 
-	<-entry.sem // release concurrency slot
+	// The legacy client-based API carries no consumer label; the SSH layers borrow
+	// through handles, which do.
+	p.releaseSlot(entry.sem, "") // release concurrency slot
 }
 
 // Discard closes client without returning it to the pool and releases the
@@ -240,7 +251,7 @@ func (p *Pool) Discard(serverID uint, client *ssh.Client) {
 		client.Close()
 	}
 	if ok {
-		<-entry.sem // release concurrency slot
+		p.releaseSlot(entry.sem, "") // release concurrency slot
 	}
 }
 
@@ -357,6 +368,9 @@ type Handle struct {
 	generation uint64
 	sem        chan struct{}
 	once       sync.Once
+	// consumer is the label the borrow declared, carried so the release reports
+	// against the same layer that reserved the slot.
+	consumer string
 }
 
 // ServerID reports the server this handle belongs to.
@@ -364,6 +378,56 @@ func (h *Handle) ServerID() uint { return h.serverID }
 
 // Generation reports the target generation this handle was pinned to.
 func (h *Handle) Generation() uint64 { return h.generation }
+
+// QuotaObserver is notified whenever a borrow takes or returns a concurrency slot.
+// The report happens where the slot really changes hands - the reservation and the
+// release, including every failure path in between - so a borrow that is still
+// probing or dialing is already counted (P2-02).
+type QuotaObserver func(consumer string, delta int)
+
+// SetQuotaObserver installs the concurrency observer. It is called once per
+// reservation and once per release, always with the consumer label the borrow
+// declared (empty when it declared none).
+func (p *Pool) SetQuotaObserver(observer QuotaObserver) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.quotaObserver = observer
+}
+
+// SetQuotaObserver is nil-safe: a nil observer (or a nil pool) reports nothing.
+func (p *Pool) notifyQuota(consumer string, delta int) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	observer := p.quotaObserver
+	p.mu.Unlock()
+	if observer != nil {
+		observer(consumer, delta)
+	}
+}
+
+// releaseSlot returns a reserved concurrency slot and reports the release. Every
+// path that gives a slot back goes through here, so the accounting cannot drift.
+func (p *Pool) releaseSlot(sem chan struct{}, consumer string) {
+	<-sem
+	p.notifyQuota(consumer, -1)
+}
+
+// quotaConsumerKey carries the frozen consumer label of a borrow into the pool,
+// which owns the slot and therefore owns the measurement.
+type quotaConsumerKey struct{}
+
+// WithQuotaConsumer labels the next borrows made with this context.
+func WithQuotaConsumer(ctx context.Context, consumer string) context.Context {
+	return context.WithValue(ctx, quotaConsumerKey{}, consumer)
+}
+
+// quotaConsumer reports the label a borrow declared, if any.
+func quotaConsumer(ctx context.Context) string {
+	consumer, _ := ctx.Value(quotaConsumerKey{}).(string)
+	return consumer
+}
 
 // AcquireContext acquires a concurrency slot for the server and returns a
 // Handle. Client is non-nil when a healthy cached client exists; otherwise the
@@ -384,14 +448,15 @@ func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint st
 			_ = client.Close()
 		}
 		if entry != nil {
-			<-entry.sem
+			p.releaseSlot(entry.sem, quotaConsumer(ctx))
 		}
 		return nil, ErrStaleGeneration
 	}
 	gen := entry.generation
 	sem := entry.sem
 	p.mu.Unlock()
-	return &Handle{Client: client, serverID: serverID, generation: gen, sem: sem}, nil
+	return &Handle{Client: client, serverID: serverID, generation: gen, sem: sem,
+		consumer: quotaConsumer(ctx)}, nil
 }
 
 // ReleaseHandle returns the client to the pool while its generation still
@@ -415,7 +480,7 @@ func (p *Pool) ReleaseHandle(h *Handle) {
 				p.mu.Unlock()
 			}
 		}
-		<-h.sem
+		p.releaseSlot(h.sem, h.consumer)
 	})
 }
 
@@ -429,6 +494,6 @@ func (p *Pool) DiscardHandle(h *Handle) {
 		if h.Client != nil {
 			_ = h.Client.Close()
 		}
-		<-h.sem
+		p.releaseSlot(h.sem, h.consumer)
 	})
 }

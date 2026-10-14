@@ -8,7 +8,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -20,6 +19,7 @@ import (
 
 func main() {
 	runProtocol := flag.Bool("run-protocol", false, "execute the amd64 artifact and validate its JSON protocol fields")
+	checkJSON := flag.String("check-json", "", "validate one captured agent report against the manifest")
 	versionInBinary := flag.Bool("version-in-binary", false, "require every artifact to embed its manifest build version (for architectures that cannot be executed)")
 	flag.Parse()
 	if flag.NArg() != 1 {
@@ -38,6 +38,20 @@ func main() {
 	fmt.Printf("artifacts OK: build_version=%s protocol_version=%d agents=%d\n",
 		manifest.BuildVersion, manifest.ProtocolVersion, len(manifest.Agents))
 
+	if *checkJSON != "" {
+		// The same strict rule the in-image acceptance applies, so a captured report
+		// (for example from the target-architecture binary) can be validated after
+		// the fact - and rejected for a fractional, exponent or string protocol.
+		raw, err := os.ReadFile(*checkJSON)
+		if err != nil {
+			fail(err)
+		}
+		if err := agentproto.VerifyReport(raw, manifest); err != nil {
+			fail(err)
+		}
+		fmt.Printf("report OK: %s matches manifest build_version=%s protocol_version=%d\n",
+			*checkJSON, manifest.BuildVersion, manifest.ProtocolVersion)
+	}
 	if *runProtocol {
 		if err := verifyProtocol(dir, manifest); err != nil {
 			fail(err)
@@ -69,20 +83,11 @@ func verifyProtocol(dir string, manifest *agentproto.Manifest) error {
 	if err != nil {
 		return fmt.Errorf("run %s: %w", artifact.File, err)
 	}
-	var decoded struct {
-		AgentVersion    string `json:"agent_version"`
-		ProtocolVersion int    `json:"protocol_version"`
-	}
-	if err := json.Unmarshal(out, &decoded); err != nil {
-		return fmt.Errorf("decode %s output: %w", artifact.File, err)
-	}
-	if decoded.AgentVersion != artifact.BuildVersion || decoded.AgentVersion == "" {
-		return fmt.Errorf("agent_version %q does not match manifest %q", decoded.AgentVersion, artifact.BuildVersion)
-	}
-	if decoded.ProtocolVersion != manifest.ProtocolVersion {
-		return fmt.Errorf("protocol_version %d does not match manifest %d", decoded.ProtocolVersion, manifest.ProtocolVersion)
-	}
-	return nil
+	// One rule for both paths: the executed artifact is checked with the same strict
+	// comparison the final image uses, against the artifact's own build version.
+	expected := *manifest
+	expected.BuildVersion = artifact.BuildVersion
+	return agentproto.VerifyReport(out, &expected)
 }
 
 func fail(err error) {

@@ -46,9 +46,9 @@ type SSHService struct {
 	// the remote never blocks on output backpressure (REQUIREMENTS §7.1.2).
 	outputLimit       int64
 	outputStreamLimit int64
-	// leaseObserver receives the in-use gauge deltas of the SSH pool slots this
-	// service hands out. It is called by the resource owner, once per real acquire
-	// and once per settlement (N03).
+	// leaseObserver receives the in-use gauge deltas of the SSH pool slots. The pool
+	// owns the counting; this field only remembers the caller's observer so the
+	// translation into the frozen consumer label lives in one place (P2-02).
 	leaseObserver func(consumer LeaseConsumer, delta float64)
 }
 
@@ -106,18 +106,22 @@ const (
 	LeaseConsumerAgent    LeaseConsumer = "agent"
 )
 
-// SetLeaseObserver wires the shared concurrency gauge. The SSH layer owns the
-// measurement because it owns the resource: the count follows the pool slot, not
-// the caller's foreground result (N03).
+// SetLeaseObserver wires the shared concurrency gauge. The measurement belongs to
+// whoever owns the slot - the pool - so this installs a pool observer that carries
+// the caller's consumer label: the count follows the real reservation, covering the
+// cached-connection probe and the dial, and falls only when the slot is returned
+// (N03, P2-02). An unlabelled borrow measures nothing rather than the wrong layer.
 func (s *SSHService) SetLeaseObserver(observer func(consumer LeaseConsumer, delta float64)) {
 	s.leaseObserver = observer
-}
-
-func (s *SSHService) observeLease(consumer LeaseConsumer, delta float64) {
-	if s.leaseObserver == nil || consumer == "" {
+	if s.pool == nil {
 		return
 	}
-	s.leaseObserver(consumer, delta)
+	s.pool.SetQuotaObserver(func(consumer string, delta int) {
+		if observer == nil || consumer == "" {
+			return
+		}
+		observer(LeaseConsumer(consumer), float64(delta))
+	})
 }
 
 // Exec runs a command on a target server via SSH.
@@ -169,7 +173,10 @@ func (s *SSHService) AcquireLease(ctx context.Context, serverID uint, consumer .
 	}
 	usage.FromContext(ctx).SetResource("server", &srv.ID, srv.Name, &srv.ID)
 
-	h, err := s.pool.AcquireContext(ctx, serverID, serverFingerprint(srv))
+	// The pool records the slot against the borrowing layer, so the gauge exists for
+	// the whole reservation - probe and dial included (P2-02).
+	h, err := s.pool.AcquireContext(sshpool.WithQuotaConsumer(ctx, string(leaseConsumer(consumer))),
+		serverID, serverFingerprint(srv))
 	if err != nil {
 		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
 	}
@@ -180,7 +187,7 @@ func (s *SSHService) AcquireLease(ctx context.Context, serverID uint, consumer .
 		return nil, err
 	}
 	if h.Client != nil {
-		return newSSHLease(s, h, leaseConsumer(consumer)), nil
+		return newSSHLease(s, h), nil
 	}
 
 	// Pool returned nil — dial a new connection.
@@ -250,7 +257,7 @@ func (s *SSHService) AcquireLease(ctx context.Context, serverID uint, consumer .
 	}
 
 	h.Client = client
-	return newSSHLease(s, h, leaseConsumer(consumer)), nil
+	return newSSHLease(s, h), nil
 }
 
 // leaseConsumer returns the first declared consumer, or "" when the borrower did

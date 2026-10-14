@@ -2,7 +2,7 @@
 
 > Generated from `tests/coverage.json` by `tests/render-coverage.mjs`. Do not edit by hand.
 
-Cases: 33 · Runs: 14 · Schema: 1
+Cases: 33 · Runs: 13 · Schema: 1
 
 ## Runs
 
@@ -21,13 +21,12 @@ Cases: 33 · Runs: 14 · Schema: 1
 | deploy-verify | integration | manual | `.` | _(manual)_ | — |
 | a11y-review | ui | manual | `.` | _(manual)_ | — |
 | image-agents | integration | shell | `.` | `bash tests/verify-agent-images.sh` | 1800s |
-| static-agent-probe | fast | shell | `.` | `bash tests/static/agent-probe-check.sh` | 120s |
 
 ## Gates (pre-registered required runs)
 
-- **M1**: `coverage-tools`, `static-adapters`, `go-unit`, `frontend-node`, `migrate-hardening`, `deploy-verify`, `static-agent-probe`
-- **M2**: `coverage-tools`, `static-adapters`, `go-unit`, `frontend-node`, `migrate-hardening`, `integration-agent`, `go-race`, `terminal-e2e`, `static-agent-probe`
-- **M3**: `static-agent-probe`, `go-unit`, `frontend-node`, `migrate-hardening`, `integration-agent`, `ui-charts`, `image-agents`
+- **M1**: `coverage-tools`, `static-adapters`, `go-unit`, `frontend-node`, `migrate-hardening`, `deploy-verify`
+- **M2**: `coverage-tools`, `static-adapters`, `go-unit`, `frontend-node`, `migrate-hardening`, `integration-agent`, `go-race`, `terminal-e2e`
+- **M3**: `go-unit`, `frontend-node`, `migrate-hardening`, `integration-agent`, `ui-charts`, `image-agents`
 - **M4**: `go-unit`, `frontend-node`, `ui-charts`, `e2e-core`
 
 ## Phases (requirement scope per gate)
@@ -182,8 +181,8 @@ Cases: 33 · Runs: 14 · Schema: 1
 | TC-08-05 | REQ-08 | implemented | go-unit | `backend/cmd/agent/main_test.go:TestAgentOutputCarriesVersionContract` | yes | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. |
 | TC-08-05 | REQ-08 | implemented | image-agents | `tests/verify-agent-images.sh:verify-artifacts` | yes | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. |
 | TC-08-05 | REQ-08 | implemented | image-agents | `tests/verify-agent-images.sh:protocol-smoke` | yes | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. |
-| TC-08-05 | REQ-08 | implemented | static-agent-probe | `tests/static/agent-probe-check.sh:exact protocol and version acceptance` | yes | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. |
 | TC-08-05 | REQ-08 | implemented | image-agents | `tests/verify-agent-images.sh:final-stage acceptance in the built image` | yes | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. |
+| TC-08-05 | REQ-08 | implemented | go-unit | `backend/cmd/agentverify/main_test.go:TestVerifyReportRejectsNonIntegerProtocols` | yes | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. | Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile. |
 | TC-08-06 | REQ-08 | implemented | migrate-hardening | `backend/internal/repository/metric_rollup_test.go:TestPrepareMetricsRollupSchemaIsIdempotent` | yes | Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs. | Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs. |
 | TC-08-06 | REQ-08 | implemented | migrate-hardening | `backend/internal/repository/metric_rollup_test.go:TestRefreshRollupsMaterializesBucketsAndCheckpoint` | yes | Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs. | Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs. |
 | TC-08-06 | REQ-08 | implemented | migrate-hardening | `backend/internal/repository/metric_rollup_test.go:TestPruneMetricsPausesUntilAggregationIsComplete` | yes | Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs. | Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs. |

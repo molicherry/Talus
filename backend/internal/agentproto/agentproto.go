@@ -52,6 +52,43 @@ type Manifest struct {
 	Agents          []Artifact `json:"agents"`
 }
 
+// ProtocolReport is an agent's `--format json` document. The fields are typed, so
+// the decode itself is the protocol check: a fractional or exponent notation
+// protocol (1.5, 1e9), a string protocol ("1") or a non-string version cannot be
+// read into these fields and are rejected instead of being matched as a prefix
+// (P2-04). The report carries many more fields; unknown ones are ignored.
+type ProtocolReport struct {
+	AgentVersion    string `json:"agent_version"`
+	ProtocolVersion int    `json:"protocol_version"`
+}
+
+// VerifyReport decodes one agent report and checks it against the manifest the
+// image ships: the protocol must equal the manifest's integer protocol and the
+// version must be non-empty and equal the manifest's build version. One rule is
+// used by the in-image acceptance and by the post-build re-read, so the two cannot
+// drift apart.
+func VerifyReport(data []byte, manifest *Manifest) error {
+	if manifest == nil {
+		return errors.New("no manifest to verify against")
+	}
+	var report ProtocolReport
+	if err := json.Unmarshal(data, &report); err != nil {
+		return fmt.Errorf("decode agent report: %w", err)
+	}
+	if report.ProtocolVersion != manifest.ProtocolVersion {
+		return fmt.Errorf("protocol_version %d does not match manifest %d",
+			report.ProtocolVersion, manifest.ProtocolVersion)
+	}
+	if report.AgentVersion == "" {
+		return errors.New("agent_version is empty")
+	}
+	if report.AgentVersion != manifest.BuildVersion {
+		return fmt.Errorf("agent_version %q does not match manifest %q",
+			report.AgentVersion, manifest.BuildVersion)
+	}
+	return nil
+}
+
 // LoadManifest reads and validates the manifest structure in dir.
 func LoadManifest(dir string) (*Manifest, error) {
 	path := filepath.Join(dir, ManifestName)

@@ -28,19 +28,12 @@ type sshLease struct {
 	cancel    context.CancelCauseFunc
 	cleanup   *sshCleanupClock
 	done      chan struct{}
-	// consumer is the frozen gauge label of the borrowing layer ("" when the
-	// borrower did not declare one), and observed guards the single release of
-	// this slot's gauge entry.
-	consumer LeaseConsumer
-	observed bool
 }
 
-func newSSHLease(s *SSHService, h *sshpool.Handle, consumer LeaseConsumer) *sshLease {
-	lease := &sshLease{svc: s, h: h, consumer: consumer, done: make(chan struct{})}
-	// The slot is already held: the gauge starts here, not when the caller's
-	// foreground operation returns (N03).
-	s.observeLease(consumer, 1)
-	return lease
+func newSSHLease(s *SSHService, h *sshpool.Handle) *sshLease {
+	// The concurrency gauge is owned by the pool, which reserved the slot before the
+	// probe: this lease must not count it a second time (P2-02).
+	return &sshLease{svc: s, h: h, done: make(chan struct{})}
 }
 
 func (l *sshLease) client() *ssh.Client { return l.h.Client }
@@ -88,17 +81,10 @@ func (l *sshLease) settleLocked() {
 		} else {
 			l.svc.pool.ReleaseHandle(l.h)
 		}
-		// The slot is back in the pool now, so the gauge follows the real
-		// settlement rather than the caller's earlier foreground return (N03).
-		l.mu.Lock()
-		if !l.observed {
-			l.observed = true
-			consumer := l.consumer
-			l.mu.Unlock()
-			l.svc.observeLease(consumer, -1)
-		} else {
-			l.mu.Unlock()
-		}
+		// The pool releases the slot exactly here, and reports it: the gauge follows
+		// the real settlement rather than the caller's earlier foreground return
+		// (N03), and a probe or dial that never produced a lease is still covered
+		// because the reservation already counted (P2-02).
 		close(l.done)
 	}()
 }

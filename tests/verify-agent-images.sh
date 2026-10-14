@@ -13,6 +13,9 @@ VERSION="${AGENT_IMAGE_VERSION:-ci-agent-check}"
 GOPROXY_ARG="${AGENT_IMAGE_GOPROXY:-https://goproxy.cn,direct}"
 NPM_REGISTRY_ARG="${AGENT_IMAGE_NPM_REGISTRY:-https://registry.npmmirror.com}"
 BUILD_TIMEOUT="${AGENT_IMAGE_BUILD_TIMEOUT:-900}"
+LAB="$(mktemp -d)"
+trap 'rm -rf "$LAB"' EXIT
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 fail() {
 	echo "✗ $*" >&2
@@ -43,17 +46,26 @@ for dockerfile in Dockerfile backend/Dockerfile; do
 			-f "$dockerfile" -t "talus-image-check:${arch}-$(basename "$(dirname "$dockerfile")")" . >/dev/null; then
 			fail "$label: the final image did not accept its own agent"
 		fi
+		# The build already accepted the image with the strict rule. This re-read
+		# proves the *published* image answers correctly, and it applies the same
+		# strict decoder instead of the prefix matching it replaced (P2-04): the
+		# report is decoded by type, so a fractional or exponent protocol cannot pass.
 		image="talus-image-check:${arch}-$(basename "$(dirname "$dockerfile")")"
-		got="$(docker run --rm --platform "linux/$arch" --entrypoint /bin/sh "$image" \
-			-c '/usr/local/bin/vpsmanager-agent-linux-'"$arch"' --format json' 2>/dev/null | head -3 | tr -d ' \n')"
-		case "$got" in
-			*"\"protocol_version\":1"*) ;;
-			*) fail "$label: the shipped agent does not report protocol 1 ($got)" ;;
-		esac
-		case "$got" in
-			*"\"agent_version\":\"$VERSION\""*) ;;
-			*) fail "$label: the shipped agent does not report the built version $VERSION ($got)" ;;
-		esac
+		if ! docker run --rm --platform "linux/$arch" --entrypoint /bin/sh "$image" \
+			-c '/usr/local/bin/vpsmanager-agent-linux-'"$arch"' --format json' \
+			> "$LAB/probe.json" 2>/dev/null; then
+			fail "$label: the shipped agent did not run"
+		fi
+		if ! docker run --rm --platform "linux/$arch" --entrypoint /bin/sh "$image" \
+			-c 'cat /usr/local/bin/agents-manifest.json' > "$LAB/agents-manifest.json" 2>/dev/null; then
+			fail "$label: the image does not ship the agent manifest"
+		fi
+		if ! ( cd "$ROOT/backend" && go build -o "$LAB/agentverify" ./cmd/agentverify ); then
+			fail "$label: could not build the report verifier"
+		fi
+		if ! "$LAB/agentverify" -check-json "$LAB/probe.json" "$LAB" >/dev/null; then
+			fail "$label: the shipped agent report failed the strict protocol check"
+		fi
 	done
 done
 

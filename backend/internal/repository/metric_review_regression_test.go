@@ -1014,3 +1014,116 @@ func TestRereviewHypertableComponentsComeFromDetailedSize(t *testing.T) {
 			"the parent shell %d", want.Table, parentTable)
 	}
 }
+
+// TestRereviewGapIsNotReportedAsFullCoverage is the P2-01 reproduction: two samples
+// 2h30s apart (beyond the delta threshold) leave 119 one-minute buckets with no
+// gauge and no valid counter rate. Those buckets must not appear, and coverage must
+// reflect the two buckets that really hold an observation - not 121/121.
+func TestRereviewGapIsNotReportedAsFullCoverage(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	const server = uint(140)
+	base := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	for _, sample := range []struct {
+		at    time.Duration
+		value int64
+	}{
+		{0, 0},
+		{2*time.Hour + 30*time.Second, 9000},
+	} {
+		row := model.Metric{
+			ServerID: server, Time: base.Add(sample.at),
+			CPUPercent: f64(10), NetBytesRecv: i64(sample.value),
+		}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := repo.QueryWithBudget(ctx, QueryRequest{
+		ServerID: server, From: base, To: base.Add(121 * time.Minute), Requested: "1m",
+	})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	// Only the two buckets that contain a sample are observations; the 119 buckets
+	// inside the outage carry nothing and must not be listed as data.
+	if len(result.Points) != 2 {
+		t.Fatalf("points = %d, want 2 (%+v)", len(result.Points), bucketTimes(result.Points))
+	}
+	want := 2.0 / 121.0
+	if result.Coverage > want+0.001 || result.Coverage < want-0.001 {
+		t.Fatalf("coverage = %v, want %v (2 observed buckets out of 121)", result.Coverage, want)
+	}
+	if result.Coverage >= 0.5 {
+		t.Fatalf("coverage = %v: a 2h30m outage must not look covered", result.Coverage)
+	}
+	// Every returned bucket must be a real observation, and none may claim coverage
+	// without any data.
+	for _, point := range result.Points {
+		if point.SampledAt == nil {
+			t.Fatalf("returned bucket %v has no sampled_at", point.BucketString())
+		}
+		if point.NetRecvCov != nil && *point.NetRecvCov == 0 && point.CPUPercent == nil {
+			t.Fatalf("bucket %v claims zero-coverage rate data", point.BucketString())
+		}
+	}
+}
+
+// TestRereviewRateOnlyBucketStillCounts pins the other half of P2-01: a bucket that
+// holds a genuine rate pair but no sample inside it is real data and must count.
+func TestRereviewRateOnlyBucketStillCounts(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	ctx := context.Background()
+	const server = uint(141)
+	base := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	// One long valid pair spanning two 1m buckets, with no sample inside the second.
+	for _, sample := range []struct {
+		at    time.Duration
+		value int64
+	}{
+		{10 * time.Second, 0},
+		{70 * time.Second, 600},
+	} {
+		row := model.Metric{ServerID: server, Time: base.Add(sample.at), NetBytesRecv: i64(sample.value)}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := repo.QueryWithBudget(ctx, QueryRequest{
+		ServerID: server, From: base, To: base.Add(2 * time.Minute), Requested: "1m",
+	})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(result.Points) != 2 {
+		t.Fatalf("points = %d, want both buckets (one has gauges, one only rate)", len(result.Points))
+	}
+	seenPositiveCoverage := false
+	for _, point := range result.Points {
+		if point.NetRecvCov != nil && *point.NetRecvCov > 0 {
+			seenPositiveCoverage = true
+		}
+	}
+	if !seenPositiveCoverage {
+		t.Fatalf("no bucket reports counter coverage: %+v", result.Points)
+	}
+	if result.Coverage < 0.9 {
+		t.Fatalf("coverage = %v, want both buckets counted as observations", result.Coverage)
+	}
+}
+
+// bucketTimes lists the bucket starts of a point set, for failure messages.
+func bucketTimes(points []AggregatedMetric) []string {
+	out := make([]string, 0, len(points))
+	for _, point := range points {
+		out = append(out, point.Time.UTC().Format("15:04:05"))
+	}
+	return out
+}
+
+// BucketString renders a bucket start for assertions.
+func (m AggregatedMetric) BucketString() string {
+	return m.Time.UTC().Format(time.RFC3339)
+}

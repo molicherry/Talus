@@ -297,9 +297,33 @@ func summarize(points []AggregatedMetric, from, to time.Time, interval string, d
 	}
 	withData := 0
 	for _, point := range points {
-		if point.CPUPercent != nil || point.NetRecvCov != nil {
+		if bucketHasObservation(point) {
 			withData++
 		}
 	}
 	return float64(withData) / float64(buckets), downsampled
+}
+
+// bucketHasObservation reports whether a bucket holds a real observation rather
+// than merely an entry in the response. A bucket is an observation when a sample
+// was collected inside it (sampled_at, the declared observation instant) or when at
+// least one counter actually accumulated coverage. An explicitly empty bucket - an
+// unmaterialized rollup bucket, or a bucket an outage left without data - has
+// neither, so a long gap can no longer be reported as fully covered (P2-01).
+func bucketHasObservation(point AggregatedMetric) bool {
+	if point.SampledAt != nil {
+		return true
+	}
+	if point.CPUPercent != nil || point.MemoryPercent != nil || point.DiskPercent != nil ||
+		point.SwapPercent != nil || point.Load1 != nil || point.Load5 != nil || point.Load15 != nil {
+		return true
+	}
+	for _, coverage := range []*float64{
+		point.NetRecvCov, point.NetSentCov, point.DiskReadCov, point.DiskWrtCov,
+	} {
+		if coverage != nil && *coverage > 0 {
+			return true
+		}
+	}
+	return false
 }

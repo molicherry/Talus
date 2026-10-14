@@ -12,6 +12,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w
 # Both agent architectures plus their manifest ship in every Hub image: the
 # Hub refuses to start unless the manifest matches the artifacts (§8.2).
 RUN sh build/agents.sh "${VERSION}" /agents
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -o /agentverify ./cmd/agentverify
 # Verify the artifacts this image will ship (TC-08-05): manifest, both agent
 # architectures, ELF class/machine, size, hash and the stamped build version. The
 # architecture this builder can execute additionally runs the protocol smoke test,
@@ -40,23 +41,16 @@ COPY --from=ui-builder /app/dist/ /static/
 # emulation in CI). Verification inside the build means a broken image cannot be
 # published (TC-08-05).
 ARG TARGETARCH
-# The probe is verified by value, not by substring: "protocol_version": 10 must not
-# satisfy a check for 1, and the reported agent version must equal the version this
-# image was built with (N07). Only POSIX tools are used - the image has no jq and no
-# python - so the check is an exact-field awk pass.
+# The probe is verified with the same strict JSON rule the post-build check uses:
+# the report is decoded by type, so a fractional or exponent protocol (1.5, 1e9), a
+# string protocol or a non-matching version is rejected instead of being matched as
+# a prefix (N07, P2-04). The verifier is copied in for the check and removed again,
+# so the published image carries no extra tool.
 ARG VERSION=dev
+COPY --from=go-builder /agentverify /usr/local/bin/agentverify
 RUN /usr/local/bin/vpsmanager-agent-linux-${TARGETARCH} --format json > /tmp/agent-probe.json \
- && awk -v want="${VERSION}" '\
-      function take(pattern,   s) { if (match($0, pattern)) { return substr($0, RSTART, RLENGTH) } return "" }\
-      {\
-        v = take("\"protocol_version\"[ \t]*:[ \t]*[0-9]+");\
-        if (v != "") { sub(/.*:[ \t]*/, "", v); if (v == "1") proto = 1 }\
-        ver = take("\"agent_version\"[ \t]*:[ \t]*\"[^\"]*\"");\
-        if (ver != "") { sub(/.*:[ \t]*"/, "", ver); sub(/"$/, "", ver); if (ver == want) version = 1 }\
-      }\
-      END { exit (proto && version) ? 0 : 1 }\
-    ' /tmp/agent-probe.json \
- && rm -f /tmp/agent-probe.json
+ && /usr/local/bin/agentverify -check-json /tmp/agent-probe.json /usr/local/bin \
+ && rm -f /tmp/agent-probe.json /usr/local/bin/agentverify
 EXPOSE 8080
 ENV STATIC_DIR=/static
 USER talus

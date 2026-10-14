@@ -223,21 +223,6 @@
           "docker"
         ]
       }
-    },
-    {
-      "run_id": "static-agent-probe",
-      "suite": "fast",
-      "runner": "shell",
-      "cwd": ".",
-      "command": [
-        "bash",
-        "tests/static/agent-probe-check.sh"
-      ],
-      "timeout_seconds": 120,
-      "environment": {
-        "profile": "local",
-        "requires": []
-      }
     }
   ],
   "gates": {
@@ -247,8 +232,7 @@
       "go-unit",
       "frontend-node",
       "migrate-hardening",
-      "deploy-verify",
-      "static-agent-probe"
+      "deploy-verify"
     ],
     "M2": [
       "coverage-tools",
@@ -258,11 +242,9 @@
       "migrate-hardening",
       "integration-agent",
       "go-race",
-      "terminal-e2e",
-      "static-agent-probe"
+      "terminal-e2e"
     ],
     "M3": [
-      "static-agent-probe",
       "go-unit",
       "frontend-node",
       "migrate-hardening",
@@ -2034,21 +2016,21 @@
           "required": true
         },
         {
-          "implementation_id": "impl-08-05e",
-          "run_id": "static-agent-probe",
-          "implementation": {
-            "path": "tests/static/agent-probe-check.sh",
-            "symbol": "exact protocol and version acceptance"
-          },
-          "automation_status": "implemented",
-          "required": true
-        },
-        {
           "implementation_id": "impl-08-05f",
           "run_id": "image-agents",
           "implementation": {
             "path": "tests/verify-agent-images.sh",
             "symbol": "final-stage acceptance in the built image"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-05g",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/agentverify/main_test.go",
+            "symbol": "TestVerifyReportRejectsNonIntegerProtocols"
           },
           "automation_status": "implemented",
           "required": true

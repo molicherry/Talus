@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
+	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/server"
 	"golang.org/x/crypto/ssh"
 )
@@ -594,5 +595,237 @@ func TestRereviewSettlementDeadlineIsSharedWithTheOwner(t *testing.T) {
 	case <-lease.Done():
 	case <-time.After(2 * time.Second):
 		t.Fatal("settlement did not finish after unblocking")
+	}
+}
+
+// blockedWriteConn stops writing after the SSH handshake has completed, so a
+// cached connection's keepalive probe can be held inside the write.
+type blockedWriteConn struct {
+	net.Conn
+	mu      sync.Mutex
+	blocked bool
+	entered chan struct{}
+	resume  chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+	closeOn sync.Once
+}
+
+func (c *blockedWriteConn) blockWrites() {
+	c.mu.Lock()
+	c.blocked = true
+	c.mu.Unlock()
+}
+
+// Write holds writes until the test lets them through. A close releases them too,
+// like a real socket: a cancelled borrow closes the transport and must be able to
+// join the probe instead of waiting for it forever.
+func (c *blockedWriteConn) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	blocked := c.blocked
+	c.mu.Unlock()
+	if blocked {
+		c.once.Do(func() { close(c.entered) })
+		select {
+		case <-c.resume:
+		case <-c.closed:
+			return 0, net.ErrClosed
+		}
+	}
+	return c.Conn.Write(p)
+}
+
+func (c *blockedWriteConn) Close() error {
+	err := c.Conn.Close()
+	c.closeOn.Do(func() { close(c.closed) })
+	return err
+}
+
+// TestRereviewQuotaGaugeCountsTheProbePhase is the P2-02 reproduction: the slot is
+// reserved before the cached-connection probe, so a borrow that is stuck in that
+// probe already holds quota and must already be counted. The gauge used to start
+// only once a lease existed, so the whole probe/dial window was invisible.
+func TestRereviewQuotaGaugeCountsTheProbePhase(t *testing.T) {
+	address, hostKey := startExecSSHServer(t, func(_ string, _ ssh.Channel, _ <-chan struct{}) {})
+	raw, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := &blockedWriteConn{Conn: raw, entered: make(chan struct{}),
+		resume: make(chan struct{}), closed: make(chan struct{})}
+	var resumeOnce sync.Once
+	unblock := func() { resumeOnce.Do(func() { close(conn.resume) }) }
+	defer unblock()
+	transport, channels, requests, err := ssh.NewClientConn(conn, address,
+		&ssh.ClientConfig{User: "test", HostKeyCallback: ssh.FixedHostKey(hostKey), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := sshpool.NewPool(time.Minute, 1, time.Second)
+	t.Cleanup(pool.Close)
+	t.Cleanup(unblock)
+	// The pool holds one cached connection; writing on it is blocked from now on, so
+	// the next borrow's keepalive probe cannot complete.
+	seedPool(t, pool, 1, ssh.NewClient(transport, channels, requests))
+	conn.blockWrites()
+
+	var mu sync.Mutex
+	inUse := 0
+	svc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
+	svc.SetLeaseObserver(func(_ LeaseConsumer, delta float64) {
+		mu.Lock()
+		inUse += int(delta)
+		mu.Unlock()
+	})
+	gauge := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return inUse
+	}
+
+	type acquired struct {
+		lease *sshLease
+		err   error
+	}
+	result := make(chan acquired, 1)
+	go func() {
+		lease, err := svc.AcquireLease(context.Background(), 1, LeaseConsumerAgent)
+		result <- acquired{lease, err}
+	}()
+
+	// The probe is stuck in the write: the slot is already reserved, so the gauge
+	// has to be 1 while the borrow is still in flight.
+	select {
+	case <-conn.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the keepalive probe never reached the blocked write")
+	}
+	if got := gauge(); got != 1 {
+		t.Fatalf("gauge during the cached-connection probe = %d, want 1: the slot is "+
+			"already reserved, so the probe/dial phase must be counted (P2-02)", got)
+	}
+
+	// The reservation is real: a second borrow cannot get the only slot.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	other, err := pool.AcquireContext(ctx, 1, testFP(1))
+	cancel()
+	if other != nil {
+		pool.DiscardHandle(other)
+	}
+	if err == nil {
+		t.Fatal("a second borrow obtained the slot while the first was still probing")
+	}
+
+	unblock()
+	var lease *sshLease
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("acquire after unblocking: %v", got.err)
+		}
+		lease = got.lease
+	case <-time.After(5 * time.Second):
+		t.Fatal("acquire did not finish after the write was unblocked")
+	}
+	if got := gauge(); got != 1 {
+		t.Fatalf("gauge after the lease was handed out = %d, want 1", got)
+	}
+	lease.Release()
+	select {
+	case <-lease.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("the lease never settled")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for gauge() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := gauge(); got != 0 {
+		t.Fatalf("gauge after settlement = %d, want 0", got)
+	}
+}
+
+// TestRereviewQuotaGaugeBalancesFailedAcquire pins the other half of P2-02: every
+// failure exit between reserving a slot and handing out a lease must give the slot
+// back exactly once, so a failed borrow cannot leak the gauge or the quota.
+func TestRereviewQuotaGaugeBalancesFailedAcquire(t *testing.T) {
+	address, hostKey := startExecSSHServer(t, func(_ string, _ ssh.Channel, _ <-chan struct{}) {})
+	raw, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := &blockedWriteConn{Conn: raw, entered: make(chan struct{}),
+		resume: make(chan struct{}), closed: make(chan struct{})}
+	var resumeOnce sync.Once
+	unblock := func() { resumeOnce.Do(func() { close(conn.resume) }) }
+	defer unblock()
+	transport, channels, requests, err := ssh.NewClientConn(conn, address,
+		&ssh.ClientConfig{User: "test", HostKeyCallback: ssh.FixedHostKey(hostKey), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := sshpool.NewPool(time.Minute, 1, time.Second)
+	t.Cleanup(pool.Close)
+	t.Cleanup(unblock)
+	seedPool(t, pool, 1, ssh.NewClient(transport, channels, requests))
+	conn.blockWrites()
+
+	var mu sync.Mutex
+	inUse := 0
+	pool.SetQuotaObserver(func(_ string, delta int) {
+		mu.Lock()
+		inUse += delta
+		mu.Unlock()
+	})
+	gauge := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return inUse
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		handle, err := pool.AcquireContext(sshpool.WithQuotaConsumer(ctx, string(LeaseConsumerExec)), 1, testFP(1))
+		if handle != nil {
+			pool.DiscardHandle(handle)
+		}
+		done <- err
+	}()
+	select {
+	case <-conn.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the probe never reached the blocked write")
+	}
+	if got := gauge(); got != 1 {
+		t.Fatalf("gauge while the slot is reserved = %d, want 1", got)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a cancelled acquire reported success")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("a cancelled acquire did not return")
+	}
+	if got := gauge(); got != 0 {
+		t.Fatalf("gauge after the failed acquire = %d, want 0: the failure exit must "+
+			"release the reservation exactly once", got)
+	}
+	// The quota is really free again, so the next borrow (once the write flows)
+	// succeeds rather than reporting a leaked slot.
+	unblock()
+	next, err := pool.AcquireContext(context.Background(), 1, testFP(1))
+	if err != nil {
+		t.Fatalf("the slot was not returned by the failed acquire: %v", err)
+	}
+	if got := gauge(); got != 1 {
+		t.Fatalf("gauge after the following acquire = %d, want 1", got)
+	}
+	pool.ReleaseHandle(next)
+	if got := gauge(); got != 0 {
+		t.Fatalf("gauge after release = %d, want 0", got)
 	}
 }

@@ -45,7 +45,14 @@ EXCLUDES=(--glob '!.git/**' --glob '!**/node_modules/**' --glob '!frontend/dist/
 # The shipped tree is scanned with git (ls-files/grep), so ripgrep is not
 # required at all there — it is only the fallback for a non-git fixture tree, and
 # even that degrades to grep so the check runs on a stock runner.
+# have_rg reports whether the ripgrep branch is used. TALUS_SCAN_TOOL pins the tool
+# ("ripgrep" or "grep") so the self-test can exercise the ripgrep-free branch on a
+# machine where ripgrep is installed; unset means "use ripgrep when available".
 have_rg() {
+  case "${TALUS_SCAN_TOOL:-}" in
+    grep) return 1 ;;
+    ripgrep|rg) return 0 ;;
+  esac
   command -v rg >/dev/null 2>&1
 }
 
@@ -57,20 +64,42 @@ list_files_fallback() { # <root> <out>
       -name '.compiled-*' -prune -o -type f -print ) | sed 's|^\./||' > "$2"
 }
 
-grep_content_fallback() { # <root> <out> <err>
+grep_content_fallback() { # <root> <out> <err>  -> 0 matches, 1 no matches, 2 tool error
   # The exclusion scope must match the ripgrep path exactly: only frontend/dist is
   # generated output. Excluding every directory named dist would quietly widen the
   # exemption and let residue under e.g. notes/dist pass (N06).
+  #
+  # The scan tool's exit status is captured immediately: the filtering steps below
+  # used to become the function's status, so a grep error (2) reached the caller as
+  # "clean" and an unfinished scan was reported as passing (P2-03).
+  local rc=0 frc=0
   ( cd "$1" && grep -rInE --exclude-dir=.git --exclude-dir=node_modules \
       --exclude='.compiled-*' \
       -e "${PATTERNS[0]}" -e "${PATTERNS[1]}" -e "${PATTERNS[2]}" -e "${PATTERNS[3]}" -e "${PATTERNS[4]}" . ) \
-    > "$2" 2> "$3"
-  # grep cannot express a path-qualified directory exclusion, so drop the one
-  # generated tree from the match list instead.
-  if [ -s "$2" ]; then
-    grep -v '^\./frontend/dist/' "$2" > "$2.filtered" 2>/dev/null || : > "$2.filtered"
-    mv "$2.filtered" "$2"
+    > "$2" 2> "$3" || rc=$?
+  if [ "$rc" -ge 2 ]; then
+    return 2
   fi
+  if [ "$rc" -eq 1 ]; then
+    : > "$2"
+    return 1
+  fi
+  # grep cannot express a path-qualified directory exclusion, so drop the one
+  # generated tree from the match list instead - and treat a filtering failure as a
+  # tool error rather than as "no matches" (never mask it with an empty file).
+  grep -v '^\./frontend/dist/' "$2" > "$2.filtered" 2>> "$3" || frc=$?
+  if [ "$frc" -ge 2 ]; then
+    rm -f "$2.filtered"
+    return 2
+  fi
+  if ! mv "$2.filtered" "$2"; then
+    rm -f "$2.filtered"
+    return 2
+  fi
+  if [ "$frc" -eq 1 ]; then
+    return 1
+  fi
+  return 0
 }
 
 # Prints "<kind>\t<path>"; exits 2 if the manifest is unreadable or malformed.
@@ -252,8 +281,57 @@ expect_pass() { # <name> <root>
   return 1
 }
 
+expect_tool_error() { # <name> <root> <tool> [path-prefix]  -> requires exit 2, never 1
+  local name="$1" root="$2" tool="${3:-grep}" prefix="${4:-}" got=0
+  if [ -n "$prefix" ]; then
+    PATH="$prefix:$PATH" TALUS_SCAN_TOOL="$tool" TALUS_SCAN_ROOT="$root" \
+      TALUS_COVERAGE_JSON="$root/tests/coverage.json" \
+      bash "$HERE/adapters-removed.sh" --repo >/dev/null 2>&1 || got=$?
+  else
+    TALUS_SCAN_TOOL="$tool" TALUS_SCAN_ROOT="$root" TALUS_COVERAGE_JSON="$root/tests/coverage.json" \
+      bash "$HERE/adapters-removed.sh" --repo >/dev/null 2>&1 || got=$?
+  fi
+  if [ "$got" -ne 2 ]; then
+    echo "✗ $name must fail closed with exit 2, got $got" >&2
+    return 1
+  fi
+  echo "✓ $name reported as a tool error"
+  return 0
+}
+
+make_failing_grep() { # <dir>
+  local dir="$1" real
+  real="$(command -v grep)"
+  mkdir -p "$dir"
+  cat > "$dir/grep" <<SHIM
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [ "\$arg" = "-rInE" ]; then
+    echo "simulated scan failure" >&2
+    exit 2
+  fi
+done
+exec "$real" "\$@"
+SHIM
+  chmod +x "$dir/grep"
+}
+
 self_test() {
   local rc=0
+
+  # The ripgrep-free branch is real code with its own failure modes: exercise it
+  # explicitly, with a working and with a failing scan tool (P2-03, N06).
+  make_clean_fixture "$TMP/fallback"; mkdir -p "$TMP/fallback/notes/dist"
+  printf 'ai-integration\n' > "$TMP/fallback/notes/dist/residue.md"
+  if TALUS_SCAN_TOOL=grep TALUS_SCAN_ROOT="$TMP/fallback" \
+      TALUS_COVERAGE_JSON="$TMP/fallback/tests/coverage.json" \
+      bash "$HERE/adapters-removed.sh" --repo >/dev/null 2>&1; then
+    echo "✗ ripgrep-free scan allowed residue under notes/dist" >&2
+    rc=1
+  else
+    echo "✓ ripgrep-free scan rejects notes/dist residue"
+  fi
+
   make_clean_fixture "$TMP/clean" && expect_pass "clean tree" "$TMP/clean" || rc=1
 
   make_clean_fixture "$TMP/case-residue"; printf 'see ai-integration/install.sh\n' > "$TMP/case-residue/notes.md"
@@ -314,6 +392,21 @@ self_test() {
   TALUS_SCAN_ROOT="$TMP/clean" TALUS_COVERAGE_JSON="$TMP/does-not-exist.json" \
     bash "$HERE/adapters-removed.sh" --repo >/dev/null 2>&1
   if [ $? -eq 2 ]; then echo "✓ unreadable manifest is a tool error"; else echo "✗ unreadable manifest must exit 2" >&2; rc=1; fi
+
+  # A tool failure must not be mistaken for a clean scan. The fixture is not a git
+  # repository, so the scan really goes through grep and the shim is reached.
+  make_clean_fixture "$TMP/tool-error"
+  make_failing_grep "$TMP/fakebin"
+  expect_tool_error "failing grep" "$TMP/tool-error" grep "$TMP/fakebin" || rc=1
+  # Positive control with the same tool selection and the real grep.
+  if TALUS_SCAN_TOOL=grep TALUS_SCAN_ROOT="$TMP/clean" \
+      TALUS_COVERAGE_JSON="$TMP/clean/tests/coverage.json" \
+      bash "$HERE/adapters-removed.sh" --repo >/dev/null 2>&1; then
+    echo "✓ ripgrep-free scan allows a clean tree"
+  else
+    echo "✗ ripgrep-free scan rejected a clean tree" >&2
+    rc=1
+  fi
 
   return $rc
 }

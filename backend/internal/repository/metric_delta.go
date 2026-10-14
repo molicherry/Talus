@@ -148,6 +148,12 @@ func deltaSamplesCTE(bucketIntervalExpr, windowStartParam, windowEndParam string
 		  AND r.time > %[3]s::timestamptz
 		  AND LEAST(r.time, b.bucket_start + %[6]s, %[5]s::timestamptz)
 		      > GREATEST(r.prev_time, b.bucket_start, %[3]s::timestamptz)
+		  -- ...and it must carry at least one usable counter. A pair across a gap
+		  -- beyond the threshold has no valid rate in any series, so it is not rate
+		  -- data and must not create buckets: doing so reported a long outage as
+		  -- fully covered (P2-01). Any series counts, not just CPU or one counter.
+		  AND (r.net_bytes_recv_rate IS NOT NULL OR r.net_bytes_sent_rate IS NOT NULL
+		       OR r.disk_read_bytes_rate IS NOT NULL OR r.disk_write_bytes_rate IS NOT NULL)
 	)`, rates, weighted, windowStartParam, scale, windowEndParam, step)
 }
 
