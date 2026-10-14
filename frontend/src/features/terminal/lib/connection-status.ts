@@ -37,10 +37,13 @@ export function describeConnection(input: {
   retryCount: number;
   maxRetries: number;
   error: string | null;
-  /** True while a retry timer is pending. */
+  /**
+   * True while a retry timer is pending. Kept for callers that distinguish the wait
+   * from the attempt; the rendered state is the same either way (F08).
+   */
   retryPending?: boolean;
 }): StatusView {
-  const { status, retryCount, maxRetries, error, retryPending = false } = input;
+  const { status, retryCount, maxRetries, error } = input;
   switch (status) {
     case "connecting":
       return {
@@ -71,8 +74,9 @@ export function describeConnection(input: {
         vars: { attempt: retryCount, max: maxRetries },
         canConnect: false,
         isRetry: true,
-        // A pending retry can still be cancelled before it fires.
-        canCancelRetry: retryPending,
+        // A retry can be cancelled while it waits for its timer and while its socket
+        // is in flight (F08).
+        canCancelRetry: true,
         canDisconnect: false,
         isNewSession: true,
       };
@@ -100,4 +104,28 @@ export function describeConnection(input: {
         isNewSession: false,
       };
   }
+}
+
+/** How a closed socket should be handled. */
+export type CloseVerdict = "retry" | "ended" | "revoked";
+
+/**
+ * Classifies a socket close so the client never reopens a session the server already
+ * refused (F07). A normal end (1000) and an application-level refusal (4001/4003 or a
+ * reason the backend sent before closing) are final; only an abnormal drop is retried.
+ * `refusal` carries the reason the last frame reported, if any.
+ */
+export function classifyClose(
+  event: { code?: number; reason?: string },
+  refusal = false,
+): CloseVerdict {
+  if (refusal) return "revoked";
+  const reason = (event.reason ?? "").toLowerCase();
+  if (reason.includes("revoke")) return "revoked";
+  if (reason.includes("auth") || reason.includes("denied")) return "revoked";
+  const code = event.code ?? 0;
+  // 1000 = deliberate close, 1008 = policy violation (refused admission),
+  // 4001 = application-level revocation.
+  if (code === 1000 || code === 1008 || code === 4001) return "ended";
+  return "retry";
 }

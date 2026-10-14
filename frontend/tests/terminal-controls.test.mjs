@@ -4,6 +4,7 @@
 // surface, reconnect semantics) that do not need a browser.
 
 import assert from "node:assert/strict";
+import { nameSuite, recordCase, writeReport } from "./lib/case-report.mjs";
 
 import {
   TERMINAL_FONT_SIZE_DEFAULT,
@@ -20,6 +21,7 @@ import { describeConnection } from "./.compiled-connection-status.mjs";
 
 let failures = 0;
 function check(name, fn) {
+  recordCase(name);
   try {
     fn();
     console.log(`  ok: ${name}`);
@@ -176,8 +178,20 @@ check("a reconnect announces a new session, never a restored one", () => {
   assert.equal(retrying.isNewSession, true);
   assert.equal(retrying.labelKey, "terminal.reconnecting");
   assert.deepEqual(retrying.vars, { attempt: 2, max: 5 });
-  // A pending retry can be cancelled; a connecting socket can also be abandoned.
+  // A retry is cancellable while its timer waits and while its socket is in flight.
   assert.equal(retrying.canCancelRetry, true);
+  const inFlight = describeConnection({
+    status: "reconnecting",
+    retryCount: 3,
+    maxRetries: 5,
+    error: null,
+    retryPending: false,
+  });
+  // The count and the new-session hint survive the transition from waiting to
+  // connecting (F08).
+  assert.deepEqual(inFlight.vars, { attempt: 3, max: 5 });
+  assert.equal(inFlight.isNewSession, true);
+  assert.equal(inFlight.canCancelRetry, true);
   // Manual reconnect after a failure is still a new session.
   const manual = describeConnection({ status: "disconnected", retryCount: 5, maxRetries: 5, error: "max" });
   assert.equal(manual.isNewSession, true);
@@ -188,4 +202,8 @@ console.log(
     ? "\nterminal-controls: ALL PASS"
     : `\nterminal-controls: ${failures} FAILURES`,
 );
+nameSuite("terminal-controls");
+writeReport();
+
 process.exit(failures === 0 ? 0 : 1);
+

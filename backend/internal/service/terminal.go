@@ -15,6 +15,27 @@ import (
 )
 
 // TerminalService manages interactive SSH PTY sessions over WebSocket.
+// terminalWriter serializes every frame written to one terminal socket. The output
+// pump and the session-teardown notice both write, and gorilla's websocket panics on
+// concurrent writes, so each socket has exactly one writer.
+type terminalWriter struct {
+	mu   sync.Mutex
+	conn *websocket.Conn
+}
+
+func (w *terminalWriter) writeJSON(message wsMessage) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.conn.WriteJSON(message)
+}
+
+func (w *terminalWriter) closeWith(code int, reason string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_ = w.conn.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(code, reason), time.Now().Add(time.Second))
+}
+
 type TerminalService struct {
 	sshSvc   *SSHService
 	registry *gate.Registry
@@ -31,11 +52,19 @@ func (s *TerminalService) SetUserGate(g mw.UserGate) { s.userGate = g }
 
 var errTerminalRevoked = errors.New("terminal session revoked")
 
+// terminalRevokedCloseCode is the application close code for a session ended by
+// revocation. 4000-4999 is the private range, so it can never be confused with a
+// protocol-level close.
+const terminalRevokedCloseCode = 4001
+
 type wsMessage struct {
 	Type string `json:"type"`
 	Data string `json:"data,omitempty"`
-	Cols int    `json:"cols,omitempty"`
-	Rows int    `json:"rows,omitempty"`
+	// Reason classifies a terminal end so the client stops retrying a revoked
+	// session instead of reconnecting with credentials the server just revoked (F07).
+	Reason string `json:"reason,omitempty"`
+	Cols   int    `json:"cols,omitempty"`
+	Rows   int    `json:"rows,omitempty"`
 }
 
 // TerminalResult describes the first original event that ended a session.
@@ -137,6 +166,10 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 	}
 
 	ended, workflowDone, teardownDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	// One writer per socket: the pumps and the teardown notice all write to it, and
+	// gorilla panics on concurrent writes.
+	writer := &terminalWriter{conn: wsConn}
+
 	var endOnce sync.Once
 	var event TerminalResult
 	end := func(outcome, reason, closeReason string) {
@@ -188,6 +221,17 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 		// under the supervisor, never on the path that starts its grace timer.
 		closeDone := make(chan struct{})
 		go func() {
+			// Say why the session is ending *before* the socket goes away: an abnormal
+			// close (1006, no reason) is indistinguishable from a dropped network, and
+			// retrying a revoked session can only fail (F07).
+			switch event.Reason {
+			case "session_revoked":
+				_ = writer.writeJSON(wsMessage{Type: "error", Reason: "revoked", Data: "session revoked"})
+				writer.closeWith(terminalRevokedCloseCode, "revoked")
+			case "client_cancelled":
+				_ = writer.writeJSON(wsMessage{Type: "disconnected"})
+				writer.closeWith(websocket.CloseNormalClosure, "")
+			}
 			_ = wsConn.Close()
 			resourceMu.Lock()
 			current := session
@@ -317,7 +361,7 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 		startFailed("terminal_ssh_failed")
 		return result, sessionCtx.Err()
 	}
-	if err := wsConn.WriteJSON(wsMessage{Type: "connected"}); err != nil {
+	if err := writer.writeJSON(wsMessage{Type: "connected"}); err != nil {
 		startFailed("terminal_output_failed")
 		return result, err
 	}
@@ -335,7 +379,7 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 		for {
 			n, readErr := stdout.Read(buf)
 			if n > 0 {
-				if err := wsConn.WriteJSON(wsMessage{Type: "output", Data: string(buf[:n])}); err != nil {
+				if err := writer.writeJSON(wsMessage{Type: "output", Data: string(buf[:n])}); err != nil {
 					end("failed", "terminal_output_failed", "transport_error")
 					return
 				}

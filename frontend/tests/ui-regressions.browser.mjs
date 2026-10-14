@@ -1,6 +1,8 @@
 // Optional browser regression suite. Build first; all API traffic is mocked.
 // See tests/README.md for browser setup and environment overrides.
 import assert from "node:assert/strict";
+
+import { nameSuite, recordCase, writeReport } from "./lib/case-report.mjs";
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -10,6 +12,7 @@ import { fileURLToPath } from "node:url";
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright");
 const root = fileURLToPath(new URL("../", import.meta.url));
 const port = Number(process.env.UI_TEST_PORT ?? 4177);
+
 const base = `http://127.0.0.1:${port}`;
 const server = spawn(
   process.execPath,
@@ -258,6 +261,7 @@ let passed = 0;
 let failed = 0;
 async function test(name, run, mobile = false) {
   if (process.env.UI_TEST_FILTER && !new RegExp(process.env.UI_TEST_FILTER).test(name)) return;
+  recordCase(name);
   browser = await chromium.launch({
     headless: true,
     executablePath: process.env.CHROMIUM_EXECUTABLE || undefined,
@@ -982,5 +986,7 @@ try {
   if (browser) await browser.close();
   server.kill();
 }
+nameSuite("ui-regressions");
+writeReport({ passed, failed });
 console.log(`UI regressions: ${passed} passed, ${failed} failed`);
 if (failed) process.exitCode = 1;

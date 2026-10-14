@@ -182,7 +182,12 @@ body {
   outline-offset: 2px;
 }
 
-@media (max-width: 639px) {
+/*
+ * Touch targets are a capability, not a viewport width: a phone in landscape is still
+ * a phone, and a narrow desktop window is not a touch device (REQ-09 移动端, F10).
+ * min-height/min-width beat the density classes a wide layout would otherwise apply.
+ */
+@media (pointer: coarse) {
   .touch-target {
     min-width: 2.75rem;
     min-height: 2.75rem;

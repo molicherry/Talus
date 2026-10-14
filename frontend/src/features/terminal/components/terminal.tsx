@@ -30,9 +30,13 @@ interface TerminalViewProps {
   port: number;
 }
 
-/** A toolbar control that meets the 44px touch target on narrow layouts. */
+/**
+ * A toolbar control. `touch-target` guarantees the 44px touch target on coarse
+ * pointers (a phone in landscape included) while the density classes keep the
+ * desktop toolbar compact.
+ */
 const controlClass =
-  "inline-flex h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-medium " +
+  "touch-target inline-flex h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-medium " +
   "transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:h-8 sm:min-w-8 sm:px-2 " +
   "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700";
 
@@ -42,6 +46,7 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
     status,
     error,
     retryCount,
+    generation,
     retryPending,
     fontSize,
     connect,
@@ -57,12 +62,18 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
     readClipboard,
     pasteText,
     focusTerminal,
+    setShortcuts,
   } = useTerminal(serverId);
   const { t } = useTranslation();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
-  const [pendingPaste, setPendingPaste] = useState<{ text: string; lines: number; preview: string } | null>(null);
+  const [pendingPaste, setPendingPaste] = useState<{
+    text: string;
+    lines: number;
+    preview: string;
+    generation: number;
+  } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -107,8 +118,10 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
 
   const view = describeConnection({ status, retryCount, maxRetries: MAX_RETRIES, error, retryPending });
 
-  const runCopy = useCallback(() => {
-    const outcome = copySelection();
+  const runCopy = useCallback(async () => {
+    // The write is awaited: reporting "copied" before the browser accepted it would
+    // claim success for a denied permission (F04).
+    const outcome = await copySelection();
     if (outcome.kind === "copy-empty") setNotice(t("terminal.copyEmpty"));
     else if (outcome.kind === "copy-denied") setNotice(t("terminal.clipboardDenied"));
     else setNotice(t("terminal.copied", { bytes: outcome.bytes }));
@@ -125,11 +138,21 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
         return;
       case "paste-multiline":
         // Multi-line payloads are confirmed first: pasting a script by accident must
-        // not be one keystroke away.
-        setPendingPaste({ text: outcome.text, lines: outcome.lines, preview: outcome.preview });
+        // not be one keystroke away. The generation travels with the payload so a
+        // reconnect in between invalidates the confirmation (F03).
+        setPendingPaste({
+          text: outcome.text,
+          lines: outcome.lines,
+          preview: outcome.preview,
+          generation: outcome.generation,
+        });
+        return;
+      case "paste-stale":
+        // The read finished after the session was replaced; nothing is typed.
+        setNotice(t("terminal.pasteStale"));
         return;
       default:
-        pasteText(outcome.text);
+        pasteText(outcome.text, outcome.generation);
         setNotice(t("terminal.pasted", { lines: outcome.lines }));
         focusTerminal();
     }
@@ -137,7 +160,8 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
 
   const confirmPaste = useCallback(() => {
     if (pendingPaste) {
-      pasteText(pendingPaste.text);
+      // pasteText drops the payload when the session it was read in is gone (F03).
+      pasteText(pendingPaste.text, pendingPaste.generation);
       setNotice(t("terminal.pasted", { lines: pendingPaste.lines }));
       focusTerminal();
     }
@@ -158,40 +182,28 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
     clearSearch();
   }, [clearSearch]);
 
-  // Keyboard surface: the toolbar advertises these combinations, so the terminal
-  // implements them for the whole page - a user pressing Ctrl+F before clicking the
-  // terminal expects search to open. Ctrl+C is deliberately left to the remote shell.
-  const onKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      if (event.key === "Escape" && searchOpen) {
-        event.preventDefault();
-        closeSearch();
-        return;
-      }
-      const key = event.key.toLowerCase();
-      if (!event.shiftKey) {
-        // Ctrl+F opens the local search. Ctrl+C and Ctrl+L are left alone: the shell
-        // needs them (interrupt, clear-screen).
-        if ((event.ctrlKey || event.metaKey) && key === "f") {
-          event.preventDefault();
-          setSearchOpen(true);
-        }
-        return;
-      }
-      if (!(event.ctrlKey || event.metaKey)) return;
-      if (key === "c") {
-        event.preventDefault();
-        runCopy();
-      } else if (key === "v") {
-        event.preventDefault();
-        void runPaste();
-      } else if (key === "l") {
-        event.preventDefault();
-        clearTerminal();
-      }
-    },
-    [searchOpen, closeSearch, clearTerminal, runCopy, runPaste],
-  );
+  // Pending clipboard work belongs to one session: when the connection generation
+  // changes (disconnect, reconnect, another host) it is dropped instead of being
+  // offered for a shell it was not read from (F03).
+  useEffect(() => {
+    setPendingPaste(null);
+    setNotice(null);
+  }, [generation]);
+
+  // The terminal-local shortcuts. They are installed on the xterm instance, which
+  // handles them *before* encoding the key, so Ctrl+F opens the local search instead
+  // of sending 0x06, and paste combinations run the confirmation flow (F01/F02).
+  // Nothing is bound at document level: a local editable control - the search box -
+  // keeps its native editing behaviour, so pasting there can never reach the shell.
+  useEffect(() => {
+    setShortcuts({
+      onSearch: () => setSearchOpen(true),
+      onCopy: () => void runCopy(),
+      onPaste: () => void runPaste(),
+      onClear: clearTerminal,
+    });
+    return () => setShortcuts(null);
+  }, [setShortcuts, runCopy, runPaste, clearTerminal]);
 
   const statusIcon = () => {
     if (view.tone === "ok") return <Wifi className="h-3.5 w-3.5 text-green-400" aria-hidden />;
@@ -199,11 +211,6 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
     if (view.tone === "busy") return <Loader2 className="h-3.5 w-3.5 animate-spin text-yellow-500" aria-hidden />;
     return <WifiOff className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" aria-hidden />;
   };
-
-  useEffect(() => {
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onKeyDown]);
 
   return (
     <div ref={containerRef} className="flex h-full flex-col overflow-hidden bg-background">
@@ -303,7 +310,7 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
             <button type="button" className={controlClass} aria-label={t("terminal.fontReset")} onClick={resetFontSize}>
               {t("terminal.fontResetShort")}
             </button>
-            <button type="button" className={controlClass} aria-label={t("terminal.copy")} onClick={runCopy}>
+            <button type="button" className={controlClass} aria-label={t("terminal.copy")} onClick={() => void runCopy()}>
               <ClipboardCopy className="h-3.5 w-3.5" aria-hidden />
             </button>
             <button type="button" className={controlClass} aria-label={t("terminal.paste")} onClick={() => void runPaste()}>
@@ -336,7 +343,7 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
               <MenuButton label={t("terminal.fontDecrease")} onClick={decreaseFontSize}>A−</MenuButton>
               <MenuButton label={t("terminal.fontIncrease")} onClick={increaseFontSize}>A+</MenuButton>
               <MenuButton label={t("terminal.fontReset")} onClick={resetFontSize}>{t("terminal.fontResetShort")}</MenuButton>
-              <MenuButton label={t("terminal.copy")} onClick={runCopy}>
+              <MenuButton label={t("terminal.copy")} onClick={() => void runCopy()}>
                 <ClipboardCopy className="h-4 w-4" aria-hidden />
               </MenuButton>
               <MenuButton label={t("terminal.paste")} onClick={() => void runPaste()}>
@@ -355,7 +362,7 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
 
       {/* Search bar: local scrollback only, Esc closes it. */}
       {searchOpen && (
-        <div className="flex flex-shrink-0 items-center gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
           <input
             autoFocus
             type="text"
@@ -367,9 +374,16 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
               if (event.key === "Enter") {
                 event.preventDefault();
                 runSearch(event.shiftKey ? "previous" : "next");
+              } else if (event.key === "Escape") {
+                // Escape belongs to the focused control: with the search box open it
+                // closes the search, and it never reaches the shell (F01).
+                event.preventDefault();
+                closeSearch();
               }
             }}
-            className="h-11 flex-1 rounded-lg border border-border bg-background px-3 text-sm text-foreground sm:h-8"
+            // min-w-0 lets the field shrink on a 375px screen instead of pushing the
+            // search actions out of the viewport (F09).
+            className="touch-target h-11 min-w-0 flex-1 basis-40 rounded-lg border border-border bg-background px-3 text-sm text-foreground sm:h-8"
           />
           <button type="button" className={controlClass} aria-label={t("terminal.searchPrevious")} onClick={() => runSearch("previous")}>
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
@@ -446,7 +460,7 @@ function MenuButton({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="inline-flex h-11 items-center gap-2 rounded-lg px-3 text-left text-xs font-medium text-foreground hover:bg-muted"
+      className="touch-target inline-flex h-11 items-center gap-2 rounded-lg px-3 text-left text-xs font-medium text-foreground hover:bg-muted"
     >
       {children}
       <span>{label}</span>

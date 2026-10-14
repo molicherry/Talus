@@ -490,7 +490,8 @@
     "shortcutPaste": "paste",
     "shortcutSearch": "search",
     "shortcutCloseSearch": "close search",
-    "shortcutClear": "clear the screen"
+    "shortcutClear": "clear the screen",
+    "pasteStale": "The session was replaced, so the paste was not sent"
   },
   "theme": {
     "light": "Light",

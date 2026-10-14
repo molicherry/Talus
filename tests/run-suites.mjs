@@ -9,7 +9,7 @@
 //   node tests/run-suites.mjs --list
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loadAndValidate } from "./render-coverage.mjs";
@@ -153,6 +153,63 @@ function manualEvidence(runID) {
   return { ok: true };
 }
 
+// Runners whose suites write ui-<suite>.json reports of the cases they executed.
+const UI_RUNNERS = new Set(["playwright", "node-test"]);
+
+// Environment variables that narrow a suite to a subset of its cases.
+const SELECTION_ENV = ["UI_TEST_FILTER"];
+
+// inspectUIResults verifies that every required implementation registered for this
+// run actually executed: the report is written per case, so a filtered or skipped
+// suite is visible even though its exit code was zero (F12).
+function inspectUIResults(doc, run, scope, root, stdout = "") {
+  const implementations = doc.cases
+    .flatMap((testCase) => testCase.implementations)
+    .filter((implementation) => implementation.run_id === run.run_id)
+    .filter((implementation) => implementation.required !== false)
+    .filter((implementation) => !scope || scope === (implementation.phase ?? scope));
+  const dir = join(root, "tests", ".artifacts");
+  const reports = existsSync(dir)
+    ? readdirSync(dir)
+        .filter((name) => name.startsWith("ui-") && name.endsWith(".json"))
+        .map((name) => {
+          try {
+            return JSON.parse(readFileSync(join(dir, name), "utf8"));
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+    : [];
+  const executed = new Set(reports.flatMap((report) => report.cases ?? []));
+  // Runners that use their own harness (node --test, the frontend suite) report
+  // executed cases on stdout: TAP lines, node's spec reporter lines, and the
+  // frontend suite's own "ok: <name>" lines.
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    const tap = /^(?:ok|not ok) \d+ - (.+)$/.exec(trimmed);
+    if (tap) executed.add(tap[1].trim());
+    const spec = /^[✔✖]\s+(.+?)(?:\s+\(\d+(?:\.\d+)?ms\))?$/.exec(trimmed);
+    if (spec) executed.add(spec[1].trim());
+    const plain = /^ok: (.+)$/.exec(trimmed);
+    if (plain) executed.add(plain[1].trim());
+  }
+  // A registration may name the suite itself (a file-level verification such as
+  // "auth-session"): that is satisfied by the suite having run at all.
+  const suites = new Set(reports.map((report) => report.suite));
+  for (const report of reports) {
+    if ((report.executed ?? 0) > 0) suites.add(report.suite);
+  }
+  return implementations.map((implementation) => ({
+    implementation_id: implementation.implementation_id,
+    test: implementation.implementation?.symbol ?? "(unnamed)",
+    status:
+      executed.has(implementation.implementation?.symbol) || suites.has(implementation.implementation?.symbol)
+        ? "pass"
+        : "not_run",
+  }));
+}
+
 function checkEnvironment(run) {
   for (const req of run.environment.requires) {
     if (req === "playwright") {
@@ -233,19 +290,33 @@ function main() {
       break;
     }
     const cwd = run.cwd === "." ? ROOT : join(ROOT, run.cwd);
+    // A gate must exercise its whole required set: a selection filter would let
+    // required cases be skipped while the run still exits zero (F12).
+    if (gate && SELECTION_ENV.some((name) => (process.env[name] ?? "") !== "")) {
+      const set = SELECTION_ENV.filter((name) => (process.env[name] ?? "") !== "").join(", ");
+      const reason = `a phase gate cannot run with a selection filter set (${set})`;
+      console.error(`✗ ${run.run_id}: ${reason}`);
+      results.push({ run_id: run.run_id, status: "blocked", reason });
+      failed = true;
+      break;
+    }
     console.log(`▶ ${run.run_id}: ${run.command.join(" ")}  (cwd=${run.cwd})`);
     const isGo = run.runner === "go-test";
+    // UI/node runs are captured too: their executed case names are the evidence the
+    // required-implementation check needs (F12). The output is echoed below.
+    const captureOutput = isGo || UI_RUNNERS.has(run.runner);
     const args = run.command.slice(1);
     if (isGo) args.splice(1, 0, "-json", "-count=1");
     const res = spawnSync(run.command[0], args, {
       cwd,
-      stdio: isGo ? ["inherit", "pipe", "inherit"] : "inherit",
+      stdio: captureOutput ? ["inherit", "pipe", "inherit"] : "inherit",
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
-      env: process.env,
+      env: { ...process.env, TALUS_UI_REPORT_DIR: join(ROOT, "tests", ".artifacts") },
       timeout: run.timeout_seconds * 1000,
     });
     // Keep native test output readable while preserving structured evidence.
+    if (!isGo && captureOutput && res.stdout) process.stdout.write(res.stdout);
     if (isGo && res.stdout) {
       for (const line of res.stdout.split("\n")) {
         if (!line) continue;
@@ -270,6 +341,26 @@ function main() {
       break;
     }
     let checks;
+    if (UI_RUNNERS.has(run.runner)) {
+      try {
+        checks = inspectUIResults(doc, run, scope, ROOT, res.stdout ?? "");
+        const missing = checks.filter((check) => check.status !== "pass");
+        if (missing.length) {
+          const reason = `required cases did not run: ${missing
+            .map((check) => `${check.implementation_id}:${check.test} (${check.status})`)
+            .join(", ")}`;
+          console.error(`✗ ${run.run_id}: ${reason}`);
+          results.push({ run_id: run.run_id, status: "failed", reason, checks });
+          failed = true;
+          break;
+        }
+      } catch (error) {
+        console.error(`✗ ${run.run_id}: ${error.message}`);
+        results.push({ run_id: run.run_id, status: "error", reason: error.message });
+        failed = true;
+        break;
+      }
+    }
     if (isGo) {
       try {
         checks = inspectGoResults(res.stdout, requiredGoTests(doc, run, scope, ROOT));

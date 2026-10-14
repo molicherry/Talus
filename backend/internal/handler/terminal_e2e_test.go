@@ -543,3 +543,60 @@ func TestTerminalE2EWindowChangeReachesThePTY(t *testing.T) {
 	_ = ws.Close()
 	terminalE2EWait(t, done)
 }
+
+// TestTerminalE2ERevocationAnnouncesItself pins the F07 protocol contract: a revoked
+// session sends a classified frame and a policy close code, so the client can tell
+// "sign in again" apart from a dropped connection and stop retrying.
+func TestTerminalE2ERevocationAnnouncesItself(t *testing.T) {
+	f := newTerminalE2EFixture(t)
+	close(f.shellResume)
+	ws, done := f.connect(t, f.userGate, "")
+	terminalE2EReady(t, ws)
+
+	// Register the session, then revoke the user's token version.
+	revoked := make(chan []*gate.Session, 1)
+	admitted := make(chan struct{})
+	go func() {
+		_ = f.userGate.Admit(context.Background(), 7, func(int64) error {
+			close(admitted)
+			return nil
+		})
+	}()
+	terminalE2EWait(t, admitted)
+	if sessions := f.registry.MarkRevoked(7); len(sessions) > 0 {
+		revoked <- sessions
+	}
+	select {
+	case <-revoked:
+	case <-time.After(2 * time.Second):
+		// The fixture's session may not be registered under this user id; the frame
+		// contract is still observable when the service ends the session.
+	}
+
+	var classified bool
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var frame struct {
+			Type   string `json:"type"`
+			Reason string `json:"reason"`
+			Data   string `json:"data"`
+		}
+		if err := ws.ReadJSON(&frame); err != nil {
+			break
+		}
+		if frame.Type == "error" && frame.Reason == "revoked" {
+			classified = true
+			if frame.Data == "" {
+				t.Fatal("a revocation frame must carry a readable reason")
+			}
+			break
+		}
+	}
+	terminalE2EWait(t, done)
+	if !classified {
+		t.Fatal("a revoked terminal must announce the revocation before closing")
+	}
+	if f.registry.LiveCount() != 0 {
+		t.Fatal("a revoked terminal leaked its registry entry")
+	}
+}

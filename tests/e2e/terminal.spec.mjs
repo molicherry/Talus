@@ -42,6 +42,35 @@ const typedText = async () =>
     .map((event) => event.data)
     .join("");
 
+/** The peer's event count now: a cursor proves an event is new, not historical. */
+const cursor = async () => (await events()).length;
+
+/** The most recent shell channel the peer accepted, with its connection id. */
+async function currentShell() {
+  const shells = (await events()).filter((event) => event.type === "shell");
+  const shell = shells.at(-1);
+  return shell ? { session: shell.session, channel: shell.channel, index: shells.length } : null;
+}
+
+/** Waits until *this* channel's shell is closed, not just any end event (F13). */
+async function untilShellClosed(shell, fromCursor, description) {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    const log = await events();
+    const closed = log.findIndex(
+      (event, index) =>
+        index >= fromCursor &&
+        event.type === "shell-closed" &&
+        event.channel === shell.channel &&
+        event.session === shell.session,
+    );
+    if (closed >= 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const seen = (await events()).slice(fromCursor).map((event) => `${event.type}:${event.channel ?? "-"}`).join(",");
+  throw new Error(`Timed out waiting for ${description} (new events: ${seen})`);
+}
+
 /** Waits until the peer log contains an event matching the predicate. */
 async function untilPeer(predicate, description, timeout = 15000) {
   const deadline = Date.now() + timeout;
@@ -148,6 +177,7 @@ try {
     assert.ok(serverId > 0, "a server id is available");
   });
 
+  let firstShell = null;
   await step("the terminal connects through a real SSH PTY", async () => {
     await page.goto(`${hubUrl}/servers/${serverId}/terminal`);
     await until(
@@ -155,6 +185,23 @@ try {
       "the terminal to report connected",
     );
     await untilPeer((event) => event.type === "shell", "the peer to enter a shell");
+    firstShell = await currentShell();
+    // "Connected" alone proves nothing about the PTY: the shell channel must have
+    // carried a valid pty-req with a real size (F14).
+    await untilPeer(
+      (event) => event.type === "pty-req" && event.channel === firstShell.channel && event.size?.[0] > 0 && event.size?.[1] > 0,
+      `a valid pty-req on ${firstShell?.channel}`,
+    );
+    await untilPeer(
+      (event) => event.type === "pty-req-invalid",
+      `no malformed pty-req (should not appear)`,
+      1500,
+    ).then(
+      () => {
+        throw new Error("the Hub sent a malformed pty-req");
+      },
+      () => {},
+    );
     // The token is sent in the first WS frame, never in a URL (REQ-09 生命周期).
     assert.deepEqual(
       requestUrls.filter((url) => url.includes("token=") || url.includes("auth_token")),
@@ -182,11 +229,16 @@ try {
     );
     const change = (await events()).filter((event) => event.type === "window-change").at(-1);
     assert.ok(change.size[0] > 0 && change.size[1] > 0, `window-change carried a size: ${JSON.stringify(change)}`);
+    // It must be *this* terminal's channel, not another channel on the connection.
+    assert.equal(change.channel, firstShell.channel, "the resize belongs to the terminal channel");
   });
 
   await step("disconnect and reconnect start a new session", async () => {
+    const beforeDisconnect = await cursor();
     await page.getByRole("button", { name: "Disconnect" }).click();
-    await untilPeer((event) => event.type === "disconnected", "the first session to end");
+    // The *terminal's* channel must close; a connection-level event or another
+    // channel ending is not evidence of reclaiming this terminal (F13).
+    await untilShellClosed(firstShell, beforeDisconnect, "the terminal channel to close");
     await until(
       async () => (await page.locator("[data-connection-status]").getAttribute("data-connection-status")) === "disconnected",
       "the toolbar to report disconnected",
@@ -197,6 +249,9 @@ try {
       async () => (await events()).filter((event) => event.type === "shell").length >= 2,
       "a second shell at the peer",
     );
+    const secondShell = await currentShell();
+    assert.notEqual(secondShell.channel, firstShell.channel, "the reconnect opened its own channel");
+    firstShell = secondShell;
     await page.getByTestId("terminal-surface").click();
     await page.keyboard.type("echo e2e-marker-two\r");
     await until(async () => (await typedText()).includes("e2e-marker-two"), "the second session to carry the typed command");
@@ -207,14 +262,12 @@ try {
   });
 
   await step("leaving the terminal reclaims the session", async () => {
-    // The Hub pools SSH connections, so the session ending is observable as its shell
-    // channel closing (and, when the pool is dropped, as a disconnection).
-    const ended = async () =>
-      (await events()).filter((event) => event.type === "shell-closed" || event.type === "disconnected").length;
-    const before = await ended();
+    const before = await cursor();
+    const shell = firstShell;
     await page.getByRole("link", { name: "Back to server" }).click();
     await until(async () => (await page.getByTestId("terminal-surface").count()) === 0, "the terminal to unmount");
-    await until(async () => (await ended()) > before, "the peer to observe the session ending");
+    // Only the channel this terminal opened counts as reclamation (F13).
+    await untilShellClosed(shell, before, "the unmounted terminal's channel to close");
   });
 
   assert.deepEqual(pageErrors, [], "no uncaught page errors");

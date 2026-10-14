@@ -5,6 +5,7 @@
 // browser suite asserts at the DOM level.
 
 import assert from "node:assert/strict";
+import { nameSuite, recordCase, writeReport } from "./lib/case-report.mjs";
 
 import {
   AXIS_SERIES,
@@ -35,6 +36,7 @@ import {
 
 let failures = 0;
 function check(name, fn) {
+  recordCase(name);
   try {
     fn();
     console.log(`  ok: ${name}`);
@@ -287,4 +289,8 @@ check("a window with no usable sum/count reports no average", () => {
 });
 
 console.log(failures === 0 ? "\nmonitoring-chart-config: ALL PASS" : `\nmonitoring-chart-config: ${failures} FAILURES`);
+nameSuite("monitoring-chart-config");
+writeReport();
+
 process.exit(failures === 0 ? 0 : 1);
+

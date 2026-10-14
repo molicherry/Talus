@@ -34,6 +34,8 @@ PIDS=()
 
 cleanup() {
   status=$?
+  cleanup_failed=""
+  cleanup_detail=""
   # Remove the playwright resolution symlink the spec relies on.
   rm -f tests/e2e/node_modules
   for pid in ${PIDS[@]:-}; do
@@ -44,15 +46,26 @@ cleanup() {
     [ -n "$pid" ] && wait "$pid" 2>/dev/null || true
   done
   if [ -x "$WORK/e2efixture" ]; then
-    "$WORK/e2efixture" -mode db-drop -database "$TEST_DATABASE_URL" -name "$DB" >/dev/null 2>&1 || true
+    if ! cleanup_detail="$("$WORK/e2efixture" -mode db-drop -database "$TEST_DATABASE_URL" -name "$DB" 2>&1)"; then
+      cleanup_failed="the scratch database $DB could not be dropped"
+      echo "✗ e2e cleanup: $cleanup_failed" >&2
+      echo "$cleanup_detail" >&2
+    fi
   fi
   rm -rf "$WORK"
+  if [ -n "$cleanup_failed" ] && [ "$status" -eq 0 ]; then
+    # A passing run whose cleanup failed is not a pass: the scratch database would be
+    # left behind and the next run could reuse it (N01).
+    echo "✗ e2e: the run passed but cleanup failed: $cleanup_failed" >&2
+    exit 1
+  fi
   exit "$status"
 }
 trap cleanup EXIT
 
 echo "▶ building the Hub, the agent bundle, the fixture and the SPA"
-(cd backend && go build -o "$WORK/hub" ./cmd/server && go build -o "$WORK/e2efixture" ./cmd/e2efixture) || fail "cannot build the backend"
+(cd backend && go build -ldflags "-X github.com/vpsmanager/backend/internal/server.Version=$VERSION" \
+  -o "$WORK/hub" ./cmd/server && go build -o "$WORK/e2efixture" ./cmd/e2efixture) || fail "cannot build the backend"
 (cd backend && sh build/agents.sh "$VERSION" "$WORK/agents" >/dev/null) || fail "cannot build the agent bundle"
 (cd frontend && npm run build >/dev/null) || fail "cannot build the SPA"
 [ -f frontend/dist/index.html ] || fail "the SPA build produced no index.html"
@@ -81,13 +94,22 @@ DATABASE_URL="$DB_URL" \
   AGENT_ARTIFACTS_DIR="$WORK/agents" \
   PORT="$HUB_PORT" \
   "$WORK/hub" >"$WORK/hub.log" 2>&1 &
-PIDS+=($!)
+HUB_PID=$!
+PIDS+=("$HUB_PID")
 ready=""
 for _ in $(seq 1 300); do
-  if curl -fsS "http://127.0.0.1:$HUB_PORT/version" >/dev/null 2>&1; then ready=1; break; fi
+  # A foreign process on this port would answer /version too: the answer has to be the
+  # version this run just built, and the child has to still be alive (F16).
+  if ! kill -0 "$HUB_PID" 2>/dev/null; then
+    fail "the Hub exited before it became ready (port $HUB_PORT may be taken): $(tail -5 "$WORK/hub.log" 2>/dev/null)"
+  fi
+  if curl -fsS "http://127.0.0.1:$HUB_PORT/api/v1/version" 2>/dev/null | grep -qE "\"version\"[[:space:]]*:[[:space:]]*\"$VERSION\""; then
+    ready=1
+    break
+  fi
   sleep 0.1
 done
-[ -n "$ready" ] || fail "the Hub did not become ready: $(tail -5 "$WORK/hub.log" 2>/dev/null)"
+[ -n "$ready" ] || fail "the Hub did not serve its own build version $VERSION on port $HUB_PORT (another process may own the port): $(tail -5 "$WORK/hub.log" 2>/dev/null)"
 
 echo "▶ running the browser flow"
 # The spec lives outside the frontend package, so it resolves playwright through the

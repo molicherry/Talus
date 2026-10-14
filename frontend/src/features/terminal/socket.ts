@@ -4,7 +4,7 @@ import type { TerminalClientMessage, TerminalServerMessage } from "../../types/s
 export function createTerminalSocket(
   serverId: number,
   onMessage: (msg: TerminalServerMessage) => void,
-  onClose: () => void,
+  onClose: (event: CloseEvent) => void,
   onError: (error: Event) => void,
 ): WebSocket {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin;
@@ -22,7 +22,7 @@ export function createTerminalSocket(
       // Ignore malformed frames; the terminal stays open.
     }
   };
-  ws.onclose = onClose;
+  ws.onclose = (event: CloseEvent) => onClose(event);
   ws.onerror = onError;
 
   ws.onopen = () => {

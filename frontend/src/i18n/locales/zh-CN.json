@@ -490,7 +490,8 @@
     "shortcutPaste": "粘贴",
     "shortcutSearch": "搜索",
     "shortcutCloseSearch": "关闭搜索",
-    "shortcutClear": "清屏"
+    "shortcutClear": "清屏",
+    "pasteStale": "会话已更换，粘贴内容未发送"
   },
   "theme": {
     "light": "浅色",

@@ -4,6 +4,8 @@
 // server messages, count connections and inspect every frame the client sends. The
 // real xterm instance runs unchanged: this asserts the DOM the user actually sees.
 import assert from "node:assert/strict";
+
+import { nameSuite, recordCase, writeReport } from "./lib/case-report.mjs";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -11,6 +13,7 @@ import { fileURLToPath } from "node:url";
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright");
 const root = fileURLToPath(new URL("../", import.meta.url));
 const port = Number(process.env.UI_TEST_PORT ?? 4179);
+
 const base = `http://127.0.0.1:${port}`;
 const server = spawn(
   process.execPath,
@@ -81,6 +84,12 @@ const webSocketStub = () => {
       this.readyState = FakeWebSocket.CLOSED;
       this.onclose?.(new CloseEvent("close", { code: 1006 }));
     }
+    /** Test hook: the server closes with a code and reason (F07). */
+    closeWith(code, reason = "") {
+      this.readyState = FakeWebSocket.CLOSED;
+      window.__ws.closed.push(this);
+      this.onclose?.(new CloseEvent("close", { code, reason }));
+    }
     readyState;
   }
   window.__ws = { sockets: [], frames: [], closed: [], last: () => window.__ws.sockets.at(-1) };
@@ -144,6 +153,9 @@ let passed = 0;
 let failed = 0;
 async function test(name, run, options) {
   if (process.env.UI_TEST_FILTER && !new RegExp(process.env.UI_TEST_FILTER).test(name)) return;
+  // The gate verifies required cases against this record, so it is written per case
+  // and not only on success (F12).
+  recordCase(name);
   browser = await chromium.launch({
     headless: true,
     executablePath: process.env.CHROMIUM_EXECUTABLE || undefined,
@@ -322,7 +334,9 @@ try {
     await until(async () => (await socketCount(page)) === 1, "one socket");
     await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
 
-    // Ctrl+F opens the local search; Escape closes it.
+    // Ctrl+F opens the local search; Escape closes it. The shortcut is terminal-local,
+    // so the terminal has to hold focus - which is also the case the review reported.
+    await page.getByTestId("terminal-surface").click();
     await page.keyboard.press("Control+f");
     await until(async () => (await page.getByRole("textbox", { name: "Search" }).count()) === 1, "Ctrl+F opens search");
     await page.keyboard.press("Escape");
@@ -379,13 +393,272 @@ try {
       );
     }
 
-    // Leaving the terminal closes the socket and stops the retry loop.
+    // Leaving the terminal closes *this* socket and stops the retry loop: asserting a
+    // cumulative close count would accept an earlier socket closing (F13).
+    const live = await page.evaluate(() => {
+      const socket = window.__ws.sockets.at(-1);
+      window.__closedSocket = socket;
+      return window.__ws.sockets.indexOf(socket);
+    });
     await page.getByRole("link", { name: "Back to server" }).click();
     await until(async () => (await page.getByTestId("terminal-surface").count()) === 0, "terminal unmounted");
-    await until(async () => (await page.evaluate(() => window.__ws.closed.length)) >= 1, "socket closed");
+    await until(
+      async () =>
+        await page.evaluate((index) => {
+          const socket = window.__ws.sockets[index];
+          return socket.readyState === 3 && window.__ws.closed.includes(socket);
+        }, live),
+      "the socket this terminal opened is closed",
+    );
+    assert.equal(
+      await page.evaluate(() => window.__ws.sockets.filter((s) => s.readyState === 1).length),
+      0,
+      "no socket is left open after unmounting",
+    );
     const before = await socketCount(page);
     await delay(2200);
     assert.equal(await socketCount(page), before, "no reconnect after unmounting");
+  });
+
+  // ---------------------------------------------------------- F05 - F08 ----
+  await test("a backend-format error keeps its reason readable outside the terminal", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    // The Hub sends {type:"error", data:"..."} - the shape the production handler uses.
+    await page.evaluate(() => window.__ws.last().deliver({ type: "error", data: "invalid or expired token" }));
+    await until(
+      async () => (await page.getByRole("alert").allInnerTexts()).join(" ").includes("invalid or expired token"),
+      "the reason is shown outside the terminal",
+    );
+    const banner = (await page.getByRole("alert").allInnerTexts()).join(" ");
+    assert.ok(!banner.includes("Unknown error"), `the real reason must be shown, got: ${banner}`);
+  });
+
+  await test("a delayed handshake still synchronizes the initial PTY size", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    const resizeFrames = async () => (await frames(page)).filter((frame) => frame.type === "resize");
+    // Nothing was sent while the socket was still connecting.
+    assert.equal((await resizeFrames()).length, 0, "no resize before the socket is open");
+    // The server confirms the session only after a slow handshake.
+    await delay(600);
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+    await until(async () => (await resizeFrames()).length >= 1, "the initial size is sent after readiness", 3000);
+    const first = (await resizeFrames())[0];
+    assert.ok(first.cols > 0 && first.rows > 0, `initial PTY size ${JSON.stringify(first)}`);
+  });
+
+  await test("revocation stops the retry loop and keeps its reason", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+    await until(
+      async () => (await page.locator("[data-connection-status]").getAttribute("data-connection-status")) === "connected",
+      "connected",
+    );
+    // The Hub announces the revocation, then closes with the policy code.
+    await page.evaluate(() => {
+      window.__ws.last().deliver({ type: "error", reason: "revoked", data: "session revoked" });
+      window.__ws.last().closeWith(4001, "revoked");
+    });
+    await until(
+      async () => (await page.getByRole("alert").allInnerTexts()).join(" ").includes("session revoked"),
+      "the revocation reason is visible",
+    );
+    await until(
+      async () => (await page.locator("[data-connection-status]").getAttribute("data-connection-status")) === "disconnected",
+      "the terminal reports the session as ended",
+    );
+    // No automatic retry: waiting past the first backoff must not open a socket.
+    const before = await socketCount(page);
+    await delay(2600);
+    assert.equal(await socketCount(page), before, "a revoked session must not be retried");
+    assert.equal(await page.evaluate(() => window.__ws.sockets.filter((s) => s.readyState === 1).length), 0);
+  });
+
+  await test("an in-flight reconnect still shows its attempt and new-session hint", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+    await until(
+      async () => (await page.locator("[data-connection-status]").getAttribute("data-connection-status")) === "connected",
+      "connected",
+    );
+    await page.evaluate(() => window.__ws.last().drop());
+    await until(
+      async () => (await page.locator("[data-connection-status]").getAttribute("data-connection-status")) === "reconnecting",
+      "waiting for the retry timer",
+    );
+    // Let the timer fire: the second socket exists but the server has not confirmed.
+    await until(async () => (await socketCount(page)) === 2, "the retry socket", 5000);
+    const status = await page.locator("[data-connection-status]");
+    assert.equal(await status.getAttribute("data-connection-status"), "reconnecting");
+    const text = await status.innerText();
+    assert.match(text, /1\/5/, `the attempt count must survive the transition: ${text}`);
+    assert.match(text, /new session/i, `the new-session hint must survive: ${text}`);
+    // And the retry is still cancellable while it is in flight.
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await until(
+      async () => (await page.locator("[data-connection-status]").getAttribute("data-connection-status")) === "disconnected",
+      "cancelled in flight",
+    );
+    await delay(2200);
+    assert.equal(await socketCount(page), 2, "cancelling must stop the loop");
+  });
+
+  // ---------------------------------------------------------------- F01 / F02 ----
+  await test("local editor paste never reaches the remote PTY, and search stays local", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+
+    // A paste into the local search box is a local edit: it must never be typed into
+    // the shell (the reported defect sent "printf search_only\n" to the PTY).
+    await page.getByRole("button", { name: "Search" }).click();
+    const input = page.getByRole("textbox", { name: "Search" });
+    await input.click();
+    await clipboardWrite(page, "printf search_only");
+    await page.keyboard.press("Control+Shift+v");
+    await until(async () => (await input.inputValue()).includes("printf search_only"), "the search box received the paste");
+    assert.deepEqual(
+      (await clientInputs(page)).filter((data) => data.includes("printf")),
+      [],
+      "a paste into the search box must not reach the PTY",
+    );
+
+    // Ctrl+F with the terminal focused opens the local search and sends no 0x06.
+    await page.keyboard.press("Escape");
+    await page.getByTestId("terminal-surface").click();
+    await page.keyboard.press("Control+f");
+    await until(async () => (await page.getByRole("textbox", { name: "Search" }).count()) === 1, "Ctrl+F opened the local search");
+    assert.ok(!(await clientInputs(page)).includes("\u0006"), "Ctrl+F must not be sent to the shell");
+  });
+
+  await test("every native multi-line paste waits for confirmation", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+
+    // Shift+Insert is the terminal's native paste: it must go through the same
+    // confirmation as the toolbar button.
+    await clipboardWrite(page, "rm -rf /tmp/native-a\nrm -rf /tmp/native-b");
+    await page.getByTestId("terminal-surface").click();
+    await page.keyboard.press("Shift+Insert");
+    const dialog = page.getByRole("alertdialog", { name: "Confirm multi-line paste" });
+    await until(async () => (await dialog.count()) === 1, "confirmation for the native paste");
+    assert.match(await dialog.innerText(), /2 lines/);
+    assert.ok(!(await clientInputs(page)).join("").includes("native-a"), "the native paste must wait for confirmation");
+    await dialog.getByRole("button", { name: "Send" }).click();
+    await until(async () => (await clientInputs(page)).join("").includes("native-b"), "confirmed native paste");
+
+    // A paste event delivered straight to xterm's textarea is prevented, so xterm
+    // cannot turn it into input behind the confirmation flow.
+    const prevented = await page.evaluate(() => {
+      const textarea = document.querySelector(".xterm-helper-textarea");
+      if (!textarea) return null;
+      const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
+      textarea.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(prevented, true, "the native paste event must be cancelled");
+  });
+
+  await test("late clipboard results and pending confirmations cannot cross a connection generation", async ({
+    page,
+    goto,
+  }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+
+    // A read that resolves after the session was replaced must not be typed.
+    await page.evaluate(() => {
+      window.__clipboardGate = {};
+      window.__clipboardGate.promise = new Promise((resolve) => {
+        window.__clipboardGate.resolve = resolve;
+      });
+      const original = navigator.clipboard.readText.bind(navigator.clipboard);
+      navigator.clipboard.readText = async () => {
+        await window.__clipboardGate.promise;
+        return "late-command-from-old-session";
+      };
+      window.__restoreClipboard = () => {
+        navigator.clipboard.readText = original;
+      };
+    });
+    await page.getByRole("button", { name: "Paste from clipboard" }).click();
+    // Replace the session while the read is still pending.
+    await page.getByRole("button", { name: "Disconnect" }).click();
+    await page.getByRole("button", { name: "Connect" }).click();
+    await until(async () => (await socketCount(page)) === 2, "second socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+    await until(
+      async () => (await page.locator("[data-connection-status]").getAttribute("data-connection-status")) === "connected",
+      "second session connected",
+    );
+    await page.evaluate(() => window.__clipboardGate.resolve());
+    await delay(300);
+    assert.ok(
+      !(await clientInputs(page)).join("").includes("late-command-from-old-session"),
+      "a late clipboard read must not reach the new shell",
+    );
+    await page.evaluate(() => window.__restoreClipboard());
+
+    // A confirmation opened before a reconnect is dropped with the session.
+    await clipboardWrite(page, "echo stale-one\necho stale-two");
+    await page.getByRole("button", { name: "Paste from clipboard" }).click();
+    await until(
+      async () => (await page.getByRole("alertdialog", { name: "Confirm multi-line paste" }).count()) === 1,
+      "confirmation open",
+    );
+    await page.getByRole("button", { name: "Disconnect" }).click();
+    await until(
+      async () => (await page.getByRole("alertdialog", { name: "Confirm multi-line paste" }).count()) === 0,
+      "the confirmation is cleared with the session",
+    );
+    await page.getByRole("button", { name: "Connect" }).click();
+    await until(async () => (await socketCount(page)) === 3, "third socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+    await delay(200);
+    assert.ok(!(await clientInputs(page)).join("").includes("stale-one"), "the old confirmation must not type into the new shell");
+  });
+
+  await test("a rejected or unavailable clipboard write reports failure, not success", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+    await page.evaluate(() => window.__ws.last().deliver({ type: "output", data: "select-me-please\r\n" }));
+    await until(async () => (await terminalText(page)).includes("select-me-please"), "output rendered");
+
+    // Select the text with a real drag over the terminal.
+    const box = await surface(page).boundingBox();
+    await page.mouse.move(box.x + 12, box.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 160, box.y + 12, { steps: 8 });
+    await page.mouse.up();
+
+    // A denied write must be reported as denied, with no unhandled rejection.
+    await page.evaluate(() => {
+      window.__restoreWrite = navigator.clipboard.writeText.bind(navigator.clipboard);
+      navigator.clipboard.writeText = async () => {
+        throw new DOMException("denied", "NotAllowedError");
+      };
+    });
+    await page.getByRole("button", { name: "Copy selection" }).click();
+    await until(
+      async () => (await page.getByRole("status").allInnerTexts()).join(" ").includes("denied"),
+      "a denied copy is reported",
+    );
+    const statuses = (await page.getByRole("status").allInnerTexts()).join(" ");
+    assert.ok(!statuses.includes("Copied"), `a denied write must not report success: ${statuses}`);
+    assert.deepEqual(
+      (await page.evaluate(() => window.__unhandled ?? [])),
+      [],
+      "no unhandled rejection was recorded",
+    );
+    await page.evaluate(() => {
+      navigator.clipboard.writeText = window.__restoreWrite;
+    });
   });
 
   await test("PTY resizes are debounced and follow font-size changes", async ({ page, goto }) => {
@@ -424,11 +697,64 @@ try {
     assert.ok((await resizeFrames()).length - beforeFont <= 2, "one font change is one resize");
   });
 
+  await test("a selection keeps its scrollback in view while output arrives", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+    // The rendered row layer shows the lines the reader is looking at, so the visible
+    // text is the observable: it must not jump to the newest output (F11).
+    const rows = page.locator(".xterm-rows");
+    const visible = () => rows.innerText();
+
+    const lines = Array.from({ length: 200 }, (_, i) => `line-${String(i).padStart(3, "0")}`).join("\r\n");
+    await page.evaluate(
+      (payload) => window.__ws.last().deliver({ type: "output", data: `${payload}\r\n` }),
+      lines,
+    );
+    await until(async () => (await visible()).includes("line-199"), "the newest line is in view");
+
+    // Scroll back with real wheel input until the oldest line is visible.
+    const box = await surface(page).boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    let reachedTop = false;
+    for (let i = 0; i < 60 && !reachedTop; i++) {
+      await page.mouse.wheel(0, -600);
+      await delay(30);
+      reachedTop = (await visible()).includes("line-000");
+    }
+    assert.ok(reachedTop, "the wheel scrolled back into the scrollback");
+    assert.ok(!(await visible()).includes("line-199"), "the newest line scrolled out of view");
+
+    // Select text in the scrollback, then let new output arrive.
+    await page.mouse.move(box.x + 12, box.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 140, box.y + 40, { steps: 6 });
+    await page.mouse.up();
+    assert.ok((await page.evaluate(() => window.getSelection()?.toString() ?? "")).length > 0, "text is selected");
+
+    for (let i = 0; i < 5; i++) {
+      await page.evaluate((n) => window.__ws.last().deliver({ type: "output", data: `new-output-${n}\r\n` }), i);
+      await delay(50);
+    }
+    await delay(300);
+    const stillVisible = await visible();
+    assert.ok(
+      stillVisible.includes("line-000"),
+      `a selection must keep its view; now showing: ${stillVisible.slice(0, 120).replace(/\n/g, "|")}`,
+    );
+    assert.ok(!stillVisible.includes("new-output-4"), "the reader must not be pulled to the newest output");
+  });
+
   await test(
     "375px and landscape keep the terminal usable with 44px controls",
     async ({ page, goto }) => {
       await goto("/servers/1/terminal");
       await until(async () => (await socketCount(page)) === 1, "one socket");
+      await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+      await until(
+        async () => (await page.locator("[data-connection-status]").getAttribute("data-connection-status")) === "connected",
+        "connected",
+      );
       // No horizontal overflow of the page or the toolbar.
       const overflow = await page.evaluate(() => ({
         scrollWidth: document.documentElement.scrollWidth,
@@ -454,6 +780,23 @@ try {
       // The terminal still owns the remaining height.
       const surfaceBox = await surface(page).boundingBox();
       assert.ok(surfaceBox.height > 200, `terminal height ${surfaceBox.height}`);
+
+      // The search bar must stay fully reachable: the reported defect pushed the
+      // close button outside a 375px viewport (F09). The "More" menu was opened
+      // above, so the search action is already reachable.
+      await page.getByTestId("terminal-more").getByRole("button", { name: "Search" }).click();
+      await until(async () => (await page.getByRole("textbox", { name: "Search" }).count()) === 1, "search opened");
+      const viewport = page.viewportSize();
+      for (const name of ["Search", "Previous match", "Next match", "Close search"]) {
+        const control = page.getByRole("textbox", { name }) .or(page.getByRole("button", { name })).first();
+        const controlBox = await control.boundingBox();
+        assert.ok(controlBox, `${name} has no box`);
+        assert.ok(
+          controlBox.x >= 0 && controlBox.x + controlBox.width <= viewport.width + 0.5,
+          `${name} is outside the viewport: x=${controlBox.x} w=${controlBox.width} vw=${viewport.width}`,
+        );
+        assert.ok(controlBox.height >= 44, `${name} height ${controlBox.height}`);
+      }
     },
     { viewport: { width: 375, height: 667 }, mobile: true },
   );
@@ -463,11 +806,24 @@ try {
     async ({ page, goto }) => {
       await goto("/servers/1/terminal");
       await until(async () => (await socketCount(page)) === 1, "one socket");
+      await page.evaluate(() => window.__ws.last().deliver({ type: "connected" }));
+      await until(
+        async () => (await page.locator("[data-connection-status]").getAttribute("data-connection-status")) === "connected",
+        "connected",
+      );
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       assert.ok(overflow <= 1, `horizontal overflow: ${overflow}`);
       const surfaceBox = await surface(page).boundingBox();
       assert.ok(surfaceBox.height > 120, `terminal height ${surfaceBox.height}`);
       assert.equal(await page.getByTestId("terminal-more").count(), 1);
+      // A landscape phone is still a touch device: the primary control keeps its 44px
+      // target even though the viewport is wider than the density breakpoint (F10).
+      // 667px crosses the density breakpoint, so the desktop toolbar is the one on
+      // screen - and it is still a touch device, so its controls keep 44px (F10).
+      const disconnect = await page.getByRole("button", { name: "Disconnect" }).boundingBox();
+      assert.ok(disconnect.height >= 44, `Disconnect height ${disconnect.height} in landscape`);
+      const search = await page.getByRole("button", { name: "Search" }).boundingBox();
+      assert.ok(search.height >= 44 && search.width >= 44, `Search ${search.height}x${search.width} in landscape`);
     },
     { viewport: { width: 667, height: 375 }, mobile: true },
   );
@@ -476,5 +832,7 @@ try {
   if (browser) await browser.close();
 }
 
+nameSuite("terminal");
+writeReport({ passed, failed });
 console.log(`Terminal UI: ${passed} passed, ${failed} failed`);
 if (failed) process.exitCode = 1;

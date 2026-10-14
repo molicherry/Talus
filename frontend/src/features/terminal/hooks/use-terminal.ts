@@ -4,6 +4,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TerminalServerMessage } from "../../../types/ssh";
+import { classifyClose } from "../lib/connection-status";
 import {
   TERMINAL_FONT_SIZE_DEFAULT,
   loadFontSize,
@@ -27,14 +28,26 @@ export type CopyOutcome =
 export type PasteOutcome =
   | { kind: "paste-empty" }
   | { kind: "paste-denied" }
-  | { kind: "paste-ready"; text: string; lines: number }
-  | { kind: "paste-multiline"; text: string; lines: number; preview: string };
+  | { kind: "paste-ready"; text: string; lines: number; generation: number }
+  | { kind: "paste-multiline"; text: string; lines: number; preview: string; generation: number }
+  // The read finished after the session it started in was replaced (F03).
+  | { kind: "paste-stale" };
+
+/** What the terminal does with a shortcut before xterm encodes it (F01). */
+export interface ShortcutHandlers {
+  onSearch: () => void;
+  onCopy: () => void;
+  onPaste: () => void;
+  onClear: () => void;
+}
 
 export interface UseTerminalReturn {
   terminalRef: React.RefObject<HTMLDivElement | null>;
   status: "disconnected" | "connecting" | "connected" | "reconnecting";
   error: string | null;
   retryCount: number;
+  /** The current connection generation; it changes on every connect/disconnect. */
+  generation: number;
   /** True while an automatic retry is waiting for its timer to fire. */
   retryPending: boolean;
   fontSize: number;
@@ -47,10 +60,12 @@ export interface UseTerminalReturn {
   search: (query: string, direction: "next" | "previous") => boolean;
   clearSearch: () => void;
   clearTerminal: () => void;
-  copySelection: () => CopyOutcome;
+  copySelection: () => Promise<CopyOutcome>;
   readClipboard: () => Promise<PasteOutcome>;
-  pasteText: (text: string) => void;
+  pasteText: (text: string, generation?: number) => void;
   focusTerminal: () => void;
+  /** Installs the terminal-local shortcut handlers (F01/F02). */
+  setShortcuts: (handlers: ShortcutHandlers | null) => void;
 }
 
 export function useTerminal(serverId: number): UseTerminalReturn {
@@ -72,12 +87,41 @@ export function useTerminal(serverId: number): UseTerminalReturn {
   const containerObserverRef = useRef<ResizeObserver | null>(null);
   // The font size is a remembered display preference (REQ-09 §字体与主题).
   const fontSizeRef = useRef(loadFontSize());
+  // Every connect/disconnect starts a new connection generation. An async clipboard
+  // read or a pending confirmation carries the generation it was started in, so a
+  // late result can never be typed into a later shell (F03).
+  const generationRef = useRef(0);
+  // A size change made before the socket was ready must not be lost (F06).
+  const pendingResizeRef = useRef(false);
+  // Shortcut handlers are installed per terminal by the component (F01).
+  const shortcutsRef = useRef<ShortcutHandlers | null>(null);
+  // Set when the server refused the session, so the close is not retried (F07).
+  const terminateRef = useRef(false);
+  // The most specific failure text reported for this session: the server's own
+  // message wins over the shorter close reason (F05/F07).
+  const errorRef = useRef<string | null>(null);
+
+  /** Records a failure, keeping the first (most specific) explanation. */
+  const reportError = useCallback((text: string) => {
+    if (errorRef.current === null) {
+      errorRef.current = text;
+      setError(text);
+    }
+  }, []);
+
+  const clearError = useCallback(() => {
+    errorRef.current = null;
+    setError(null);
+  }, []);
 
   const [status, setStatus] = useState<UseTerminalReturn["status"]>("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [retryPending, setRetryPending] = useState(false);
   const [fontSize, setFontSize] = useState(fontSizeRef.current);
+  // Mirrors generationRef for the UI: every connect/disconnect invalidates pending
+  // clipboard work, and the toolbar must not keep offering it (F03).
+  const [generation, setGeneration] = useState(0);
 
   const clearTimers = useCallback(() => {
     if (retryTimerRef.current !== null) {
@@ -96,8 +140,21 @@ export function useTerminal(serverId: number): UseTerminalReturn {
     containerObserverRef.current = null;
   }, []);
 
+  /** Routes a native paste event through the same flow as the toolbar button. */
+  const onNativePaste = useCallback((event: Event) => {
+    // Cancel xterm's own handling first: the payload is only sent after the review
+    // flow (single line) or the confirmation (multi-line).
+    event.preventDefault();
+    event.stopPropagation();
+    shortcutsRef.current?.onPaste();
+  }, []);
+
   const disconnect = useCallback(() => {
     manualDisconnectRef.current = true;
+    // A new generation invalidates in-flight clipboard reads and confirmations.
+    generationRef.current++;
+    setGeneration(generationRef.current);
+    pendingResizeRef.current = false;
     clearTimers();
     if (windowResizeHandlerRef.current !== null) {
       window.removeEventListener("resize", windowResizeHandlerRef.current);
@@ -116,6 +173,7 @@ export function useTerminal(serverId: number): UseTerminalReturn {
       ws.onopen = null;
       ws.close(1000);
     }
+    terminalRef.current?.removeEventListener("paste", onNativePaste, true);
     termInstanceRef.current?.dispose();
     termInstanceRef.current = null;
     fitAddonRef.current = null;
@@ -123,15 +181,21 @@ export function useTerminal(serverId: number): UseTerminalReturn {
     retryCountRef.current = 0;
     setRetryCount(0);
     setStatus("disconnected");
-    setError(null);
-  }, [clearTimers, detachContainerObserver]);
+    clearError();
+  }, [clearTimers, detachContainerObserver, onNativePaste, clearError]);
 
-  /** Sends the current cols/rows to the PTY (debounced by the caller). */
+  /** Sends the current cols/rows to the PTY, remembering a size taken too early. */
   const sendResize = useCallback(() => {
     const term = termInstanceRef.current;
-    if (wsRef.current?.readyState === WebSocket.OPEN && term) {
-      sendTerminalMessage(wsRef.current, { type: "resize", cols: term.cols, rows: term.rows });
+    if (!term) return;
+    if (wsRef.current?.readyState !== WebSocket.OPEN) {
+      // A handshake slower than the layout must not lose the initial size: the
+      // pending flag is honoured as soon as the socket is ready (F06).
+      pendingResizeRef.current = true;
+      return;
     }
+    pendingResizeRef.current = false;
+    sendTerminalMessage(wsRef.current, { type: "resize", cols: term.cols, rows: term.rows });
   }, []);
 
   const scheduleResize = useCallback(() => {
@@ -145,6 +209,10 @@ export function useTerminal(serverId: number): UseTerminalReturn {
     if (!terminalRef.current) return;
 
     manualDisconnectRef.current = false;
+    // Every connect starts a new generation: a clipboard read or confirmation that
+    // started in the previous one is no longer allowed to type.
+    generationRef.current++;
+    setGeneration(generationRef.current);
     clearTimers();
     // Dispose any previous terminal before opening a new one. Auto-reconnect
     // (scheduleRetry → connect(true)) reaches here with the old terminal
@@ -174,8 +242,11 @@ export function useTerminal(serverId: number): UseTerminalReturn {
       retryCountRef.current = 0;
       setRetryCount(0);
     }
-    setStatus("connecting");
-    setError(null);
+    // A reconnect keeps reporting itself as a reconnect: the attempt count and the
+    // new-session hint must survive the transition from "waiting for the timer" to
+    // "socket in flight" (F08).
+    setStatus(fromRetry ? "reconnecting" : "connecting");
+    clearError();
 
     const term = new Terminal({
       cursorBlink: true,
@@ -247,31 +318,62 @@ export function useTerminal(serverId: number): UseTerminalReturn {
           retryCountRef.current = 0;
           setRetryCount(0);
           setStatus("connected");
+          // The PTY starts at its own default (80x24). Whatever the layout produced
+          // before the handshake finished is sent now, unconditionally, so the shell
+          // and the browser agree on the size from the first prompt (F06).
+          sendResize();
         } else if (msg.type === "output") {
-          // Follow new output only while the user is already at the bottom: a
-          // reader who scrolled into history (or is selecting text) is not yanked
-          // back by the next line (REQ-09 "尺寸与焦点").
+          // Follow new output only while the user is already at the bottom *and* is
+          // not selecting: reading or selecting history must not be yanked away.
           const buffer = term.buffer.active;
-          const pinned = buffer.viewportY >= buffer.baseY;
+          const readPosition = buffer.viewportY;
+          const pinned = readPosition >= buffer.baseY && !term.hasSelection();
           term.write(msg.data ?? "", () => {
-            if (pinned) term.scrollToBottom();
+            if (pinned) {
+              term.scrollToBottom();
+            } else if (buffer.baseY > readPosition) {
+              // xterm scrolls on write when new lines arrive; put the reader back
+              // where they were (F11).
+              term.scrollToLine(readPosition);
+            }
           });
         } else if (msg.type === "disconnected") {
           term.writeln("\r\n\x1b[33m[Disconnected]\x1b[0m");
           setStatus("disconnected");
         } else if (msg.type === "error") {
-          term.writeln(`\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m`);
-          setError(msg.message ?? "Unknown error");
+          // The backend sends the reason in `data` (handler wsMessage); `message` is
+          // tolerated for older frames, and the reason must be readable outside the
+          // terminal either way (F05).
+          const reason = msg.data || msg.message || "Unknown error";
+          term.writeln(`\r\n\x1b[31m[Error: ${reason}]\x1b[0m`);
+          reportError(reason);
+          // A refusal at admission (revoked session, denied access) is terminal:
+          // retrying with the same credentials can only fail again (F07).
+          if (msg.reason === "revoked" || msg.reason === "auth" || msg.reason === "denied") {
+            terminateRef.current = true;
+          }
         }
       },
-      () => {
+      (event: CloseEvent) => {
         term.writeln("\r\n\x1b[33m[Connection closed]\x1b[0m");
         wsRef.current = null;
-        if (!manualDisconnectRef.current) {
-          scheduleRetry();
-        } else {
+        if (manualDisconnectRef.current) {
           setStatus("disconnected");
+          return;
         }
+        const verdict = classifyClose(event, terminateRef.current);
+        if (verdict === "retry") {
+          scheduleRetry();
+          return;
+        }
+        // Normal end or a refusal that retrying cannot fix: stop, drop the timer and
+        // report why instead of reopening a shell the server already refused (F07).
+        terminateRef.current = false;
+        clearTimers();
+        setStatus("disconnected");
+        // The reason the server sent (frame or close reason) is shown when there is
+        // one; a bare abnormal close still gets a readable line (F05/F07).
+        reportError(event.reason || (verdict === "revoked" ? "session revoked" : "session ended"));
       },
       (_evt: Event) => {
         setError("WebSocket error");
@@ -284,6 +386,40 @@ export function useTerminal(serverId: number): UseTerminalReturn {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         sendTerminalMessage(wsRef.current, { type: "input", data });
       }
+    });
+
+    // Terminal-local shortcuts are handled *before* xterm encodes the key, so Ctrl+F
+    // opens the local search instead of sending 0x06, and paste combinations run the
+    // confirmation path instead of xterm's own paste (F01, F02). Ctrl+C and Ctrl+L
+    // return true: the shell keeps interrupt and readline clear-screen.
+    term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+      if (event.type !== "keydown") return true;
+      const handlers = shortcutsRef.current;
+      if (!handlers) return true;
+      const key = event.key.toLowerCase();
+      const mod = event.ctrlKey || event.metaKey;
+      if (mod && !event.shiftKey && key === "f") {
+        handlers.onSearch();
+        return false;
+      }
+      if (mod && event.shiftKey && key === "c") {
+        handlers.onCopy();
+        return false;
+      }
+      if (mod && event.shiftKey && key === "v") {
+        handlers.onPaste();
+        return false;
+      }
+      if (mod && event.shiftKey && key === "l") {
+        handlers.onClear();
+        return false;
+      }
+      // Shift+Insert is the other paste combination xterm understands natively.
+      if (event.shiftKey && key === "insert") {
+        handlers.onPaste();
+        return false;
+      }
+      return true;
     });
 
     const handleResize = () => {
@@ -305,6 +441,15 @@ export function useTerminal(serverId: number): UseTerminalReturn {
       scheduleResize();
     });
 
+    // Native paste (Shift+Insert, context menu, middle click) has to be caught
+    // before xterm's own textarea listener turns it into input, so every entry point
+    // shares the confirmation flow (F02). A capture-phase listener on the terminal
+    // container runs before the target's listeners; one attached to the textarea
+    // itself would run after xterm's, because listeners on the same node fire in
+    // registration order.
+    const pasteTarget = terminalRef.current;
+    pasteTarget?.addEventListener("paste", onNativePaste, true);
+
     // A layout change that never resizes the window (sidebar toggle, fullscreen,
     // flex reflow) still has to fit and re-sync the PTY size.
     detachContainerObserver();
@@ -315,7 +460,7 @@ export function useTerminal(serverId: number): UseTerminalReturn {
       observer.observe(terminalRef.current);
       containerObserverRef.current = observer;
     }
-  }, [serverId, clearTimers, detachContainerObserver, scheduleResize]);
+  }, [serverId, clearTimers, detachContainerObserver, scheduleResize, clearError, reportError, sendResize]);
 
   useEffect(() => {
     return () => {
@@ -370,12 +515,15 @@ export function useTerminal(serverId: number): UseTerminalReturn {
     termInstanceRef.current?.clear();
   }, []);
 
-  const copySelection = useCallback((): CopyOutcome => {
+  const copySelection = useCallback(async (): Promise<CopyOutcome> => {
     const term = termInstanceRef.current;
     const selection = term?.getSelection() ?? "";
     if (selection.length === 0) return { kind: "copy-empty" };
+    const clipboard = navigator.clipboard;
+    if (!clipboard?.writeText) return { kind: "copy-denied" };
     try {
-      void navigator.clipboard?.writeText(selection);
+      // Await the write: a rejected permission must not be reported as a copy (F04).
+      await clipboard.writeText(selection);
     } catch {
       return { kind: "copy-denied" };
     }
@@ -383,6 +531,7 @@ export function useTerminal(serverId: number): UseTerminalReturn {
   }, []);
 
   const readClipboard = useCallback(async (): Promise<PasteOutcome> => {
+    const generation = generationRef.current;
     let text = "";
     try {
       text = (await navigator.clipboard?.readText()) ?? "";
@@ -390,15 +539,24 @@ export function useTerminal(serverId: number): UseTerminalReturn {
       // Browsers require a user gesture and may still refuse; the toolbar reports it.
       return { kind: "paste-denied" };
     }
+    if (generation !== generationRef.current) {
+      // The session was replaced while the read was in flight: the payload belongs to
+      // the previous shell and must not be typed into this one (F03).
+      return { kind: "paste-stale" };
+    }
     const shape = classifyPaste(text);
     if (shape.kind === "empty") return { kind: "paste-empty" };
     if (shape.kind === "multi-line") {
-      return { kind: "paste-multiline", text, lines: shape.lines, preview: shape.preview };
+      return { kind: "paste-multiline", text, lines: shape.lines, preview: shape.preview, generation };
     }
-    return { kind: "paste-ready", text, lines: shape.lines };
+    return { kind: "paste-ready", text, lines: shape.lines, generation };
   }, []);
 
-  const pasteText = useCallback((text: string) => {
+  const pasteText = useCallback((text: string, generation?: number) => {
+    // A confirmation or late read from an earlier generation is dropped instead of
+    // being typed into the current shell (F03).
+    if (generation !== undefined && generation !== generationRef.current) return;
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
     // term.paste() routes through onData, so the PTY receives exactly what a
     // keyboard paste would send (including bracketed-paste markers).
     termInstanceRef.current?.paste(text);
@@ -408,20 +566,35 @@ export function useTerminal(serverId: number): UseTerminalReturn {
     termInstanceRef.current?.focus();
   }, []);
 
+  const setShortcuts = useCallback((handlers: ShortcutHandlers | null) => {
+    shortcutsRef.current = handlers;
+  }, []);
+
   const cancelRetry = useCallback(() => {
-    // Abandoning a pending retry is a deliberate stop, not a failure: the state
-    // becomes disconnected so the user can reconnect by hand.
+    // Abandoning a retry is a deliberate stop, not a failure: the state becomes
+    // disconnected so the user can reconnect by hand. An in-flight attempt is closed
+    // too, otherwise cancelling would leave a socket connecting in the background.
     manualDisconnectRef.current = true;
     clearTimers();
+    const ws = wsRef.current;
+    wsRef.current = null;
+    if (ws) {
+      ws.onclose = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onopen = null;
+      ws.close(1000);
+    }
     setStatus("disconnected");
-    setError(null);
-  }, [clearTimers]);
+    clearError();
+  }, [clearTimers, clearError]);
 
   return {
     terminalRef,
     status,
     error,
     retryCount,
+    generation,
     retryPending,
     fontSize,
     connect,
@@ -437,5 +610,6 @@ export function useTerminal(serverId: number): UseTerminalReturn {
     readClipboard,
     pasteText,
     focusTerminal,
+    setShortcuts,
   };
 }

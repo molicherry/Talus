@@ -6,11 +6,13 @@
 // and, critically, that "last collected" never comes from a filled bucket.
 
 import assert from "node:assert/strict";
+import { nameSuite, recordCase, writeReport } from "./lib/case-report.mjs";
 
 import { buildAlignedSeries, isolatedIndices } from "./.compiled-series.mjs";
 
 let failures = 0;
 function check(name, fn) {
+  recordCase(name);
   try {
     fn();
     console.log(`  ok: ${name}`);
@@ -247,4 +249,8 @@ check("a confirmed-empty bucket never becomes the newest sample", () => {
 });
 
 console.log(failures === 0 ? "\nmonitoring-series: ALL PASS" : `\nmonitoring-series: ${failures} FAILED`);
+nameSuite("monitoring-series");
+writeReport();
+
 process.exit(failures === 0 ? 0 : 1);
+

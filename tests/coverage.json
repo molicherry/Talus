@@ -368,7 +368,7 @@
           "run_id": "coverage-tools",
           "implementation": {
             "path": "tests/coverage-tools.test.mjs",
-            "symbol": "node:test"
+            "symbol": "the generated report matches the committed machine inventory"
           },
           "automation_status": "implemented",
           "required": true
@@ -388,7 +388,7 @@
           "run_id": "coverage-tools",
           "implementation": {
             "path": "tests/coverage-tools.test.mjs",
-            "symbol": "node:test"
+            "symbol": "a duplicate implementation identifier fails schema validation"
           },
           "automation_status": "implemented",
           "required": true
@@ -2574,6 +2574,76 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-09-01o",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "local editor paste never reaches the remote PTY, and search stays local"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01p",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "every native multi-line paste waits for confirmation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01q",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "late clipboard results and pending confirmations cannot cross a connection generation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01r",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a rejected or unavailable clipboard write reports failure, not success"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01s",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a backend-format error keeps its reason readable outside the terminal"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01t",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/terminal_e2e_test.go",
+            "symbol": "TestTerminalE2ERevocationAnnouncesItself"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01u",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/e2efixture/main_test.go",
+            "symbol": "TestReplaceDatabasePathKeepsConnectionOptions"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -2691,6 +2761,76 @@
           "implementation": {
             "path": "tests/e2e/terminal.spec.mjs",
             "symbol": "leaving the terminal reclaims the session"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02l",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a delayed handshake still synchronizes the initial PTY size"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02m",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "revocation stops the retry loop and keeps its reason"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02n",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "an in-flight reconnect still shows its attempt and new-session hint"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02o",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a selection keeps its scrollback in view while output arrives"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02p",
+          "run_id": "e2e-core",
+          "implementation": {
+            "path": "tests/e2e/terminal.spec.mjs",
+            "symbol": "the terminal connects through a real SSH PTY"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02q",
+          "run_id": "e2e-core",
+          "implementation": {
+            "path": "tests/e2e/terminal.spec.mjs",
+            "symbol": "leaving the terminal reclaims the session"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02r",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-controls.test.mjs",
+            "symbol": "a reconnect announces a new session, never a restored one"
           },
           "automation_status": "implemented",
           "required": true

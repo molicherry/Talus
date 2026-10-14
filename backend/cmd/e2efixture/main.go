@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -34,13 +35,17 @@ import (
 // event is one JSONL line of the peer's log. The browser test reads it, so the field
 // names are the contract between the two.
 type event struct {
-	At      time.Time `json:"at"`
-	Type    string    `json:"type"`
-	Size    [2]int    `json:"size,omitempty"` // cols, rows
-	Term    string    `json:"term,omitempty"`
-	Data    string    `json:"data,omitempty"`
-	Session string    `json:"session,omitempty"`
-	Error   string    `json:"error,omitempty"`
+	At   time.Time `json:"at"`
+	Type string    `json:"type"`
+	Size [2]int    `json:"size,omitempty"` // cols, rows
+	Term string    `json:"term,omitempty"`
+	Data string    `json:"data,omitempty"`
+	// Session identifies the SSH *connection*; Channel identifies one session channel
+	// inside it. A test that wants to prove a terminal was reclaimed must name the
+	// channel it opened, not just count connection events (F13).
+	Session string `json:"session,omitempty"`
+	Channel string `json:"channel,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 type recorder struct {
@@ -99,7 +104,11 @@ func main() {
 		}
 		// The Hub needs a database it can migrate; handing back the URL keeps the
 		// harness free of connection-string editing.
-		fmt.Printf("DATABASE_URL=%s\n", databaseURLFor(*database, *name))
+		scratch, err := replaceDatabasePath(*database, *name)
+		if err != nil {
+			fail(err)
+		}
+		fmt.Printf("DATABASE_URL=%s\n", scratch)
 	case "db-drop":
 		if err := dropDatabase(*database, *name); err != nil {
 			fail(err)
@@ -176,11 +185,11 @@ type sessionCounter struct {
 	n  int
 }
 
-func (s *sessionCounter) next() string {
+func (s *sessionCounter) next(prefix string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.n++
-	return fmt.Sprintf("session-%d", s.n)
+	return fmt.Sprintf("%s-%d", prefix, s.n)
 }
 
 func handleConn(conn net.Conn, cfg *ssh.ServerConfig, rec *recorder, echo bool, sessions *sessionCounter) {
@@ -190,7 +199,7 @@ func handleConn(conn net.Conn, cfg *ssh.ServerConfig, rec *recorder, echo bool, 
 		_ = conn.Close()
 		return
 	}
-	id := sessions.next()
+	id := sessions.next("session")
 	rec.record(event{Type: "connected", Session: id})
 	go func() {
 		// The Hub's pool probes cached connections with a keepalive that expects a
@@ -221,48 +230,68 @@ func handleConn(conn net.Conn, cfg *ssh.ServerConfig, rec *recorder, echo bool, 
 		if err != nil {
 			continue
 		}
-		go handleSession(channel, requests, rec, echo, id)
+		go handleSession(channel, requests, rec, echo, id, sessions.next("channel"))
 	}
 }
 
-func handleSession(channel ssh.Channel, requests <-chan *ssh.Request, rec *recorder, echo bool, session string) {
+func handleSession(channel ssh.Channel, requests <-chan *ssh.Request, rec *recorder, echo bool, session, channelID string) {
+	// only a channel that really started a shell is a terminal: a rejected exec
+	// channel (the monitor probing the target) must not be reported as one, or a test
+	// could "prove" a terminal was reused by closing something else (F13).
+	shellStarted := false
 	defer func() {
-		// The Hub pools SSH connections, so a finished terminal shows up as a closed
-		// session channel rather than a closed connection: record both.
-		rec.record(event{Type: "shell-closed", Session: session})
+		kind := "channel-closed"
+		if shellStarted {
+			kind = "shell-closed"
+		}
+		rec.record(event{Type: kind, Session: session, Channel: channelID})
 		_ = channel.Close()
 	}()
 	for req := range requests {
 		switch req.Type {
 		case "pty-req":
-			// term string, then cols, rows, width and height in pixels.
+			// The request is term, cols, rows, width, height, then the mandatory
+			// terminal modes string. Omitting the last field leaves unparsed bytes and
+			// ssh.Unmarshal fails; accepting it anyway would let the browser flow claim
+			// a PTY that was never requested (F14).
 			var payload struct {
 				Term   string
 				Cols   uint32
 				Rows   uint32
 				Width  uint32
 				Height uint32
+				Modes  string
 			}
-			if err := ssh.Unmarshal(req.Payload, &payload); err == nil {
-				rec.record(event{Type: "pty-req", Session: session, Term: payload.Term,
-					Size: [2]int{int(payload.Cols), int(payload.Rows)}})
+			if err := ssh.Unmarshal(req.Payload, &payload); err != nil {
+				rec.record(event{Type: "pty-req-invalid", Session: session, Channel: channelID, Error: err.Error()})
+				_ = req.Reply(false, nil)
+				continue
 			}
+			if payload.Term == "" || payload.Cols == 0 || payload.Rows == 0 {
+				rec.record(event{Type: "pty-req-invalid", Session: session, Channel: channelID,
+					Error: "missing terminal type or size"})
+				_ = req.Reply(false, nil)
+				continue
+			}
+			rec.record(event{Type: "pty-req", Session: session, Channel: channelID, Term: payload.Term,
+				Size: [2]int{int(payload.Cols), int(payload.Rows)}})
 			_ = req.Reply(true, nil)
 		case "window-change":
 			var payload struct{ Cols, Rows, Width, Height uint32 }
 			if err := ssh.Unmarshal(req.Payload, &payload); err == nil {
-				rec.record(event{Type: "window-change", Session: session,
+				rec.record(event{Type: "window-change", Session: session, Channel: channelID,
 					Size: [2]int{int(payload.Cols), int(payload.Rows)}})
 			}
 			_ = req.Reply(true, nil)
 		case "shell":
-			rec.record(event{Type: "shell", Session: session})
+			shellStarted = true
+			rec.record(event{Type: "shell", Session: session, Channel: channelID})
 			_ = req.Reply(true, nil)
-			go pump(channel, rec, echo, session)
+			go pump(channel, rec, echo, session, channelID)
 		case "exec":
 			// The monitor probes targets with exec; the fixture is a terminal peer, so
 			// it declines instead of pretending to run commands.
-			rec.record(event{Type: "exec-declined", Session: session})
+			rec.record(event{Type: "exec-declined", Session: session, Channel: channelID})
 			_ = req.Reply(false, nil)
 		case "subsystem":
 			_ = req.Reply(false, nil)
@@ -274,14 +303,14 @@ func handleSession(channel ssh.Channel, requests <-chan *ssh.Request, rec *recor
 
 // pump echoes what the terminal sends back to it, so the browser can assert that a
 // round trip really happened, and records the input for the test to inspect.
-func pump(channel ssh.Channel, rec *recorder, echo bool, session string) {
+func pump(channel ssh.Channel, rec *recorder, echo bool, session, channelID string) {
 	reader := bufio.NewReader(channel)
 	buf := make([]byte, 1024)
 	for {
 		n, err := reader.Read(buf)
 		if n > 0 {
 			text := string(buf[:n])
-			rec.record(event{Type: "input", Session: session, Data: text})
+			rec.record(event{Type: "input", Session: session, Channel: channelID, Data: text})
 			if echo {
 				if _, writeErr := io.WriteString(channel, text); writeErr != nil {
 					return
@@ -320,23 +349,10 @@ func loadOrCreateHostKey(path string) (ssh.Signer, error) {
 
 // --------------------------------------------------------- scratch database ----
 
-// databaseURLFor replaces the database component of url with name.
-func databaseURLFor(url, name string) string {
-	base := url
-	if index := strings.IndexAny(base, "?"); index >= 0 {
-		base = base[:index]
-	}
-	slash := strings.LastIndex(base, "/")
-	if slash < 0 {
-		return url
-	}
-	return base[:slash+1] + name
-}
-
 // maintenanceURL points at the server's default database, which is where CREATE
 // DATABASE and DROP DATABASE must run.
-func maintenanceURL(url string) string {
-	return databaseURLFor(url, "postgres")
+func maintenanceURL(raw string) (string, error) {
+	return replaceDatabasePath(raw, "postgres")
 }
 
 func createDatabase(url, name string) error {
@@ -346,7 +362,11 @@ func createDatabase(url, name string) error {
 	if !strings.HasPrefix(name, "talus_e2e") {
 		return fmt.Errorf("refusing to create %q: scratch databases are named talus_e2e*", name)
 	}
-	db, err := sql.Open("pgx", maintenanceURL(url))
+	maintenance, err := maintenanceURL(url)
+	if err != nil {
+		return err
+	}
+	db, err := sql.Open("pgx", maintenance)
 	if err != nil {
 		return err
 	}
@@ -365,7 +385,11 @@ func dropDatabase(url, name string) error {
 	if !strings.HasPrefix(name, "talus_e2e") {
 		return fmt.Errorf("refusing to drop %q: only talus_e2e* databases are dropped", name)
 	}
-	db, err := sql.Open("pgx", maintenanceURL(url))
+	maintenance, err := maintenanceURL(url)
+	if err != nil {
+		return err
+	}
+	db, err := sql.Open("pgx", maintenance)
 	if err != nil {
 		return err
 	}
@@ -401,4 +425,20 @@ func generateKeyPair(path string) error {
 		return err
 	}
 	return os.WriteFile(path+".pub", ssh.MarshalAuthorizedKey(public), 0o644)
+}
+
+// replaceDatabasePath swaps the database component of a PostgreSQL URL while keeping
+// the scheme, credentials, host, port, encoding and every query parameter (sslmode,
+// connect_timeout, application_name, ...). Truncating the query silently downgraded
+// the connection policy the caller asked for (F15).
+func replaceDatabasePath(raw, name string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse database url: %w", err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("database url %q has no scheme or host", raw)
+	}
+	parsed.Path = "/" + name
+	return parsed.String(), nil
 }
