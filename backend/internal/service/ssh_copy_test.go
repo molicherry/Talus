@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -54,17 +55,14 @@ func TestCopyFileReturnsSlotAfterSuccessAndRemoteFailure(t *testing.T) {
 				t.Fatalf("slot leaked: %v", err)
 			}
 			defer pool.Release(1, cached)
-			if failure && cached != nil {
-				t.Fatal("failed upload was cached")
-			}
-			if !failure && cached == nil {
-				t.Fatal("healthy upload was not cached")
+			if cached == nil {
+				t.Fatal("completed remote upload discarded a healthy transport")
 			}
 		})
 	}
 }
 
-func TestCopyFileCancellationClosesTransportAndReturnsSlot(t *testing.T) {
+func TestCopyFileCancellationReturnsSlotAndRetainsOnlyHealthyTransport(t *testing.T) {
 	started := make(chan struct{})
 	address, key := startExecSSHServer(t, func(_ string, ch ssh.Channel, closed <-chan struct{}) { close(started); <-closed; _ = ch.Close() })
 	pool := newTestPool(t)
@@ -82,7 +80,7 @@ func TestCopyFileCancellationClosesTransportAndReturnsSlot(t *testing.T) {
 	cancel()
 	select {
 	case err := <-done:
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancel result = %v", err)
 		}
 	case <-time.After(time.Second):
@@ -92,9 +90,11 @@ func TestCopyFileCancellationClosesTransportAndReturnsSlot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("slot leaked: %v", err)
 	}
-	pool.Release(1, client)
+	defer pool.Release(1, client)
 	if client != nil {
-		t.Fatal("cancelled upload transport cached")
+		if _, _, err := client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+			t.Fatalf("cancelled upload cached an unhealthy transport: %v", err)
+		}
 	}
 }
 

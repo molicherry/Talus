@@ -8,9 +8,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/crypto"
+	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/pkg/token"
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
@@ -366,5 +368,120 @@ func TestConnectionMigrationPreservesLegacyServersAndForeignKeys(t *testing.T) {
 	if err := db.Raw(`SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'servers'::regclass
 		AND confrelid = 'server_connection_configs'::regclass AND contype = 'f'`).Scan(&reversed).Error; err != nil || reversed != 0 {
 		t.Fatalf("GORM generated a reverse configuration foreign key: %d, %v", reversed, err)
+	}
+}
+
+type connectionTopologyObserver struct{ notify func() }
+
+func (o connectionTopologyObserver) NotifyTopologyChange() { o.notify() }
+
+func TestServerTopologyNotificationFollowsRouteCommit(t *testing.T) {
+	svc, repo, _, ctx, _ := connectionServiceFixture(t)
+	ownerID := mw.GetUserClaims(ctx).UserID
+	var current *model.Server
+	notifications := 0
+	deleted := false
+	svc.SetTopologyNotifier(connectionTopologyObserver{notify: func() {
+		notifications++
+		if current == nil {
+			t.Fatal("monitor notified before create finished")
+		}
+		stored, err := repo.FindByID(ctx, current.ID)
+		config, configErr := repo.FindConnectionConfig(ctx, current.ID)
+		if deleted {
+			if !errors.Is(err, gorm.ErrRecordNotFound) || configErr != nil || config != nil {
+				t.Fatalf("delete notification preceded atomic deletion: row=%+v err=%v config=%+v configErr=%v", stored, err, config, configErr)
+			}
+			return
+		}
+		if err != nil || configErr != nil || config == nil || config.Mode != model.ConnectionSOCKS5 {
+			t.Fatalf("create notification preceded route commit: row=%+v err=%v config=%+v configErr=%v", stored, err, config, configErr)
+		}
+	}})
+	missingJump := uint(999999)
+	if _, err := svc.Create(ctx, &model.Server{Name: "failed-notification", Host: "target", OwnerID: ownerID}, ConnectionMutation{Set: true, Config: &ConnectionInput{Mode: model.ConnectionSSHJump, JumpServerID: &missingJump}}); err == nil {
+		t.Fatal("expected nonexistent jump to reject creation")
+	}
+	if notifications != 0 {
+		t.Fatal("failed creation notified the monitor")
+	}
+	current = &model.Server{Name: "notified-proxy", Host: "target", Port: 22, OwnerID: ownerID}
+	if _, err := svc.Create(ctx, current, ConnectionMutation{Set: true, Config: &ConnectionInput{Mode: model.ConnectionSOCKS5, Host: "proxy", Port: 1080, AuthType: model.SOCKSAuthNone}}); err != nil {
+		t.Fatal(err)
+	}
+	if notifications != 1 {
+		t.Fatalf("successful creation sent %d notifications", notifications)
+	}
+	deleted = true
+	if err := svc.Delete(ctx, current.ID); err != nil {
+		t.Fatal(err)
+	}
+	if notifications != 2 {
+		t.Fatalf("successful deletion did not notify the monitor: %d", notifications)
+	}
+}
+
+func TestServerConnectionUsesConfiguredFreshness(t *testing.T) {
+	svc, _, db, ctx, _ := connectionServiceFixture(t)
+	srv, err := svc.Create(ctx, &model.Server{Name: "freshness", Host: "host", Port: 22, OwnerID: mw.GetUserClaims(ctx).UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Metric{ServerID: srv.ID, Time: time.Now().UTC().Add(-3 * time.Minute)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []struct {
+		threshold time.Duration
+		status    string
+	}{{5 * time.Minute, "online"}, {time.Minute, "offline"}} {
+		svc.SetFreshnessThreshold(check.threshold)
+		stored, err := svc.Get(ctx, srv.ID)
+		if err != nil || stored.Status != check.status || stored.Connection.Mode != model.ConnectionDirect {
+			t.Fatalf("detail ignored configured freshness or connection: %+v, %v", stored, err)
+		}
+		servers, err := svc.List(ctx)
+		if err != nil || len(servers) != 1 || servers[0].Status != check.status {
+			t.Fatalf("list ignored configured freshness: %+v, %v", servers, err)
+		}
+		filtered, err := svc.ListFiltered(ctx, []uint{srv.ID})
+		if err != nil || len(filtered) != 1 || filtered[0].Status != check.status {
+			t.Fatalf("filtered list ignored configured freshness: %+v, %v", filtered, err)
+		}
+		summaries, err := svc.ListSummaries(ctx)
+		if err != nil || len(summaries) != 1 || summaries[0].Status != check.status {
+			t.Fatalf("summary ignored configured freshness: %+v, %v", summaries, err)
+		}
+	}
+}
+
+func TestProxyHostKeyTrustKeepsPendingFingerprintAndAdminChecks(t *testing.T) {
+	svc, repo, db, ctx, pool := connectionServiceFixture(t)
+	srv, err := svc.Create(ctx, &model.Server{Name: "pending-proxy", Host: "target", Port: 22, OwnerID: mw.GetUserClaims(ctx).UserID}, ConnectionMutation{Set: true, Config: &ConnectionInput{Mode: model.ConnectionSOCKS5, Host: "proxy", Port: 1080, AuthType: model.SOCKSAuthNone}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, seen := []byte("original-key"), []byte("presented-key")
+	if err := db.Model(&model.Server{}).Where("id = ?", srv.ID).Updates(map[string]any{"host_key": pinned, "host_key_seen": seen, "host_key_mismatch_at": time.Now().UTC()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	apiKeyCtx := mw.WithPrincipal(context.Background(), usage.Principal{AuthType: "api_key", Role: "admin"})
+	metadataUpdate, err := svc.Update(apiKeyCtx, srv.ID, &model.Server{Name: "pending-proxy-renamed", Host: srv.Host, Port: srv.Port}, false)
+	if err != nil || !metadataUpdate.HostKeyMismatch || metadataUpdate.HostKeySeen == nil || !bytes.Equal(*metadataUpdate.HostKeySeen, seen) || metadataUpdate.ConnectionRevision != 1 {
+		t.Fatalf("metadata-only edit bypassed pending host-key state: %+v, %v", metadataUpdate, err)
+	}
+	_, err = svc.TrustHostKey(apiKeyCtx, srv.ID, sshpool.Fingerprint(seen))
+	expectConnectionReason(t, err, server.ReasonForbidden)
+	_, err = svc.TrustHostKey(ctx, srv.ID, sshpool.Fingerprint(pinned))
+	expectConnectionReason(t, err, server.ReasonHostKeyChanged)
+	before, err := repo.FindByID(ctx, srv.ID)
+	if err != nil || before.ConnectionRevision != 1 || before.HostKeyMismatchAt == nil || !bytes.Equal(*before.HostKey, pinned) {
+		t.Fatalf("rejected trust changed pending identity: %+v, %v", before, err)
+	}
+	trusted, err := svc.TrustHostKey(ctx, srv.ID, sshpool.Fingerprint(seen))
+	if err != nil || trusted.ConnectionRevision != 2 || trusted.HostKeyMismatchAt != nil || trusted.HostKeySeen != nil || trusted.HostKey == nil || !bytes.Equal(*trusted.HostKey, seen) {
+		t.Fatalf("verified trust did not atomically replace pending identity: %+v, %v", trusted, err)
+	}
+	if len(pool.ids) != 1 || pool.ids[0] != srv.ID {
+		t.Fatalf("trust failed to invalidate old cached identity: %v", pool.ids)
 	}
 }

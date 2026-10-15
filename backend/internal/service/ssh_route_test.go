@@ -328,3 +328,41 @@ func TestSSHServicePoolCloseCancelsPendingProxyHandshake(t *testing.T) {
 		t.Fatal("pending proxy socket remained open")
 	}
 }
+
+func TestTOFUAdoptsConfirmedIdentityForSequentialLeasePrimitives(t *testing.T) {
+	address, _ := startExecSSHServer(t, func(command string, ch ssh.Channel, _ <-chan struct{}) {
+		_, _ = io.WriteString(ch, command)
+		_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
+		_ = ch.Close()
+	})
+	svc, source := routeTestFixture(t, address, nil)
+	lease, err := svc.AcquireLease(context.Background(), 1, LeaseConsumerAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	for _, command := range []string{"probe", "verify"} {
+		result, err := lease.Exec(context.Background(), command, time.Second)
+		if err != nil {
+			t.Fatalf("TOFU lease %s = %v", command, err)
+		}
+		if result.Stdout != command {
+			t.Fatalf("primitive output = %q", result.Stdout)
+		}
+	}
+	if err := lease.releaseAndWait(); err != nil {
+		t.Fatal(err)
+	}
+	current, err := source.FindByID(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached, err := svc.pool.Get(1, serverFingerprint(current))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.pool.Release(1, cached)
+	if cached != nil {
+		t.Fatal("first-use TOFU transport was cached")
+	}
+}

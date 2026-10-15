@@ -17,6 +17,9 @@ var ErrClosed = errors.New("sshpool: pool closed")
 // ErrStaleLease means configuration changed while acquiring a connection.
 var ErrStaleLease = errors.New("sshpool: connection configuration changed")
 
+// ErrStaleGeneration is the Handle API name for the same stale acquisition.
+var ErrStaleGeneration = ErrStaleLease
+
 type Pool struct {
 	mu             sync.Mutex
 	conns          map[uint]*connEntry
@@ -31,6 +34,7 @@ type Pool struct {
 	probe          func(*ssh.Client) bool
 	leases         map[*Lease]struct{}
 	legacy         map[uint][]*Lease
+	quotaObserver  QuotaObserver
 }
 
 type connEntry struct {
@@ -57,6 +61,7 @@ type Lease struct {
 	cacheable   bool
 	legacy      bool
 	original    *ssh.Client
+	consumer    string
 }
 
 func NewPool(maxIdle time.Duration, maxConns int, slotTimeout time.Duration) *Pool {
@@ -82,7 +87,7 @@ func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint st
 	entry := p.conns[serverID]
 	var stale *ssh.Client
 	if entry == nil {
-		entry = &connEntry{fingerprint: fingerprint, sem: make(chan struct{}, p.maxConns)}
+		entry = &connEntry{fingerprint: fingerprint, generation: 1, sem: make(chan struct{}, p.maxConns)}
 		p.conns[serverID] = entry
 	} else if entry.fingerprint != fingerprint {
 		stale, entry.client = entry.client, nil
@@ -107,6 +112,12 @@ func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint st
 	case <-p.done:
 		err = ErrClosed
 	}
+	consumer := quotaConsumer(ctx)
+	if err == nil {
+		// Reserve accounting before a probe or dial can block, matching the
+		// actual slot lifetime rather than the service lease lifetime.
+		p.notifyQuota(consumer, 1)
+	}
 	p.mu.Lock()
 	entry.waiters--
 	if err != nil {
@@ -122,7 +133,7 @@ func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint st
 	}
 	if err != nil {
 		p.mu.Unlock()
-		<-entry.sem
+		p.releaseSlot(entry.sem, consumer)
 		return nil, err
 	}
 	client := entry.client
@@ -138,12 +149,12 @@ func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint st
 		case <-ctx.Done():
 			_ = client.Close()
 			<-probed
-			<-entry.sem
+			p.releaseSlot(entry.sem, consumer)
 			return nil, ctx.Err()
 		case <-p.done:
 			_ = client.Close()
 			<-probed
-			<-entry.sem
+			p.releaseSlot(entry.sem, consumer)
 			return nil, ErrClosed
 		}
 		if !healthy {
@@ -164,10 +175,10 @@ func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint st
 		if client != nil {
 			_ = client.Close()
 		}
-		<-entry.sem
+		p.releaseSlot(entry.sem, consumer)
 		return nil, err
 	}
-	lease := &Lease{Client: client, pool: p, entry: entry, serverID: serverID, generation: generation, fingerprint: fingerprint, cacheable: true}
+	lease := &Lease{Client: client, pool: p, entry: entry, serverID: serverID, generation: generation, fingerprint: fingerprint, cacheable: true, consumer: consumer}
 	p.leases[lease] = struct{}{}
 	p.mu.Unlock()
 	return lease, nil
@@ -185,6 +196,72 @@ func (l *Lease) Valid() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return !p.closed && p.conns[l.serverID] == l.entry && l.entry.generation == l.generation && l.entry.fingerprint == l.fingerprint
+}
+
+// Handle is the service primitive API name for the same owning lease.
+// Both APIs share generation checks, quota accounting and idempotent return.
+type Handle = Lease
+
+func (l *Lease) ServerID() uint { return l.serverID }
+func (l *Lease) Generation() uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.generation
+}
+
+// RebindFingerprint adopts an already verified, self-induced identity update
+// such as TOFU pinning. The caller must first verify the complete current
+// database snapshot and must never use this to adopt an external change.
+// Only the still-current original generation may advance itself; other leases
+// and waiters retain their old generation and become stale. This first-use
+// transport may finish its primitives but is conservatively not cached.
+func (l *Lease) RebindFingerprint(fingerprint string) bool {
+	l.mu.Lock()
+	if l.done {
+		l.mu.Unlock()
+		return false
+	}
+	p := l.pool
+	p.mu.Lock()
+	if p.closed || p.conns[l.serverID] != l.entry || l.entry.generation != l.generation || l.entry.fingerprint != l.fingerprint {
+		p.mu.Unlock()
+		l.mu.Unlock()
+		return false
+	}
+	var stale *ssh.Client
+	if fingerprint != l.fingerprint {
+		stale, l.entry.client = l.entry.client, nil
+		l.entry.fingerprint = fingerprint
+		l.entry.generation++
+		l.fingerprint, l.generation = fingerprint, l.entry.generation
+		l.cacheable = false
+	}
+	p.mu.Unlock()
+	l.mu.Unlock()
+	if stale != nil {
+		_ = stale.Close()
+	}
+	return true
+}
+
+// IsCurrent guards admission of every service primitive. An invalidation
+// retires a borrowed connection even when its current primitive may finish.
+func (p *Pool) IsCurrent(serverID uint, generation uint64) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	entry := p.conns[serverID]
+	return !p.closed && entry != nil && entry.generation == generation
+}
+
+func (p *Pool) ReleaseHandle(h *Handle) {
+	if h != nil {
+		h.Release()
+	}
+}
+func (p *Pool) DiscardHandle(h *Handle) {
+	if h != nil {
+		h.Discard()
+	}
 }
 
 // DialContext links an in-progress dial to both its request and pool
@@ -286,7 +363,7 @@ func (l *Lease) finish(discard bool) {
 	if client != nil {
 		_ = client.Close()
 	}
-	<-l.entry.sem
+	p.releaseSlot(l.entry.sem, l.consumer)
 }
 
 // Get and its return-by-serverID counterparts remain for legacy callers.
@@ -478,4 +555,54 @@ func keepAliveProbe(client *ssh.Client) bool {
 		<-done
 		return false
 	}
+}
+
+// QuotaObserver is notified whenever a borrow takes or returns a concurrency slot.
+// The report happens where the slot really changes hands - the reservation and the
+// release, including every failure path in between - so a borrow that is still
+// probing or dialing is already counted (P2-02).
+type QuotaObserver func(consumer string, delta int)
+
+// SetQuotaObserver installs the concurrency observer. It is called once per
+// reservation and once per release, always with the consumer label the borrow
+// declared (empty when it declared none).
+func (p *Pool) SetQuotaObserver(observer QuotaObserver) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.quotaObserver = observer
+}
+
+// SetQuotaObserver is nil-safe: a nil observer (or a nil pool) reports nothing.
+func (p *Pool) notifyQuota(consumer string, delta int) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	observer := p.quotaObserver
+	p.mu.Unlock()
+	if observer != nil {
+		observer(consumer, delta)
+	}
+}
+
+// releaseSlot returns a reserved concurrency slot and reports the release. Every
+// path that gives a slot back goes through here, so the accounting cannot drift.
+func (p *Pool) releaseSlot(sem chan struct{}, consumer string) {
+	<-sem
+	p.notifyQuota(consumer, -1)
+}
+
+// quotaConsumerKey carries the frozen consumer label of a borrow into the pool,
+// which owns the slot and therefore owns the measurement.
+type quotaConsumerKey struct{}
+
+// WithQuotaConsumer labels the next borrows made with this context.
+func WithQuotaConsumer(ctx context.Context, consumer string) context.Context {
+	return context.WithValue(ctx, quotaConsumerKey{}, consumer)
+}
+
+// quotaConsumer reports the label a borrow declared, if any.
+func quotaConsumer(ctx context.Context) string {
+	consumer, _ := ctx.Value(quotaConsumerKey{}).(string)
+	return consumer
 }

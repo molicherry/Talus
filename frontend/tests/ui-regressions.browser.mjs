@@ -1,6 +1,8 @@
 // Optional browser regression suite. Build first; all API traffic is mocked.
 // See tests/README.md for browser setup and environment overrides.
 import assert from "node:assert/strict";
+
+import { nameSuite, recordCase, writeReport } from "./lib/case-report.mjs";
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -10,6 +12,7 @@ import { fileURLToPath } from "node:url";
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright");
 const root = fileURLToPath(new URL("../", import.meta.url));
 const port = Number(process.env.UI_TEST_PORT ?? 4177);
+
 const base = `http://127.0.0.1:${port}`;
 const server = spawn(
   process.execPath,
@@ -135,16 +138,36 @@ async function fixture(browser, mobile = false) {
     if (path === "/api/v1/servers/summary" || path === "/api/v1/servers")
       return reply(state.servers);
     if (/\/servers\/\d+\/metrics$/.test(path)) {
-      const interval = { "1m": 60000, "5m": 300000, "15m": 900000, "1h": 3600000 }[
-        url.searchParams.get("interval")
-      ];
-      const first = Math.floor(Date.parse(url.searchParams.get("from")) / interval) * interval;
-      const last = Date.parse(url.searchParams.get("to"));
+      const stat = url.searchParams.get("stat") ?? "avg";
+      const fromMs = Date.parse(url.searchParams.get("from"));
+      const toMs = Date.parse(url.searchParams.get("to"));
+      const requestedRaw = url.searchParams.get("interval") ?? "auto";
+      // The backend resolves "auto" to the finest granularity the budget allows;
+      // the mock mirrors that so the chart aligns to the same grid.
+      const effective =
+        requestedRaw === "auto"
+          ? toMs - fromMs <= 3600000
+            ? "1m"
+            : toMs - fromMs <= 21600000
+              ? "5m"
+              : toMs - fromMs <= 86400000
+                ? "15m"
+                : toMs - fromMs <= 604800000
+                  ? "1h"
+                  : "6h"
+          : requestedRaw;
+      const requested = requestedRaw;
+      const interval =
+        { "1m": 60000, "5m": 300000, "15m": 900000, "1h": 3600000, "6h": 21600000 }[effective] ?? 60000;
+      const first = Math.floor(fromMs / interval) * interval;
+      const last = toMs;
       const points = [];
       for (let time = first, index = 0; time <= last; time += interval, index++) {
         if (index === 1) continue; // A gap must remain distinct from real zero.
         points.push({
           time: new Date(time).toISOString(),
+          // The newest sample inside the bucket, not the bucket start.
+          sampled_at: new Date(Math.min(time + interval - 1000, toMs)).toISOString(),
           cpu_percent: index === 0 ? 0 : 30,
           memory_percent: 25,
           disk_percent: 40,
@@ -156,9 +179,53 @@ async function fixture(browser, mobile = false) {
           net_sent_rate: 2000,
           disk_read_rate: 3000,
           disk_write_rate: 4000,
+          cpu_peak: index === 0 ? 0 : 60,
+          memory_peak: 50,
+          disk_peak: 80,
+          swap_peak: 0,
+          load_1_peak: 2,
+          load_5_peak: 2,
+          load_15_peak: 2,
+          net_recv_peak: 5000,
+          net_sent_peak: 6000,
+          disk_read_peak: 7000,
+          disk_write_peak: 8000,
+          net_recv_coverage: 60,
+          net_sent_coverage: 60,
+          disk_read_coverage: 60,
+          disk_write_coverage: 60,
+          // Per-bucket statistics: the window average is sum/count, never the mean
+          // of bucket means (F06).
+          cpu_sum: index === 0 ? 0 : 30,
+          cpu_count: 1,
+          memory_percent_sum: 25,
+          memory_percent_count: 1,
+          disk_percent_sum: 40,
+          disk_percent_count: 1,
+          swap_percent_sum: 0,
+          swap_percent_count: 1,
+          load1_sum: 1,
+          load1_count: 1,
+          load5_sum: 1,
+          load5_count: 1,
+          load15_sum: 1,
+          load15_count: 1,
         });
       }
-      return reply(points);
+      // The endpoint answers with the §4.2.1 envelope, never a bare array.
+      return reply({
+        server_id: 1,
+        from: url.searchParams.get("from"),
+        to: url.searchParams.get("to"),
+        requested_interval: requested,
+        actual_interval: effective,
+        coarsen_reason: "",
+        stat,
+        coverage: 0.75,
+        source: effective === "6h" ? "rollup" : "raw",
+        downsampled: effective === "6h",
+        points,
+      });
     }
     if (/\/servers\/\d+$/.test(path)) {
       if (method === "DELETE") {
@@ -184,7 +251,7 @@ async function fixture(browser, mobile = false) {
     return reply({ version: "dev" });
   });
   const page = await context.newPage();
-  page.setDefaultTimeout(5000);
+  page.setDefaultTimeout(15000);
   page.on("pageerror", (error) => state.errors.push(error.message));
   return { page, context, state, goto: (path) => page.goto(`${base}${path}`) };
 }
@@ -194,6 +261,7 @@ let passed = 0;
 let failed = 0;
 async function test(name, run, mobile = false) {
   if (process.env.UI_TEST_FILTER && !new RegExp(process.env.UI_TEST_FILTER).test(name)) return;
+  recordCase(name);
   browser = await chromium.launch({
     headless: true,
     executablePath: process.env.CHROMIUM_EXECUTABLE || undefined,
@@ -206,6 +274,7 @@ async function test(name, run, mobile = false) {
     passed++;
     console.log(`PASS ${name}`);
   } catch (error) {
+    recordCase(name, false);
     failed++;
     console.error(`FAIL ${name}: ${error.stack}`);
   } finally {
@@ -665,6 +734,248 @@ try {
     true,
   );
 
+  await test(
+    "monitoring exposes the range/axis/statistic vocabulary with a data table",
+    async ({ page, goto }) => {
+      await goto("/servers/1");
+
+      // Ranges: 15m and 30d are offered; 30d asks for the 6h granularity and is
+      // shown as downsampled instead of implying minute resolution.
+      const thirtyDays = page.getByRole("button", { name: "30d", exact: true });
+      await thirtyDays.click();
+      assert.equal(await thirtyDays.getAttribute("aria-pressed"), "true");
+      const notice = page.locator('p[role="status"]').filter({ hasText: /6h/ });
+      await notice.waitFor();
+
+      // Freshness comes from the real sample time, so a 6h bucket that started
+      // hours ago must not be reported as hours stale (R18).
+      const describedByLarge = await page.getByRole("slider").first().getAttribute("aria-describedby");
+      const largeDescription = await page.locator(`#${describedByLarge}`).textContent();
+      const freshness = /freshness (\d+)/.exec(largeDescription);
+      assert.ok(freshness, `no freshness in: ${largeDescription}`);
+      assert.ok(Number(freshness[1]) <= 5, `freshness = ${freshness[1]} minutes, want the latest sample`);
+
+      // The axis choice changes what the chart plots and how it is labelled.
+      await page.getByRole("button", { name: "Throughput", exact: true }).click();
+      assert.equal(
+        await page.getByRole("button", { name: "Throughput", exact: true }).getAttribute("aria-pressed"),
+        "true",
+      );
+
+      // The statistic is a page-level choice, and it applies to the cards as
+      // well as the chart: the mock reports 30% average but 60% peak for CPU.
+      const peak = page.getByRole("button", { name: "Peak", exact: true });
+      await peak.click();
+      assert.equal(await peak.getAttribute("aria-pressed"), "true");
+      await page.getByRole("slider").first().waitFor();
+      // The mock reports 30% average and 60% peak for CPU, so the card grid must
+      // show both: the peak as the current value and the average under Avg.
+      const cards = page.locator("div.grid", { hasText: "CPU Usage" }).first();
+      await cards.waitFor();
+      await page.waitForTimeout(150);
+      const cardText = await cards.textContent();
+      assert.match(cardText, /60\.0%/, `the card must follow the peak column: ${cardText}`);
+      // The average column stays the average of the average buckets (the mock's
+      // first bucket is a real zero), so it must not jump to the peak value.
+      assert.match(cardText, /29\.\d%/, `the average column must stay the average: ${cardText}`);
+
+      // Series must stay distinguishable without colour: more than one dash
+      // pattern has to be rendered.
+      const dashes = await page
+        .locator("svg line[stroke-dasharray]")
+        .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("stroke-dasharray")));
+      assert.ok(
+        new Set(dashes.filter(Boolean)).size >= 2,
+        `expected distinct dash patterns, got ${JSON.stringify(dashes)}`,
+      );
+
+      // The semantic data table carries the same numbers, and a missing bucket
+      // reads as a dash rather than as zero.
+      await page.getByRole("button", { name: "Show data table", exact: true }).click();
+      // The toggle's label flips, so assert the expanded state on the new name.
+      const opened = page.getByRole("button", { name: "Hide data table", exact: true });
+      assert.equal(await opened.getAttribute("aria-expanded"), "true");
+      const table = page.locator("#monitoring-data-table table");
+      await table.waitFor();
+      assert.equal(await table.locator("caption").count(), 1);
+      assert.ok((await table.locator("thead th").count()) >= 2);
+      const rows = await table.locator("tbody tr").count();
+      assert.ok(rows > 1, `expected multiple rows, got ${rows}`);
+      // Switch back to the percentage axis to assert the zero-versus-missing
+      // distinction on values that are not rates: bucket 0 is a real zero and
+      // bucket 1 was deliberately omitted from the mock.
+      await page.getByRole("button", { name: "Usage (%)", exact: true }).click();
+      await page.getByRole("button", { name: "Average", exact: true }).click();
+      await page.waitForTimeout(200);
+      const percentTable = page.locator("#monitoring-data-table table");
+      const firstRow = await percentTable.locator("tbody tr").nth(0).locator("td").allInnerTexts();
+      assert.ok(
+        firstRow.some((cell) => cell.trim() === "0.0%"),
+        `a real zero must stay visible as 0: ${JSON.stringify(firstRow)}`,
+      );
+      const secondRow = await percentTable.locator("tbody tr").nth(1).locator("td").allInnerTexts();
+      assert.ok(
+        secondRow.every((cell) => cell.trim() !== "0.0%"),
+        `a missing bucket must not become zero: ${JSON.stringify(secondRow)}`,
+      );
+    },
+  );
+
+  await test(
+    "monitoring controls stay reachable and touch-sized at 375px",
+    async ({ page, goto }) => {
+      await goto("/servers/1");
+      for (const name of ["15m", "Usage (%)", "Average"]) {
+        const control = page.getByRole("button", { name, exact: true });
+        await control.waitFor();
+        const box = await control.boundingBox();
+        assert.ok(box && box.height >= 44, `${name} is only ${box?.height}px tall, want >= 44px`);
+      }
+    },
+    true,
+  );
+
+  await test("series toggles, chart description and the paged data view are keyboard accessible", async ({
+    page,
+    goto,
+  }) => {
+    await goto("/servers/1");
+    const chart = page.getByRole("slider").first();
+    await chart.waitFor();
+
+    // The chart announces its own configuration (§4.5): range, granularity,
+    // statistic, unit and freshness, not just a usage hint.
+    const describedBy = await chart.getAttribute("aria-describedby");
+    const description = await page.locator(`#${describedBy}`).textContent();
+    for (const needle of ["granularity", "statistic", "unit", "freshness"]) {
+      assert.ok(description.includes(needle), `chart description lacks "${needle}": ${description}`);
+    }
+    assert.match(description, /granularity 1m/, description);
+
+    // Series toggles: a keyboard-operable group that exposes its pressed state
+    // and actually removes the series from the plot.
+    const toggle = page.getByRole("button", { name: "CPU", exact: true });
+    assert.equal(await toggle.getAttribute("aria-pressed"), "true");
+    const pathsBefore = await page.locator('svg path[fill="none"]').count();
+    await toggle.click();
+    assert.equal(await toggle.getAttribute("aria-pressed"), "false");
+    assert.equal(
+      await page.locator('svg path[fill="none"]').count(),
+      pathsBefore - 1,
+      "a hidden series must stop being drawn",
+    );
+    await toggle.focus();
+    await page.keyboard.press("Space");
+    assert.equal(await toggle.getAttribute("aria-pressed"), "true", "Space must toggle the series");
+    assert.equal(await page.locator('svg path[fill="none"]').count(), pathsBefore);
+
+    // The data view pages at 50 rows and names what it contains.
+    await page.getByRole("button", { name: "7d", exact: true }).click();
+    await page.getByRole("button", { name: "Show data table", exact: true }).click();
+    const table = page.locator("#monitoring-data-table table");
+    await table.waitFor();
+    const caption = await table.locator("caption").textContent();
+    for (const needle of ["granularity", "statistic", "unit"]) {
+      assert.ok(caption.includes(needle), `caption lacks "${needle}": ${caption}`);
+    }
+    const headers = await table.locator("thead th").allInnerTexts();
+    assert.ok(headers.includes("Coverage"), `coverage column missing: ${JSON.stringify(headers)}`);
+
+    const firstPageRows = await table.locator("tbody tr").count();
+    assert.equal(firstPageRows, 50, "the first page holds exactly 50 rows");
+    const firstCell = await table.locator("tbody tr").first().locator("td").last().innerText();
+    assert.match(firstCell, /%|sampled|no sample/, `coverage cell = ${firstCell}`);
+
+    const pager = page.getByRole("button", { name: "Next page", exact: true });
+    await pager.click();
+    await page.waitForTimeout(100);
+    assert.equal(await table.locator("tbody tr").count(), 50);
+    assert.match(await page.locator('span[aria-live="polite"]').first().innerText(), /Page 2 of \d+/);
+
+    // Paging to the end keeps the remainder and disables Next.
+    let guard = 0;
+    while (!(await pager.isDisabled()) && guard++ < 10) {
+      await pager.click();
+      await page.waitForTimeout(50);
+    }
+    const lastPageRows = await table.locator("tbody tr").count();
+    assert.ok(lastPageRows > 0 && lastPageRows <= 50, `last page rows = ${lastPageRows}`);
+    assert.equal(await pager.isDisabled(), true, "Next must be disabled on the last page");
+    assert.equal(
+      await page.getByRole("button", { name: "Previous page", exact: true }).isEnabled(),
+      true,
+    );
+  });
+
+  await test("a late response from the previous range never replaces the current one", async ({
+    page,
+    state,
+    goto,
+  }) => {
+    const pending = gate();
+    let held = false;
+    state.custom = async ({ path, url, reply }) => {
+      if (!/\/metrics$/.test(path)) return false;
+      // Hold the first (1h/1m) response until after the 6h request resolves.
+      if (!held && url.searchParams.get("interval") === "1m") {
+        held = true;
+        await pending.promise;
+        const interval = 60000;
+        const first = Math.floor(Date.parse(url.searchParams.get("from")) / interval) * interval;
+        const points = [];
+        for (let time = first; time <= Date.parse(url.searchParams.get("to")); time += interval) {
+          points.push({
+            time: new Date(time).toISOString(),
+            cpu_percent: 99,
+            memory_percent: 99,
+            disk_percent: 99,
+            swap_percent: 99,
+            load_1: 9,
+            load_5: 9,
+            load_15: 9,
+            net_recv_rate: 9,
+            net_sent_rate: 9,
+            disk_read_rate: 9,
+            disk_write_rate: 9,
+          });
+        }
+        await reply({
+          server_id: 1,
+          from: url.searchParams.get("from"),
+          to: url.searchParams.get("to"),
+          requested_interval: "1m",
+          actual_interval: "1m",
+          coarsen_reason: "",
+          stat: "avg",
+          coverage: 1,
+          source: "raw",
+          downsampled: false,
+          points,
+        });
+        return true;
+      }
+      return false;
+    };
+
+    await goto("/servers/1");
+    await page.getByRole("button", { name: "6h", exact: true }).click();
+    // Let the newer request settle, then release the stale one.
+    await page.getByRole("slider").first().waitFor();
+    pending.release();
+    await page.waitForTimeout(200);
+
+    // The chart must still describe the 6h window: the stale 99% series would
+    // produce value labels far above the mocked 30%.
+    await page.getByRole("button", { name: "Show data table", exact: true }).click();
+    const table = page.locator("#monitoring-data-table table");
+    await table.waitFor();
+    const cells = await table.locator("tbody tr").last().locator("td").allInnerTexts();
+    assert.ok(
+      cells.every((cell) => !cell.includes("99")),
+      `stale response leaked into the table: ${JSON.stringify(cells)}`,
+    );
+  });
+
   await test("chart keyboard navigation distinguishes gaps/zero and handles range changes", async ({
     page,
     goto,
@@ -674,7 +985,9 @@ try {
     await chart.focus();
     await page.keyboard.press("Home");
     assert.equal(await chart.getAttribute("aria-valuenow"), "0");
-    assert.match(await chart.getAttribute("aria-valuetext"), /CPU Usage: 0/);
+    // The chart now labels series with the axis vocabulary and formats the value
+    // with its unit, so the announcement carries the real zero explicitly.
+    assert.match(await chart.getAttribute("aria-valuetext"), /CPU: 0\.0%/);
     await capture(page, "monitoring-keyboard");
     await page.keyboard.press("ArrowRight");
     assert.equal(await chart.getAttribute("aria-valuenow"), "1");
@@ -685,10 +998,10 @@ try {
       await chart.getAttribute("aria-valuemax"),
     );
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "7 Days", exact: true }).click();
+    await page.getByRole("button", { name: "7d", exact: true }).click();
     await page.getByRole("slider").first().waitFor();
     assert.equal(
-      await page.getByRole("button", { name: "7 Days", exact: true }).getAttribute("aria-pressed"),
+      await page.getByRole("button", { name: "7d", exact: true }).getAttribute("aria-pressed"),
       "true",
     );
   });
@@ -754,7 +1067,8 @@ try {
         document.documentElement.classList.toggle("dark", dark);
         const style = getComputedStyle(document.documentElement);
         return Object.fromEntries(
-          ["link", "link-hover", "ring", "card", "background", "primary-subtle"].map((key) => [
+          ["link", "link-hover", "ring", "card", "background", "primary-subtle",
+           "chart-1", "chart-2", "chart-3", "chart-4"].map((key) => [
             key,
             style.getPropertyValue(`--color-${key}`).trim(),
           ]),
@@ -766,11 +1080,20 @@ try {
           `${colors.link} on ${colors[background]}`,
         );
       assert.ok(contrast(colors.ring, colors.background) >= 3);
+      // Informative chart graphics need 3:1 against the surface they are drawn on.
+      for (const key of ["chart-1", "chart-2", "chart-3", "chart-4"]) {
+        assert.ok(
+          contrast(colors[key], colors.card) >= 3,
+          `${key} ${colors[key]} on card ${colors.card} (${contrast(colors[key], colors.card).toFixed(2)}:1)`,
+        );
+      }
     }
   });
 } finally {
   if (browser) await browser.close();
   server.kill();
 }
+nameSuite("ui-regressions", import.meta.url);
+writeReport({ passed, failed });
 console.log(`UI regressions: ${passed} passed, ${failed} failed`);
 if (failed) process.exitCode = 1;

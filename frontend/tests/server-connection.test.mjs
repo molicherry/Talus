@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { nameSuite, recordCase, writeReport } from "./lib/case-report.mjs";
 import { ConnectionConfigSchema, ConnectionInputSchema, connectionDraft, connectionErrors, canKeepProxyPassword, connectionChanged, serializeConnection } from "./.compiled-connection-config.mjs";
 
 const saved = { mode: "socks5", host: "Proxy.EXAMPLE.test", port: 1080, auth_type: "username_password", username: "proxy-user", has_password: true };
@@ -31,3 +32,7 @@ assert.equal(ConnectionInputSchema.safeParse({ ...serializeConnection(draft), pa
 assert.deepEqual(ConnectionConfigSchema.parse({ ...saved, password: "must-not-enter-state", encrypted_password: "hidden", salt: "hidden" }), saved, "response schema strips unexpected secret fields");
 assert.deepEqual(ConnectionConfigSchema.parse({ mode: "ssh_jump" }), { mode: "ssh_jump" }, "API key summary does not require private detail fields");
 console.log("SSH connection drafts, secret preservation, mode serialization and read/write schemas passed.");
+
+nameSuite("server-connection", import.meta.url);
+recordCase("SSH connection drafts preserve proxy secrets and serialize route modes", true);
+writeReport();

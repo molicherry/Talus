@@ -12,7 +12,7 @@ import (
 
 func TestConnectionRouteRejectsAPIKeysAndLimitsFreshProbes(t *testing.T) {
 	jwtSvc := token.NewJWTService("test-secret", time.Hour)
-	tok, err := jwtSvc.GenerateToken(1, "admin", "admin")
+	tok, err := jwtSvc.GenerateToken(1, "admin", "admin", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

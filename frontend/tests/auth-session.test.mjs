@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { nameSuite, recordCase, writeReport } from "./lib/case-report.mjs";
 
 const values = new Map();
 const events = new Map();
@@ -92,3 +93,8 @@ assert.ok(notifications >= 7);
 stop();
 auth.clearAuthToken();
 console.log("auth-session: ALL PASS");
+
+nameSuite("auth-session", import.meta.url);
+// This suite is a single file-level verification, registered under its own name.
+recordCase("auth-session", true);
+writeReport();

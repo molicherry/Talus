@@ -130,7 +130,11 @@ try {
   await page.goto(`${base}/usage-logs?page_size=abc&preset=1h&from=2020-01-01T00:00:00Z&to=2020-01-02T00:00:00Z`); await detailButton(page, A).waitFor();
   assert.equal(state.lists[0].searchParams.get('page_size'), '25');
   assert.equal(await page.getByLabel('Rows per page', {exact: true}).inputValue(), '25');
-  const initialTo = Date.parse(state.lists[0].searchParams.get('to')); assert.ok(Math.abs(initialTo - time.getTime()) < 1000);
+  // Installation keeps ticking while the production bundle loads. The range
+  // must resolve during entry, without assuming navigation takes under 1 second.
+  const initialTo = Date.parse(state.lists[0].searchParams.get('to'));
+  const readyTime = await page.evaluate(() => Date.now());
+  assert.ok(initialTo >= time.getTime() && initialTo <= readyTime, `entry range ${initialTo} outside ${time.getTime()}..${readyTime}`);
   await page.clock.fastForward(60000);
   await page.getByRole('button', {name: 'Next page', exact: true}).click(); await detailButton(page, B).waitFor();
   assert.equal(state.lists[1].searchParams.get('to'), state.lists[0].searchParams.get('to'));

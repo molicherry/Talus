@@ -246,3 +246,24 @@ func TestWriterKeepsFirstWriteError(t *testing.T) {
 		t.Fatal("write error lost")
 	}
 }
+
+type failedFlushWriter struct {
+	plainResponse
+	err error
+}
+
+func (w *failedFlushWriter) Flush()            { _ = w.FlushError() }
+func (w *failedFlushWriter) FlushError() error { return w.err }
+
+func TestResponseControllerPreservesFlushErrorThroughCaptureLayers(t *testing.T) {
+	failure := errors.New("downstream flush failed")
+	original := &failedFlushWriter{err: failure}
+	inner, innerCapture := WrapResponseWriter(original)
+	outer, outerCapture := WrapResponseWriter(inner)
+	if err := http.NewResponseController(outer).Flush(); !errors.Is(err, failure) {
+		t.Fatalf("flush error was hidden by middleware: %v", err)
+	}
+	if !errors.Is(innerCapture.WriteError(), failure) || !errors.Is(outerCapture.WriteError(), failure) {
+		t.Fatal("flush failure was not recorded by each capture layer")
+	}
+}

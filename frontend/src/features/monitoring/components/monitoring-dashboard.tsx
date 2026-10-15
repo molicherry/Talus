@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 
 import { translateApiError } from "../../../lib/api-error";
 import { Card } from "../../../components/ui/card";
@@ -10,10 +10,27 @@ import {
   metricLevelText,
   percentLevel,
 } from "../../../lib/metric-level";
+import { weightedMean } from "../lib/chart-config";
 import { cn } from "../../../lib/utils";
 import type { TimeRange } from "../../../types/metrics";
 import { useMetrics } from "../hooks/use-metrics";
 import { buildAlignedSeries } from "../lib/series";
+import {
+  AXIS_SERIES,
+  alignmentFields,
+  downsampleNotice,
+  formatBytesPerSecond as formatBytesPerSecondSI,
+  formatCoverage,
+  seriesForStat,
+  seriesLabelKey,
+  seriesPattern,
+  axisUnit,
+  chartDescription,
+  coverageCell,
+  dataTableCaption,
+  pageSlice,
+} from "../lib/chart-config";
+import type { AxisMode, MetricStat } from "../../../types/metric-axes";
 import { EmptyState } from "./empty-state";
 import { ErrorState } from "./error-state";
 import { LoadingSkeleton } from "./loading-skeleton";
@@ -31,15 +48,34 @@ interface MonitoringDashboardProps {
  */
 type Nullable = number | null;
 
+// Chart series use the dedicated chart palette: those tokens are verified to
+// reach 3:1 against the card background in both themes (R19), while the UI accent
+// blue does not on light backgrounds.
 const SERIES_COLOR = {
-  cpu: "var(--color-primary)",
-  memory: "var(--color-success)",
-  disk: "var(--color-warning)",
-  rx: "var(--color-primary)",
-  tx: "var(--color-success)",
-  read: "var(--color-primary)",
-  write: "var(--color-success)",
+  cpu: "var(--color-chart-1)",
+  memory: "var(--color-chart-2)",
+  disk: "var(--color-chart-3)",
+  swap: "var(--color-chart-4)",
+  rx: "var(--color-chart-1)",
+  tx: "var(--color-chart-2)",
+  read: "var(--color-chart-1)",
+  write: "var(--color-chart-2)",
 } as const;
+
+/** Chart colour per axis series label (colour is secondary to the pattern). */
+const AXIS_COLOR: Record<string, string> = {
+  cpu: SERIES_COLOR.cpu,
+  memory: SERIES_COLOR.memory,
+  disk: SERIES_COLOR.disk,
+  swap: SERIES_COLOR.swap,
+  net_recv: SERIES_COLOR.rx,
+  net_sent: SERIES_COLOR.tx,
+  disk_read: SERIES_COLOR.read,
+  disk_write: SERIES_COLOR.write,
+  load_1: "var(--color-chart-1)",
+  load_5: "var(--color-chart-2)",
+  load_15: "var(--color-chart-3)",
+};
 
 // Fields aligned onto the bucket grid for the cards and charts below.
 const SERIES_FIELDS = [
@@ -65,13 +101,6 @@ function latestOf(values: Nullable[]): number | null {
   return null;
 }
 
-/** Average over collected samples only — missing buckets are excluded. */
-function avgOf(values: Nullable[]): number | null {
-  const present = values.filter((v): v is number => v !== null);
-  if (present.length === 0) return null;
-  return present.reduce((acc, v) => acc + v, 0) / present.length;
-}
-
 function maxOf(values: Nullable[]): number | null {
   const present = values.filter((v): v is number => v !== null);
   if (present.length === 0) return null;
@@ -95,7 +124,7 @@ function makeTimeFormatter(range: TimeRange): (iso: string) => string {
   return (iso: string) => {
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return iso;
-    if (range === "7d") return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    if (range === "7d" || range === "30d") return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
     return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
   };
 }
@@ -107,7 +136,7 @@ interface MetricStatProps {
   max: Nullable;
 }
 
-function MetricStat({ label, value, avg, max }: MetricStatProps) {
+function MetricStatCard({ label, value, avg, max }: MetricStatProps) {
   const { t } = useTranslation();
   const level = percentLevel(value);
   return (
@@ -234,10 +263,62 @@ function LoadAvgCard({ load1, load5, load15 }: LoadAvgCardProps) {
 export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
   const { t } = useTranslation();
   const [timeRange, setTimeRange] = useState<TimeRange>("1h");
+  // The page shares one range, one axis and one statistic: the cards,
+  // the charts and the data table describe the same numbers.
+  const [axisMode, setAxisMode] = useState<AxisMode>("percent");
+  const [stat, setStat] = useState<MetricStat>("avg");
+  const [showDataTable, setShowDataTable] = useState(false);
+  const [tablePage, setTablePage] = useState(1);
   const { data, isLoading, isError, error, isRefetching, refetch } = useMetrics(
     serverId,
     timeRange,
+    { stat },
   );
+
+  // Align every column the page can render — all three axes and both statistics,
+  // including coverage — because the cards and the network/disk side charts are
+  // always visible. Restricting this to the selected axis left them empty when the
+  // statistic changed on another axis (R15).
+  const alignFields = useMemo(
+    () =>
+      Array.from(
+        new Set<string>([
+          ...SERIES_FIELDS,
+          ...alignmentFields("percent"),
+          ...alignmentFields("throughput"),
+          ...alignmentFields("load"),
+        ]),
+      ),
+    [],
+  );
+
+  // Axis presentation: a percentage axis is fixed at 100, the others scale to
+  // the data and carry their own unit.
+  const axisConfig = useMemo(() => {
+    switch (axisMode) {
+      case "percent":
+        return {
+          yMax: 100 as number | null,
+          formatValue: (value: number) => formatPercent(value, 1),
+          formatAxis: (value: number) => `${value.toFixed(0)}%`,
+        };
+      case "throughput":
+        return {
+          yMax: null as number | null,
+          formatValue: (value: number) => `${formatBytesPerSecondSI(value)}/s`,
+          formatAxis: (value: number) => formatBytesPerSecondSI(value),
+        };
+      default:
+        return {
+          yMax: null as number | null,
+          formatValue: (value: number) => value.toFixed(2),
+          formatAxis: (value: number) => value.toFixed(1),
+        };
+    }
+  }, [axisMode]);
+
+  const notice = downsampleNotice(data?.meta);
+  const coverage = formatCoverage(data?.meta?.coverage);
 
   const formatTime = makeTimeFormatter(timeRange);
   // `data.points`/`data.window` keep a stable reference between renders, so the
@@ -250,13 +331,13 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
   const aligned = useMemo(
     () =>
       window
-        ? buildAlignedSeries(points ?? [], window, SERIES_FIELDS)
+        ? buildAlignedSeries(points ?? [], window, alignFields)
         : {
             times: [] as string[],
             series: {} as Record<string, Nullable[]>,
             lastSampleTime: null,
           },
-    [points, window],
+    [points, window, alignFields],
   );
 
   const times = aligned.times;
@@ -274,6 +355,77 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
   const load1 = aligned.series.load_1 ?? [];
   const load5 = aligned.series.load_5 ?? [];
   const load15 = aligned.series.load_15 ?? [];
+  // The sampled maxima are separate columns; the page-level statistic
+  // decides which column every card and side chart reads (R15).
+  const cpuPeak = aligned.series.cpu_peak ?? [];
+  const memoryPeak = aligned.series.memory_peak ?? [];
+  const diskPeak = aligned.series.disk_peak ?? [];
+  const swapPeak = aligned.series.swap_peak ?? [];
+  const netRecvPeak = aligned.series.net_recv_peak ?? [];
+  const netSentPeak = aligned.series.net_sent_peak ?? [];
+  const diskReadPeak = aligned.series.disk_read_peak ?? [];
+  const diskWritePeak = aligned.series.disk_write_peak ?? [];
+  const load1Peak = aligned.series.load_1_peak ?? [];
+  const load5Peak = aligned.series.load_5_peak ?? [];
+  const load15Peak = aligned.series.load_15_peak ?? [];
+  const pick = (peak: Nullable[], average: Nullable[]) => (stat === "peak" ? peak : average);
+
+  // Chart series for the selected axis and statistic, each distinguished by its
+  // dash pattern and marker as well as its colour.
+  const chartSeries = useMemo(() => {
+    const fields = seriesForStat(axisMode, stat);
+    return AXIS_SERIES[axisMode].map((axis, index) => {
+      const pattern = seriesPattern(index);
+      return {
+        key: axis.label,
+        label: t(seriesLabelKey(axisMode, index)),
+        color: AXIS_COLOR[axis.label] ?? SERIES_COLOR.cpu,
+        dash: pattern.dash,
+        marker: pattern.marker as "circle" | "square" | "triangle" | "diamond",
+        values: aligned.series[fields[index]] ?? [],
+      };
+    });
+  }, [aligned, axisMode, stat, t]);
+
+  // Screen-reader description of the chart and the caption of
+  // the equivalent data view.
+  const description = useMemo(() => {
+    const built = chartDescription({
+      title: t(`metrics.axis.${axisMode}`),
+      from: data?.window.from ?? "",
+      to: data?.window.to ?? "",
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      actualInterval: data?.meta?.actualInterval ?? "",
+      stat,
+      unit: axisUnit(axisMode),
+      lastSampleAt: aligned.lastSampleTime,
+    });
+    return t(built.key, built.params);
+  }, [aligned.lastSampleTime, axisMode, data?.meta?.actualInterval, data?.window.from, data?.window.to, stat, t]);
+
+  const caption = useMemo(() => {
+    const built = dataTableCaption({
+      title: t(`metrics.axis.${axisMode}`),
+      from: data?.window.from ?? "",
+      to: data?.window.to ?? "",
+      interval: data?.meta?.actualInterval ?? "",
+      stat,
+      unit: axisUnit(axisMode),
+    });
+    return t(built.key, built.params);
+  }, [axisMode, data?.meta?.actualInterval, data?.window.from, data?.window.to, stat, t]);
+
+  // Only a configuration change (range, axis, statistic) returns the data view to
+  // its first page: an automatic refresh must not move the reader (R17). The page
+  // is clamped below when the row count shrinks.
+  useEffect(() => {
+    setTablePage(1);
+  }, [axisMode, stat, timeRange]);
+
+  const tableRows = pageSlice(times.length, tablePage);
+  useEffect(() => {
+    if (tableRows.page !== tablePage) setTablePage(tableRows.page);
+  }, [tableRows.page, tablePage]);
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -286,6 +438,64 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
           </p>
         </div>
         <TimeRangeSelector selected={timeRange} onChange={setTimeRange} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div
+          role="group"
+          aria-label={t("metrics.axisLabel")}
+          className="inline-flex rounded-lg border border-border bg-muted/60 p-0.5"
+        >
+          {(["percent", "throughput", "load"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={axisMode === mode}
+              onClick={() => setAxisMode(mode)}
+              className={cn(
+                "touch-target rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                axisMode === mode
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+              )}
+            >
+              {t(`metrics.axis.${mode}`)}
+            </button>
+          ))}
+        </div>
+
+        <div
+          role="group"
+          aria-label={t("metrics.statLabel")}
+          className="inline-flex rounded-lg border border-border bg-muted/60 p-0.5"
+        >
+          {(["avg", "peak"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={stat === value}
+              onClick={() => setStat(value)}
+              className={cn(
+                "touch-target rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                stat === value
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+              )}
+            >
+              {t(`metrics.stat.${value}`)}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          aria-expanded={showDataTable}
+          aria-controls="monitoring-data-table"
+          onClick={() => setShowDataTable((open) => !open)}
+          className="touch-target rounded-lg border border-border bg-muted/60 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        >
+          {showDataTable ? t("metrics.hideDataTable") : t("metrics.showDataTable")}
+        </button>
       </div>
 
       {isLoading && <LoadingSkeleton />}
@@ -304,55 +514,143 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
       {data && (points?.length ?? 0) > 0 && (
         <>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <MetricStat
+            <MetricStatCard
               label={t("monitoring.cpuUsage")}
-              value={latestOf(cpu)}
-              avg={avgOf(cpu)}
-              max={maxOf(cpu)}
+              value={latestOf(pick(cpuPeak, cpu))}
+              avg={weightedMean(points ?? [], "cpu_sum", "cpu_count", "cpu_percent")}
+              max={maxOf(cpuPeak)}
             />
-            <MetricStat
+            <MetricStatCard
               label={t("monitoring.memoryUsage")}
-              value={latestOf(memory)}
-              avg={avgOf(memory)}
-              max={maxOf(memory)}
+              value={latestOf(pick(memoryPeak, memory))}
+              avg={weightedMean(points ?? [], "memory_percent_sum", "memory_percent_count", "memory_percent")}
+              max={maxOf(memoryPeak)}
             />
-            <MetricStat
+            <MetricStatCard
               label={t("monitoring.diskUsage")}
-              value={latestOf(disk)}
-              avg={avgOf(disk)}
-              max={maxOf(disk)}
+              value={latestOf(pick(diskPeak, disk))}
+              avg={weightedMean(points ?? [], "disk_percent_sum", "disk_percent_count", "disk_percent")}
+              max={maxOf(diskPeak)}
             />
-            <MetricStat
+            <MetricStatCard
               label={t("monitoring.swapUsage")}
-              value={latestOf(swap)}
-              avg={avgOf(swap)}
-              max={maxOf(swap)}
+              value={latestOf(pick(swapPeak, swap))}
+              avg={weightedMean(points ?? [], "swap_percent_sum", "swap_percent_count", "swap_percent")}
+              max={maxOf(swapPeak)}
             />
           </div>
 
           <Card className="p-5">
-            <h3 className="text-sm font-semibold text-foreground">{t("monitoring.usageTrend")}</h3>
+            <h3 className="text-sm font-semibold text-foreground">
+              {t(`metrics.axis.${axisMode}`)}
+            </h3>
             <TrendChart
               className="mt-3"
               height={240}
               times={times}
-              yMax={100}
+              yMax={axisConfig.yMax}
               formatTime={formatTime}
-              formatValue={(v) => formatPercent(v, 1)}
-              formatAxis={(v) => `${v.toFixed(0)}%`}
-              ariaLabel={t("monitoring.usageTrend")}
-              series={[
-                { key: "cpu", label: t("monitoring.cpuUsage"), color: SERIES_COLOR.cpu, values: cpu },
-                {
-                  key: "memory",
-                  label: t("monitoring.memoryUsage"),
-                  color: SERIES_COLOR.memory,
-                  values: memory,
-                },
-                { key: "disk", label: t("monitoring.diskUsage"), color: SERIES_COLOR.disk, values: disk },
-              ]}
+              formatValue={axisConfig.formatValue}
+              formatAxis={axisConfig.formatAxis}
+              ariaLabel={t(`metrics.axis.${axisMode}`)}
+              description={description}
+              series={chartSeries}
             />
           </Card>
+
+          {(notice || coverage) && (
+            <p role="status" className="text-xs text-muted-foreground">
+              {notice ? t(notice.key, notice.params) : null}
+              {notice && coverage ? " · " : null}
+              {coverage ? t("metrics.coverage", { percent: coverage }) : null}
+            </p>
+          )}
+
+          {showDataTable && (
+            <Card className="p-5">
+              <div id="monitoring-data-table" className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <caption className="pb-2 text-left text-muted-foreground">{caption}</caption>
+                  <thead>
+                    <tr className="text-left text-muted-foreground">
+                      <th scope="col" className="py-1 pr-3 font-medium">
+                        {t("metrics.time")}
+                      </th>
+                      {chartSeries.map((series) => (
+                        <th key={series.key} scope="col" className="py-1 pr-3 font-medium">
+                          {series.label}
+                        </th>
+                      ))}
+                      <th scope="col" className="py-1 pr-3 font-medium">
+                        {t("metrics.dataTable.coverage")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {times.slice(tableRows.start, tableRows.end).map((time, offset) => {
+                      const index = tableRows.start + offset;
+                      const rowValues = chartSeries.map((series) => series.values[index] ?? null);
+                      const coverages = AXIS_SERIES[axisMode]
+                        .map((axis) =>
+                          axis.coverageField ? (aligned.series[axis.coverageField]?.[index] ?? null) : null,
+                        )
+                        .filter((value): value is number => value !== null);
+                      const coverage = coverageCell(
+                        axisMode,
+                        rowValues,
+                        coverages.length > 0 ? Math.max(...coverages) : null,
+                        window?.intervalMs ?? 0,
+                      );
+                      return (
+                        <tr key={time} className="border-t border-border/60">
+                          <th scope="row" className="py-1 pr-3 font-normal text-muted-foreground">
+                            {formatTime(time)}
+                          </th>
+                          {chartSeries.map((series, seriesIndex) => {
+                            const value = rowValues[seriesIndex];
+                            return (
+                              <td key={series.key} className="py-1 pr-3 font-mono tabular-nums">
+                                {value === null || value === undefined || !Number.isFinite(value)
+                                  ? METRIC_MISSING_LABEL
+                                  : axisConfig.formatValue(value)}
+                              </td>
+                            );
+                          })}
+                          <td className="py-1 pr-3 text-muted-foreground">
+                            {t(coverage.key, coverage.params)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span aria-live="polite">
+                  {t("metrics.dataTable.page", { page: tableRows.page, pages: tableRows.pages })}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTablePage((page) => Math.max(1, page - 1))}
+                    disabled={tableRows.page <= 1}
+                    className="touch-target rounded-md border border-border px-3 py-1.5 font-medium transition-colors hover:bg-secondary disabled:opacity-50"
+                  >
+                    {t("metrics.dataTable.prev")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTablePage((page) => Math.min(tableRows.pages, page + 1))}
+                    disabled={tableRows.page >= tableRows.pages}
+                    className="touch-target rounded-md border border-border px-3 py-1.5 font-medium transition-colors hover:bg-secondary disabled:opacity-50"
+                  >
+                    {t("metrics.dataTable.next")}
+                  </button>
+                </div>
+              </div>
+            </Card>
+          )}
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <ThroughputCard
@@ -360,30 +658,30 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
               times={times}
               formatTime={formatTime}
               primaryLabel={t("monitoring.rx")}
-              primaryValue={latestOf(netRecv)}
-              primaryValues={netRecv}
+              primaryValue={latestOf(pick(netRecvPeak, netRecv))}
+              primaryValues={pick(netRecvPeak, netRecv)}
               secondaryLabel={t("monitoring.tx")}
-              secondaryValue={latestOf(netSent)}
-              secondaryValues={netSent}
+              secondaryValue={latestOf(pick(netSentPeak, netSent))}
+              secondaryValues={pick(netSentPeak, netSent)}
             />
             <ThroughputCard
               title={t("monitoring.diskIo")}
               times={times}
               formatTime={formatTime}
               primaryLabel={t("monitoring.read")}
-              primaryValue={latestOf(diskRead)}
-              primaryValues={diskRead}
+              primaryValue={latestOf(pick(diskReadPeak, diskRead))}
+              primaryValues={pick(diskReadPeak, diskRead)}
               secondaryLabel={t("monitoring.write")}
-              secondaryValue={latestOf(diskWrite)}
-              secondaryValues={diskWrite}
+              secondaryValue={latestOf(pick(diskWritePeak, diskWrite))}
+              secondaryValues={pick(diskWritePeak, diskWrite)}
             />
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <LoadAvgCard
-              load1={latestOf(load1)}
-              load5={latestOf(load5)}
-              load15={latestOf(load15)}
+              load1={latestOf(pick(load1Peak, load1))}
+              load5={latestOf(pick(load5Peak, load5))}
+              load15={latestOf(pick(load15Peak, load15))}
             />
           </div>
 

@@ -98,7 +98,7 @@ func (s *SSHService) readRoute(ctx context.Context, id uint) (*sshRouteSnapshot,
 		return nil, routeFailure("ssh_authentication_failed", "target_auth", "target")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, context.Cause(ctx)
 	}
 	return snap, nil
 }
@@ -211,6 +211,19 @@ func (s *SSHService) dialRoute(ctx context.Context, snap *sshRouteSnapshot) (*ss
 	return sshpool.DialRouteContext(ctx, route, s.sshDialTimeout)
 }
 
+// AcquireLease preserves the target-pinned operation contract used by Exec,
+// terminals and multi-step agent deployment while sharing proxy route validation.
+func (s *SSHService) AcquireLease(ctx context.Context, id uint, consumer ...LeaseConsumer) (*sshLease, error) {
+	h, err := s.getLease(sshpool.WithQuotaConsumer(ctx, string(leaseConsumer(consumer))), id, false)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
+		}
+		return nil, err
+	}
+	return newSSHLease(s, h), nil
+}
+
 // GetLease returns ownership of one concurrency slot and the entire SSH chain.
 // Every successful acquisition has exactly one idempotent Release or Discard.
 func (s *SSHService) GetLease(ctx context.Context, id uint) (*sshpool.Lease, error) {
@@ -230,7 +243,7 @@ func (s *SSHService) GetClient(ctx context.Context, id uint) (*ssh.Client, error
 func (s *SSHService) getLease(ctx context.Context, id uint, fresh bool) (*sshpool.Lease, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, context.Cause(ctx)
 		}
 		snap, err := s.readRoute(ctx, id)
 		if err != nil {
@@ -268,7 +281,7 @@ func (s *SSHService) getLease(ctx context.Context, id uint, fresh bool) (*sshpoo
 				}
 				lease.Discard()
 				if ctx.Err() != nil {
-					return nil, ctx.Err()
+					return nil, context.Cause(ctx)
 				}
 				if errors.Is(dialErr, context.Canceled) {
 					return nil, sshpool.ErrClosed
@@ -279,7 +292,7 @@ func (s *SSHService) getLease(ctx context.Context, id uint, fresh bool) (*sshpoo
 		}
 		if ctx.Err() != nil {
 			lease.Discard()
-			return nil, ctx.Err()
+			return nil, context.Cause(ctx)
 		}
 		// The slot wait, cache probe and handshake can all span a configuration
 		// update. Re-read before committing identity or opening a business session.
@@ -287,7 +300,7 @@ func (s *SSHService) getLease(ctx context.Context, id uint, fresh bool) (*sshpoo
 		if readErr != nil || current.fingerprint() != snap.fingerprint() || !lease.Valid() {
 			lease.Discard()
 			if ctx.Err() != nil {
-				return nil, ctx.Err()
+				return nil, context.Cause(ctx)
 			}
 			if readErr != nil && !errors.Is(readErr, server.ErrNotFound) {
 				return nil, readErr
@@ -306,15 +319,13 @@ func (s *SSHService) getLease(ctx context.Context, id uint, fresh bool) (*sshpoo
 		if readErr != nil || current.fingerprint() != snap.fingerprint() || !lease.Valid() {
 			lease.Discard()
 			if ctx.Err() != nil {
-				return nil, ctx.Err()
+				return nil, context.Cause(ctx)
 			}
 			continue
 		}
-		if changed {
-			s.invalidateRouteIdentity(ctx, id)
-			if snap.jump != nil {
-				s.invalidateRouteIdentity(ctx, snap.jump.ID)
-			}
+		if changed && !lease.RebindFingerprint(snap.fingerprint()) {
+			lease.Discard()
+			continue
 		}
 		return lease, nil
 	}

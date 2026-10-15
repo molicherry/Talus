@@ -29,16 +29,19 @@ export function TerminalPage() {
     );
   }
 
+  // The terminal toolbar is the single header (REQ-09 "信息与状态"): it carries the
+  // server name, the address, the connection state and the controls, so the page
+  // adds no duplicate title above it.
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-shrink-0 px-1 py-2">
-        <h1 className="text-xl font-semibold text-foreground">{t("terminal.title", { name: server.name })}</h1>
-        <p className="text-xs text-muted-foreground">
-          {server.host}:{server.port}
-        </p>
-      </div>
-      <div className="mt-2 flex-1 overflow-hidden rounded-2xl border border-border bg-[#0d1117]">
-        <TerminalView serverId={serverId} />
+    <div className="flex h-full min-h-0 flex-col overflow-x-hidden">
+      <h1 className="sr-only">{t("terminal.title", { name: server.name })}</h1>
+      <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-border bg-[#0d1117]">
+        <TerminalView
+          serverId={serverId}
+          serverName={server.name}
+          host={server.host}
+          port={server.port}
+        />
       </div>
     </div>
   );

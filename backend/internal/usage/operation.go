@@ -417,9 +417,12 @@ func safeMethod(s string) string {
 }
 func normalizeMetadata(key string, value any) (any, bool) {
 	switch key {
-	case "response_write_failed":
+	case "response_write_failed", "cleanup_pending":
 		v, ok := value.(bool)
 		return v, ok
+	case "cleanup_reason":
+		v, ok := value.(string)
+		return v, ok && v == "terminal_cleanup_incomplete"
 	case "handshake_at", "authenticated_at", "ready_at", "closed_at":
 		var t time.Time
 		switch v := value.(type) {
@@ -506,6 +509,10 @@ func safeReason(reason string) string {
 	case "terminal_permission_denied", "terminal_input_failed", "terminal_output_failed", "terminal_resize_failed":
 		return reason
 	case "invalid_connection_config", "connection_config_changed", "connection_in_use", "proxy_connection_failed", "proxy_auth_failed", "proxy_connect_rejected", "jump_forward_failed":
+		return reason
+	case "relay_budget_exceeded", "relay_idle_timeout":
+		return reason
+	case "session_revoked", "revoked", "terminal_cleanup_incomplete":
 		return reason
 	}
 	return "internal_error"

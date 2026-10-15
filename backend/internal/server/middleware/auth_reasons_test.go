@@ -20,7 +20,7 @@ import (
 // rest of the API and the UI translations use.
 func TestAuthMiddlewareReasons(t *testing.T) {
 	jwtSvc := token.NewJWTService("test-secret", time.Hour)
-	validToken, err := jwtSvc.GenerateToken(1, "admin", "admin")
+	validToken, err := jwtSvc.GenerateToken(1, "admin", "admin", 0)
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestAuthMiddlewareReasons(t *testing.T) {
 	})
 
 	handler := func(next middleware.APIKeyValidator) http.Handler {
-		return middleware.Auth(jwtSvc, next)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		return middleware.Auth(jwtSvc, next, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 	}
@@ -99,7 +99,7 @@ func TestWebSocketUpgradeOnlyBypassesAuthForTerminal(t *testing.T) {
 	})
 
 	reached := false
-	handler := middleware.Auth(jwtSvc, keyValidator)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := middleware.Auth(jwtSvc, keyValidator, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		reached = true
 		w.WriteHeader(http.StatusOK)
 	}))

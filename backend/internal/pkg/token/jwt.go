@@ -13,6 +13,9 @@ type Claims struct {
 	Username  string `json:"username"`
 	Role      string `json:"role"`
 	ServerIDs []uint `json:"server_ids,omitempty"`
+	// TokenVersion mirrors users.token_version. A pointer distinguishes a
+	// legacy token without the claim (nil, always rejected) from version 0.
+	TokenVersion *int64 `json:"tv,omitempty"`
 }
 
 // JWTService signs and validates JSON Web Tokens using HMAC-SHA256.
@@ -30,17 +33,19 @@ func NewJWTService(secret string, expiry time.Duration) *JWTService {
 }
 
 // GenerateToken creates a signed JWT for the given user.
-func (s *JWTService) GenerateToken(userID uint, username, role string) (string, error) {
+func (s *JWTService) GenerateToken(userID uint, username, role string, tokenVersion int64) (string, error) {
 	now := time.Now()
+	tv := tokenVersion
 	claims := &Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.expiryTime)),
 			IssuedAt:  jwt.NewNumericDate(now),
 			Issuer:    "vpsmanager",
 		},
-		UserID:   userID,
-		Username: username,
-		Role:     role,
+		UserID:       userID,
+		Username:     username,
+		Role:         role,
+		TokenVersion: &tv,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

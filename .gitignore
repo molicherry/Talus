@@ -15,6 +15,7 @@ frontend/node_modules/
 # Build output
 backend/bin/
 backend/server
+backend/agent
 frontend/dist/
 frontend/dist-ssr/
 
@@ -51,3 +52,6 @@ pgdata/
 # Python
 __pycache__/
 *.pyc
+
+# Unified test run records (runtime artifacts)
+tests/.artifacts/

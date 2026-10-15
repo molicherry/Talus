@@ -21,6 +21,7 @@ const (
 	ReasonInvalidCredentials      = "invalid_credentials"
 	ReasonWrongCurrentPassword    = "current_password_incorrect"
 	ReasonForbidden               = "forbidden"
+	ReasonUnavailable             = "unavailable"
 	ReasonNotFound                = "not_found"
 	ReasonConflict                = "conflict"
 	ReasonValidationFailed        = "validation_failed"
@@ -37,6 +38,9 @@ const (
 	ReasonScopesRequired          = "scopes_required"
 	ReasonServersNotFound         = "servers_not_found"
 	ReasonMethodRequired          = "method_required"
+	ReasonMetricsQueryBudget      = "metrics_query_budget_exceeded"
+	ReasonMetricsRollupNotReady   = "metrics_rollup_not_ready"
+	ReasonMetricsQueryTimeout     = "metrics_query_timeout"
 	ReasonCommandRequired         = "command_required"
 	ReasonServiceNotFound         = "service_not_found"
 	ReasonCredentialNotFound      = "credential_not_found"
@@ -83,6 +87,7 @@ var reasonMessages = map[string]string{
 	ReasonInvalidCredentials:      "invalid username or password",
 	ReasonWrongCurrentPassword:    "current password is incorrect",
 	ReasonForbidden:               "forbidden",
+	ReasonUnavailable:             "authentication temporarily unavailable",
 	ReasonNotFound:                "resource not found",
 	ReasonConflict:                "resource conflict",
 	ReasonValidationFailed:        "validation failed",
@@ -99,6 +104,9 @@ var reasonMessages = map[string]string{
 	ReasonScopesRequired:          "at least one scope is required",
 	ReasonServersNotFound:         "unknown server ids: {{servers}}",
 	ReasonMethodRequired:          "method is required",
+	ReasonMetricsQueryBudget:      "the requested range needs a coarser interval",
+	ReasonMetricsRollupNotReady:   "metrics rollup is not ready for this range",
+	ReasonMetricsQueryTimeout:     "metrics query exceeded its deadline",
 	ReasonCommandRequired:         "command is required",
 	ReasonServiceNotFound:         "service not found",
 	ReasonCredentialNotFound:      "credential not found",

@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
 
+	"github.com/vpsmanager/backend/internal/gate"
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/token"
 	"github.com/vpsmanager/backend/internal/repository"
@@ -19,12 +22,22 @@ var errFirstUserTaken = errors.New("first user already created")
 
 const firstUserSetupLock int64 = 0x54414c5553415554 // "TALUSAUT", database-wide setup lock.
 
+// userGate serializes admission and password updates for one user. *gate.Gate
+// satisfies it; tests may supply a stub.
+type userGate interface {
+	Admit(ctx context.Context, userID uint, fn func(version int64) error) error
+	Update(ctx context.Context, userID uint, fn func(context.Context, int64) (bool, error)) error
+	Recover(ctx context.Context, userID uint) error
+}
+
 // AuthService handles authentication including first-user bootstrap.
 type AuthService struct {
 	userRepo             *repository.UserRepo
 	jwtSvc               *token.JWTService
 	db                   *gorm.DB
 	ownerBackfillTrigger func()
+	gate                 userGate
+	terminalRegistry     *gate.Registry
 }
 
 // SetOwnerBackfillTrigger connects optional background work to successful
@@ -33,12 +46,25 @@ func (s *AuthService) SetOwnerBackfillTrigger(trigger func()) {
 	s.ownerBackfillTrigger = trigger
 }
 
+// SetUserGate wires the shared per-user gate so a password change and JWT
+// admission for the same user are serialized.
+func (s *AuthService) SetUserGate(g userGate) {
+	s.gate = g
+}
+
+// SetTerminalRegistry wires the JWT terminal registry so a successful password
+// change revokes the user's existing terminals.
+func (s *AuthService) SetTerminalRegistry(r *gate.Registry) {
+	s.terminalRegistry = r
+}
+
 // NewAuthService creates an AuthService with the given dependencies.
 func NewAuthService(userRepo *repository.UserRepo, jwtSvc *token.JWTService, db *gorm.DB) *AuthService {
 	return &AuthService{
 		userRepo: userRepo,
 		jwtSvc:   jwtSvc,
 		db:       db,
+		gate:     gate.New(userRepo.TokenVersion, userRepo.LockedTokenVersion),
 	}
 }
 
@@ -109,7 +135,7 @@ func (s *AuthService) createFirstUser(ctx context.Context, username, password st
 	if s.ownerBackfillTrigger != nil {
 		s.ownerBackfillTrigger()
 	}
-	return s.jwtSvc.GenerateToken(user.ID, user.Username, user.Role)
+	return s.jwtSvc.GenerateToken(user.ID, user.Username, user.Role, user.TokenVersion)
 }
 
 // authenticateExisting validates credentials for an existing user.
@@ -126,24 +152,71 @@ func (s *AuthService) authenticateExisting(ctx context.Context, username, passwo
 		return "", fmt.Errorf("login: invalid credentials: %w", server.ErrInvalidCredentials)
 	}
 
-	return s.jwtSvc.GenerateToken(user.ID, user.Username, user.Role)
+	return s.jwtSvc.GenerateToken(user.ID, user.Username, user.Role, user.TokenVersion)
 }
 
 func (s *AuthService) ChangePassword(ctx context.Context, userID uint, currentPassword, newPassword string) error {
-	user, err := s.userRepo.FindByID(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("change password: %w", err)
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
-		return fmt.Errorf("current password is incorrect: %w", server.ErrWrongCurrentPassword)
-	}
-
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("change password: bcrypt: %w", server.ErrInternal)
 	}
+	verify := func(currentHash string) error {
+		if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(currentPassword)); err != nil {
+			return fmt.Errorf("current password is incorrect: %w", server.ErrWrongCurrentPassword)
+		}
+		return nil
+	}
+	var revoked []*gate.Session
+	changeErr := s.gate.Update(ctx, userID, func(updateCtx context.Context, _ int64) (bool, error) {
+		_, err := s.userRepo.ChangePassword(updateCtx, userID, verify, string(hash))
+		unknown := errors.Is(err, repository.ErrCommitUnknown)
+		// A lost acknowledgement may already have changed the password. Fence
+		// and revoke while still holding the admission lock, just as on success.
+		if (err == nil || unknown) && s.terminalRegistry != nil {
+			revoked = s.terminalRegistry.MarkRevoked(userID)
+		}
+		return unknown, err
+	})
 
-	user.PasswordHash = string(hash)
-	return s.userRepo.Update(ctx, user)
+	unknown := errors.Is(changeErr, repository.ErrCommitUnknown)
+	var recovered chan error
+	if unknown {
+		recovered = make(chan error, 1)
+		go func() {
+			// HTTP cancellation cannot abandon reconciliation. Recover has its
+			// own bounded deadline and leaves the fence intact on failure.
+			recovered <- s.gate.Recover(context.WithoutCancel(ctx), userID)
+		}()
+	}
+	// Closing and joining happen outside the user lock and share the deadline
+	// frozen by MarkRevoked. A disconnected HTTP client cannot skip this work.
+	var cleanupErr error
+	if s.terminalRegistry != nil && len(revoked) > 0 {
+		result := s.terminalRegistry.Await(context.WithoutCancel(ctx), revoked)
+		if !result.Complete {
+			cleanupErr = fmt.Errorf("terminal cleanup deadline exceeded: %d sessions pending", result.Pending)
+			slog.Error("password revocation cleanup incomplete", "user_id", userID, "pending", result.Pending, "forced", result.Forced, "error", cleanupErr)
+		}
+	}
+	if recovered != nil {
+		if err := <-recovered; err != nil {
+			slog.Warn("password commit remains unresolved", "user_id", userID, "error", err)
+		}
+	}
+	if unknown {
+		err := server.NewAppErrorParams(http.StatusServiceUnavailable, server.ReasonUnavailable, map[string]any{"state": "password_commit_unknown"})
+		err.Err = errors.Join(changeErr, cleanupErr)
+		return err
+	}
+	if cleanupErr != nil {
+		err := server.NewAppErrorParams(http.StatusServiceUnavailable, server.ReasonUnavailable, map[string]any{"state": "terminal_cleanup_incomplete"})
+		err.Err = cleanupErr
+		return err
+	}
+	if errors.Is(changeErr, gate.ErrUnavailable) || errors.Is(changeErr, context.DeadlineExceeded) || errors.Is(changeErr, context.Canceled) {
+		err := server.NewAppError(http.StatusServiceUnavailable, server.ReasonUnavailable)
+		err.Err = changeErr
+		return err
+	}
+	return changeErr
 }

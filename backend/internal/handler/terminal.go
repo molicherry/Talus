@@ -28,6 +28,14 @@ const authTimeout = 10 * time.Second
 type TerminalHandler struct {
 	terminalSvc *service.TerminalService
 	jwtSvc      *token.JWTService
+	userGate    mw.UserGate
+}
+
+// SetUserGate wires the shared per-user gate so the WS first-frame JWT is
+// admitted against the current session version.
+func (h *TerminalHandler) SetUserGate(g mw.UserGate) {
+	h.userGate = g
+	h.terminalSvc.SetUserGate(g)
 }
 
 // NewTerminalHandler creates a TerminalHandler with the given dependencies.
@@ -42,6 +50,19 @@ func NewTerminalHandler(terminalSvc *service.TerminalService, jwtSvc *token.JWTS
 type wsMessage struct {
 	Type string `json:"type"`
 	Data string `json:"data,omitempty"`
+	// Reason classifies a terminal refusal so the client can tell "retry" from
+	// "sign in again" instead of retrying a session the server will never admit (F07).
+	Reason string `json:"reason,omitempty"`
+}
+
+// refuse closes the socket with the reason it refused, in the frame the client reads
+// and in the close code, so a refusal is never mistaken for a dropped connection.
+func refuse(conn *websocket.Conn, code int, reason, message string) {
+	_ = conn.WriteJSON(wsMessage{Type: "error", Reason: reason, Data: message})
+	deadline := time.Now().Add(time.Second)
+	_ = conn.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(code, reason), deadline)
+	_ = conn.Close()
 }
 
 // Handle handles GET /api/v1/servers/{id}/terminal.
@@ -97,15 +118,15 @@ func (h *TerminalHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 		if msg.Type != "auth" || msg.Data == "" {
 			op.SetResult("rejected", "terminal_auth_failed")
-			_ = conn.WriteJSON(wsMessage{Type: "error", Data: "authentication required"})
+			refuse(conn, websocket.ClosePolicyViolation, "auth", "authentication required")
 			slog.Warn("terminal connection missing auth message", "server_id", id)
 			return
 		}
 
 		parsed, verifyErr := h.jwtSvc.ValidateToken(msg.Data)
-		if verifyErr != nil {
+		if verifyErr != nil || parsed.TokenVersion == nil {
 			op.SetResult("rejected", "terminal_auth_failed")
-			_ = conn.WriteJSON(wsMessage{Type: "error", Data: "invalid or expired token"})
+			refuse(conn, websocket.ClosePolicyViolation, "auth", "invalid or expired token")
 			slog.Warn("terminal auth failed", "server_id", id, "reason", "terminal_auth_failed")
 			return
 		}
@@ -116,7 +137,7 @@ func (h *TerminalHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	if !mw.CheckServerAccess(claims, id) {
 		op.SetResult("rejected", "terminal_permission_denied")
-		_ = conn.WriteJSON(wsMessage{Type: "error", Data: "access denied: no access to this server"})
+		refuse(conn, websocket.ClosePolicyViolation, "denied", "access denied: no access to this server")
 		slog.Warn("terminal access denied", "server_id", id)
 		return
 	}
@@ -129,7 +150,13 @@ func (h *TerminalHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		op.SetMetadata("ready_at", result.ReadyAt)
 	}
 	op.SetMetadata("closed_at", result.ClosedAt)
+	op.SetMetadata("cleanup_pending", result.CleanupPending)
+	logReason := result.Reason
+	if result.CleanupPending {
+		logReason = "terminal_cleanup_incomplete"
+		op.SetMetadata("cleanup_reason", logReason)
+	}
 	if sessionErr != nil || result.Outcome == "failed" {
-		slog.Warn("terminal session failed", "server_id", id, "reason", result.Reason)
+		slog.Warn("terminal session failed", "server_id", id, "reason", logReason)
 	}
 }

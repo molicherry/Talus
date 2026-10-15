@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -21,6 +22,12 @@ func NewMetricsHandler(metricRepo *repository.MetricRepo) *MetricsHandler {
 }
 
 // Get handles GET /api/v1/servers/{id}/metrics.
+//
+// The response carries the requested and actual granularity, the selected
+// statistic, coverage, the data source and whether the series was downsampled.
+// Budget refusals are explicit: 422 with a recommendation
+// when a finer granularity cannot fit, 503 when the rollup is not ready or the
+// shared deadline expired.
 func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	serverID, err := parseIDParam(r)
 	if err != nil {
@@ -34,88 +41,119 @@ func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	from, to, pgInterval, err := parseMetricParams(r)
+	request, err := parseMetricQuery(r)
 	if err != nil {
 		server.WriteError(w, r, server.NewAppErrorParams(http.StatusBadRequest, server.ReasonInvalidQuery, map[string]any{"detail": err.Error()}))
 		return
 	}
+	request.ServerID = serverID
 
-	results, err := h.metricRepo.Query(r.Context(), serverID, from, to, pgInterval)
+	result, err := h.metricRepo.QueryWithBudget(r.Context(), request)
 	if err != nil {
-		server.WriteError(w, r, err)
+		server.WriteError(w, r, metricQueryError(err))
 		return
 	}
-
-	if results == nil {
-		results = make([]repository.AggregatedMetric, 0)
+	if result.Points == nil {
+		result.Points = make([]repository.AggregatedMetric, 0)
 	}
-
-	server.WriteJSON(w, http.StatusOK, results)
+	if echo := request.EchoStat; echo == "max" {
+		// Echo the alias the caller used so a documented `stat=max` client sees
+		// the token it asked for.
+		result.Stat = "max"
+	}
+	server.WriteJSON(w, http.StatusOK, result)
 }
 
-// parseMetricParams extracts and validates query parameters for the metrics endpoint.
-func parseMetricParams(r *http.Request) (from, to time.Time, interval string, err error) {
-	q := r.URL.Query()
-
-	now := time.Now().UTC()
-
-	// Parse from
-	if fromStr := q.Get("from"); fromStr != "" {
-		from, err = time.Parse(time.RFC3339, fromStr)
-		if err != nil {
-			return time.Time{}, time.Time{}, "", err
+// metricQueryError maps a repository refusal onto the documented status.
+func metricQueryError(err error) error {
+	var budget *repository.QueryBudgetError
+	if !errors.As(err, &budget) {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return server.NewAppError(http.StatusServiceUnavailable, server.ReasonMetricsQueryTimeout)
 		}
-	} else {
-		from = now.Add(-1 * time.Hour)
+		return err
 	}
-
-	// Parse to
-	if toStr := q.Get("to"); toStr != "" {
-		to, err = time.Parse(time.RFC3339, toStr)
-		if err != nil {
-			return time.Time{}, time.Time{}, "", err
-		}
-	} else {
-		to = now
-	}
-
-	if !to.After(from) {
-		return time.Time{}, time.Time{}, "", errors.New("'to' must be after 'from'")
-	}
-
-	// Determine interval
-	if intervalStr := q.Get("interval"); intervalStr != "" {
-		switch intervalStr {
-		case "1m":
-			interval = "1 minute"
-		case "5m":
-			interval = "5 minutes"
-		case "15m":
-			interval = "15 minutes"
-		case "1h":
-			interval = "1 hour"
-		default:
-			return time.Time{}, time.Time{}, "", errors.New("invalid interval: must be one of 1m, 5m, 15m, 1h")
-		}
-	} else {
-		interval = defaultInterval(from, to)
-	}
-
-	return from, to, interval, nil
-}
-
-// defaultInterval returns an appropriate PostgreSQL interval string based on
-// the time range duration.
-func defaultInterval(from, to time.Time) string {
-	dur := to.Sub(from)
-	switch {
-	case dur <= 1*time.Hour:
-		return "1 minute"
-	case dur <= 6*time.Hour:
-		return "5 minutes"
-	case dur <= 24*time.Hour:
-		return "15 minutes"
+	switch budget.Reason {
+	case repository.ReasonBucketBudget:
+		return server.NewAppErrorParams(http.StatusUnprocessableEntity, server.ReasonMetricsQueryBudget, map[string]any{
+			"recommended_interval": budget.Recommended,
+		})
+	case repository.ReasonRollupNotReady:
+		return server.NewAppErrorParams(http.StatusServiceUnavailable, server.ReasonMetricsRollupNotReady, map[string]any{
+			"samples": budget.Samples,
+		})
+	case repository.ReasonQueryTimeout:
+		return server.NewAppError(http.StatusServiceUnavailable, server.ReasonMetricsQueryTimeout)
 	default:
-		return "1 hour"
+		return err
 	}
+}
+
+// parseMetricQuery extracts and validates the query parameters, returning a
+// 400-class error for an illegal granularity or an over-30-day range: the range
+// is never silently shortened.
+func parseMetricQuery(r *http.Request) (repository.QueryRequest, error) {
+	q := r.URL.Query()
+	now := time.Now().UTC()
+	request := repository.QueryRequest{Stat: "avg"}
+
+	from := now.Add(-time.Hour)
+	if value := q.Get("from"); value != "" {
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return request, errors.New("invalid 'from': must be RFC3339")
+		}
+		from = parsed
+	}
+	to := now
+	if value := q.Get("to"); value != "" {
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return request, errors.New("invalid 'to': must be RFC3339")
+		}
+		to = parsed
+	}
+	if !to.After(from) {
+		return request, errors.New("'to' must be after 'from'")
+	}
+	if to.Sub(from) > repository.MaxQueryRange {
+		return request, errors.New("range exceeds 30 days")
+	}
+
+	interval := q.Get("interval")
+	if interval != "" && interval != "auto" && !repository.IsMetricInterval(interval) {
+		return request, errors.New("invalid interval: must be auto or one of 1m, 5m, 15m, 1h, 6h")
+	}
+	if interval == "" {
+		interval = "auto"
+	}
+
+	// The query contract names the statistic `avg|max`;
+	// the API's preferred spelling for the sampled maximum is `peak`, so `max` is
+	// accepted as a compatible alias and echoed back as requested (R20).
+	requestedStat := q.Get("stat")
+	stat := requestedStat
+	if stat == "" {
+		stat = "avg"
+	}
+	if stat == "max" {
+		stat = "peak"
+	}
+	if stat != "avg" && stat != "peak" {
+		return request, errors.New("invalid stat: must be avg, max or peak")
+	}
+	if requestedStat != "" && requestedStat != stat {
+		request.EchoStat = requestedStat
+	}
+
+	allowCoarsen := false
+	if value := q.Get("allow_coarsen"); value != "" {
+		allowCoarsen = value == "true" || value == "1"
+	}
+
+	request.From, request.To = from, to
+	request.Requested = interval
+	request.AllowCoarsen = allowCoarsen
+	request.Stat = stat
+	return request, nil
 }

@@ -13,7 +13,7 @@
 - **Credential Vault** — Store SSH passwords and private keys encrypted with AES-256-GCM at rest.
 - **Remote Shell** — Execute commands on any server and see stdout, stderr, and exit codes.
 - **Interactive Terminal** — Open a full PTY session in your browser (xterm.js, resize-aware, WebSocket-backed).
-- **Live Monitoring** — CPU, memory, disk, load, swap, network, and disk I/O charts with 1h / 6h / 24h / 7d time ranges. Ephemeral agent deployed on-demand over SSH.
+- **Live Monitoring** — CPU, memory, disk, load, swap, network, and disk I/O charts with 15m / 1h / 6h / 24h / 7d / 30d time ranges, average/peak views, and accessible data tables. The Hub deploys the matching monitoring agent over SSH.
 - **API Keys** — Create scoped API keys with per-server access control. Two-dimensional permissions (what actions × which servers). Keys are encrypted at rest and can be copied on demand. Rate-limited reveal with audit logging.
 - **Service Proxy** — Register external services (Grafana, Portainer, etc.) with encrypted credentials. Proxy API requests through Talus with credential injection and placeholder substitution. Edit forms load existing credentials with show/hide toggle and copy support.
 
@@ -31,8 +31,8 @@
 ```
 
 - **Hub-and-spoke**: The Hub connects out to your servers via SSH. Servers never call back.
-- **Ephemeral agent**: Monitoring data is collected by a statically-linked Go binary that the Hub deploys and runs over SSH — no daemon, no open ports, no leftovers.
-- **Credentials**: Encrypted at rest with a master key you control. Never returned in API responses.
+- **On-demand agent**: Monitoring data is collected by a statically-linked Go binary that the Hub deploys and runs over SSH. It exits after collection; the verified binary is retained at `/tmp/vpsmanager-agent` for reuse. No daemon or extra open ports are needed.
+- **Credentials**: Encrypted at rest with a master key you control. Secret values are omitted from list responses; authenticated administrators can reveal them through dedicated, audited endpoints.
 
 ## Quick Start
 
@@ -52,7 +52,6 @@ cd Talus
 
 Copy `.env.example` to `.env` and set real secrets — the stack refuses to start
 without them:
-secrets:
 
 ```env
 DB_PASSWORD=<your-postgres-password>
@@ -103,8 +102,8 @@ proxy routes: older binaries do not understand them and would connect directly.
 
 1. Go to **Services** → **Add Service**
 2. Fill in name, display name, base URL (e.g. `http://localhost:3000`), and credentials (key-value pairs)
-3. Optionally associate the service with a server for organization and access control; the base URL must be reachable from the Hub (this association does not create an SSH tunnel)
-4. Use the relay API to proxy requests through Talus — credentials are injected automatically, `{{key}}` placeholders are substituted
+3. Optionally assign the service to a server for management and authorization scope — the relay calls the service base URL directly from the Hub; there is **no** SSH tunnel
+4. Use the relay API to proxy requests through Talus — credentials are injected automatically, `{{key}}` placeholders are substituted. An omitted `mode` is a normal 30s request; pass `"mode": "bounded_stream"` for an explicit up-to-300s stream (30s header wait, 30s no-progress idle limit; the mode is not forwarded upstream)
 
 ### 6. View Usage Logs
 
@@ -153,6 +152,11 @@ services:
       MONITOR_INTERVAL: ${MONITOR_INTERVAL:-60}
       SSH_TIMEOUT: ${SSH_TIMEOUT:-10}
       EXEC_TIMEOUT: ${EXEC_TIMEOUT:-30}
+      EXEC_TIMEOUT_MAX: ${EXEC_TIMEOUT_MAX:-300}
+      EXEC_OUTPUT_LIMIT: ${EXEC_OUTPUT_LIMIT:-8388608}
+      EXEC_OUTPUT_STREAM_LIMIT: ${EXEC_OUTPUT_STREAM_LIMIT:-4194304}
+      METRICS_RETENTION_ENABLED: ${METRICS_RETENTION_ENABLED:-false}
+      METRICS_RETENTION_DRY_RUN: ${METRICS_RETENTION_DRY_RUN:-true}
     depends_on:
       db:
         condition: service_healthy
@@ -175,6 +179,29 @@ docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+When upgrading from a version without JWT revocation, stop every old Hub instance
+and its WebSocket sessions before starting this version. Do not run those old
+and new versions together. Subsequent upgrades and rollbacks must retain token
+version checks and active session revocation.
+
+### Reverse-proxy timeouts
+
+Talus disables its global HTTP write timeout and applies per-route budgets, so a
+300-second Exec or a bounded Relay stream is not cut off mid-response. Any proxy
+in front of Talus (nginx, Traefik, Caddy, Cloudflare) must match that budget —
+including room for result return and cleanup, so a 300-second route needs more
+than 300 seconds at the proxy:
+
+| Route | Minimum proxy timeout |
+| --- | --- |
+| `POST /api/v1/servers/*/exec`, `POST /api/v1/services/*/relay` | ≥ 330s |
+| Ordinary HTTP API routes | ≥ 15s |
+
+Buffered responses must be disabled for `/api/v1/services/*/relay` so streamed
+bodies are forwarded incrementally. Enable WebSocket upgrades for terminal
+routes and configure their idle timeout for the intended interactive session
+length; the ordinary HTTP timeout above does not define a terminal session limit.
 
 ## Tech Stack
 
@@ -244,22 +271,6 @@ written in the **Talus Web UI → Services → Add/Edit Service → Usage Guide*
 tells the AI how to use that service (endpoints, auth headers, request examples)
 without hard-coding any service specifics into the shared skill.
 
-### Install the service-directory injection plugin (recommended)
-
-The [ai-integration](ai-integration/) plugin (OpenCode / pi / Claude Code / Codex)
-injects the service directory **when the user mentions services** — so the AI
-sees what is available exactly when it matters and is reminded to fetch the
-usage guide, without paying tokens on unrelated turns. Injection affects only
-the current turn and is never written to conversation history. Install it after
-the skill:
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/molicherry/Talus/main/ai-integration/install.sh)
-```
-
-Platforms without a prompt-injection hook (e.g. Cursor) rely on the skill's
-discovery rules instead — the capability works either way; the plugin just makes
-it impossible to miss.
 
 ### Example prompts
 
@@ -271,6 +282,10 @@ it impossible to miss.
 ```
 
 ## Configuration
+
+Configure these values in the Hub process or container environment. When using
+Compose, add any variable not already listed to the Hub's `environment` section;
+setting it in `.env` alone does not pass it into the container.
 
 | Variable | Default | Description |
 | ---------- | --------- | ------------- |
@@ -285,17 +300,48 @@ it impossible to miss.
 | `USAGE_LOG_RETENTION_DAYS` | `30` | Ordinary usage log retention in days |
 | `USAGE_LOG_SENSITIVE_RETENTION_DAYS` | `90` | Sensitive-operation and deletion log retention in days |
 | `USAGE_LOG_LEGACY_WRITERS_DRAINED` | `false` | Set to `true` only after all legacy instances and their transactions have stopped to enable historical audit backfill; remove after completion is confirmed |
-| `MONITOR_INTERVAL` | `60` | Metrics collection interval (seconds) |
+| `MONITOR_INTERVAL` | `60` | Metrics collection interval (seconds); set through the Hub environment |
+| `MONITOR_TOLERATED_ROUNDS` | `1` | Non-negative number of missed collection rounds allowed before a node becomes stale |
+| `MONITOR_ALLOWED_LATENCY_SECONDS` | `0` | Non-negative additional freshness allowance (seconds) |
+| `AGENT_ARTIFACTS_DIR` | `/usr/local/bin` | Directory containing `agents-manifest.json` and both Linux amd64/arm64 agent binaries; validated at startup |
+| `METRICS_RETENTION_ENABLED` | `false` | Enable cleanup of eligible raw and rollup metrics older than 35 days; deletion also requires dry-run mode to be disabled |
+| `METRICS_RETENTION_DRY_RUN` | `true` | Report the cleanup plan without deleting; deletion requires `METRICS_RETENTION_ENABLED=true` and this value `false` |
 | `SSH_TIMEOUT` | `10` | SSH connection timeout (seconds) |
-| `EXEC_TIMEOUT` | `30` | Command execution timeout (seconds) |
+| `EXEC_TIMEOUT` | `30` | Default command budget (seconds), including SSH setup and execution; requests may override it up to the configured cap (300s by default) |
+| `EXEC_TIMEOUT_MAX` | `300` | Maximum command budget (seconds); must be at least `EXEC_TIMEOUT` and at most `300` |
+| `EXEC_OUTPUT_LIMIT` | `8388608` | Retained stdout + stderr limit (bytes); positive and at most 8 MiB |
+| `EXEC_OUTPUT_STREAM_LIMIT` | `4194304` | Retained limit for each output stream (bytes); positive, at most 4 MiB, and no greater than `EXEC_OUTPUT_LIMIT` |
+
+A node becomes stale after `MONITOR_INTERVAL × (MONITOR_TOLERATED_ROUNDS + 1) +
+MONITOR_ALLOWED_LATENCY_SECONDS` seconds without a fresh sample (120 seconds by
+default).
 
 ## Security
 
 - SSH private keys and passwords, service credentials, and API key raw values are encrypted with **AES-256-GCM** at rest, using an Argon2id-derived key from `VPSMANAGER_MASTER_KEY`.
 - Credential and API key values are **never returned** in list API responses (`json:"-"`). Dedicated JWT-only reveal endpoints decrypt on-demand with **audit logging** (slog structured JSON) and **rate limiting** (5 req/min per user).
 - Target servers require **no additional open ports** — monitoring data flows over the existing SSH channel.
-- The monitoring agent is **ephemeral**: deployed on-demand, collects metrics, and exits. No persistent binary or daemon remains.
+- The monitoring agent runs **on demand** and exits after collection. The Hub verifies the retained binary before reuse and atomically replaces it when needed; no agent daemon runs on the target.
+- Changing a password invalidates existing JWTs and actively closes that user's terminal sessions. API keys have a separate lifecycle.
 - SSH host keys are verified using **TOFU (Trust On First Use)**: the key presented on first connection is recorded and verified on all subsequent connections, preventing MITM attacks.
+
+## Tests
+
+Use [the unified test entry point](tests/README.md) for the `fast`, `integration`,
+`ui`, and `e2e` suites and the M1–M4 gates. The generated
+[test inventory](tests/coverage.md) lists scenarios, implementations, and commands.
+
+M1's deployment check starts the current Hub with an owned temporary database
+and a loopback HTTP upstream. It verifies bootstrap/restart, JWT revocation,
+service discovery, usage guides, and Relay behavior without a personal server,
+public endpoint, or historical deployment record. Set `TEST_DATABASE_URL` to an
+isolated TimescaleDB test instance whose role can create temporary databases
+and install the TimescaleDB extension.
+A missing database or a skipped required test blocks the gate.
+
+```bash
+bash tests/run.sh --gate M1
+```
 
 ## License
 
