@@ -12,6 +12,8 @@
 // TALUS_UI_RUN_ID and TALUS_UI_SUITE (falling back to the run id).
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import { Readable } from "node:stream";
+import { spec } from "node:test/reporters";
 
 /** Records one test's outcome. A skipped or todo test is not passing evidence. */
 export function collect(event, into) {
@@ -26,15 +28,22 @@ export function collect(event, into) {
 
 export default async function* reporter(source) {
 	const cases = [];
-	for await (const event of source) {
-		if (
-			event.type === "test:pass" ||
-			event.type === "test:fail" ||
-			event.type === "test:skip"
-		) {
-			collect(event, cases);
+	async function* events() {
+		for await (const event of source) {
+			if (
+				event.type === "test:pass" ||
+				event.type === "test:fail" ||
+				event.type === "test:skip"
+			) {
+				collect(event, cases);
+			}
+			yield event;
 		}
 	}
+	// Keep Node's assertion details, stacks, test output and summary visible while
+	// recording the same events as structured evidence. Logging is useful even
+	// when this reporter is run directly without a report directory.
+	yield* Readable.from(events()).compose(new spec());
 	const dir = process.env.TALUS_UI_REPORT_DIR;
 	if (!dir) return;
 	const suite =

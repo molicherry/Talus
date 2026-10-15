@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readdirSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -250,4 +250,61 @@ test("a passing test from the registered file satisfies its implementation", (t)
   ];
   const result = f.run(reports, "\u2714 Required current terminal check (1ms)\n");
   assert.equal(result.status, 0, result.stderr);
+});
+
+test("the native reporter preserves assertion diagnostics and structured outcomes", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "talus-node-diagnostics-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const reportDir = join(root, "reports");
+  writeFileSync(join(root, "diagnostics.test.mjs"), `
+import test from "node:test";
+import assert from "node:assert/strict";
+test("a passing native test", () => {});
+test.skip("a skipped native test", () => {});
+test.todo("a todo native test");
+test("a failing native assertion", (t) => {
+  console.log("native stdout remains visible");
+  console.error("native stderr remains visible");
+  t.diagnostic("native diagnostic remains visible");
+  assert.equal("actual-value", "expected-value", "native assertion details remain visible");
+});
+`);
+  const env = { ...process.env, NODE_DISABLE_COLORS: "1", FORCE_COLOR: "0", TALUS_UI_REPORT_DIR: reportDir, TALUS_UI_RUN_ID: "native-diagnostics", TALUS_UI_SUITE: "native-diagnostics" };
+  // This is a separate native test runner, not a child test of this process.
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(process.execPath, ["--test", `--test-reporter=${join(HERE, "lib", "node-test-report.mjs")}`, "diagnostics.test.mjs"], {
+    cwd: root,
+    encoding: "utf8",
+    env,
+  });
+  const output = result.stdout + result.stderr;
+  assert.equal(result.status, 1, output);
+  for (const detail of ["a failing native assertion", "native assertion details remain visible", "actual-value", "expected-value", "diagnostics.test.mjs:", "native stdout remains visible", "native stderr remains visible", "native diagnostic remains visible"]) {
+    assert.ok(output.includes(detail), `missing failure diagnostic: ${detail}\n${output}`);
+  }
+  assert.match(output, /at TestContext\./);
+  assert.match(output, /tests 4/);
+  const reports = readdirSync(reportDir).map((name) => JSON.parse(readFileSync(join(reportDir, name), "utf8")));
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].file, "diagnostics.test.mjs");
+  assert.equal(reports[0].run_id, "native-diagnostics");
+  assert.deepEqual(reports[0].cases, [
+    { name: "a passing native test", ok: true },
+    { name: "a skipped native test", ok: false },
+    { name: "a todo native test", ok: false },
+    { name: "a failing native assertion", ok: false },
+  ]);
+});
+
+test("the native reporter remains readable without structured reporting configured", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "talus-node-console-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, "console.test.mjs"), `import test from "node:test"; test("a visible native success", () => {});\n`);
+  const env = { ...process.env, NODE_DISABLE_COLORS: "1", FORCE_COLOR: "0" };
+  delete env.TALUS_UI_REPORT_DIR;
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(process.execPath, ["--test", `--test-reporter=${join(HERE, "lib", "node-test-report.mjs")}`, "console.test.mjs"], { cwd: root, encoding: "utf8", env });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /a visible native success/);
+  assert.match(result.stdout, /pass 1/);
 });
