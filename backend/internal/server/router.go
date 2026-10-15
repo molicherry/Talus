@@ -34,13 +34,14 @@ type RouteConfig struct {
 	ChangePasswordHandler http.HandlerFunc
 
 	// Servers
-	ListServersHandler         http.HandlerFunc
-	ListServerSummariesHandler http.HandlerFunc
-	CreateServerHandler        http.HandlerFunc
-	GetServerHandler           http.HandlerFunc
-	UpdateServerHandler        http.HandlerFunc
-	DeleteServerHandler        http.HandlerFunc
-	TrustServerHostKeyHandler  http.HandlerFunc
+	ListServersHandler          http.HandlerFunc
+	ListServerSummariesHandler  http.HandlerFunc
+	CreateServerHandler         http.HandlerFunc
+	GetServerHandler            http.HandlerFunc
+	UpdateServerHandler         http.HandlerFunc
+	DeleteServerHandler         http.HandlerFunc
+	TrustServerHostKeyHandler   http.HandlerFunc
+	TestServerConnectionHandler http.HandlerFunc
 
 	// Credentials
 	ListCredentialsHandler  http.HandlerFunc
@@ -140,6 +141,10 @@ func NewRouter(cfg RouteConfig) chi.Router {
 				r.Put("/", cfg.UpdateServerHandler)
 				r.Delete("/", cfg.DeleteServerHandler)
 				r.Post("/host-key/trust", cfg.TrustServerHostKeyHandler)
+				if cfg.TestServerConnectionHandler != nil {
+					connectionLimiter := middleware.NewRateLimiter(time.Minute, 5)
+					r.With(connectionLimiter.Limit).Post("/connection/test", cfg.TestServerConnectionHandler)
+				}
 				r.Post("/exec", cfg.ExecHandler)
 				r.Get("/metrics", cfg.MetricsHandler)
 				r.Get("/terminal", cfg.TerminalHandler)

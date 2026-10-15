@@ -563,7 +563,9 @@ func (staticServerSource) ClearHostKeyMismatch(context.Context, uint) error {
 // testServerFor is the server the fake source reports; testFP derives the
 // fingerprint seedPool must seed the pool with so GetClient hits the cache.
 func testServerFor(id uint) *model.Server {
-	return &model.Server{BaseModel: model.BaseModel{ID: id}, Host: "test-host", Port: 22}
+	credID := uint(1)
+	password := "encrypted-test-password"
+	return &model.Server{BaseModel: model.BaseModel{ID: id}, Host: "test-host", Port: 22, CredentialID: &credID, Credential: &model.SSHCredential{BaseModel: model.BaseModel{ID: credID}, AuthType: "password", Username: "tester", EncryptedPassword: &password}}
 }
 
 func testFP(id uint) string { return serverFingerprint(testServerFor(id)) }

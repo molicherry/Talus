@@ -51,47 +51,33 @@ func DialSSH(host string, port int, username string, authMethod ssh.AuthMethod, 
 // DialSSHContext bounds TCP connection and SSH authentication together. The
 // cancellation callback is stopped or joined before returning ownership.
 func DialSSHContext(parent context.Context, host string, port int, username string, authMethod ssh.AuthMethod, knownHostKey []byte, timeout time.Duration) (*ssh.Client, []byte, error) {
-	var ctx context.Context
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		ctx, cancel = context.WithTimeout(parent, timeout)
-	} else {
-		ctx, cancel = context.WithCancel(parent)
-	}
-	defer cancel()
+	client, key, _, err := DialRouteContext(parent, Route{Mode: "direct", Target: Endpoint{Host: host, Port: port, Username: username, AuthMethod: authMethod, KnownHostKey: knownHostKey}}, timeout)
+	return client, key, err
+}
+
+// HandshakeContext authenticates an existing transport, taking ownership of
+// raw on both success and failure. Cancellation is stopped or joined before
+// a successful client is transferred to the caller.
+func HandshakeContext(ctx context.Context, raw net.Conn, endpoint Endpoint) (*ssh.Client, []byte, error) {
 	var capturedKey []byte
 	mismatch := false
-
 	config := &ssh.ClientConfig{
-		User:    username,
-		Auth:    []ssh.AuthMethod{authMethod},
-		Timeout: timeout,
-		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-			presented := key.Marshal()
-			capturedKey = presented
-
-			if len(knownHostKey) == 0 {
-				return nil // TOFU: trust on first use
-			}
-
-			if !bytes.Equal(knownHostKey, presented) {
+		User: endpoint.Username,
+		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+			capturedKey = key.Marshal()
+			if len(endpoint.KnownHostKey) != 0 && !bytes.Equal(endpoint.KnownHostKey, capturedKey) {
 				mismatch = true
-				return fmt.Errorf("ssh host key mismatch for %s: recorded %s, presented %s",
-					host, Fingerprint(knownHostKey), Fingerprint(presented))
+				return fmt.Errorf("recorded %s, presented %s", Fingerprint(endpoint.KnownHostKey), Fingerprint(capturedKey))
 			}
 			return nil
 		},
 	}
-
-	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
-
-	raw, err := (&net.Dialer{Timeout: timeout}).DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return nil, nil, fmt.Errorf("ssh dial %s: %w", addr, err)
+	if endpoint.AuthMethod != nil {
+		config.Auth = []ssh.AuthMethod{endpoint.AuthMethod}
 	}
 	closed := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() { _ = raw.Close(); close(closed) })
-	conn, channels, requests, err := ssh.NewClientConn(raw, addr, config)
+	conn, channels, requests, err := ssh.NewClientConn(raw, endpoint.address(), config)
 	if !stop() {
 		<-closed
 	}
@@ -102,10 +88,9 @@ func DialSSHContext(parent context.Context, host string, port int, username stri
 	if err != nil {
 		_ = raw.Close()
 		if mismatch {
-			return nil, capturedKey, &HostKeyMismatchError{Host: host, Presented: capturedKey, Cause: err}
+			return nil, capturedKey, &HostKeyMismatchError{Host: endpoint.Host, Presented: capturedKey, Cause: err}
 		}
-		return nil, nil, fmt.Errorf("ssh dial %s: %w", addr, err)
+		return nil, nil, err
 	}
-
 	return ssh.NewClient(conn, channels, requests), capturedKey, nil
 }

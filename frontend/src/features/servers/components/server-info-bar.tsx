@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import { StatusIndicator } from "../../../components/ui/status-indicator";
 import { useTranslation } from "../../../i18n";
+import { ConnectionTestButton } from "./connection-test-button";
 import type { Server } from "../../../types/models";
 
 interface ServerInfoBarProps {
@@ -67,6 +68,17 @@ export function ServerInfoBar({ server }: ServerInfoBarProps) {
           </>
         )}
       </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <span>{t("server.connection.mode")}: {t(`server.connection.${server.connection.mode}`)}</span>
+        {server.connection.mode === "ssh_jump" && server.connection.jump_server_id && (
+          <Link className="text-link hover:underline" to={`/servers/${server.connection.jump_server_id}`}>
+            {t("server.connection.jumpLink", { id: server.connection.jump_server_id })}
+          </Link>
+        )}
+        {server.connection.mode === "socks5" && server.connection.host && <span>{server.connection.host}:{server.connection.port}</span>}
+      </div>
+      <div className="mt-3"><ConnectionTestButton serverID={server.id} /></div>
 
       {/* System info row */}
       {(server.cpu_model || server.uptime_seconds) && (

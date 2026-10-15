@@ -9,6 +9,7 @@
 ## Features
 
 - **Server Inventory** — Register your VPS and bare-metal hosts by name, IP, and SSH port.
+- **SSH Connection Routes** — Choose direct, a single SSH jump host, or SOCKS5 per server. Commands, browser terminals, monitoring, and agent uploads use the same route.
 - **Credential Vault** — Store SSH passwords and private keys encrypted with AES-256-GCM at rest.
 - **Remote Shell** — Execute commands on any server and see stdout, stderr, and exit codes.
 - **Interactive Terminal** — Open a full PTY session in your browser (xterm.js, resize-aware, WebSocket-backed).
@@ -78,11 +79,31 @@ On first login, enter any username and a password of at least 8 characters — t
 3. Go to **Credentials** → **Add Credential** and attach a password or private key
 4. Your server is now live — execute commands, open a terminal, or view metrics.
 
+For servers behind an IP allowlist, choose a **Connection mode** in the server
+form. **SSH jump host** selects an existing direct server with SSH credentials;
+its SSH daemon must permit TCP forwarding to the target. **SOCKS5** accepts a
+proxy host and port, with optional username/password authentication. Keep the
+target's real host, SSH port, and SSH credentials in the server fields. The
+target must allow the jump host or proxy's actual outbound IP.
+
+Save the server, then use **Test connection** on its edit page to check a fresh
+SSH handshake. Target names are resolved by the jump host or SOCKS5 proxy.
+Proxy failures never fall back to a direct connection. Passwords are encrypted
+and are not returned by ordinary server reads; leave an unchanged proxy's
+password blank to retain it. Changing its address or username requires a new
+password. Connection changes apply to new operations; reconnect open terminals
+to use the new route.
+
+Only a signed-in administrator can change routes or test saved connections.
+API keys can execute permitted operations on their allowed targets through the
+administrator's configured route. Stop older Hub versions before enabling
+proxy routes: older binaries do not understand them and would connect directly.
+
 ### 5. Proxy a Service
 
 1. Go to **Services** → **Add Service**
 2. Fill in name, display name, base URL (e.g. `http://localhost:3000`), and credentials (key-value pairs)
-3. Optionally assign the service to a server for SSH-tunneled access
+3. Optionally associate the service with a server for organization and access control; the base URL must be reachable from the Hub (this association does not create an SSH tunnel)
 4. Use the relay API to proxy requests through Talus — credentials are injected automatically, `{{key}}` placeholders are substituted
 
 ### 6. View Usage Logs

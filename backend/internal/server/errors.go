@@ -17,46 +17,53 @@ import (
 // `errors.<reason>`; frontend/tests/error-reasons.test.mjs fails if the two
 // sides drift, so a new reason cannot ship untranslated.
 const (
-	ReasonUnauthorized         = "unauthorized"
-	ReasonInvalidCredentials   = "invalid_credentials"
-	ReasonWrongCurrentPassword = "current_password_incorrect"
-	ReasonForbidden            = "forbidden"
-	ReasonNotFound             = "not_found"
-	ReasonConflict             = "conflict"
-	ReasonValidationFailed     = "validation_failed"
-	ReasonInternal             = "internal_error"
-	ReasonRateLimited          = "rate_limited"
-	ReasonInvalidRequest       = "invalid_request"
-	ReasonInvalidServerID      = "invalid_server_id"
-	ReasonInvalidServiceID     = "invalid_service_id"
-	ReasonInvalidCredentialID  = "invalid_credential_id"
-	ReasonInvalidKeyID         = "invalid_key_id"
-	ReasonInvalidRelayRequest  = "invalid_relay_request"
-	ReasonInvalidRelayPath     = "invalid_relay_path"
-	ReasonInvalidScopes        = "invalid_scopes"
-	ReasonScopesRequired       = "scopes_required"
-	ReasonServersNotFound      = "servers_not_found"
-	ReasonMethodRequired       = "method_required"
-	ReasonCommandRequired      = "command_required"
-	ReasonServiceNotFound      = "service_not_found"
-	ReasonCredentialNotFound   = "credential_not_found"
-	ReasonAPIKeyNotFound       = "api_key_not_found"
-	ReasonRawKeyUnavailable    = "raw_key_unavailable"
-	ReasonCredentialDecrypt    = "credential_decrypt_failed"
-	ReasonAPIKeyServerDenied   = "api_key_server_denied"
-	ReasonAPIKeyServiceDenied  = "api_key_service_denied"
-	ReasonRelayTimeout         = "relay_timeout"
-	ReasonRelayUnreachable     = "relay_unreachable"
-	ReasonInvalidQuery         = "invalid_query"
-	ReasonInvalidCursor        = "invalid_cursor"
-	ReasonCursorFilterMismatch = "cursor_filter_mismatch"
-	ReasonCursorExpired        = "cursor_expired"
-	ReasonSSHConnection        = "ssh_connection_failed"
-	ReasonSSHAuth              = "ssh_authentication_failed"
-	ReasonSSHTimeout           = "ssh_timeout"
-	ReasonSSHHostKeyMismatch   = "ssh_host_key_mismatch"
-	ReasonNoHostKeyMismatch    = "no_host_key_mismatch"
-	ReasonHostKeyChanged       = "host_key_changed"
+	ReasonUnauthorized            = "unauthorized"
+	ReasonInvalidCredentials      = "invalid_credentials"
+	ReasonWrongCurrentPassword    = "current_password_incorrect"
+	ReasonForbidden               = "forbidden"
+	ReasonNotFound                = "not_found"
+	ReasonConflict                = "conflict"
+	ReasonValidationFailed        = "validation_failed"
+	ReasonInternal                = "internal_error"
+	ReasonRateLimited             = "rate_limited"
+	ReasonInvalidRequest          = "invalid_request"
+	ReasonInvalidServerID         = "invalid_server_id"
+	ReasonInvalidServiceID        = "invalid_service_id"
+	ReasonInvalidCredentialID     = "invalid_credential_id"
+	ReasonInvalidKeyID            = "invalid_key_id"
+	ReasonInvalidRelayRequest     = "invalid_relay_request"
+	ReasonInvalidRelayPath        = "invalid_relay_path"
+	ReasonInvalidScopes           = "invalid_scopes"
+	ReasonScopesRequired          = "scopes_required"
+	ReasonServersNotFound         = "servers_not_found"
+	ReasonMethodRequired          = "method_required"
+	ReasonCommandRequired         = "command_required"
+	ReasonServiceNotFound         = "service_not_found"
+	ReasonCredentialNotFound      = "credential_not_found"
+	ReasonAPIKeyNotFound          = "api_key_not_found"
+	ReasonRawKeyUnavailable       = "raw_key_unavailable"
+	ReasonCredentialDecrypt       = "credential_decrypt_failed"
+	ReasonAPIKeyServerDenied      = "api_key_server_denied"
+	ReasonAPIKeyServiceDenied     = "api_key_service_denied"
+	ReasonRelayTimeout            = "relay_timeout"
+	ReasonRelayUnreachable        = "relay_unreachable"
+	ReasonInvalidQuery            = "invalid_query"
+	ReasonInvalidCursor           = "invalid_cursor"
+	ReasonCursorFilterMismatch    = "cursor_filter_mismatch"
+	ReasonCursorExpired           = "cursor_expired"
+	ReasonSSHConnection           = "ssh_connection_failed"
+	ReasonSSHAuth                 = "ssh_authentication_failed"
+	ReasonSSHTimeout              = "ssh_timeout"
+	ReasonSSHHostKeyMismatch      = "ssh_host_key_mismatch"
+	ReasonNoHostKeyMismatch       = "no_host_key_mismatch"
+	ReasonHostKeyChanged          = "host_key_changed"
+	ReasonInvalidConnection       = "invalid_connection_config"
+	ReasonConnectionConfigChanged = "connection_config_changed"
+	ReasonConnectionInUse         = "connection_in_use"
+	ReasonProxyConnection         = "proxy_connection_failed"
+	ReasonProxyAuth               = "proxy_auth_failed"
+	ReasonProxyConnectRejected    = "proxy_connect_rejected"
+	ReasonJumpForwardFailed       = "jump_forward_failed"
 
 	// Field-level validation reasons. These render through {{params}} on both
 	// sides so the numbers live in one place.
@@ -72,46 +79,53 @@ const (
 // API's untranslated wording lives. {{name}} placeholders are filled from
 // Params, both here and (independently translated) on the client.
 var reasonMessages = map[string]string{
-	ReasonUnauthorized:         "unauthorized",
-	ReasonInvalidCredentials:   "invalid username or password",
-	ReasonWrongCurrentPassword: "current password is incorrect",
-	ReasonForbidden:            "forbidden",
-	ReasonNotFound:             "resource not found",
-	ReasonConflict:             "resource conflict",
-	ReasonValidationFailed:     "validation failed",
-	ReasonInternal:             "internal server error",
-	ReasonRateLimited:          "too many requests",
-	ReasonInvalidRequest:       "invalid request body",
-	ReasonInvalidServerID:      "invalid server id",
-	ReasonInvalidServiceID:     "invalid service id",
-	ReasonInvalidCredentialID:  "invalid credential id",
-	ReasonInvalidKeyID:         "invalid key id",
-	ReasonInvalidRelayRequest:  "invalid relay request",
-	ReasonInvalidRelayPath:     "invalid relay path",
-	ReasonInvalidScopes:        "invalid scopes: {{scopes}}",
-	ReasonScopesRequired:       "at least one scope is required",
-	ReasonServersNotFound:      "unknown server ids: {{servers}}",
-	ReasonMethodRequired:       "method is required",
-	ReasonCommandRequired:      "command is required",
-	ReasonServiceNotFound:      "service not found",
-	ReasonCredentialNotFound:   "credential not found",
-	ReasonAPIKeyNotFound:       "api key not found",
-	ReasonRawKeyUnavailable:    "raw key not available",
-	ReasonCredentialDecrypt:    "credential decryption failed",
-	ReasonAPIKeyServerDenied:   "access denied: api key does not have access to this server",
-	ReasonAPIKeyServiceDenied:  "access denied: api key does not have access to the service's server",
-	ReasonRelayTimeout:         "target service timeout",
-	ReasonRelayUnreachable:     "target service unreachable: {{detail}}",
-	ReasonInvalidQuery:         "invalid query parameters: {{detail}}",
-	ReasonInvalidCursor:        "invalid usage log cursor",
-	ReasonCursorFilterMismatch: "cursor filters do not match this query",
-	ReasonCursorExpired:        "usage log cursor expired; refresh the list",
-	ReasonSSHConnection:        "ssh connection failed",
-	ReasonSSHAuth:              "ssh authentication failed",
-	ReasonSSHTimeout:           "ssh command timed out",
-	ReasonSSHHostKeyMismatch:   "ssh host key changed: verify the new fingerprint before trusting it",
-	ReasonNoHostKeyMismatch:    "no pending host key change to trust",
-	ReasonHostKeyChanged:       "the pending host key changed again: re-verify the new fingerprint",
+	ReasonUnauthorized:            "unauthorized",
+	ReasonInvalidCredentials:      "invalid username or password",
+	ReasonWrongCurrentPassword:    "current password is incorrect",
+	ReasonForbidden:               "forbidden",
+	ReasonNotFound:                "resource not found",
+	ReasonConflict:                "resource conflict",
+	ReasonValidationFailed:        "validation failed",
+	ReasonInternal:                "internal server error",
+	ReasonRateLimited:             "too many requests",
+	ReasonInvalidRequest:          "invalid request body",
+	ReasonInvalidServerID:         "invalid server id",
+	ReasonInvalidServiceID:        "invalid service id",
+	ReasonInvalidCredentialID:     "invalid credential id",
+	ReasonInvalidKeyID:            "invalid key id",
+	ReasonInvalidRelayRequest:     "invalid relay request",
+	ReasonInvalidRelayPath:        "invalid relay path",
+	ReasonInvalidScopes:           "invalid scopes: {{scopes}}",
+	ReasonScopesRequired:          "at least one scope is required",
+	ReasonServersNotFound:         "unknown server ids: {{servers}}",
+	ReasonMethodRequired:          "method is required",
+	ReasonCommandRequired:         "command is required",
+	ReasonServiceNotFound:         "service not found",
+	ReasonCredentialNotFound:      "credential not found",
+	ReasonAPIKeyNotFound:          "api key not found",
+	ReasonRawKeyUnavailable:       "raw key not available",
+	ReasonCredentialDecrypt:       "credential decryption failed",
+	ReasonAPIKeyServerDenied:      "access denied: api key does not have access to this server",
+	ReasonAPIKeyServiceDenied:     "access denied: api key does not have access to the service's server",
+	ReasonRelayTimeout:            "target service timeout",
+	ReasonRelayUnreachable:        "target service unreachable: {{detail}}",
+	ReasonInvalidQuery:            "invalid query parameters: {{detail}}",
+	ReasonInvalidCursor:           "invalid usage log cursor",
+	ReasonCursorFilterMismatch:    "cursor filters do not match this query",
+	ReasonCursorExpired:           "usage log cursor expired; refresh the list",
+	ReasonSSHConnection:           "ssh connection failed",
+	ReasonSSHAuth:                 "ssh authentication failed",
+	ReasonSSHTimeout:              "ssh command timed out",
+	ReasonSSHHostKeyMismatch:      "ssh host key changed: verify the new fingerprint before trusting it",
+	ReasonNoHostKeyMismatch:       "no pending host key change to trust",
+	ReasonHostKeyChanged:          "the pending host key changed again: re-verify the new fingerprint",
+	ReasonInvalidConnection:       "invalid server connection configuration",
+	ReasonConnectionConfigChanged: "connection configuration changed; reload and retry",
+	ReasonConnectionInUse:         "server is used as an SSH jump host; update dependent servers first",
+	ReasonProxyConnection:         "cannot connect to the proxy",
+	ReasonProxyAuth:               "proxy authentication failed",
+	ReasonProxyConnectRejected:    "proxy refused the target connection",
+	ReasonJumpForwardFailed:       "SSH jump host could not forward to the target",
 
 	ReasonRequired:       "{{field}} is required",
 	ReasonLength:         "must be between {{min}} and {{max}} characters",

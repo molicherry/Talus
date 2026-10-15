@@ -103,6 +103,9 @@ export function ServerList() {
                   >
                     {server.name}
                   </button>
+                  <span className="ml-2 inline-flex rounded-full bg-muted px-2 py-0.5 align-middle text-[11px] text-muted-foreground">
+                    {t(`server.connection.${server.connection.mode}`)}
+                  </span>
                   {server.host_key_mismatch && (
                     <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-warning-subtle px-2 py-0.5 align-middle text-[11px] font-medium text-warning">
                       <AlertTriangle className="h-3 w-3" aria-hidden="true" />

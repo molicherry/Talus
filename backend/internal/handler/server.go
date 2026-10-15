@@ -14,12 +14,13 @@ import (
 
 // CreateServerRequest is the JSON body for creating a server.
 type CreateServerRequest struct {
-	Name         string  `json:"name"`
-	Host         string  `json:"host"`
-	Port         int     `json:"port"`
-	Description  *string `json:"description,omitempty"`
-	Notes        *string `json:"notes,omitempty"`
-	CredentialID *uint   `json:"credential_id,omitempty"`
+	Name         string                     `json:"name"`
+	Host         string                     `json:"host"`
+	Port         int                        `json:"port"`
+	Description  *string                    `json:"description,omitempty"`
+	Notes        *string                    `json:"notes,omitempty"`
+	CredentialID *uint                      `json:"credential_id,omitempty"`
+	Connection   service.ConnectionMutation `json:"connection"`
 }
 
 // nullableUint distinguishes an absent JSON field from an explicit null:
@@ -46,12 +47,14 @@ func (n *nullableUint) UnmarshalJSON(data []byte) error {
 
 // UpdateServerRequest is the JSON body for updating a server.
 type UpdateServerRequest struct {
-	Name         *string      `json:"name,omitempty"`
-	Host         *string      `json:"host,omitempty"`
-	Port         *int         `json:"port,omitempty"`
-	Description  *string      `json:"description,omitempty"`
-	Notes        *string      `json:"notes,omitempty"`
-	CredentialID nullableUint `json:"credential_id"`
+	Name                       *string                    `json:"name,omitempty"`
+	Host                       *string                    `json:"host,omitempty"`
+	Port                       *int                       `json:"port,omitempty"`
+	Description                *string                    `json:"description,omitempty"`
+	Notes                      *string                    `json:"notes,omitempty"`
+	CredentialID               nullableUint               `json:"credential_id"`
+	Connection                 service.ConnectionMutation `json:"connection"`
+	ExpectedConnectionRevision *uint64                    `json:"expected_connection_revision"`
 }
 
 // ServerHandler exposes the server CRUD endpoints.
@@ -155,7 +158,7 @@ func (h *ServerHandler) Create(w http.ResponseWriter, r *http.Request) {
 		srv.OwnerID = claims.UserID
 	}
 
-	created, err := h.svc.Create(r.Context(), srv)
+	created, err := h.svc.Create(r.Context(), srv, req.Connection)
 	if err != nil {
 		server.WriteError(w, r, err)
 		return
@@ -210,7 +213,8 @@ func (h *ServerHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updated, err := h.svc.Update(r.Context(), id, input, clearCredential)
+	req.Connection.ExpectedRevision = req.ExpectedConnectionRevision
+	updated, err := h.svc.Update(r.Context(), id, input, clearCredential, req.Connection)
 	if err != nil {
 		server.WriteError(w, r, err)
 		return

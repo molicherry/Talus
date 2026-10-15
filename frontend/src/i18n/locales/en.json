@@ -76,7 +76,14 @@
     "validation_failed": "Invalid input",
     "invalid_cursor": "The page cursor is invalid. Refresh to continue.",
     "cursor_filter_mismatch": "The page cursor does not match these filters. Refresh to continue.",
-    "cursor_expired": "The page cursor has expired. Refresh to continue."
+    "cursor_expired": "The page cursor has expired. Refresh to continue.",
+    "invalid_connection_config": "Invalid SSH connection configuration",
+    "connection_config_changed": "The connection configuration changed. Reload this page and retry.",
+    "connection_in_use": "This server is used as a jump host. Update the dependent servers first.",
+    "proxy_connection_failed": "Cannot connect to the proxy",
+    "proxy_auth_failed": "Proxy authentication failed",
+    "proxy_connect_rejected": "The proxy refused the target connection",
+    "jump_forward_failed": "The SSH jump host could not forward to the target"
   },
   "fields": {
     "auth_type": "auth type",
@@ -203,7 +210,64 @@
     "listSubtitle": "Manage server connections and configuration.",
     "listSubtitleCount": "{{count}} servers · {{online}} online",
     "lastSeen": "Last collected {{time}}",
-    "neverSeen": "Awaiting first sample"
+    "neverSeen": "Awaiting first sample",
+    "connection": {
+      "title": "SSH connection",
+      "mode": "Connection method",
+      "direct": "Direct",
+      "ssh_jump": "SSH jump host",
+      "socks5": "SOCKS5",
+      "targetHint": "Keep the real target SSH address above. The proxy changes the route to that target.",
+      "jump": "Jump host",
+      "chooseJump": "Choose a server",
+      "jumpHint": "Choose a direct server with SSH credentials. TCP forwarding to the target must be enabled.",
+      "unavailableJump": "Unavailable server #{{id}}",
+      "jumpNotDirect": "uses a proxy",
+      "jumpNoCredential": "no SSH credential",
+      "jumpHostKey": "host key needs verification",
+      "proxyHost": "Proxy host",
+      "proxyPort": "Proxy port",
+      "auth": "Proxy authentication",
+      "authNone": "No authentication",
+      "authPassword": "Username and password",
+      "username": "Proxy username",
+      "password": "Proxy password",
+      "passwordKept": "A password is saved. Leave blank to keep it.",
+      "passwordNew": "Enter a new password. Changing the proxy address or username requires a new password.",
+      "passwordPlaceholder": "Saved; leave blank to keep",
+      "socksHint": "Target DNS is resolved by the proxy. SOCKS5 password authentication requires a trusted network or an encrypted tunnel.",
+      "sessionHint": "New connections use the saved settings. Reconnect any open terminals to use the new route.",
+      "test": "Test saved connection",
+      "testing": "Testing connection…",
+      "testHint": "Opens a fresh SSH connection with the saved settings; no commands are run.",
+      "saveFirst": "Save connection changes before testing.",
+      "testSuccess": "Connection succeeded ({{latency}} ms).",
+      "jumpLink": "Jump server #{{id}}",
+      "validation": {
+        "jumpRequired": "Choose a jump server.",
+        "hostInvalid": "Enter a hostname or IP address, without a URL or credentials.",
+        "portInvalid": "Enter a port from 1 to 65535.",
+        "usernameLength": "Use 1–255 UTF-8 bytes for the username.",
+        "passwordRequired": "Enter a password of 1–255 UTF-8 bytes, or keep the saved password without changing the proxy address or username."
+      },
+      "stages": {
+        "proxy_connect": "Connecting to proxy",
+        "proxy_auth": "Proxy authentication",
+        "proxy_connect_request": "SOCKS5 target connection",
+        "jump_connect": "Connecting to jump host",
+        "jump_auth": "Jump host authentication",
+        "jump_forward": "Jump host forwarding",
+        "target_connect": "Connecting to target",
+        "target_auth": "Target authentication",
+        "target_host_key": "Target host key verification",
+        "jump_host_key": "Jump host key verification"
+      },
+      "roles": {
+        "target": "Target server",
+        "jump": "Jump host",
+        "proxy": "SOCKS5 proxy"
+      }
+    }
   },
   "credential": {
     "add": "Add Credential",
@@ -539,7 +603,12 @@
       "handshake_at": "Handshake at",
       "authenticated_at": "Authenticated at",
       "ready_at": "Ready at",
-      "closed_at": "Closed at"
+      "closed_at": "Closed at",
+      "connection_mode": "Connection method",
+      "connection_revision": "Connection revision",
+      "jump_server_id": "Jump server ID",
+      "connection_stage": "Connection stage",
+      "connection_role": "Connection role"
     },
     "actions": {
       "server_create": "Create server",
@@ -559,7 +628,8 @@
       "server_host_key_trust": "Trust host key",
       "server_exec": "Execute command",
       "service_relay": "Relay service request",
-      "server_terminal": "Open terminal"
+      "server_terminal": "Open terminal",
+      "server_connection_test": "Test saved SSH connection"
     },
     "resourceTypes": {
       "server": "Server",

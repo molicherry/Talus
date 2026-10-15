@@ -6,27 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/server"
 	"github.com/vpsmanager/backend/internal/usage"
 	"golang.org/x/crypto/ssh"
-	"gorm.io/gorm"
 )
-
-// serverSource is the subset of repository.ServerRepo the SSH service needs.
-// An interface keeps the dial path testable without a database.
-type serverSource interface {
-	FindByID(ctx context.Context, id uint) (*model.Server, error)
-	SetHostKeyIfUnchanged(ctx context.Context, id uint, host string, port int, hostKey []byte) (bool, error)
-	RecordHostKeyMismatch(ctx context.Context, id uint, host string, port int, seen []byte) (bool, error)
-	ClearHostKeyMismatch(ctx context.Context, id uint) error
-}
 
 // SSHService provides SSH command execution and connection management.
 type SSHService struct {
@@ -64,11 +52,12 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 
 	start := time.Now()
 
-	client, err := s.GetClient(ctx, serverID)
+	lease, err := s.GetLease(ctx, serverID)
 	if err != nil {
 		return nil, err
 	}
 
+	client := lease.Client
 	result, err, transportClosed := s.runCommand(ctx, client, command, timeout)
 	duration := time.Since(start).Milliseconds()
 
@@ -79,131 +68,12 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 	// Never cache a connection whose transport failed — reuse would
 	// immediately fail again on the next call.
 	if transportClosed || isConnectionError(err) {
-		s.pool.Discard(serverID, client)
+		lease.Discard()
 	} else {
-		s.pool.Release(serverID, client)
+		lease.Release()
 	}
 
 	return result, err
-}
-
-// GetClient returns a pooled SSH client for the given server, dialing a new
-// connection if none is cached. The caller must call pool.Release when done.
-func (s *SSHService) GetClient(ctx context.Context, serverID uint) (*ssh.Client, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	// Always read current server state, even on a cache hit: a pooled client is
-	// only valid for the host/port/credential it was dialed with, and a deleted
-	// server must not stay reachable through a stale connection.
-	srv, err := s.serverRepo.FindByID(ctx, serverID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, server.ErrNotFound)
-		}
-		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	usage.FromContext(ctx).SetResource("server", &srv.ID, srv.Name, &srv.ID)
-
-	client, err := s.pool.GetContext(ctx, serverID, serverFingerprint(srv))
-	if err != nil {
-		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
-	}
-	if err := ctx.Err(); err != nil {
-		// GetContext already validated the connection. Cancellation before any
-		// session uses it does not make its transport unhealthy.
-		s.pool.Release(serverID, client)
-		return nil, err
-	}
-	if client != nil {
-		return client, nil
-	}
-
-	// Pool returned nil — dial a new connection.
-	if srv.CredentialID == nil {
-		s.pool.Release(serverID, nil)
-		return nil, fmt.Errorf("get ssh client for server %d: no credential configured", serverID)
-	}
-
-	username, password, privateKey, err := s.credSvc.GetDecryptedByID(ctx, *srv.CredentialID)
-	if err != nil {
-		s.pool.Release(serverID, nil)
-		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
-	}
-
-	authMethod, err := buildAuthMethod(password, privateKey)
-	if err != nil {
-		s.pool.Release(serverID, nil)
-		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, server.ErrInternal)
-	}
-
-	var knownHostKey []byte
-	if srv.HostKey != nil {
-		knownHostKey = *srv.HostKey
-	}
-
-	client, capturedKey, err := sshpool.DialSSHContext(ctx, srv.Host, srv.Port, username, authMethod, knownHostKey, s.sshDialTimeout)
-	if contextErr := ctx.Err(); contextErr != nil {
-		if client != nil {
-			_ = client.Close()
-		}
-		s.pool.Release(serverID, nil)
-		return nil, contextErr
-	}
-	if err != nil {
-		s.pool.Release(serverID, nil)
-		// A host key change is fail-closed but must not be silent: record the
-		// presented key so the UI can show its fingerprint and let the operator
-		// decide whether to trust it.
-		var mismatch *sshpool.HostKeyMismatchError
-		if errors.As(err, &mismatch) {
-			if updated, recErr := s.serverRepo.RecordHostKeyMismatch(ctx, srv.ID, srv.Host, srv.Port, mismatch.Presented); recErr != nil {
-				slog.Warn("failed to record host key mismatch", "server_id", serverID, "error", recErr)
-			} else if !updated {
-				slog.Warn("host key mismatch not recorded: server changed during dial", "server_id", serverID)
-			}
-			return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, server.ErrSSHHostKeyMismatch)
-		}
-		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, wrapSSHError(err))
-	}
-
-	// Persist the host key on first connection. A conditional update (keyed on
-	// the host/port that was dialed) avoids a full-row save reverting a
-	// concurrent edit — the row was read before the dial, which can take seconds.
-	if len(knownHostKey) == 0 && len(capturedKey) > 0 {
-		updated, updateErr := s.serverRepo.SetHostKeyIfUnchanged(ctx, srv.ID, srv.Host, srv.Port, capturedKey)
-		if updateErr != nil {
-			slog.Warn("failed to persist host key", "server_id", serverID, "error", updateErr)
-		} else if !updated {
-			slog.Warn("host key not persisted: server changed during dial", "server_id", serverID)
-		}
-	}
-	// The connection succeeds, so any pending mismatch is resolved.
-	if srv.HostKeyMismatchAt != nil {
-		if clrErr := s.serverRepo.ClearHostKeyMismatch(ctx, srv.ID); clrErr != nil {
-			slog.Warn("failed to clear host key mismatch", "server_id", serverID, "error", clrErr)
-		}
-	}
-
-	return client, nil
-}
-
-// serverFingerprint identifies everything a pooled SSH connection depends on.
-// Two calls with the same fingerprint may reuse a connection; any change (host,
-// port, credential id or credential revision) must miss the cache.
-func serverFingerprint(srv *model.Server) string {
-	credential := "none"
-	if srv.CredentialID != nil {
-		if srv.Credential != nil {
-			credential = fmt.Sprintf("%d@%d", *srv.CredentialID, srv.Credential.UpdatedAt.UnixNano())
-		} else {
-			credential = fmt.Sprintf("%d@missing", *srv.CredentialID)
-		}
-	}
-	return fmt.Sprintf("%s:%d:%s", srv.Host, srv.Port, credential)
 }
 
 const execTeardownGrace = 100 * time.Millisecond
@@ -415,43 +285,69 @@ func isConnectionError(err error) bool {
 }
 
 // CopyFile pipes a local file to a remote path over SSH.
-func (s *SSHService) CopyFile(ctx context.Context, serverID uint, localPath, remotePath string) error {
-	client, err := s.GetClient(ctx, serverID)
-	if err != nil {
-		return fmt.Errorf("copy file: %w", err)
-	}
-
+func (s *SSHService) CopyFile(ctx context.Context, serverID uint, localPath, remotePath string) (err error) {
 	f, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open source: %w", err)
 	}
 	defer f.Close()
-
+	lease, err := s.GetLease(ctx, serverID)
+	if err != nil {
+		return fmt.Errorf("copy file: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			lease.Discard()
+		} else {
+			lease.Release()
+		}
+	}()
+	client := lease.Client
+	cancelled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { _ = client.Close(); close(cancelled) })
+	defer func() {
+		if !stop() {
+			<-cancelled
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	session, err := client.NewSession()
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
 	defer session.Close()
-
 	pipe, err := session.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("stdin pipe: %w", err)
 	}
-
+	copied := make(chan error, 1)
 	go func() {
-		defer pipe.Close()
-		if _, err := io.Copy(pipe, f); err != nil {
-			slog.Warn("failed to copy file to ssh pipe", "error", err)
+		_, copyErr := io.Copy(pipe, f)
+		closeErr := pipe.Close()
+		if copyErr == nil {
+			copyErr = closeErr
 		}
+		copied <- copyErr
 	}()
-
 	var stderr bytes.Buffer
 	session.Stderr = &stderr
-
-	cmd := fmt.Sprintf("cat > %s && chmod +x %s", remotePath, remotePath)
-	if err := session.Run(cmd); err != nil {
-		return fmt.Errorf("copy failed: %w (stderr: %s)", err, stderr.String())
+	quotedPath := "'" + strings.ReplaceAll(remotePath, "'", "'\"'\"'") + "'"
+	cmd := fmt.Sprintf("cat > %s && chmod +x %s", quotedPath, quotedPath)
+	runErr := session.Run(cmd)
+	if runErr != nil {
+		_ = client.Close()
 	}
-
+	copyErr := <-copied
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if runErr != nil {
+		return fmt.Errorf("copy failed: %w (stderr: %s)", runErr, stderr.String())
+	}
+	if copyErr != nil {
+		return fmt.Errorf("copy source: %w", copyErr)
+	}
 	return nil
 }

@@ -1,10 +1,13 @@
 import { z } from "zod";
 import i18n from "../i18n";
+import { ConnectionConfigSchema, ConnectionInputSchema } from "../features/servers/lib/connection-config";
 
 export const ServerSchema = z.object({
   id: z.number(),
   name: z.string(),
   host: z.string(),
+  connection: ConnectionConfigSchema.default({ mode: "direct" }),
+  connection_revision: z.number().int().positive().default(1),
   port: z.number().min(1).max(65535),
   description: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
@@ -52,6 +55,8 @@ export const ServerSummarySchema = z.object({
   description: z.string().nullable().optional(),
   host: z.string(),
   credential_id: z.number().nullable(),
+  connection: z.object({ mode: z.enum(["direct", "ssh_jump", "socks5"]) }).default({ mode: "direct" }),
+  port: z.number().int().min(1).max(65535).optional(),
   status: z.enum(["online", "offline", "checking", "unknown"]),
   host_key_mismatch: z.boolean().optional(),
 });
@@ -67,6 +72,8 @@ export const ServerFormSchema = z.object({
   description: z.string().max(500).optional(),
   notes: z.string().max(2000).optional(),
   credential_id: z.number().nullable().optional(),
+  connection: ConnectionInputSchema.nullable().optional(),
+  expected_connection_revision: z.number().int().positive().optional(),
 });
 export type ServerFormValues = z.infer<typeof ServerFormSchema>;
 

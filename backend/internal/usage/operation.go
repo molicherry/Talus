@@ -441,13 +441,29 @@ func normalizeMetadata(key string, value any) (any, bool) {
 			return nil, false
 		}
 		return v, true
+	case "connection_mode":
+		v, ok := value.(string)
+		return v, ok && (v == "direct" || v == "ssh_jump" || v == "socks5")
+	case "connection_role":
+		v, ok := value.(string)
+		return v, ok && (v == "target" || v == "jump" || v == "proxy")
+	case "connection_stage":
+		v, ok := value.(string)
+		if !ok {
+			return nil, false
+		}
+		switch v {
+		case "proxy_connect", "proxy_auth", "proxy_request", "proxy_connect_request", "jump_connect", "jump_auth", "jump_forward", "target_connect", "target_auth", "target_host_key", "jump_host_key", "target_handshake", "jump_handshake", "proxy_handshake":
+			return v, true
+		}
+		return nil, false
 	case "close_reason":
 		v, ok := value.(string)
 		if !ok || safeReason(v) != v {
 			return nil, false
 		}
 		return v, true
-	case "timeout_seconds", "exit_code", "bytes_copied", "http_status", "upstream_status":
+	case "timeout_seconds", "exit_code", "bytes_copied", "http_status", "upstream_status", "connection_revision", "jump_server_id":
 		var n int64
 		switch v := value.(type) {
 		case int:
@@ -470,6 +486,9 @@ func normalizeMetadata(key string, value any) (any, bool) {
 		if key == "bytes_copied" && n < 0 {
 			return nil, false
 		}
+		if (key == "connection_revision" || key == "jump_server_id") && n <= 0 {
+			return nil, false
+		}
 		if (key == "http_status" || key == "upstream_status") && (n < 100 || n > 599) {
 			return nil, false
 		}
@@ -485,6 +504,8 @@ func safeReason(reason string) string {
 	case "unauthorized", "invalid_credentials", "current_password_incorrect", "forbidden", "not_found", "conflict", "validation_failed", "internal_error", "rate_limited", "invalid_request", "invalid_server_id", "invalid_service_id", "invalid_credential_id", "invalid_key_id", "invalid_relay_request", "invalid_relay_path", "invalid_scopes", "scopes_required", "servers_not_found", "method_required", "command_required", "service_not_found", "credential_not_found", "api_key_not_found", "raw_key_unavailable", "credential_decrypt_failed", "api_key_server_denied", "api_key_service_denied", "relay_timeout", "relay_unreachable", "invalid_query", "ssh_connection_failed", "ssh_authentication_failed", "ssh_timeout", "ssh_host_key_mismatch", "no_host_key_mismatch", "host_key_changed", "request_rejected", "client_cancelled", "relay_copy_failed", "relay_upstream_failed", "terminal_auth_timeout", "terminal_auth_failed", "terminal_ssh_failed", "terminal_transport_failed", "terminal_closed", "terminal_cancelled", "websocket_upgrade_failed", "ssh_nonzero_exit", "client_closed", "remote_closed", "normal_close", "transport_error", "ssh_error", "server_shutdown":
 		return reason
 	case "terminal_permission_denied", "terminal_input_failed", "terminal_output_failed", "terminal_resize_failed":
+		return reason
+	case "invalid_connection_config", "connection_config_changed", "connection_in_use", "proxy_connection_failed", "proxy_auth_failed", "proxy_connect_rejected", "jump_forward_failed":
 		return reason
 	}
 	return "internal_error"

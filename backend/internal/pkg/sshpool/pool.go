@@ -9,79 +9,68 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// probeTimeout bounds a single keepalive round-trip used to verify a pooled
-// connection is still alive. Connections that do not respond within this
-// window are treated as dead and discarded so callers dial a fresh one.
 const probeTimeout = 3 * time.Second
 
-// Pool manages a cache of SSH client connections keyed by server ID.
-// It limits concurrent sessions per server and evicts idle connections.
-// ErrSlotTimeout is returned by Get when the server already has maxConns
-// active sessions and no slot frees up within slotTimeout.
 var ErrSlotTimeout = errors.New("sshpool: too many concurrent sessions for this server")
 var ErrClosed = errors.New("sshpool: pool closed")
 
+// ErrStaleLease means configuration changed while acquiring a connection.
+var ErrStaleLease = errors.New("sshpool: connection configuration changed")
+
 type Pool struct {
-	mu          sync.Mutex
-	conns       map[uint]*connEntry
-	maxIdle     time.Duration
-	maxConns    int
-	slotTimeout time.Duration
-	done        chan struct{}
-	closed      bool
-	closeOnce   sync.Once
-	// probe reports whether a pooled connection is still usable. It is
-	// overridable in tests; the default performs a keepalive round-trip.
-	probe func(*ssh.Client) bool
+	mu             sync.Mutex
+	conns          map[uint]*connEntry
+	maxIdle        time.Duration
+	maxConns       int
+	slotTimeout    time.Duration
+	done           chan struct{}
+	shutdown       context.Context
+	cancelShutdown context.CancelFunc
+	closed         bool
+	closeOnce      sync.Once
+	probe          func(*ssh.Client) bool
+	leases         map[*Lease]struct{}
+	legacy         map[uint][]*Lease
 }
 
-// connEntry tracks a single cached SSH client and its usage.
 type connEntry struct {
-	client *ssh.Client
-	// fingerprint identifies the connection parameters the cached client was
-	// dialed with (host, port, credential revision). It is compared on every
-	// Get so a cached client can never be used for different parameters.
+	client      *ssh.Client
 	fingerprint string
+	generation  uint64
 	lastUsed    time.Time
-	sem         chan struct{} // concurrency limiter per server
+	sem         chan struct{}
 	waiters     int
 }
 
-// NewPool creates a connection pool that evicts idle connections after maxIdle
-// and limits concurrent sessions per server to maxConns. Get blocks for at
-// most slotTimeout waiting for a slot before returning ErrSlotTimeout.
+// Lease owns one concurrency slot and, optionally, an entire SSH transport.
+// Release and Discard are idempotent. A connection can only return to the
+// entry and configuration generation from which it was borrowed.
+type Lease struct {
+	Client      *ssh.Client
+	mu          sync.Mutex
+	pool        *Pool
+	entry       *connEntry
+	serverID    uint
+	generation  uint64
+	fingerprint string
+	done        bool
+	cacheable   bool
+	legacy      bool
+	original    *ssh.Client
+}
+
 func NewPool(maxIdle time.Duration, maxConns int, slotTimeout time.Duration) *Pool {
-	p := &Pool{
-		conns:       make(map[uint]*connEntry),
-		maxIdle:     maxIdle,
-		maxConns:    maxConns,
-		slotTimeout: slotTimeout,
-		done:        make(chan struct{}),
-		probe:       keepAliveProbe,
+	if maxConns < 1 {
+		maxConns = 1
 	}
+	shutdown, cancelShutdown := context.WithCancel(context.Background())
+	p := &Pool{shutdown: shutdown, cancelShutdown: cancelShutdown, conns: make(map[uint]*connEntry), maxIdle: maxIdle, maxConns: maxConns, slotTimeout: slotTimeout, done: make(chan struct{}), probe: keepAliveProbe, leases: make(map[*Lease]struct{}), legacy: make(map[uint][]*Lease)}
 	go p.evictLoop()
 	return p
 }
 
-// Get acquires a concurrency slot for the given server and returns a cached
-// client if one is available and healthy. Returns nil if no cached client
-// exists or the cached one is dead — the caller must dial a new connection
-// and pass it to Release when finished.
-// Blocks up to slotTimeout if maxConns sessions are already active for this
-// server, then returns ErrSlotTimeout instead of hanging the caller forever.
-//
-// fingerprint describes the dial parameters (host, port, credential revision).
-// A cached client dialed with a different fingerprint is closed and dropped:
-// reusing it would send commands to the previous host or authenticate with the
-// previous credential. Callers compute it from current server state, so a
-// reconfigured or deleted server can never hit a stale cache entry.
-func (p *Pool) Get(serverID uint, fingerprint string) (*ssh.Client, error) {
-	return p.GetContext(context.Background(), serverID, fingerprint)
-}
-
-// GetContext also cancels slot waits and joins a cancelled keepalive probe.
-// On error it owns no slot and returns no client; callers must not Release.
-func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string) (*ssh.Client, error) {
+// AcquireContext transfers a cached client, or a vacant slot for a new dial.
+func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint string) (*Lease, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -90,63 +79,56 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 		p.mu.Unlock()
 		return nil, ErrClosed
 	}
-	entry, ok := p.conns[serverID]
-	if !ok {
-		entry = &connEntry{
-			fingerprint: fingerprint,
-			sem:         make(chan struct{}, p.maxConns),
-		}
+	entry := p.conns[serverID]
+	var stale *ssh.Client
+	if entry == nil {
+		entry = &connEntry{fingerprint: fingerprint, sem: make(chan struct{}, p.maxConns)}
 		p.conns[serverID] = entry
 	} else if entry.fingerprint != fingerprint {
-		if entry.client != nil {
-			entry.client.Close()
-			entry.client = nil
-		}
+		stale, entry.client = entry.client, nil
 		entry.fingerprint = fingerprint
+		entry.generation++
 	}
+	generation := entry.generation
 	entry.waiters++
 	p.mu.Unlock()
-
-	// Acquire concurrency slot (bounded wait; never block forever)
+	if stale != nil {
+		_ = stale.Close()
+	}
 	timer := time.NewTimer(p.slotTimeout)
 	defer timer.Stop()
-	var waitErr error
+	var err error
 	select {
 	case entry.sem <- struct{}{}:
 	case <-timer.C:
-		waitErr = ErrSlotTimeout
+		err = ErrSlotTimeout
 	case <-ctx.Done():
-		waitErr = ctx.Err()
+		err = ctx.Err()
 	case <-p.done:
-		waitErr = ErrClosed
+		err = ErrClosed
 	}
-
 	p.mu.Lock()
 	entry.waiters--
-	if waitErr != nil {
+	if err != nil {
 		p.mu.Unlock()
-		return nil, waitErr
+		return nil, err
 	}
-	if p.closed || ctx.Err() != nil {
-		waitErr = ctx.Err()
-		if waitErr == nil {
-			waitErr = ErrClosed
-		}
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	} else if p.closed {
+		err = ErrClosed
+	} else if entry.generation != generation || entry.fingerprint != fingerprint {
+		err = ErrStaleLease
+	}
+	if err != nil {
 		p.mu.Unlock()
 		<-entry.sem
-		return nil, waitErr
+		return nil, err
 	}
 	client := entry.client
-	if client != nil {
-		entry.client = nil // transfer ownership to caller
-	}
+	entry.client = nil
 	entry.lastUsed = time.Now()
 	p.mu.Unlock()
-
-	// A cached connection may have died silently (network drop, server
-	// restart, or the peer timing it out). Verify it is still usable before
-	// handing it out; otherwise close and drop it so the caller dials a fresh
-	// connection instead of reusing a dead one forever.
 	if client != nil {
 		probed := make(chan bool, 1)
 		go func() { probed <- p.probe(client) }()
@@ -155,7 +137,7 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 		case healthy = <-probed:
 		case <-ctx.Done():
 			_ = client.Close()
-			<-probed // the probe cannot retain ownership after returning
+			<-probed
 			<-entry.sem
 			return nil, ctx.Err()
 		case <-p.done:
@@ -164,120 +146,301 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 			<-entry.sem
 			return nil, ErrClosed
 		}
-		if err := ctx.Err(); err != nil {
-			_ = client.Close()
-			<-entry.sem
-			return nil, err
-		}
 		if !healthy {
 			_ = client.Close()
 			client = nil
 		}
 	}
-
 	p.mu.Lock()
-	closed := p.closed
-	p.mu.Unlock()
-	if closed || ctx.Err() != nil {
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	} else if p.closed {
+		err = ErrClosed
+	} else if entry.generation != generation || entry.fingerprint != fingerprint {
+		err = ErrStaleLease
+	}
+	if err != nil {
+		p.mu.Unlock()
 		if client != nil {
 			_ = client.Close()
 		}
 		<-entry.sem
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		return nil, ErrClosed
+		return nil, err
 	}
-	return client, nil
-}
-
-// Release returns a client to the pool or closes it if the pool already has
-// a cached connection. Also releases the concurrency slot acquired by Get.
-// Passing nil for client is valid — it only releases the slot.
-func (p *Pool) Release(serverID uint, client *ssh.Client) {
-	p.mu.Lock()
-	entry, ok := p.conns[serverID]
-	if !ok {
-		p.mu.Unlock()
-		if client != nil {
-			client.Close()
-		}
-		return
-	}
-
-	if client != nil {
-		if entry.client != nil {
-			// Pool already has a cached client, close this one
-			client.Close()
-		} else {
-			entry.client = client
-		}
-		entry.lastUsed = time.Now()
-	}
+	lease := &Lease{Client: client, pool: p, entry: entry, serverID: serverID, generation: generation, fingerprint: fingerprint, cacheable: true}
+	p.leases[lease] = struct{}{}
 	p.mu.Unlock()
-
-	<-entry.sem // release concurrency slot
+	return lease, nil
 }
 
-// Discard closes client without returning it to the pool and releases the
-// concurrency slot acquired by Get. Callers should use Discard instead of
-// Release when they know the connection is broken, so a dead connection is
-// never cached and reused.
-func (p *Pool) Discard(serverID uint, client *ssh.Client) {
-	p.mu.Lock()
-	entry, ok := p.conns[serverID]
-	p.mu.Unlock()
-
-	if client != nil {
-		client.Close()
+// Valid reports whether this lease still belongs to the current generation.
+func (l *Lease) Valid() bool {
+	l.mu.Lock()
+	done := l.done
+	l.mu.Unlock()
+	if done {
+		return false
 	}
-	if ok {
-		<-entry.sem // release concurrency slot
-	}
-}
-
-// Invalidate drops any cached connection for the server. Call it when the
-// server's connection parameters change (host/port/credential) or it is
-// deleted, so the next Get cannot reuse a connection dialed with the old
-// parameters. Safe to call for an unknown server.
-func (p *Pool) Invalidate(serverID uint) {
+	p := l.pool
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	entry, ok := p.conns[serverID]
-	if !ok {
-		return
-	}
-	if entry.client != nil {
-		entry.client.Close()
-		entry.client = nil
-	}
-	// Clearing the fingerprint makes any client returned by an in-flight
-	// session stale too: the next Get passes the current fingerprint and
-	// closes whatever it finds (a stale release included).
-	entry.fingerprint = ""
+	return !p.closed && p.conns[l.serverID] == l.entry && l.entry.generation == l.generation && l.entry.fingerprint == l.fingerprint
 }
 
-// Close shuts down the eviction goroutine and closes all cached connections.
+// DialContext links an in-progress dial to both its request and pool
+// shutdown. Call cleanup after ownership has transferred to SetClient (or the
+// dial failed). Cleanup stops or joins the pool callback before cancelling
+// the derived context; a successful route has already detached its temporary
+// cancellation watchers, so this does not close an established client.
+func (l *Lease) DialContext(parent context.Context) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	l.mu.Lock()
+	done := l.done
+	l.mu.Unlock()
+	if done || l.pool.shutdown.Err() != nil {
+		cancel()
+	}
+	joined := make(chan struct{})
+	stop := context.AfterFunc(l.pool.shutdown, func() {
+		defer close(joined)
+		cancel()
+	})
+	var once sync.Once
+	cleanup := func() {
+		once.Do(func() {
+			if !stop() {
+				<-joined
+			}
+			cancel()
+		})
+	}
+	return ctx, cleanup
+}
+
+// SetClient transfers ownership of a newly dialed client to the lease.
+func (l *Lease) SetClient(client *ssh.Client) {
+	l.mu.Lock()
+	old := l.Client
+	if l.done {
+		l.mu.Unlock()
+		if client != nil {
+			_ = client.Close()
+		}
+		return
+	}
+	select {
+	case <-l.pool.done:
+		l.Client = nil
+		l.mu.Unlock()
+		if old != nil {
+			_ = old.Close()
+		}
+		if client != nil && client != old {
+			_ = client.Close()
+		}
+		return
+	default:
+	}
+	l.Client = client
+	l.mu.Unlock()
+	if old != nil && old != client {
+		_ = old.Close()
+	}
+}
+
+func (l *Lease) Release() { l.finish(false) }
+func (l *Lease) Discard() { l.finish(true) }
+func (l *Lease) finish(discard bool) {
+	l.mu.Lock()
+	if l.done {
+		l.mu.Unlock()
+		return
+	}
+	l.done = true
+	client := l.Client
+	l.Client = nil
+	l.mu.Unlock()
+	p := l.pool
+	p.mu.Lock()
+	delete(p.leases, l)
+	if l.legacy {
+		pending := p.legacy[l.serverID]
+		for i, candidate := range pending {
+			if candidate == l {
+				pending = append(pending[:i], pending[i+1:]...)
+				break
+			}
+		}
+		if len(pending) == 0 {
+			delete(p.legacy, l.serverID)
+		} else {
+			p.legacy[l.serverID] = pending
+		}
+	}
+	if !discard && l.cacheable && !p.closed && p.conns[l.serverID] == l.entry && l.entry.generation == l.generation && l.entry.fingerprint == l.fingerprint && l.entry.client == nil {
+		l.entry.client = client
+		l.entry.lastUsed = time.Now()
+		client = nil
+	}
+	p.mu.Unlock()
+	if client != nil {
+		_ = client.Close()
+	}
+	<-l.entry.sem
+}
+
+// Get and its return-by-serverID counterparts remain for legacy callers.
+// New code must retain a Lease: a newly dialed client cannot be unambiguously
+// associated with a serverID-only Get when multiple generations overlap.
+func (p *Pool) Get(serverID uint, fingerprint string) (*ssh.Client, error) {
+	return p.GetContext(context.Background(), serverID, fingerprint)
+}
+func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string) (*ssh.Client, error) {
+	lease, err := p.AcquireContext(ctx, serverID, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	return lease.LegacyClient(), nil
+}
+
+// LegacyClient opts this lease into the serverID-only compatibility API.
+// Use only when an older caller cannot retain the lease token.
+func (l *Lease) LegacyClient() *ssh.Client {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.done {
+		return nil
+	}
+	if l.legacy {
+		return l.Client
+	}
+	l.legacy = true
+	l.original = l.Client
+	p := l.pool
+	p.mu.Lock()
+	if l.original == nil {
+		for _, previous := range p.legacy[l.serverID] {
+			if previous.original == nil && (previous.entry != l.entry || previous.generation != l.generation) {
+				// New clients have no token in the legacy API. All overlapping,
+				// unidentifiable generations must conservatively avoid caching.
+				l.cacheable = false
+				previous.cacheable = false
+			}
+		}
+	}
+	p.legacy[l.serverID] = append(p.legacy[l.serverID], l)
+	p.mu.Unlock()
+	return l.Client
+}
+
+func (p *Pool) legacyLease(serverID uint, client *ssh.Client) *Lease {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pending := p.legacy[serverID]
+	index := -1
+	if client != nil {
+		for i, lease := range pending {
+			if lease.original == client {
+				index = i
+				break
+			}
+		}
+	}
+	if index < 0 {
+		for i, lease := range pending {
+			if lease.original == nil {
+				index = i
+				break
+			}
+		}
+	}
+	if index < 0 {
+		return nil
+	}
+	lease := pending[index]
+	p.legacy[serverID] = append(pending[:index], pending[index+1:]...)
+	if len(p.legacy[serverID]) == 0 {
+		delete(p.legacy, serverID)
+	}
+	return lease
+}
+func (p *Pool) Release(serverID uint, client *ssh.Client) {
+	lease := p.legacyLease(serverID, client)
+	if lease == nil {
+		if client != nil {
+			_ = client.Close()
+		}
+		return
+	}
+	lease.SetClient(client)
+	lease.Release()
+}
+func (p *Pool) Discard(serverID uint, client *ssh.Client) {
+	lease := p.legacyLease(serverID, client)
+	if lease == nil {
+		if client != nil {
+			_ = client.Close()
+		}
+		return
+	}
+	lease.SetClient(client)
+	lease.Discard()
+}
+
+// Invalidate retires cached and borrowed connections without interrupting an
+// operation already using a lease. Old generations are closed on return.
+func (p *Pool) Invalidate(serverID uint) {
+	p.mu.Lock()
+	entry := p.conns[serverID]
+	var client *ssh.Client
+	if entry != nil {
+		client, entry.client = entry.client, nil
+		entry.fingerprint = ""
+		entry.generation++
+	}
+	p.mu.Unlock()
+	if client != nil {
+		_ = client.Close()
+	}
+}
+
+// Close closes both idle transports and active transports during Hub shutdown.
 func (p *Pool) Close() {
 	p.closeOnce.Do(func() {
 		p.mu.Lock()
-		defer p.mu.Unlock()
 		p.closed = true
 		close(p.done)
+		clients := make([]*ssh.Client, 0, len(p.conns))
 		for _, entry := range p.conns {
 			if entry.client != nil {
-				entry.client.Close()
+				clients = append(clients, entry.client)
+				entry.client = nil
 			}
 		}
+		active := make([]*Lease, 0, len(p.leases))
+		for lease := range p.leases {
+			active = append(active, lease)
+		}
 		p.conns = nil
+		p.mu.Unlock()
+		p.cancelShutdown()
+		for _, client := range clients {
+			_ = client.Close()
+		}
+		for _, lease := range active {
+			lease.mu.Lock()
+			client := lease.Client
+			lease.mu.Unlock()
+			if client != nil {
+				_ = client.Close()
+			}
+		}
 	})
 }
 
-// evictLoop periodically removes idle connections.
 func (p *Pool) evictLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ticker.C:
@@ -287,32 +450,26 @@ func (p *Pool) evictLoop() {
 		}
 	}
 }
-
-// evict closes and removes connections that have been idle longer than maxIdle.
 func (p *Pool) evict() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
+	var clients []*ssh.Client
 	for id, entry := range p.conns {
 		if entry.client != nil && time.Since(entry.lastUsed) > p.maxIdle {
-			entry.client.Close()
+			clients = append(clients, entry.client)
 			entry.client = nil
 		}
-		// Remove entries with no cached client and no active users.
 		if entry.client == nil && len(entry.sem) == 0 && entry.waiters == 0 {
 			delete(p.conns, id)
 		}
 	}
+	p.mu.Unlock()
+	for _, client := range clients {
+		_ = client.Close()
+	}
 }
-
-// keepAliveProbe performs a bounded keepalive round-trip over the SSH channel.
-// It returns true only when the server responds within probeTimeout.
 func keepAliveProbe(client *ssh.Client) bool {
 	done := make(chan error, 1)
-	go func() {
-		_, _, err := client.SendRequest("keepalive@talus.local", true, nil)
-		done <- err
-	}()
+	go func() { _, _, err := client.SendRequest("keepalive@talus.local", true, nil); done <- err }()
 	select {
 	case err := <-done:
 		return err == nil

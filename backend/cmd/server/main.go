@@ -106,6 +106,7 @@ func main() {
 			&model.User{},
 			&model.SSHCredential{},
 			&model.Server{},
+			&model.ServerConnectionConfig{},
 			&model.APIKey{},
 			&model.Metric{},
 			&model.Service{},
@@ -164,6 +165,7 @@ func main() {
 	serverRepo := repository.NewServerRepo(db)
 	metricRepo := repository.NewMetricRepo(db)
 	serverSvc := service.NewServerService(serverRepo, metricRepo, sshPool)
+	serverSvc.SetMasterKey(masterKey)
 
 	// Dependency chain — API Keys
 	apiKeyRepo := repository.NewAPIKeyRepo(db)
@@ -278,6 +280,7 @@ func main() {
 	terminalSvc := service.NewTerminalService(sshSvc)
 
 	execH := handler.NewExecHandler(sshSvc)
+	connectionH := handler.NewServerConnectionHandler(sshSvc)
 	terminalH := handler.NewTerminalHandler(terminalSvc, jwtSvc)
 
 	// Dependency chain — Metrics
@@ -313,13 +316,14 @@ func main() {
 		ProfileHandler:        authHandler.Profile,
 		ChangePasswordHandler: authHandler.ChangePassword,
 		// Servers
-		ListServersHandler:         serverHandler.List,
-		ListServerSummariesHandler: serverHandler.ListSummaries,
-		CreateServerHandler:        serverHandler.Create,
-		GetServerHandler:           serverHandler.Get,
-		UpdateServerHandler:        serverHandler.Update,
-		DeleteServerHandler:        serverHandler.Delete,
-		TrustServerHostKeyHandler:  serverHandler.TrustHostKey,
+		ListServersHandler:          serverHandler.List,
+		ListServerSummariesHandler:  serverHandler.ListSummaries,
+		CreateServerHandler:         serverHandler.Create,
+		GetServerHandler:            serverHandler.Get,
+		UpdateServerHandler:         serverHandler.Update,
+		DeleteServerHandler:         serverHandler.Delete,
+		TrustServerHostKeyHandler:   serverHandler.TrustHostKey,
+		TestServerConnectionHandler: connectionH.Test,
 		// Credentials
 		ListCredentialsHandler:  credHandler.List,
 		CreateCredentialHandler: credHandler.Create,

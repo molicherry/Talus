@@ -38,6 +38,7 @@ compile src/features/usage-logs/types.ts usage-types
 sed 's|"../types"|"./.compiled-usage-types.mjs"|g' tests/.compiled-usage-session.mjs > tests/.compiled-usage-session-imports.mjs
 mv tests/.compiled-usage-session-imports.mjs tests/.compiled-usage-session.mjs
 compile src/features/services/lib/credential-rows.ts credential-rows
+compile src/features/servers/lib/connection-config.ts connection-config
 
 # 2. Run every test file under tests/ (skip this runner + compiled artifacts).
 FAIL=0

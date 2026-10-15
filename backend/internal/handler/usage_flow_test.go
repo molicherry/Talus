@@ -58,7 +58,7 @@ func usageFlowDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = db.AutoMigrate(&model.User{}, &model.Server{}, &model.SSHCredential{}, &model.APIKey{}, &model.AuditEvent{}, &model.UsageLogInstance{}, &model.UsageLog{}, &model.UsageLogBackfillState{}); err != nil {
+	if err = db.AutoMigrate(&model.User{}, &model.Server{}, &model.ServerConnectionConfig{}, &model.SSHCredential{}, &model.APIKey{}, &model.AuditEvent{}, &model.UsageLogInstance{}, &model.UsageLog{}, &model.UsageLogBackfillState{}); err != nil {
 		t.Fatal(err)
 	}
 	return db

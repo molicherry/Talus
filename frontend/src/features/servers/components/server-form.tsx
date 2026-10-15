@@ -8,6 +8,7 @@ import { translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { Dialog } from "../../../components/ui/dialog";
 import { Field, Input, Label, Select, Textarea } from "../../../components/ui/field";
+import { useAuth } from "../../../hooks/use-auth";
 import { useTranslation } from "../../../i18n";
 import { toast } from "../../../lib/toast";
 import {
@@ -18,7 +19,11 @@ import {
 } from "../../../types/models";
 import { CredentialForm } from "../../credentials/components/credential-form";
 import { useCredentials } from "../../credentials/hooks/use-credentials";
-import { useCreateServer, useUpdateServer } from "../hooks/use-servers";
+import { useCreateServer, useUpdateServer, useServers } from "../hooks/use-servers";
+
+import { connectionDraft, connectionChanged, connectionErrors, serializeConnection } from "../lib/connection-config";
+import { ServerConnectionFields } from "./server-connection-fields";
+import { ConnectionTestButton } from "./connection-test-button";
 
 interface ServerFormProps {
   server?: Server;
@@ -34,11 +39,19 @@ export function ServerForm({ server }: ServerFormProps) {
   const activeMutation = isEdit ? updateMutation : createMutation;
   const { data: credentials } = useCredentials();
   const { t } = useTranslation();
+  const { isAdmin } = useAuth();
+  const candidates = useServers();
+  const [savedServer, setSavedServer] = useState(server);
+  const [draft, setDraft] = useState(() => connectionDraft(server?.connection));
+  const [testGeneration, setTestGeneration] = useState(0);
+  const [proxyErrors, setProxyErrors] = useState<ReturnType<typeof connectionErrors>>({});
 
   const {
     register,
     handleSubmit,
     setValue,
+    watch,
+    reset,
     formState: { errors },
   } = useForm<ServerFormValues>({
     resolver: zodResolver(ServerFormSchema),
@@ -55,6 +68,22 @@ export function ServerForm({ server }: ServerFormProps) {
           port: 22,
         },
   });
+
+  const values = watch();
+  const routeChanged = connectionChanged(draft, savedServer?.connection);
+  const unsavedConnection = routeChanged || (!!savedServer && (values.host !== savedServer.host ||
+    values.port !== savedServer.port || (values.credential_id ?? null) !== (savedServer.credential_id ?? null)));
+
+  // A handshake may pin a key and advance only the revision; accepting that
+  // revision is safe while the editable connection parameters remain identical.
+  useEffect(() => {
+    if (server && savedServer && server.connection_revision > savedServer.connection_revision && !unsavedConnection &&
+      server.host === savedServer.host && server.port === savedServer.port &&
+      server.credential_id === savedServer.credential_id &&
+      !connectionChanged(connectionDraft(server.connection), savedServer.connection)) {
+      setSavedServer(server);
+    }
+  }, [server, savedServer, unsavedConnection]);
 
   // The credential create page navigates back here with the id it created, so
   // the user does not have to hunt for it in the dropdown.
@@ -105,13 +134,28 @@ export function ServerForm({ server }: ServerFormProps) {
   }, [createdCredential, setValue]);
 
   const onSubmit = (data: ServerFormValues) => {
+    if (isAdmin) {
+      const nextErrors = connectionErrors(draft, savedServer?.connection);
+      setProxyErrors(nextErrors);
+      if (Object.keys(nextErrors).length) return;
+      if (!isEdit || routeChanged) {
+        data = { ...data, connection: serializeConnection(draft),
+          ...(isEdit ? { expected_connection_revision: savedServer?.connection_revision ?? 1 } : {}) };
+      }
+    }
     if (isEdit && server) {
       updateMutation.mutate(
         { id: server.id, data },
         {
-          onSuccess: () => {
+          onSuccess: (updated) => {
             toast.success(t("server.toast.updated"));
-            navigate("/servers");
+            setTestGeneration((value) => value + 1);
+            setSavedServer(updated);
+            setDraft(connectionDraft(updated.connection));
+            setProxyErrors({});
+            reset({ name: updated.name, host: updated.host, port: updated.port,
+              description: updated.description ?? "", notes: updated.notes ?? "",
+              credential_id: updated.credential_id ?? null });
           },
           onError: () => {
             toast.error(t("server.toast.updateFailed"));
@@ -222,6 +266,15 @@ export function ServerForm({ server }: ServerFormProps) {
           ))}
         </Select>
       </div>
+
+      {isAdmin && <ServerConnectionFields draft={draft} saved={savedServer?.connection}
+        onChange={(next) => { setDraft(next); setProxyErrors({}); }} errors={proxyErrors}
+        candidates={candidates.data} candidatesError={candidates.isError ? translateApiError(candidates.error, t) : undefined}
+        serverID={server?.id} disabled={isPending} />}
+      {isEdit && server && <>
+        <ConnectionTestButton key={testGeneration} serverID={server.id} unsaved={unsavedConnection} disabled={isPending} />
+        <p className="text-xs text-muted-foreground">{t("server.connection.sessionHint")}</p>
+      </>}
 
       <div className="flex gap-3">
         <Button type="submit" disabled={isPending}>

@@ -52,18 +52,19 @@ func (s *TerminalService) StartSessionWithResult(ctx context.Context, serverID u
 			result.Outcome, result.Reason, result.CloseReason = "cancelled", "client_cancelled", "client_cancelled"
 		}
 	}
-	client, err := s.sshSvc.GetClient(ctx, serverID)
+	lease, err := s.sshSvc.GetLease(ctx, serverID)
 	if err != nil {
 		startFailed("terminal_ssh_failed")
 		return result, err
 	}
 
+	client := lease.Client
 	discard := false
 	defer func() {
 		if discard || result.Forced || result.Outcome == "failed" || result.Outcome == "cancelled" {
-			s.sshSvc.pool.Discard(serverID, client)
+			lease.Discard()
 		} else {
-			s.sshSvc.pool.Release(serverID, client)
+			lease.Release()
 		}
 	}()
 
