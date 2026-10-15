@@ -186,13 +186,22 @@
     {
       "run_id": "deploy-verify",
       "suite": "integration",
-      "runner": "manual",
-      "cwd": ".",
-      "command": null,
-      "timeout_seconds": null,
+      "runner": "go-test",
+      "cwd": "backend",
+      "command": [
+        "go",
+        "test",
+        "./cmd/server",
+        "-run",
+        "^TestServer(EmptyDatabaseBootstrapAndRestart|IsolatedServiceCatalogAndRelay)$",
+        "-count=1"
+      ],
+      "timeout_seconds": 600,
       "environment": {
-        "profile": "tx-deploy",
-        "requires": []
+        "profile": "isolated-hub",
+        "requires": [
+          "TEST_DATABASE_URL"
+        ]
       }
     },
     {
@@ -330,9 +339,13 @@
         {
           "implementation_id": "impl-01-02",
           "run_id": "deploy-verify",
-          "implementation": null,
-          "automation_status": "manual",
-          "required": true
+          "implementation": {
+            "path": "backend/cmd/server/isolated_deploy_test.go",
+            "symbol": "TestServerIsolatedServiceCatalogAndRelay"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Run an isolated Hub against an owned temporary database and local upstream; verify scoped service discovery, usage guides, credential injection and Relay modes without external deployment records."
         }
       ]
     },
@@ -480,6 +493,17 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Concurrent first-install callers complete without duplicate bootstrap work."
+        },
+        {
+          "implementation_id": "impl-02-03-startup",
+          "run_id": "deploy-verify",
+          "implementation": {
+            "path": "backend/cmd/server/startup_test.go",
+            "symbol": "TestServerEmptyDatabaseBootstrapAndRestart"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Start the real Hub on an empty owned database, bootstrap the administrator, revoke a session and restart; verify persistent users, migrations and token revocation."
         }
       ]
     },

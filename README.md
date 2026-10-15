@@ -310,6 +310,18 @@ Use [the unified test entry point](tests/README.md) for the `fast`, `integration
 `ui`, and `e2e` suites and the M1–M4 gates. The generated
 [test inventory](tests/coverage.md) lists scenarios, implementations, and commands.
 
+M1's deployment check starts the current Hub with an owned temporary database
+and a loopback HTTP upstream. It verifies bootstrap/restart, JWT revocation,
+service discovery, usage guides, and Relay behavior without a personal server,
+public endpoint, or historical deployment record. Set `TEST_DATABASE_URL` to an
+isolated TimescaleDB test instance whose role can create temporary databases
+and install the TimescaleDB extension.
+A missing database or a skipped required test blocks the gate.
+
+```bash
+bash tests/run.sh --gate M1
+```
+
 ## License
 
 [MIT](LICENSE)

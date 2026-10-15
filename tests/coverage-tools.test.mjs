@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,16 +32,54 @@ function fixture(t) {
     scan_exemptions: [],
   };
   return {
+    root,
     doc,
     run(events = [], extraEnv = {}) {
       writeFileSync(join(root, "tests", "coverage.json"), JSON.stringify(doc));
-      return spawnSync(process.execPath, [join(root, "tests", "run-suites.mjs"), "--gate", "M2"], {
+      return spawnSync(process.execPath, [join(root, "tests", "run-suites.mjs"), "--gate", Object.keys(doc.gates)[0]], {
         cwd: root,
         encoding: "utf8",
         env: { ...process.env, PATH: `${join(root, "bin")}:${process.env.PATH}`, FIXTURE_GO_EVENTS: events.map((event) => JSON.stringify(event)).join("\n"), ...extraEnv },
       });
     },
   };
+}
+
+function isolatedDeploymentFixture(t) {
+  const actual = JSON.parse(readFileSync(join(HERE, "coverage.json"), "utf8"));
+  const run = actual.runs.find((entry) => entry.run_id === "deploy-verify");
+  assert.ok(actual.gates.M1.includes(run.run_id));
+  assert.equal(run.runner, "go-test");
+  assert.ok(run.environment.requires.includes("TEST_DATABASE_URL"));
+  const cases = actual.cases
+    .map((entry) => ({ ...entry, implementations: entry.implementations.filter((impl) => impl.run_id === run.run_id && impl.required) }))
+    .filter((entry) => entry.implementations.length > 0);
+  const implementations = cases.flatMap((entry) => entry.implementations);
+  assert.deepEqual(implementations.map((impl) => impl.implementation.symbol).sort(), [
+    "TestServerEmptyDatabaseBootstrapAndRestart",
+    "TestServerIsolatedServiceCatalogAndRelay",
+  ]);
+  assert.ok(implementations.every((impl) => impl.automation_status === "implemented"));
+  const f = fixture(t);
+  Object.assign(f.doc, { runs: [run], cases, gates: { M1: [run.run_id] }, phases: { M1: actual.phases.M1 } });
+  for (const impl of implementations) {
+    const target = join(f.root, impl.implementation.path);
+    mkdirSync(dirname(target), { recursive: true });
+    copyFileSync(join(HERE, "..", impl.implementation.path), target);
+  }
+  // A squash/fresh checkout need not contain any old deployment commit. Permit
+  // only the current revision lookup used to label this execution record.
+  writeFileSync(join(f.root, "bin", "git"), `#!${process.execPath}
+import { writeFileSync } from "node:fs";
+if (process.argv.slice(2).join(" ") === "rev-parse HEAD") {
+  process.stdout.write("current-squashed-revision\\n");
+} else {
+  writeFileSync(${JSON.stringify(join(f.root, "unexpected-history-access"))}, process.argv.slice(2).join(" "));
+  process.exitCode = 91;
+}
+`, { mode: 0o755 });
+  const events = implementations.map((impl) => ({ Package: "example.test/backend/cmd/server", Test: impl.implementation.symbol, Action: "pass" }));
+  return { ...f, events };
 }
 
 
@@ -218,6 +256,33 @@ test("a duplicate implementation identifier fails schema validation", (t) => {
   const result = f.run();
   assert.equal(result.status, 1);
   assert.match(result.stderr, /duplicate or missing implementation_id required-test/);
+});
+
+test("M1 deployment verification needs no historical commit or manual deployment record", (t) => {
+  const f = isolatedDeploymentFixture(t);
+  const result = f.run(f.events, { TEST_DATABASE_URL: "isolated-fixture" });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.ok(!existsSync(join(f.root, "unexpected-history-access")));
+  assert.ok(!existsSync(join(f.root, "tests", "evidence")));
+  assert.ok(!existsSync(join(HERE, "evidence", "deploy-verify.json")));
+});
+
+test("M1 deployment verification blocks without an isolated database", (t) => {
+  const f = isolatedDeploymentFixture(t);
+  const result = f.run(f.events, { TEST_DATABASE_URL: "" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /requires env TEST_DATABASE_URL/);
+  assert.doesNotMatch(result.stdout, /▶ deploy-verify/);
+});
+
+test("M1 deployment verification rejects zero selected tests and skipped required tests", (t) => {
+  const f = isolatedDeploymentFixture(t);
+  const empty = f.run([], { TEST_DATABASE_URL: "isolated-fixture" });
+  assert.equal(empty.status, 1);
+  assert.match(empty.stderr, /required tests did not pass/);
+  const skipped = f.run(f.events.map((event, index) => ({ ...event, Action: index === 0 ? "skip" : "pass" })), { TEST_DATABASE_URL: "isolated-fixture" });
+  assert.equal(skipped.status, 1);
+  assert.match(skipped.stderr, /\(skip\)/);
 });
 
 test("a passing test from another directory cannot satisfy a same-named implementation", (t) => {
