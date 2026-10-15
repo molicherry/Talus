@@ -284,6 +284,12 @@ Talus 使用路由级写入预算：普通 HTTP API 为 15 秒，Exec 最长执�
 
 通过[统一测试入口](../tests/README.md)运行 `fast`、`integration`、`ui`、`e2e` 套件及 M1–M4 门禁。[测试索引](../tests/coverage.md)由机器清单生成，列出场景、实现和执行命令。
 
+M1 的部署检查会使用临时数据库和本机回环 HTTP 服务启动当前 Hub，自动验证初始化、重启、JWT 撤销、服务目录、使用指南和 Relay 行为，无需个人服务器、公网域名或历史部署记录。运行前将 `TEST_DATABASE_URL` 指向隔离的 TimescaleDB 测试实例，并确保测试账号有创建临时数据库及安装 TimescaleDB 扩展的权限。缺少数据库或跳过必需测试都会阻断门禁。
+
+```bash
+bash tests/run.sh --gate M1
+```
+
 ## 许可证
 
 [MIT](../LICENSE)
