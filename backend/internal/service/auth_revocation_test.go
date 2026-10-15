@@ -90,7 +90,7 @@ func newRevocationAuth(t *testing.T) (*AuthService, *repository.UserRepo, *model
 	return svc, repo, user, registry
 }
 
-// TestChangePasswordRevokesRegisteredTerminals pins REQ-05 §5.2: a successful
+// TestChangePasswordRevokesRegisteredTerminals verifies that a successful
 // password change marks the user's live terminals revoked and cancels them, and
 // the cleanup join happens (bounded).
 func TestChangePasswordRevokesRegisteredTerminals(t *testing.T) {

@@ -88,7 +88,7 @@ export function useTerminal(serverId: number): UseTerminalReturn {
   // Layout changes that a window "resize" event never reports (sidebar toggles,
   // fullscreen, panel resizes) are observed on the container itself.
   const containerObserverRef = useRef<ResizeObserver | null>(null);
-  // The font size is a remembered display preference (REQ-09 §字体与主题).
+  // The font size is a remembered display preference.
   const fontSizeRef = useRef(loadFontSize());
   // Every connect/disconnect starts a new connection generation. An async clipboard
   // read or a pending confirmation carries the generation it was started in, so a

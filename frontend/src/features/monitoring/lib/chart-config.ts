@@ -172,7 +172,7 @@ export function bucketCoverage(point: PointLike, field: string): number | null {
 /**
  * Visible notice when the backend served a different granularity than asked, or
  * downsampled the series. Returns an i18n key plus its parameters, never a
- * silent change (REQUIREMENTS §4.2.1).
+ * silent change.
  */
 export function downsampleNotice(meta: MetaLike | null | undefined): {
 	key: string;
@@ -206,7 +206,7 @@ export function formatCoverage(
 }
 
 /**
- * Non-colour series distinction (REQUIREMENTS §4.5): every series gets its own
+ * Non-colour series distinction: every series gets its own
  * dash pattern and marker, so the chart is readable without relying on hue and
  * remains distinguishable at low contrast or in greyscale.
  */
@@ -229,7 +229,7 @@ export function seriesPattern(index: number): { dash: string; marker: string } {
 	return { dash: pattern.dash, marker: pattern.marker };
 }
 
-/** Rows per page of the accessible data view (REQUIREMENTS §4.5). */
+/** Rows per page of the accessible data view. */
 export const DATA_TABLE_PAGE_SIZE = 50;
 
 /** Page slice of a row count, clamped to the available pages. */
@@ -246,7 +246,7 @@ export function pageSlice(total: number, page: number, size: number = DATA_TABLE
 }
 
 /**
- * Screen-reader description of one chart (REQUIREMENTS §4.5): name, range with
+ * Screen-reader description of one chart: name, range with
  * its time zone, the granularity the backend actually served, the statistic, the
  * unit and how fresh the data is. Returns an i18n key plus its parameters so the
  * wording stays translatable.
@@ -301,8 +301,8 @@ export function axisUnit(mode: AxisMode): string {
 }
 
 /**
- * Caption of the accessible data view: range, granularity, statistic and unit
- * (REQUIREMENTS §4.5), as an i18n key with parameters.
+ * Caption of the accessible data view: range, granularity, statistic and unit,
+ * as an i18n key with parameters.
  */
 export function dataTableCaption(input: {
   title: string;

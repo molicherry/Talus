@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// SessionState is the terminal session lifecycle (REQUIREMENTS §5.2).
+// SessionState is the terminal session lifecycle.
 type SessionState string
 
 const (
@@ -16,13 +16,13 @@ const (
 )
 
 // cleanupGrace is the graceful close window per session; cleanupBudget is the
-// absolute total for revoking one user's sessions (REQ-05 §5.3: 2s + 1s = 3s).
+// absolute total for revoking one user's sessions (2s + 1s = 3s).
 const (
 	cleanupGrace  = 2 * time.Second
 	cleanupBudget = 3 * time.Second
 )
 
-// Exported mirrors of the frozen §7.1.1 cleanup contract, so callers and
+// Exported cleanup limits, so callers and
 // acceptance tests can pin the values without duplicating them.
 const (
 	CleanupGrace  = cleanupGrace

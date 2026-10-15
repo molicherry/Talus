@@ -12,8 +12,8 @@ import (
 	"github.com/vpsmanager/backend/internal/telemetry"
 )
 
-// monitorTelemetry records the frozen vocabulary of REQUIREMENTS §12.1/§12.2 for
-// the background paths. Every method is nil-safe: without a registry the counter
+// monitorTelemetry records the bounded log and metric vocabulary for the
+// background paths. Every method is nil-safe: without a registry the counter
 // calls are skipped and only the structured log line is written.
 //
 // The values are never free-form. `talus_monitor_collections_total` and
@@ -135,8 +135,8 @@ func (t *monitorTelemetry) operation(action, outcome, reasonClass string) {
 	})
 }
 
-// Frozen outcome/reason vocabulary used by the mappings below (REQUIREMENTS
-// §12.2). Keeping them as constants documents the only legal values.
+// Fixed outcome/reason vocabulary used by the mappings below. Keeping them as
+// constants documents the only legal values.
 const (
 	telOutcomeSuccess  = "success"
 	telOutcomeFailure  = "failure"

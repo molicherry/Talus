@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Query budget (REQUIREMENTS §4.2.1). These are the first-phase limits frozen by
+// Query budget. These limits are enforced by
 // the acceptance fixtures: 600 output buckets, 12,000 planned raw samples and a
 // two-second total deadline shared by probing, reading and aggregating.
 const (
@@ -83,7 +83,7 @@ type QueryRequest struct {
 	EchoStat string
 }
 
-// QueryResult is the response contract of §4.2.1: the requested and actual
+// QueryResult is the response contract: the requested and actual
 // granularity, why they differ, the statistic, coverage, the data source and
 // whether the series was downsampled.
 type QueryResult struct {
@@ -147,7 +147,7 @@ func defaultIntervalFor(from, to time.Time) string {
 	}
 }
 
-// QueryWithBudget runs the §4.2.1 query plan: it validates the range and
+// QueryWithBudget runs the bounded query plan: it validates the range and
 // granularity, enforces the bucket budget, probes at most 12,001 candidate keys
 // before reading anything, and either answers from raw samples or switches to
 // the materialized 6h rollup plus bounded raw edges. Probing, reading and

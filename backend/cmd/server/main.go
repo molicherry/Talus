@@ -41,7 +41,7 @@ func main() {
 	// Initialize JWT service
 	jwtSvc := token.NewJWTService(cfg.JWTSecret, 24*time.Hour)
 
-	// Agent artifacts (REQUIREMENTS §8.2): validate the bundled agent binaries and
+	// Agent artifacts: validate the bundled agent binaries and
 	// their manifest before touching the database or binding a port. A missing,
 	// corrupt, mis-architecture or mis-versioned artifact is fatal — the Hub never
 	// falls back to a single architecture.
@@ -123,7 +123,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Metrics rollup storage (REQ-08 §8.3.1): the 6h rollup table and its
+	// Metrics rollup storage: the 6h rollup table and its
 	// materialization checkpoints. Idempotent and explicit.
 	if err := repository.PrepareMetricsRollupSchema(db); err != nil {
 		slog.Error("failed to prepare metrics rollup schema", "error", err)
@@ -356,7 +356,7 @@ func main() {
 		monitorSvc.Start(appCtx)
 	}()
 
-	// Metrics storage maintenance (REQ-08 §8.3.1): hourly rollup refresh and the
+	// Metrics storage maintenance: hourly rollup refresh and the
 	// daily retention pass, joined on the same root context.
 	maintenance := service.NewMetricsMaintenance(metricRepo)
 	// Retention follows the documented rollout: disabled by default, a dry run
@@ -439,7 +439,7 @@ func main() {
 		ReadTimeout: 15 * time.Second,
 		// WriteTimeout is disabled globally: a single 15s deadline truncates
 		// long Exec/Relay responses. Per-route budgets are applied by
-		// middleware.WriteDeadline (REQ-07 §7.1).
+		// middleware.WriteDeadline.
 		WriteTimeout: 0,
 		IdleTimeout:  60 * time.Second,
 	}

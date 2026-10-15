@@ -271,8 +271,4 @@ Cases: 33 · Runs: 13 · Schema: 1
 
 | path | kind | reason |
 | --- | --- | --- |
-| `docs/ARCHITECTURE.zh-CN.md` | planning | Planning document that references the removed adapter directory by design. |
-| `docs/REQUIREMENTS.zh-CN.md` | planning | Planning document that specifies the adapter removal requirement. |
-| `docs/IMPLEMENTATION.zh-CN.md` | planning | Planning document that describes the adapter removal work package. |
-| `docs/DEVELOPMENT-PLAN.zh-CN.md` | planning | Planning document that describes the adapter removal task. |
 | `tests/static/adapters-removed.sh` | checker | The checker itself must contain the banned patterns it searches for. |

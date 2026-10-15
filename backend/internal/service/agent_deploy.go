@@ -24,7 +24,7 @@ const agentPath = "/tmp/vpsmanager-agent"
 // deadline still caps the whole collection.
 const probeBudget = 5 * time.Second
 
-// Failure reason classes for agent deployment (REQUIREMENTS §8.2 step 2). They
+// Failure reason classes for agent deployment. They
 // are distinct so a read-only or noexec target is not confused with a corrupt
 // upload.
 const (
@@ -77,14 +77,14 @@ func (p AgentPlatform) String() string { return p.OS + "/" + p.Arch }
 
 // AgentDeploymentService owns everything the Hub does to get a matching,
 // verified agent running on a managed node: probe, idempotent upload, atomic
-// activation and protocol verification (REQ-08 §8.2). The monitor only
+// activation and protocol verification. The monitor only
 // schedules, validates and stores what this service returns.
 type AgentDeploymentService struct {
 	ssh          *SSHService
 	artifactsDir string
 	probeBudget  time.Duration
 	execBudget   time.Duration
-	// logger emits the agent.deploy correlation events (§12.3): shared
+	// logger emits the agent.deploy correlation events: shared
 	// server_id with monitor.collect, never a metric label.
 	logger *slog.Logger
 	// telemetry records the frozen arch/outcome/reason vocabulary.
@@ -265,7 +265,7 @@ func (s *AgentDeploymentService) runAgent(ctx context.Context, lease Lease) (*ag
 }
 
 // verifyProtocol accepts only the exact protocol version and build version the
-// Hub was built with (§8.2 step 4).
+// Hub was built with.
 func verifyProtocol(out *agentOutput, artifact agentproto.Artifact, protocol int) error {
 	if out == nil {
 		return deployError(ReasonAgentProtocolMismatch, errors.New("empty agent output"))

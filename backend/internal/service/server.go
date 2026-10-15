@@ -44,7 +44,7 @@ const defaultFreshnessThreshold = 120 * time.Second
 
 // freshnessThreshold reports the configured online/expired cutoff. It is derived
 // from the monitor interval, the tolerated rounds and the allowed latency
-// (REQUIREMENTS §8.1) instead of a fixed 120 seconds.
+// instead of a fixed 120 seconds.
 func (s *ServerService) freshnessThreshold() time.Duration {
 	if s.freshness > 0 {
 		return s.freshness

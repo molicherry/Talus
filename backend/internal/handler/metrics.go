@@ -24,8 +24,8 @@ func NewMetricsHandler(metricRepo *repository.MetricRepo) *MetricsHandler {
 // Get handles GET /api/v1/servers/{id}/metrics.
 //
 // The response carries the requested and actual granularity, the selected
-// statistic, coverage, the data source and whether the series was downsampled
-// (REQUIREMENTS §4.2.1). Budget refusals are explicit: 422 with a recommendation
+// statistic, coverage, the data source and whether the series was downsampled.
+// Budget refusals are explicit: 422 with a recommendation
 // when a finer granularity cannot fit, 503 when the rollup is not ready or the
 // shared deadline expired.
 func (h *MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +128,7 @@ func parseMetricQuery(r *http.Request) (repository.QueryRequest, error) {
 		interval = "auto"
 	}
 
-	// The frozen contract names the statistic `avg|max` (IMPLEMENTATION §3.4);
+	// The query contract names the statistic `avg|max`;
 	// the API's preferred spelling for the sampled maximum is `peak`, so `max` is
 	// accepted as a compatible alias and echoed back as requested (R20).
 	requestedStat := q.Get("stat")

@@ -1,5 +1,5 @@
 // Package agentproto freezes the Agent artifact contract shared by the build
-// script, the agent binary and the Hub's startup validation (REQUIREMENTS §8.2).
+// script, the agent binary and the Hub's startup validation.
 //
 // The manifest and the agent's own `--format json` output carry the same build
 // version and protocol version, so a Hub can refuse artifacts that do not match

@@ -15,7 +15,7 @@ import (
 )
 
 // agentOutput mirrors the JSON output of the monitoring agent binary, including
-// the version contract the Hub verifies before storing any metric (§8.2).
+// the version contract the Hub verifies before storing any metric.
 type agentOutput struct {
 	AgentVersion    string       `json:"agent_version"`
 	ProtocolVersion int          `json:"protocol_version"`
@@ -86,7 +86,7 @@ type MonitorService struct {
 	logger     *slog.Logger
 	clock      monitorClock
 	rng        monitorRand
-	// taskBudget is the per-collection deadline starting at admission (§8.1.1).
+	// taskBudget is the per-collection deadline starting at admission.
 	taskBudget time.Duration
 	// deployer owns probing, uploading and protocol verification.
 	deployer *AgentDeploymentService
@@ -94,7 +94,7 @@ type MonitorService struct {
 	taskFn func(ctx context.Context, serverID uint) error
 	// wake asks the scheduler to re-read the managed node list immediately.
 	wake chan struct{}
-	// telemetry records the frozen operation/stage/lag vocabulary (§12.1/§12.2).
+	// telemetry records the bounded operation/stage/lag vocabulary.
 	telemetry *monitorTelemetry
 	// leaseSettleBudget bounds one settlement wait in tests. It is zero in
 	// production, where the wait consumes the lease's own absolute deadline - the
@@ -300,8 +300,8 @@ func (s *MonitorService) collectTask(ctx context.Context, serverID uint) error {
 }
 
 // emitCollection writes the final event of one collection attempt: the frozen
-// outcome/reason pair, the schedule lag and the capacity wait (REQUIREMENTS
-// §12.1/§12.2). Success is an event too, so a healthy cycle is observable.
+// outcome/reason pair, the schedule lag and the capacity wait. Success is an
+// event too, so a healthy cycle is observable.
 func (s *MonitorService) emitCollection(collectionID string, serverID uint, due, queuedAt, startedAt, finishedAt time.Time, outcome monitorOutcome, err error) {
 	outcomeLabel, reasonLabel := collectionOutcome(outcome, err)
 	lag := time.Duration(0)
@@ -324,7 +324,7 @@ func (s *MonitorService) emitCollection(collectionID string, serverID uint, due,
 }
 
 // reportTick records deferred admissions (missed or late samples) and escalates
-// once per streak, as required by REQUIREMENTS §12.3. Node identity stays in the
+// once per streak. Node identity stays in the
 // log for correlation and is never a metric label.
 func (s *MonitorService) reportTick(tick monitorTick) {
 	// A deferred admission is a production outcome, not just a log line: count the
@@ -349,7 +349,7 @@ func (s *MonitorService) reportTick(tick monitorTick) {
 }
 
 // reportCompletion emits exactly-once escalation and recovery events for a
-// finished collection (§12.3).
+// finished collection.
 func (s *MonitorService) reportCompletion(serverID uint, result monitorCompletion) {
 	if result.WarnDegraded {
 		s.logger.Warn("monitor collection repeatedly failing",
@@ -367,7 +367,7 @@ func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
 		return errors.New("monitor: agent deployment service is not configured")
 	}
 	// One lease spans the probe, the upload and the execution so the whole
-	// collection is pinned to a single target generation (§8.2 step 3).
+	// collection is pinned to a single target generation.
 	lease, err := s.sshSvc.AcquireLease(ctx, serverID, LeaseConsumerAgent)
 	if err != nil {
 		return err

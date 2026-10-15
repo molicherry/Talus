@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Delta and rollup constants (REQUIREMENTS §8.3.1).
+// Delta and rollup constants.
 const (
 	// DefaultDeltaGapThreshold is the largest spacing between two samples that
 	// may contribute a rate: three times the 60s collection interval, so up to two

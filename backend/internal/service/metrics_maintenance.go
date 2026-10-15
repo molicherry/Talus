@@ -9,7 +9,7 @@ import (
 	"github.com/vpsmanager/backend/internal/telemetry"
 )
 
-// MetricsMaintenance runs the periodic metrics storage jobs of REQ-08 §8.3.1:
+// MetricsMaintenance runs the periodic metrics storage jobs:
 // an hourly 6h-rollup refresh (first run backfills the retention window) and a
 // daily retention pass. A failed refresh or an incomplete aggregation pauses the
 // corresponding work and is reported, never silently ignored.
@@ -173,7 +173,7 @@ func (m *MetricsMaintenance) Prune(ctx context.Context) {
 	if result.RawRows > 0 {
 		// Raw older than the aggregation backfill window is discarded without ever
 		// being materialized; that is a deliberate policy exception, not a claim of
-		// completeness (§8.3.1). It is logged so capacity and audit can see it.
+		// completeness. It is logged so capacity and audit can see it.
 		m.logger.Info("metrics retention discarded raw outside the aggregation backfill window",
 			"cutoff", plan.Cutoff, "raw_rows", result.RawRows,
 			"aggregation_backfill_days", int(repository.RollupBackfillWindow.Hours()/24))

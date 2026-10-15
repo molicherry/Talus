@@ -19,7 +19,7 @@ export interface TrendSeries {
   /** CSS colour value, e.g. `var(--color-primary)`. */
   color: string;
   /**
-   * Non-colour distinction (REQUIREMENTS §4.5): an SVG dash pattern and a marker
+   * Non-colour distinction: an SVG dash pattern and a marker
    * shape, so series stay distinguishable without relying on hue.
    */
   dash?: string;
@@ -103,7 +103,7 @@ export function TrendChart({
   const helpId = useId();
   // Preserve selection by timestamp when polling shifts or replaces the grid.
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
-  // Per-series visibility (REQUIREMENTS §4.5): the legend is a keyboard-operable
+  // Per-series visibility: the legend is a keyboard-operable
   // group of toggle buttons exposing their pressed state.
   const [hiddenKeys, setHiddenKeys] = useState<ReadonlySet<string>>(new Set());
   const toggleSeries = (key: string) =>

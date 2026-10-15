@@ -368,7 +368,7 @@ func TestAgentDeployRejectsUnsupportedPlatformWithoutUploading(t *testing.T) {
 	}
 }
 
-// TestAgentDeployRejectsLegacyAndMismatchedProtocols pins §8.2 step 4: an agent
+// TestAgentDeployRejectsLegacyAndMismatchedProtocols verifies that an agent
 // that does not speak the exact protocol and build version is refused.
 func TestAgentDeployRejectsLegacyAndMismatchedProtocols(t *testing.T) {
 	cases := []struct {
@@ -446,8 +446,8 @@ func TestAgentDeployClassifiesRemoteFailures(t *testing.T) {
 	}
 }
 
-// TestAgentDeployConfirmsAmbiguousActivationByRemoteHash pins §8.2 step 4's
-// "activation result unknown": when the command reports failure but the rename
+// TestAgentDeployConfirmsAmbiguousActivationByRemoteHash covers an unknown
+// activation result: when the command reports failure but the rename
 // actually happened, the remote hash decides and the collection proceeds.
 func TestAgentDeployConfirmsAmbiguousActivationByRemoteHash(t *testing.T) {
 	deployer, h := newAgentDeployHarness(t, "v1.2.3")

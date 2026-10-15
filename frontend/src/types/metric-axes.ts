@@ -29,7 +29,7 @@ export const TIME_RANGE_HOURS: Record<TimeRange, number> = {
 /**
  * Granularity requested per range. 30d asks for 6h because the API budget is
  * 600 buckets: 30d at 1h would be 720 buckets and would be refused with 422
- * `metrics_query_budget_exceeded` (REQUIREMENTS §4.2.1).
+ * `metrics_query_budget_exceeded`.
  */
 export const TIME_RANGE_INTERVALS: Record<TimeRange, string> = {
   "15m": "1m",

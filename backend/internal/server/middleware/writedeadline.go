@@ -9,7 +9,7 @@ import (
 // Write budgets. A single global http.Server.WriteTimeout cannot serve both
 // ordinary CRUD (short protection) and long operations (Exec up to 300s, bounded
 // Relay streams up to 300s), so the global timeout is disabled and each request
-// gets a budget here. See REQUIREMENTS §7.1 and IMPLEMENTATION §3.5.
+// gets a budget here.
 const (
 	// DefaultWriteBudget protects ordinary requests, matching the historical 15s.
 	DefaultWriteBudget = 15 * time.Second

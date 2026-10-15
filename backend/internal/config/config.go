@@ -24,10 +24,10 @@ type Config struct {
 	LogLevel  string
 
 	// Agent artifacts: the directory holding agents-manifest.json and both
-	// architecture-specific binaries (REQUIREMENTS §8.2).
+	// architecture-specific binaries.
 	AgentArtifactsDir string
 
-	// Metrics retention rollout (REQUIREMENTS §8.3.1 rollout: disabled by default,
+	// Metrics retention rollout (disabled by default,
 	// then an operator-visible dry run, then enabled). The dry run always plans
 	// and reports; only enabled && !dry-run deletes anything.
 	MetricsRetentionEnabled bool
@@ -39,7 +39,7 @@ type Config struct {
 	// Monitoring
 	MonitorInterval int
 	// MonitorToleratedRounds and MonitorAllowedLatency derive the online/expired
-	// freshness threshold together with MonitorInterval (REQUIREMENTS §8.1):
+	// freshness threshold together with MonitorInterval:
 	// threshold = I×(rounds+1) + latency. The defaults (1 round, 0 latency)
 	// reproduce the historical flat 120s at the default 60s interval.
 	MonitorToleratedRounds int
@@ -49,7 +49,7 @@ type Config struct {
 	SSHTimeout int
 	SSHMaxIdle int
 
-	// Exec budgets (REQUIREMENTS §7.1.2). The handler resolves the effective
+	// Exec budgets. The handler resolves the effective
 	// timeout as request -> ExecTimeout -> ExecTimeoutMax; the output limits cap
 	// what is retained in memory (stdout+stderr total, and each stream).
 	ExecTimeout           int

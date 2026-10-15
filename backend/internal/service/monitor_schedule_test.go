@@ -237,7 +237,7 @@ func TestMonitorEarliestDueDrivesWakeUp(t *testing.T) {
 	}
 }
 
-// TestMonitorFailureEscalationIsExactlyOncePerStreak pins §12.3: three
+// TestMonitorFailureEscalationIsExactlyOncePerStreak verifies that three
 // consecutive failures warn once, a fourth does not warn again, and the next
 // success produces exactly one recovery event.
 func TestMonitorFailureEscalationIsExactlyOncePerStreak(t *testing.T) {
@@ -285,7 +285,7 @@ func TestMonitorFailureEscalationIsExactlyOncePerStreak(t *testing.T) {
 }
 
 // TestMonitorDeferEscalationIsExactlyOncePerStreak pins the deferred-admission
-// side of §12.3 and its recovery event.
+// path and its recovery event.
 func TestMonitorDeferEscalationIsExactlyOncePerStreak(t *testing.T) {
 	sched, clock := newTestScheduler(t, 60*time.Second, 0.5)
 	live := make([]uint, 0, 17)

@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Metrics query contract (REQUIREMENTS §4.2.1). The field names are frozen and
+// Metrics query contract. The field names are shared and
 // must match the frontend decoder: `interval`/`allow_coarsen`/`actual_interval`,
 // not the earlier `bucket`/`allow_downsample`/`actual_bucket`.
 const (

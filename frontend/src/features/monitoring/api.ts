@@ -60,7 +60,7 @@ const MetricPointSchema = z.object({
   disk_write_coverage: z.number().nullable().optional(),
 });
 
-/** The §4.2.1 response envelope: points plus what the backend actually served. */
+/** The response envelope: points plus what the backend actually served. */
 const MetricQueryResponseSchema = z.object({
   server_id: z.number(),
   from: z.string(),

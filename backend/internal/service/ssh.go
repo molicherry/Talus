@@ -39,11 +39,11 @@ type SSHService struct {
 	sshDialTimeout     time.Duration
 	execDefaultTimeout time.Duration
 	// uploadTeardownGrace bounds the graceful close phase of an upload before the
-	// transport is force-closed (REQUIREMENTS §7.1.1: 100ms).
+	// transport is force-closed (100ms).
 	uploadTeardownGrace time.Duration
 	// outputLimit caps the total retained stdout+stderr bytes; outputStreamLimit
 	// caps each stream. Beyond the limit bytes are still read and discarded, so
-	// the remote never blocks on output backpressure (REQUIREMENTS §7.1.2).
+	// the remote never blocks on output backpressure.
 	outputLimit       int64
 	outputStreamLimit int64
 	// leaseObserver receives the in-use gauge deltas of the SSH pool slots. The pool

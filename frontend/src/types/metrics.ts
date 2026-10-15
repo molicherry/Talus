@@ -21,7 +21,7 @@ export interface MetricPoint {
 	disk_write_rate: number | null;
 
 	// Observed maxima of the sampled interval, retained separately from the
-	// average so long-range charts can still show peaks (REQ §8.3).
+	// average so long-range charts can still show peaks.
 	cpu_peak?: number | null;
 	// Per-bucket statistics; a window average is sum/count (F06).
 	cpu_sum?: number | null;
@@ -80,7 +80,7 @@ export const TIME_RANGE_MAP: Record<
 };
 
 /**
- * Query metadata returned alongside the points (REQUIREMENTS §4.2.1). It tells
+ * Query metadata returned alongside the points. It tells
  * the UI what granularity the backend actually used, whether it had to coarsen,
  * which statistic was requested, how much of the window has data, whether the
  * rollup served it and whether the series is downsampled — so nothing about the

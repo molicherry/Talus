@@ -10,7 +10,7 @@ RUN go mod download
 COPY backend/ .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w -X github.com/vpsmanager/backend/internal/server.Version=${VERSION}" -o /hub ./cmd/server
 # Both agent architectures plus their manifest ship in every Hub image: the
-# Hub refuses to start unless the manifest matches the artifacts (§8.2).
+# Hub refuses to start unless the manifest matches the bundled artifacts.
 RUN sh build/agents.sh "${VERSION}" /agents
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -o /agentverify ./cmd/agentverify
 # Verify the artifacts this image will ship (TC-08-05): manifest, both agent

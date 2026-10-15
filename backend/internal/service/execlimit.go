@@ -8,7 +8,7 @@ import (
 // cappedWriter retains at most streamMax bytes, and never more than the shared
 // totalMax across all writers. Beyond the cap it keeps accepting (and counting)
 // input so the remote command is never blocked by output backpressure; the
-// excess is discarded rather than buffered (REQUIREMENTS §7.1.2).
+// excess is discarded rather than buffered.
 type cappedWriter struct {
 	mu        *sync.Mutex
 	total     *int64

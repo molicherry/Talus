@@ -1,7 +1,6 @@
-// Package telemetry freezes the fixed log and metric vocabulary from
-// REQUIREMENTS §12. Phase 2+ wires these into the running services; this package
-// only defines the enums, the metric registry and the bounded label contract so
-// call sites can compile against a single source of truth.
+// Package telemetry defines the shared log and metric vocabulary. It provides
+// the enums, the metric registry and the bounded label contract used by the
+// running services so call sites compile against a single source of truth.
 package telemetry
 
 import (
@@ -11,7 +10,7 @@ import (
 	"sync"
 )
 
-// Component is the REQUIRED §12.1 component vocabulary.
+// Component is the fixed component vocabulary.
 type Component string
 
 const (
@@ -24,7 +23,7 @@ const (
 	ComponentRelay    Component = "relay"
 )
 
-// Stage is the REQUIRED §12.1 stage vocabulary.
+// Stage is the fixed operation-stage vocabulary.
 type Stage string
 
 const (
@@ -49,7 +48,7 @@ const (
 	StageFinalize       Stage = "finalize"
 )
 
-// Outcome is the REQUIRED §12.1 outcome vocabulary.
+// Outcome is the fixed operation-outcome vocabulary.
 type Outcome string
 
 const (
@@ -62,7 +61,7 @@ const (
 	OutcomeUnknown  Outcome = "unknown"
 )
 
-// ReasonClass is the REQUIRED §12.1 reason vocabulary.
+// ReasonClass is the fixed failure-reason vocabulary.
 type ReasonClass string
 
 const (
@@ -97,7 +96,7 @@ const (
 	KindGauge     Kind = "gauge"
 )
 
-// Label value vocabulary (REQUIREMENTS §12.2): only fixed enums, never dynamic
+// Label value vocabulary: only fixed enums, never dynamic
 // values such as IDs, hosts, paths, versions or budgets. Values are grouped by
 // label name, so a metric label is validated against its own enum.
 var (
@@ -163,7 +162,7 @@ func containsValue(list []string, v string) bool {
 	return false
 }
 
-// MetricDef is a metric with its bounded label key set (REQUIREMENTS §12.2).
+// MetricDef is a metric with its bounded label key set.
 type MetricDef struct {
 	Name   string
 	Kind   Kind

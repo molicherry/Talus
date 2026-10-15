@@ -26,9 +26,9 @@ func (r *MetricRepo) SetDeltaGapThreshold(interval time.Duration) {
 }
 
 // DeltaGapForInterval derives the sampling-gap threshold from the effective
-// collection interval: three intervals exactly, never clamped (§8.3 requires the
-// threshold to follow the configured period, and clamping changed the semantics of
-// legitimate periods — F03). The scan budget is protected by reading only the
+// collection interval: three intervals exactly, never clamped, so the threshold
+// follows the configured period without changing the semantics of legitimate
+// periods. The scan budget is protected by reading only the
 // actual predecessor row instead of widening the threshold.
 func DeltaGapForInterval(interval time.Duration) time.Duration {
 	if interval <= 0 {
@@ -140,7 +140,7 @@ type AggregatedMetric struct {
 	DiskReadRate  *float64   `gorm:"column:disk_read_rate" json:"disk_read_rate"`
 	DiskWriteRate *float64   `gorm:"column:disk_write_rate" json:"disk_write_rate"`
 
-	// Observed maxima of the sampled interval (§8.3): retained separately from the
+	// Observed maxima of the sampled interval: retained separately from the
 	// average so long-range charts can still show peaks.
 	CPUPeak      *float64 `gorm:"column:cpu_peak" json:"cpu_peak"`
 	MemoryPeak   *float64 `gorm:"column:memory_peak" json:"memory_peak"`
@@ -274,7 +274,7 @@ func (r *MetricRepo) Query(
 	from, to time.Time,
 	interval string,
 ) ([]AggregatedMetric, error) {
-	// Rates come from adjacent samples (REQUIREMENTS §8.3): a counter reset, a
+	// Rates come from adjacent samples: a counter reset, a
 	// zero/negative time delta or a gap beyond the declared threshold yields an
 	// unknown value (a gap), while a real zero increment is a real zero. The scan
 	// starts one threshold early so the first bucket has a predecessor.

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// The frozen scheduling numbers live here (REQUIREMENTS §8.1.1): a global
+// The scheduling limits live here: a global
 // in-flight cap of min(N,16), one in-flight task plus at most one queued record
 // per node, a 30s deadline after admission, and an exponential backoff with
 // ±10% jitter clamped to [I, max(I,300s)].
@@ -16,8 +16,8 @@ const (
 	monitorTaskBudget  = 30 * time.Second
 	monitorBackoffCap  = 300 * time.Second
 	monitorJitter      = 0.1
-	// monitorWarnAfter is the consecutive count that escalates to a WARN
-	// (REQUIREMENTS §12.3): repeated collection failures, or repeated deferred
+	// monitorWarnAfter is the consecutive count that escalates to a WARN:
+	// repeated collection failures, or repeated deferred
 	// admissions (capacity/re-entrancy skips).
 	monitorWarnAfter = 3
 )
@@ -48,7 +48,7 @@ func (s *seededMonitorRand) Float64() float64 { return s.r.Float64() }
 
 // monitorOutcome classifies a finished task. Only outcomeFailure advances the
 // consecutive-failure counter: skips, shutdown, node deletion and generation
-// invalidation never inflate it (§8.1.1).
+// invalidation never inflate it.
 type monitorOutcome int
 
 const (
@@ -70,7 +70,7 @@ type monitorNode struct {
 	queued   bool
 	queuedAt time.Time
 	// defers counts consecutive deferred admissions; failureWarned/deferWarned
-	// keep the escalation to exactly one WARN per streak (§12.3).
+	// keep the escalation to exactly one WARN per streak.
 	defers        int
 	failureWarned bool
 	deferWarned   bool

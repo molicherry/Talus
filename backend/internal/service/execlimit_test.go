@@ -39,7 +39,7 @@ func TestCappedWriterBoundaries(t *testing.T) {
 }
 
 // TestExecOutputTruncationMetadata pins the per-stream cap, the shared total cap
-// and the exit-code/truncation metadata (REQUIREMENTS §7.1.2).
+// and the exit-code/truncation metadata.
 func TestExecOutputTruncationMetadata(t *testing.T) {
 	address, hostKey := startExecSSHServer(t, func(_ string, ch ssh.Channel, _ <-chan struct{}) {
 		_, _ = ch.Write(bytes.Repeat([]byte("o"), 700))          // stdout: per-stream capped at 600

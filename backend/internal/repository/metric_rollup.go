@@ -219,7 +219,7 @@ func materializeBuckets(tx *gorm.DB, repo *MetricRepo, serverID uint, from, to t
 // recent samples, those whose checkpoint is behind (a failure gap or a quiet
 // node), and those that hold retained samples but were never materialized at
 // all. Selecting only "recently active" nodes would leave a backlog unaggregated
-// forever, which later blocks retention (REQ §8.3.1).
+// forever, which later blocks retention.
 func (r *MetricRepo) serversNeedingRollup(ctx context.Context, since, closed time.Time) ([]uint, error) {
 	var ids []uint
 	err := r.db.WithContext(ctx).Raw(`
@@ -446,7 +446,7 @@ func chunkHoldsPendingRaw(tx *gorm.DB, chunk chunkRange, pending []uint) (bool, 
 }
 
 // StorageReport is the measured on-disk footprint of the metrics storage plus the
-// linear projection to the retention window (REQUIREMENTS §8.3.2).
+// linear projection to the retention window.
 type StorageReport struct {
 	RawRows       int64
 	RawTotalBytes int64

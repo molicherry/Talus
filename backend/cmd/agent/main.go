@@ -18,7 +18,7 @@ import (
 )
 
 // AgentOutput contains all collected system metrics plus the version contract
-// the Hub validates before trusting a deployment (REQUIREMENTS §8.2).
+// the Hub validates before trusting a deployment.
 type AgentOutput struct {
 	AgentVersion    string      `json:"agent_version"`
 	ProtocolVersion int         `json:"protocol_version"`

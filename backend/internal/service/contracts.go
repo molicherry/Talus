@@ -8,9 +8,9 @@ import (
 	"github.com/vpsmanager/backend/internal/gate"
 )
 
-// This file freezes the cross-requirement contracts agreed in
-// REQUIREMENTS §5/§6/§7 and IMPLEMENTATION §3. Compile-time assertions below
-// keep the Phase 2 implementations aligned with the shared contracts.
+// This file defines the shared contracts for SSH leases, terminal sessions and
+// command cleanup. Compile-time assertions below keep the implementations
+// aligned with these contracts.
 
 // Generation identifies a pool entry's target snapshot (host, port, credential,
 // updated_at). A lease may only be returned while its generation still matches
@@ -18,7 +18,7 @@ import (
 type Generation uint64
 
 // StageClass classifies the failing stage of an SSH operation, matching the
-// telemetry reason vocabulary (REQUIREMENTS §12.1).
+// telemetry reason vocabulary.
 type StageClass string
 
 const (
@@ -80,7 +80,7 @@ type Lease interface {
 	Discard()
 }
 
-// SessionState is the terminal session lifecycle (REQ-05 §5.2).
+// SessionState is the terminal session lifecycle.
 type SessionState = gate.SessionState
 
 const (

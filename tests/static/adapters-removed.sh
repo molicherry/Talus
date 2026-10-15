@@ -259,6 +259,20 @@ make_clean_fixture() {
   cp "$COVERAGE" "$d/tests/coverage.json"
 }
 
+# Keep the exact-path exemption proof self-contained: real repository exemptions
+# do not need to include a historical document just for the negative fixtures.
+make_history_fixture() {
+  local d="$1"
+  make_clean_fixture "$d"
+  printf 'historical ai-integration note\n' > "$d/docs/adapter-removal-history.md"
+  node -e '
+    const fs=require("fs");const p=process.argv[1];
+    const d=JSON.parse(fs.readFileSync(p,"utf8"));
+    d.scan_exemptions.push({path:"docs/adapter-removal-history.md",kind:"history",reason:"Fixture historical record intentionally describes the removed adapter."});
+    fs.writeFileSync(p,JSON.stringify(d,null,2));
+  ' "$d/tests/coverage.json"
+}
+
 expect_fail() { # <name> <root>
   local name="$1" root="$2"
   if TALUS_SCAN_ROOT="$root" TALUS_COVERAGE_JSON="$root/tests/coverage.json" \
@@ -366,12 +380,11 @@ self_test() {
   make_clean_fixture "$TMP/noskill"; rm "$TMP/noskill/skills/talus/SKILL.md"
   expect_fail "missing skill" "$TMP/noskill" || rc=1
 
-  make_clean_fixture "$TMP/exempt"
-  printf 'historical ai-integration note\n' > "$TMP/exempt/docs/ARCHITECTURE.zh-CN.md"
+  make_history_fixture "$TMP/exempt"
   expect_pass "exact-path exemption" "$TMP/exempt" || rc=1
 
-  make_clean_fixture "$TMP/narrow"; mkdir -p "$TMP/narrow/other/docs"
-  printf 'ai-integration\n' > "$TMP/narrow/other/docs/ARCHITECTURE.zh-CN.md"
+  make_history_fixture "$TMP/narrow"; mkdir -p "$TMP/narrow/other/docs"
+  printf 'ai-integration\n' > "$TMP/narrow/other/docs/adapter-removal-history.md"
   expect_fail "unregistered look-alike path" "$TMP/narrow" || rc=1
 
   # A negative_fixture exemption is directory-boundary scoped: a look-alike

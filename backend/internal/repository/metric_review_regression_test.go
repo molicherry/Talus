@@ -776,7 +776,7 @@ func TestRereviewCapacityUsesHypertableChunks(t *testing.T) {
 	}
 }
 
-// TestRereviewBootstrapDiscardPolicyIsExplicit pins §4: raw older than the
+// TestRereviewBootstrapDiscardPolicyIsExplicit verifies that raw older than the
 // aggregation backfill window is discarded without being aggregated, and that is
 // stated as an explicit policy rather than recorded as complete aggregation.
 func TestRereviewBootstrapDiscardPolicyIsExplicit(t *testing.T) {

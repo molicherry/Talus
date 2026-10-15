@@ -263,7 +263,7 @@ function LoadAvgCard({ load1, load5, load15 }: LoadAvgCardProps) {
 export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
   const { t } = useTranslation();
   const [timeRange, setTimeRange] = useState<TimeRange>("1h");
-  // The page shares one range, one axis and one statistic (REQ §4.3): the cards,
+  // The page shares one range, one axis and one statistic: the cards,
   // the charts and the data table describe the same numbers.
   const [axisMode, setAxisMode] = useState<AxisMode>("percent");
   const [stat, setStat] = useState<MetricStat>("avg");
@@ -355,7 +355,7 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
   const load1 = aligned.series.load_1 ?? [];
   const load5 = aligned.series.load_5 ?? [];
   const load15 = aligned.series.load_15 ?? [];
-  // The sampled maxima are separate columns (REQ §8.3); the page-level statistic
+  // The sampled maxima are separate columns; the page-level statistic
   // decides which column every card and side chart reads (R15).
   const cpuPeak = aligned.series.cpu_peak ?? [];
   const memoryPeak = aligned.series.memory_peak ?? [];
@@ -387,7 +387,7 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
     });
   }, [aligned, axisMode, stat, t]);
 
-  // Screen-reader description of the chart (REQUIREMENTS §4.5) and the caption of
+  // Screen-reader description of the chart and the caption of
   // the equivalent data view.
   const description = useMemo(() => {
     const built = chartDescription({

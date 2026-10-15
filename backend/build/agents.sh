@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build both Agent architectures and their manifest (REQUIREMENTS §8.2).
+# Build both Agent architectures and their versioned artifact manifest.
 #
 #   build/agents.sh <build-version> [output-dir]
 #
