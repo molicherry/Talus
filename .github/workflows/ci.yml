@@ -39,10 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
-      # Plain Postgres is enough: the integration test migrates only the
-      # servers/ssh_credentials models into a throwaway schema.
+      # The startup regression exercises the real entrypoint in a separate
+      # database, including the TimescaleDB extension and model migrations.
       postgres:
-        image: postgres:16-alpine
+        image: timescale/timescaledb:latest-pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -142,6 +142,144 @@ jobs:
         run: npm run test:ui:built
         working-directory: frontend
 
+  unified:
+    name: Unified test entry (tests/run.sh)
+    runs-on: ubuntu-latest
+    # M3 now includes the image acceptance run, which builds the four final images
+    # in this job as well.
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Evidence re-use checks ancestry and diffs against a recorded
+          # commit, so the unified job needs full history.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      # The M3 gate includes the image acceptance run: it builds each final image
+      # for its own platform and executes the agent inside it, so the arm64 build
+      # needs binfmt handlers on this runner too.
+      - name: Set up QEMU (M3 builds arm64 images)
+        uses: docker/setup-qemu-action@v4
+
+      # The M3 gate runs the ui-charts checks, which drive a real browser.
+      - name: Install Playwright chromium for the UI gate
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      # The manifest is the single machine source; a stale generated report
+      # must fail before any runner starts.
+      - name: Coverage manifest + report drift
+        run: node tests/render-coverage.mjs --check
+
+      # The phase gate runs the pre-registered M1 set, including the adapter
+      # scan and the isolated-database migration subset.
+      - name: Phase gate M1
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+        run: bash tests/run.sh --gate M1
+
+      # M2 is independently exercised even when M1 needs fresh deployment
+      # evidence. M1 remains failed/pending; this never overrides its result.
+      - name: Phase gate M2 (race and real terminal protocols)
+        if: ${{ !cancelled() }}
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+        run: bash tests/run.sh --gate M2
+
+      # M3 is the hardening gate and now includes the image acceptance run, so the
+      # gate cannot pass while the four final images are never built and executed.
+      # The docker job below does the same builds with a warm cache, so this step is
+      # redundant on purpose: the gate is only meaningful if it runs the check.
+      - name: Phase gate M3 (migrate hardening, agent images)
+        if: ${{ !cancelled() }}
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+        run: bash tests/run.sh --gate M3
+
+      # M4 is the terminal-acceptance gate. Its end-to-end run boots the Hub, its own
+      # scratch database and a controlled SSH peer, so the whole browser flow runs here
+      # rather than against an externally provided deployment.
+      - name: Phase gate M4 (terminal UI, PTY resize, lifecycle)
+        if: ${{ !cancelled() }}
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+        run: bash tests/run.sh --gate M4
+
+      # The records live in tests/.artifacts, a hidden directory: without
+      # include-hidden-files the upload silently finds nothing, and a "successful"
+      # upload step then proves nothing (P2-05). Missing records are an error here,
+      # not a warning, because the evidence is the point of running the gates.
+      - name: Verify the phase-gate execution records exist
+        if: ${{ !cancelled() }}
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const dir = "tests/.artifacts";
+            const files = fs.readdirSync(dir).filter((f) => /^exec-.*\.json$/.test(f));
+            if (files.length === 0) {
+              console.error("no phase-gate execution records were written");
+              process.exit(1);
+            }
+            const expected = process.env.EXPECTED_COMMIT;
+            const gates = new Set();
+            for (const file of files) {
+              const doc = JSON.parse(fs.readFileSync(`${dir}/${file}`, "utf8"));
+              // A record from another commit would not describe this run.
+              if (expected && doc.commit !== expected) {
+                console.error(`${file} records commit ${doc.commit}, expected ${expected}`);
+                process.exit(1);
+              }
+              if (doc.selector && doc.selector.gate) gates.add(doc.selector.gate);
+            }
+            console.log(`records: ${files.length}, gates: ${[...gates].sort().join(",")}, commit: ${expected.slice(0, 7)}`);
+            const missing = ["M1", "M2", "M3", "M4"].filter((gate) => !gates.has(gate));
+            if (missing.length > 0) {
+              console.error(`missing execution records for: ${missing.join(",")}`);
+              process.exit(1);
+            }
+          '
+
+      - name: Upload phase execution evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-gate-evidence
+          path: tests/.artifacts/exec-*.json
+          include-hidden-files: true
+          if-no-files-found: error
+
   docker:
     name: Docker
     runs-on: ubuntu-latest
@@ -153,7 +291,10 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       # Both builder stages are pinned to $BUILDPLATFORM and cross-compile, so
-      # QEMU is only needed for the final alpine stage's `apk add`. Only the
+      # QEMU is only needed for the final alpine stage: its `apk add` and the
+      # agent protocol probe, which executes the TARGETARCH binary (arm64 runs
+      # under binfmt, which is exactly the case a native host cannot cover).
+      # Only the
       # arch-independent ui-builder is shared between the two targets (one
       # `npm ci` + `npm run build`, and both final stages copy the same
       # /app/dist); go-builder runs once per target platform, natively and in
@@ -182,6 +323,40 @@ jobs:
             type=ref,event=tag
             type=sha,prefix=
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      # Verify what each Hub image actually ships: both agent architectures and
+      # the manifest, checked inside the image rather than in the build context.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # Verify the agent artifacts of every image variant (TC-08-05). Each build
+      # verifies what it ships — manifest, both architectures, ELF class/machine,
+      # size, hash and the stamped version, plus the protocol smoke test for the
+      # architecture the builder can execute — so a mismatch fails the build.
+      - name: Verify every image variant (2 Dockerfiles × 2 platforms)
+        run: |
+          set -euo pipefail
+          for dockerfile in Dockerfile backend/Dockerfile; do
+            for platform in linux/amd64 linux/arm64; do
+              echo "=== $dockerfile $platform ==="
+              # The artifact stage verifies the manifest, both architectures, ELF
+              # class/machine, size, hash and the stamped version; the final stage
+              # executes the TARGETARCH agent and checks its protocol output (arm64
+              # under the QEMU binfmt registered above).
+              docker buildx build --platform "$platform" --target go-builder \
+                --build-arg VERSION=ci-agent-check -f "$dockerfile" .
+              docker buildx build --platform "$platform" \
+                --build-arg VERSION=ci-agent-check -f "$dockerfile" .
+            done
+          done
+
+      # The gate's own image acceptance run, executed here where the builds above
+      # left a warm cache: it builds each final image with the platform's own
+      # binary, then re-reads the version and protocol out of the shipped image.
+      - name: Agent image acceptance (tests/verify-agent-images.sh)
+        run: bash tests/verify-agent-images.sh
 
       - name: Build and push Hub
         uses: docker/build-push-action@v7

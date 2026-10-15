@@ -24,6 +24,12 @@
   --color-card-elevated: #FFFFFF;
 
   --color-primary: #55BFF2;
+  /* Chart series colours: informative graphics need >= 3:1 against the
+     card background, which the light accent blue does not reach. */
+  --color-chart-1: #2563EB;
+  --color-chart-2: #047857;
+  --color-chart-3: #B45309;
+  --color-chart-4: #B91C1C;
   --color-primary-foreground: #0A2E4D;
   --color-primary-hover: #3AAEE8;
   --color-primary-subtle: #EFF6FF;
@@ -67,6 +73,10 @@
   --color-card-elevated: #1F2128;
 
   --color-primary: #55BFF2;
+  --color-chart-1: #55BFF2;
+  --color-chart-2: #10B981;
+  --color-chart-3: #F59E0B;
+  --color-chart-4: #F87171;
   --color-primary-foreground: #0A2E4D;
   --color-primary-hover: #7ED2F8;
   --color-primary-subtle: #1E3A8A;
@@ -172,7 +182,12 @@ body {
   outline-offset: 2px;
 }
 
-@media (max-width: 639px) {
+/*
+ * Touch targets are a capability, not a viewport width: a phone in landscape is still
+ * a phone, and a narrow desktop window is not a touch device (REQ-09 移动端, F10).
+ * min-height/min-width beat the density classes a wide layout would otherwise apply.
+ */
+@media (pointer: coarse) {
   .touch-target {
     min-width: 2.75rem;
     min-height: 2.75rem;

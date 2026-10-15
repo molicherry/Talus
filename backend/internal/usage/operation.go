@@ -417,9 +417,12 @@ func safeMethod(s string) string {
 }
 func normalizeMetadata(key string, value any) (any, bool) {
 	switch key {
-	case "response_write_failed":
+	case "response_write_failed", "cleanup_pending":
 		v, ok := value.(bool)
 		return v, ok
+	case "cleanup_reason":
+		v, ok := value.(string)
+		return v, ok && v == "terminal_cleanup_incomplete"
 	case "handshake_at", "authenticated_at", "ready_at", "closed_at":
 		var t time.Time
 		switch v := value.(type) {
@@ -485,6 +488,10 @@ func safeReason(reason string) string {
 	case "unauthorized", "invalid_credentials", "current_password_incorrect", "forbidden", "not_found", "conflict", "validation_failed", "internal_error", "rate_limited", "invalid_request", "invalid_server_id", "invalid_service_id", "invalid_credential_id", "invalid_key_id", "invalid_relay_request", "invalid_relay_path", "invalid_scopes", "scopes_required", "servers_not_found", "method_required", "command_required", "service_not_found", "credential_not_found", "api_key_not_found", "raw_key_unavailable", "credential_decrypt_failed", "api_key_server_denied", "api_key_service_denied", "relay_timeout", "relay_unreachable", "invalid_query", "ssh_connection_failed", "ssh_authentication_failed", "ssh_timeout", "ssh_host_key_mismatch", "no_host_key_mismatch", "host_key_changed", "request_rejected", "client_cancelled", "relay_copy_failed", "relay_upstream_failed", "terminal_auth_timeout", "terminal_auth_failed", "terminal_ssh_failed", "terminal_transport_failed", "terminal_closed", "terminal_cancelled", "websocket_upgrade_failed", "ssh_nonzero_exit", "client_closed", "remote_closed", "normal_close", "transport_error", "ssh_error", "server_shutdown":
 		return reason
 	case "terminal_permission_denied", "terminal_input_failed", "terminal_output_failed", "terminal_resize_failed":
+		return reason
+	case "relay_budget_exceeded", "relay_idle_timeout":
+		return reason
+	case "session_revoked", "revoked", "terminal_cleanup_incomplete":
 		return reason
 	}
 	return "internal_error"

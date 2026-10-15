@@ -1,19 +1,18 @@
 import { useTranslation } from "../../../i18n";
 import { cn } from "../../../lib/utils";
-import { TIME_RANGE_MAP, type TimeRange } from "../../../types/metrics";
+import { TIME_RANGES, type TimeRange } from "../../../types/metric-axes";
+import { TIME_RANGE_MAP } from "../../../types/metrics";
 
 interface TimeRangeSelectorProps {
   selected: TimeRange;
   onChange: (range: TimeRange) => void;
 }
 
-const RANGES: TimeRange[] = ["1h", "6h", "24h", "7d"];
-
 export function TimeRangeSelector({ selected, onChange }: TimeRangeSelectorProps) {
   const { t } = useTranslation();
   return (
     <div role="group" aria-label={t("monitoring.timeRange")} className="inline-flex rounded-lg border border-border bg-muted/60 p-0.5">
-      {RANGES.map((range) => (
+      {TIME_RANGES.map((range) => (
         <button
           key={range}
           type="button"

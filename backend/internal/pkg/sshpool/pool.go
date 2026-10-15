@@ -21,15 +21,22 @@ const probeTimeout = 3 * time.Second
 var ErrSlotTimeout = errors.New("sshpool: too many concurrent sessions for this server")
 var ErrClosed = errors.New("sshpool: pool closed")
 
+// ErrStaleGeneration is returned when the target parameters changed while a
+// client was being handed out; the handed-out client belongs to a previous
+// generation and must not be reused for the new target.
+var ErrStaleGeneration = errors.New("sshpool: target generation changed during acquire")
+
 type Pool struct {
 	mu          sync.Mutex
 	conns       map[uint]*connEntry
 	maxIdle     time.Duration
 	maxConns    int
 	slotTimeout time.Duration
-	done        chan struct{}
-	closed      bool
-	closeOnce   sync.Once
+	// quotaObserver reports slot reservations and releases (nil disables it).
+	quotaObserver QuotaObserver
+	done          chan struct{}
+	closed        bool
+	closeOnce     sync.Once
 	// probe reports whether a pooled connection is still usable. It is
 	// overridable in tests; the default performs a keepalive round-trip.
 	probe func(*ssh.Client) bool
@@ -42,6 +49,7 @@ type connEntry struct {
 	// dialed with (host, port, credential revision). It is compared on every
 	// Get so a cached client can never be used for different parameters.
 	fingerprint string
+	generation  uint64
 	lastUsed    time.Time
 	sem         chan struct{} // concurrency limiter per server
 	waiters     int
@@ -94,6 +102,7 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 	if !ok {
 		entry = &connEntry{
 			fingerprint: fingerprint,
+			generation:  1,
 			sem:         make(chan struct{}, p.maxConns),
 		}
 		p.conns[serverID] = entry
@@ -103,6 +112,7 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 			entry.client = nil
 		}
 		entry.fingerprint = fingerprint
+		entry.generation++
 	}
 	entry.waiters++
 	p.mu.Unlock()
@@ -121,6 +131,13 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 		waitErr = ErrClosed
 	}
 
+	consumer := quotaConsumer(ctx)
+	if waitErr == nil {
+		// The slot is ours: report it now, before the cached-connection probe and
+		// any dial, so a borrow that is stuck there is still counted (P2-02).
+		p.notifyQuota(consumer, 1)
+	}
+
 	p.mu.Lock()
 	entry.waiters--
 	if waitErr != nil {
@@ -133,7 +150,7 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 			waitErr = ErrClosed
 		}
 		p.mu.Unlock()
-		<-entry.sem
+		p.releaseSlot(entry.sem, consumer)
 		return nil, waitErr
 	}
 	client := entry.client
@@ -156,17 +173,17 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 		case <-ctx.Done():
 			_ = client.Close()
 			<-probed // the probe cannot retain ownership after returning
-			<-entry.sem
+			p.releaseSlot(entry.sem, consumer)
 			return nil, ctx.Err()
 		case <-p.done:
 			_ = client.Close()
 			<-probed
-			<-entry.sem
+			p.releaseSlot(entry.sem, consumer)
 			return nil, ErrClosed
 		}
 		if err := ctx.Err(); err != nil {
 			_ = client.Close()
-			<-entry.sem
+			p.releaseSlot(entry.sem, consumer)
 			return nil, err
 		}
 		if !healthy {
@@ -182,7 +199,7 @@ func (p *Pool) GetContext(ctx context.Context, serverID uint, fingerprint string
 		if client != nil {
 			_ = client.Close()
 		}
-		<-entry.sem
+		p.releaseSlot(entry.sem, consumer)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -216,7 +233,9 @@ func (p *Pool) Release(serverID uint, client *ssh.Client) {
 	}
 	p.mu.Unlock()
 
-	<-entry.sem // release concurrency slot
+	// The legacy client-based API carries no consumer label; the SSH layers borrow
+	// through handles, which do.
+	p.releaseSlot(entry.sem, "") // release concurrency slot
 }
 
 // Discard closes client without returning it to the pool and releases the
@@ -232,8 +251,23 @@ func (p *Pool) Discard(serverID uint, client *ssh.Client) {
 		client.Close()
 	}
 	if ok {
-		<-entry.sem // release concurrency slot
+		p.releaseSlot(entry.sem, "") // release concurrency slot
 	}
+}
+
+// IsCurrent reports whether a generation captured earlier is still the target's
+// current generation. A lease must consult this before every primitive: an
+// invalidation (host, port or credential change, deletion) makes the pinned
+// connection unusable, and Release-time checking alone would let an operation
+// start against the old target.
+func (p *Pool) IsCurrent(serverID uint, generation uint64) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	entry, ok := p.conns[serverID]
+	if !ok {
+		return false
+	}
+	return entry.generation == generation
 }
 
 // Invalidate drops any cached connection for the server. Call it when the
@@ -255,6 +289,7 @@ func (p *Pool) Invalidate(serverID uint) {
 	// session stale too: the next Get passes the current fingerprint and
 	// closes whatever it finds (a stale release included).
 	entry.fingerprint = ""
+	entry.generation++
 }
 
 // Close shuts down the eviction goroutine and closes all cached connections.
@@ -321,4 +356,144 @@ func keepAliveProbe(client *ssh.Client) bool {
 		<-done
 		return false
 	}
+}
+
+// Handle is a borrowed concurrency slot plus (optionally) a cached client,
+// pinned to the target generation observed at acquisition time. ReleaseHandle
+// or DiscardHandle must be called exactly once; a client is only cached when
+// the generation still matches, otherwise the stale client is closed.
+type Handle struct {
+	Client     *ssh.Client
+	serverID   uint
+	generation uint64
+	sem        chan struct{}
+	once       sync.Once
+	// consumer is the label the borrow declared, carried so the release reports
+	// against the same layer that reserved the slot.
+	consumer string
+}
+
+// ServerID reports the server this handle belongs to.
+func (h *Handle) ServerID() uint { return h.serverID }
+
+// Generation reports the target generation this handle was pinned to.
+func (h *Handle) Generation() uint64 { return h.generation }
+
+// QuotaObserver is notified whenever a borrow takes or returns a concurrency slot.
+// The report happens where the slot really changes hands - the reservation and the
+// release, including every failure path in between - so a borrow that is still
+// probing or dialing is already counted (P2-02).
+type QuotaObserver func(consumer string, delta int)
+
+// SetQuotaObserver installs the concurrency observer. It is called once per
+// reservation and once per release, always with the consumer label the borrow
+// declared (empty when it declared none).
+func (p *Pool) SetQuotaObserver(observer QuotaObserver) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.quotaObserver = observer
+}
+
+// SetQuotaObserver is nil-safe: a nil observer (or a nil pool) reports nothing.
+func (p *Pool) notifyQuota(consumer string, delta int) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	observer := p.quotaObserver
+	p.mu.Unlock()
+	if observer != nil {
+		observer(consumer, delta)
+	}
+}
+
+// releaseSlot returns a reserved concurrency slot and reports the release. Every
+// path that gives a slot back goes through here, so the accounting cannot drift.
+func (p *Pool) releaseSlot(sem chan struct{}, consumer string) {
+	<-sem
+	p.notifyQuota(consumer, -1)
+}
+
+// quotaConsumerKey carries the frozen consumer label of a borrow into the pool,
+// which owns the slot and therefore owns the measurement.
+type quotaConsumerKey struct{}
+
+// WithQuotaConsumer labels the next borrows made with this context.
+func WithQuotaConsumer(ctx context.Context, consumer string) context.Context {
+	return context.WithValue(ctx, quotaConsumerKey{}, consumer)
+}
+
+// quotaConsumer reports the label a borrow declared, if any.
+func quotaConsumer(ctx context.Context) string {
+	consumer, _ := ctx.Value(quotaConsumerKey{}).(string)
+	return consumer
+}
+
+// AcquireContext acquires a concurrency slot for the server and returns a
+// Handle. Client is non-nil when a healthy cached client exists; otherwise the
+// caller dials one and assigns h.Client before ReleaseHandle so it is cached.
+func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint string) (*Handle, error) {
+	client, err := p.GetContext(ctx, serverID, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	entry := p.conns[serverID]
+	if entry == nil || entry.fingerprint != fingerprint {
+		p.mu.Unlock()
+		// The parameters changed (or the pool closed) while the client was being
+		// probed. The handed-out client belongs to the previous generation, so it
+		// must not be stamped with the new one; release the slot and report stale.
+		if client != nil {
+			_ = client.Close()
+		}
+		if entry != nil {
+			p.releaseSlot(entry.sem, quotaConsumer(ctx))
+		}
+		return nil, ErrStaleGeneration
+	}
+	gen := entry.generation
+	sem := entry.sem
+	p.mu.Unlock()
+	return &Handle{Client: client, serverID: serverID, generation: gen, sem: sem,
+		consumer: quotaConsumer(ctx)}, nil
+}
+
+// ReleaseHandle returns the client to the pool while its generation still
+// matches the current entry; a stale client is closed instead of cached. The
+// slot is released exactly once.
+func (p *Pool) ReleaseHandle(h *Handle) {
+	if h == nil || h.sem == nil {
+		return
+	}
+	h.once.Do(func() {
+		if h.Client != nil {
+			p.mu.Lock()
+			entry, ok := p.conns[h.serverID]
+			stale := !ok || entry.generation != h.generation
+			if stale || entry.client != nil {
+				p.mu.Unlock()
+				_ = h.Client.Close()
+			} else {
+				entry.client = h.Client
+				entry.lastUsed = time.Now()
+				p.mu.Unlock()
+			}
+		}
+		p.releaseSlot(h.sem, h.consumer)
+	})
+}
+
+// DiscardHandle closes the client (if any) without caching it and releases the
+// slot exactly once.
+func (p *Pool) DiscardHandle(h *Handle) {
+	if h == nil || h.sem == nil {
+		return
+	}
+	h.once.Do(func() {
+		if h.Client != nil {
+			_ = h.Client.Close()
+		}
+		p.releaseSlot(h.sem, h.consumer)
+	})
 }

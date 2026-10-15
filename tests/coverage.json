@@ -1,0 +1,2929 @@
+{
+  "schema_version": 1,
+  "runs": [
+    {
+      "run_id": "coverage-tools",
+      "suite": "fast",
+      "runner": "node-test",
+      "cwd": ".",
+      "command": [
+        "node",
+        "--test",
+        "--test-reporter=./tests/lib/node-test-report.mjs",
+        "tests/coverage-tools.test.mjs"
+      ],
+      "timeout_seconds": 120,
+      "environment": {
+        "profile": "local",
+        "requires": []
+      }
+    },
+    {
+      "run_id": "static-adapters",
+      "suite": "fast",
+      "runner": "shell",
+      "cwd": ".",
+      "command": [
+        "bash",
+        "tests/static/adapters-removed.sh"
+      ],
+      "timeout_seconds": 120,
+      "environment": {
+        "profile": "local",
+        "requires": []
+      }
+    },
+    {
+      "run_id": "go-unit",
+      "suite": "fast",
+      "runner": "go-test",
+      "cwd": "backend",
+      "command": [
+        "go",
+        "test",
+        "./..."
+      ],
+      "timeout_seconds": 600,
+      "environment": {
+        "profile": "local",
+        "requires": []
+      }
+    },
+    {
+      "run_id": "frontend-node",
+      "suite": "fast",
+      "runner": "node-test",
+      "cwd": "frontend",
+      "command": [
+        "bash",
+        "tests/run.sh"
+      ],
+      "timeout_seconds": 600,
+      "environment": {
+        "profile": "local",
+        "requires": []
+      }
+    },
+    {
+      "run_id": "migrate-hardening",
+      "suite": "integration",
+      "runner": "go-test",
+      "cwd": "backend",
+      "command": [
+        "go",
+        "test",
+        "./internal/repository/...",
+        "-run",
+        "ApplyOnce|PrepareUserTokenVersion|Delta|Rollup|Prune|Bucket|Peak|Deadline|RawSample|Review|Rereview",
+        "-count=1"
+      ],
+      "timeout_seconds": 600,
+      "environment": {
+        "profile": "isolated-db",
+        "requires": [
+          "TEST_DATABASE_URL"
+        ]
+      }
+    },
+    {
+      "run_id": "integration-agent",
+      "suite": "integration",
+      "runner": "go-test",
+      "cwd": "backend",
+      "command": [
+        "go",
+        "test",
+        "./internal/service/...",
+        "-run",
+        "Agent",
+        "-count=1"
+      ],
+      "timeout_seconds": 600,
+      "environment": {
+        "profile": "isolated-db",
+        "requires": [
+          "TEST_DATABASE_URL"
+        ]
+      }
+    },
+    {
+      "run_id": "go-race",
+      "suite": "integration",
+      "runner": "go-test",
+      "cwd": "backend",
+      "command": [
+        "go",
+        "test",
+        "-race",
+        "./...",
+        "-count=1"
+      ],
+      "timeout_seconds": 900,
+      "environment": {
+        "profile": "isolated-db",
+        "requires": [
+          "TEST_DATABASE_URL"
+        ]
+      }
+    },
+    {
+      "run_id": "terminal-e2e",
+      "suite": "e2e",
+      "runner": "go-test",
+      "cwd": "backend",
+      "command": [
+        "go",
+        "test",
+        "-race",
+        "./internal/handler/...",
+        "-run",
+        "^TestTerminalE2E",
+        "-count=1"
+      ],
+      "timeout_seconds": 600,
+      "environment": {
+        "profile": "real-http-ws-ssh",
+        "requires": [
+          "TEST_DATABASE_URL"
+        ]
+      }
+    },
+    {
+      "run_id": "ui-charts",
+      "suite": "ui",
+      "runner": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:ui"
+      ],
+      "timeout_seconds": 900,
+      "environment": {
+        "profile": "browser-mock",
+        "requires": [
+          "playwright"
+        ]
+      }
+    },
+    {
+      "run_id": "e2e-core",
+      "suite": "e2e",
+      "runner": "shell",
+      "cwd": ".",
+      "command": [
+        "bash",
+        "tests/e2e/run.sh"
+      ],
+      "timeout_seconds": 1200,
+      "environment": {
+        "profile": "real-hub",
+        "requires": [
+          "TEST_DATABASE_URL"
+        ]
+      }
+    },
+    {
+      "run_id": "deploy-verify",
+      "suite": "integration",
+      "runner": "manual",
+      "cwd": ".",
+      "command": null,
+      "timeout_seconds": null,
+      "environment": {
+        "profile": "tx-deploy",
+        "requires": []
+      }
+    },
+    {
+      "run_id": "a11y-review",
+      "suite": "ui",
+      "runner": "manual",
+      "cwd": ".",
+      "command": null,
+      "timeout_seconds": null,
+      "environment": {
+        "profile": "manual-review",
+        "requires": []
+      }
+    },
+    {
+      "run_id": "image-agents",
+      "suite": "integration",
+      "runner": "shell",
+      "cwd": ".",
+      "command": [
+        "bash",
+        "tests/verify-agent-images.sh"
+      ],
+      "timeout_seconds": 1800,
+      "environment": {
+        "profile": "local",
+        "requires": [
+          "docker"
+        ]
+      }
+    }
+  ],
+  "gates": {
+    "M1": [
+      "coverage-tools",
+      "static-adapters",
+      "go-unit",
+      "frontend-node",
+      "migrate-hardening",
+      "deploy-verify"
+    ],
+    "M2": [
+      "coverage-tools",
+      "static-adapters",
+      "go-unit",
+      "frontend-node",
+      "migrate-hardening",
+      "integration-agent",
+      "go-race",
+      "terminal-e2e"
+    ],
+    "M3": [
+      "go-unit",
+      "frontend-node",
+      "migrate-hardening",
+      "integration-agent",
+      "ui-charts",
+      "image-agents"
+    ],
+    "M4": [
+      "go-unit",
+      "frontend-node",
+      "ui-charts",
+      "terminal-e2e",
+      "e2e-core"
+    ]
+  },
+  "phases": {
+    "M1": [
+      "REQ-01",
+      "REQ-02"
+    ],
+    "M2": [
+      "REQ-05",
+      "REQ-06",
+      "REQ-07"
+    ],
+    "M3": [
+      "REQ-04",
+      "REQ-08"
+    ],
+    "M4": [
+      "REQ-09"
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "TC-01-01",
+      "requirement_ids": [
+        "REQ-01"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/0/scenario",
+      "scenario": "Remove adapters while retaining the skill and valid installation links.",
+      "implementations": [
+        {
+          "implementation_id": "impl-01-01",
+          "run_id": "static-adapters",
+          "implementation": {
+            "path": "tests/static/adapters-removed.sh",
+            "symbol": "main"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-01-04",
+          "run_id": "static-adapters",
+          "implementation": {
+            "path": "tests/static/adapters-removed.sh",
+            "symbol": "identical exclusion scope with and without ripgrep"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-01-05",
+          "run_id": "static-adapters",
+          "implementation": {
+            "path": "tests/static/adapters-removed.sh",
+            "symbol": "failing scan tool is a tool error"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-01-02",
+      "requirement_ids": [
+        "REQ-01"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/1/scenario",
+      "scenario": "Preserve the service catalog and Relay contracts required by the skill.",
+      "implementations": [
+        {
+          "implementation_id": "impl-01-02",
+          "run_id": "deploy-verify",
+          "implementation": null,
+          "automation_status": "manual",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-01-03",
+      "requirement_ids": [
+        "REQ-01"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/2/scenario",
+      "scenario": "Reject residual adapter artifacts, stale installation links, missing skills, and invalid scan conditions; allow reviewed historical records.",
+      "implementations": [
+        {
+          "implementation_id": "impl-01-03",
+          "run_id": "static-adapters",
+          "implementation": {
+            "path": "tests/static/adapters-removed.sh",
+            "symbol": "negative-fixtures"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-02-01",
+      "requirement_ids": [
+        "REQ-02"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/3/scenario",
+      "scenario": "Index existing tests with English descriptions, generate coverage.md deterministically from coverage.json, reject report drift, and propagate runner failures.",
+      "implementations": [
+        {
+          "implementation_id": "impl-02-01",
+          "run_id": "coverage-tools",
+          "implementation": {
+            "path": "tests/coverage-tools.test.mjs",
+            "symbol": "the generated report matches the committed machine inventory"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-02-02",
+      "requirement_ids": [
+        "REQ-02"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/4/scenario",
+      "scenario": "Validate JSON schema, unique IDs, references, suites, statuses, and commands before execution; fail on missing dependencies and distinguish mock UI from real E2E.",
+      "implementations": [
+        {
+          "implementation_id": "impl-02-02",
+          "run_id": "coverage-tools",
+          "implementation": {
+            "path": "tests/coverage-tools.test.mjs",
+            "symbol": "a duplicate implementation identifier fails schema validation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-02-03",
+      "requirement_ids": [
+        "REQ-02"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/5/scenario",
+      "scenario": "Apply first-install and upgrade migrations atomically, serialize concurrent migration attempts, and retry failed work without a premature completion marker.",
+      "implementations": [
+        {
+          "implementation_id": "impl-02-03-concurrent",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/migrations_hardening_test.go",
+            "symbol": "TestApplyOnceConcurrentAppliesOnce"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Concurrent callers execute the migration body once under the database lock."
+        },
+        {
+          "implementation_id": "impl-02-03-retry",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/migrations_hardening_test.go",
+            "symbol": "TestApplyOnceFailureLeavesNoMarkerAndRetries"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A failed migration leaves no marker and a later attempt can complete."
+        },
+        {
+          "implementation_id": "impl-02-03-partial",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/migrations_hardening_test.go",
+            "symbol": "TestApplyOnceRollsBackPartialWorkOnFailure"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Partial schema writes roll back when the migration fails."
+        },
+        {
+          "implementation_id": "impl-02-03-marker",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/migrations_hardening_test.go",
+            "symbol": "TestApplyOnceRollsBackWhenMarkerWriteFails"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A failed marker write rolls back the migration body in the same transaction."
+        },
+        {
+          "implementation_id": "impl-02-03-empty",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/user_schema_test.go",
+            "symbol": "TestPrepareUserTokenVersionEmptyDatabase"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "An empty database accepts the token-version migration before regular model migration."
+        },
+        {
+          "implementation_id": "impl-02-03-upgrade",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/user_schema_test.go",
+            "symbol": "TestPrepareUserTokenVersionUpgradePreservesUsers"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "An existing database preserves users while adding token versions."
+        },
+        {
+          "implementation_id": "impl-02-03-bootstrap-race",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/user_schema_test.go",
+            "symbol": "TestPrepareUserTokenVersionConcurrentBootstrap"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Concurrent first-install callers complete without duplicate bootstrap work."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-04-01",
+      "requirement_ids": [
+        "REQ-04"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/6/scenario",
+      "scenario": "Apply correct time ranges, aggregation intervals, axes, and units; distinguish zero from null without implying finer sampling.",
+      "implementations": [
+        {
+          "implementation_id": "impl-04-01a",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "ranges include 15m and 30d and stay within the API maximum"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-01b",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "every range stays inside the 600-bucket budget"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-01c",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "zero is a value and null is a gap"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-01d",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "monitoring exposes the range/axis/statistic vocabulary with a data table"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-01e",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "monitoring controls stay reachable and touch-sized at 375px"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-01f",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-series.test.mjs",
+            "symbol": "last collected uses the real sample time, not the bucket start"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-01g",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-series.test.mjs",
+            "symbol": "a confirmed-empty bucket never becomes the newest sample"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-04-02",
+      "requirement_ids": [
+        "REQ-04"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/7/scenario",
+      "scenario": "Compute averages and observed sample maxima correctly; retain maxima in long-range data.",
+      "implementations": [
+        {
+          "implementation_id": "impl-04-02a",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_budget_test.go",
+            "symbol": "TestAverageAndObservedPeakAreSeparateAndSurviveRollup"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-02b",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_rollup_test.go",
+            "symbol": "TestRefreshRollupsMaterializesBucketsAndCheckpoint"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-02c",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "series toggles, chart description and the paged data view are keyboard accessible"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-02d",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewBucketStatisticsAreReturned"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-02e",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "window averages are sample-weighted, not the mean of bucket means"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-04-03",
+      "requirement_ids": [
+        "REQ-04"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/8/scenario",
+      "scenario": "Ignore stale responses during rapid range changes; support touch, keyboard input, and visibility-aware refresh.",
+      "implementations": [
+        {
+          "implementation_id": "impl-04-03a",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "a late response from the previous range never replaces the current one"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-03b",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "chart keyboard navigation distinguishes gaps/zero and handles range changes"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-03c",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "touch chart supports horizontal drag without blocking vertical page scroll"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-04-04",
+      "requirement_ids": [
+        "REQ-04"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/9/scenario",
+      "scenario": "Distinguish series without color, meet contrast thresholds, preserve visible focus, and expose equivalent chart data to keyboard and screen-reader users.",
+      "implementations": [
+        {
+          "implementation_id": "impl-04-04-c1",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "series toggles, chart description and the paged data view are keyboard accessible"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c2",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "series toggles, chart description and the paged data view are keyboard accessible"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c3",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "series toggles, chart description and the paged data view are keyboard accessible"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c4",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "monitoring controls stay reachable and touch-sized at 375px"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c5",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "the chart description carries name, range, granularity, statistic, unit and freshness"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c6",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "the data view pages at 50 rows and clamps out-of-range pages"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c7",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "coverage cells distinguish partial sampling from no sample"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-c8",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "the data table caption names the range, granularity, statistic and unit"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04a",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "series stay distinguishable without colour"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04b",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/monitoring-chart-config.test.mjs",
+            "symbol": "a coarsened or downsampled response is never silent"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04c",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "light/dark link and focus colors retain sufficient contrast"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-04-manual",
+          "run_id": "a11y-review",
+          "implementation": null,
+          "automation_status": "manual",
+          "required": false
+        }
+      ]
+    },
+    {
+      "case_id": "TC-04-05",
+      "requirement_ids": [
+        "REQ-04"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/10/scenario",
+      "scenario": "Enforce 600-bucket and 12,000-raw-sample boundaries; share one 2-second deadline across probes and plans; verify strict/coarsen behavior and 422/503 errors without range truncation.",
+      "implementations": [
+        {
+          "implementation_id": "impl-04-05a",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_budget_test.go",
+            "symbol": "TestBucketBudgetBoundary"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05b",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_budget_test.go",
+            "symbol": "TestRawSampleBudgetBoundary"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05c",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_budget_test.go",
+            "symbol": "TestExpiredDeadlineIsReportedAsTimeout"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05d",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/metrics_budget_test.go",
+            "symbol": "TestMetricQueryErrorMapping"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05e",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewRollupEdgesUseRequestBounds"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05f",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewPredecessorCountsAgainstRawBudget"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05g",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/metrics_budget_test.go",
+            "symbol": "TestReviewDocumentedStatMaxAccepted"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05h",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewQueryBudgetIsSharedAcrossPlans"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-05-01",
+      "requirement_ids": [
+        "REQ-05"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/11/scenario",
+      "scenario": "Commit or roll back password and token-version changes atomically; reject old JWTs and accept newly issued JWTs.",
+      "implementations": [
+        {
+          "implementation_id": "impl-05-01",
+          "run_id": "integration-agent",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentPasswordChangeRevokesJWTAndTerminals"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-05-01-ack-lost",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/auth_commit_test.go",
+            "symbol": "TestChangePasswordCommitAcknowledgementLostRevokes"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A committed password transaction with a lost acknowledgement revokes old sessions and returns an explicit uncertain result."
+        },
+        {
+          "implementation_id": "impl-05-01-rollback",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/auth_commit_test.go",
+            "symbol": "TestChangePasswordDefiniteCommitRollbackKeepsSessions"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A definite database rollback preserves the password version and existing sessions."
+        },
+        {
+          "implementation_id": "impl-05-01-process-restart",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/cmd/server/startup_test.go",
+            "symbol": "TestServerEmptyDatabaseBootstrapAndRestart"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The actual Hub process starts against an empty database, bootstraps a user, revokes an old JWT after a password change, and preserves both migration and authentication state across restart."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-05-02",
+      "requirement_ids": [
+        "REQ-05"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/12/scenario",
+      "scenario": "Reject revoked JWTs during WS authentication and close existing sessions, including registration races.",
+      "implementations": [
+        {
+          "implementation_id": "impl-05-02",
+          "run_id": "integration-agent",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentRevokedJWTRejectedAtHandshakeAndClosesLiveTerminal"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-05-02-registration-race",
+          "run_id": "terminal-e2e",
+          "implementation": {
+            "path": "backend/internal/handler/terminal_e2e_test.go",
+            "symbol": "TestTerminalE2EValidationAndRegistrationShareGate"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Real HTTP/WebSocket authentication cannot register a terminal after the same user has been revoked."
+        },
+        {
+          "implementation_id": "impl-05-02-password-http",
+          "run_id": "terminal-e2e",
+          "implementation": {
+            "path": "backend/internal/handler/terminal_e2e_test.go",
+            "symbol": "TestTerminalE2EPasswordChangeThroughHTTP"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A real database-backed HTTP password change closes live WebSocket and SSH resources, rejects the old JWT, and returns terminal quota."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-05-03",
+      "requirement_ids": [
+        "REQ-05"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/13/scenario",
+      "scenario": "Clear authentication across tabs, keep API Keys independent, and reject legacy JWTs without a version claim.",
+      "implementations": [
+        {
+          "implementation_id": "impl-05-03",
+          "run_id": "integration-agent",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentLegacyJWTWithoutVersionIsRejected"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-05-03-legacy-ws",
+          "run_id": "terminal-e2e",
+          "implementation": {
+            "path": "backend/internal/handler/terminal_e2e_test.go",
+            "symbol": "TestTerminalE2ERejectsStaleAndLegacyJWT"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Real WebSocket authentication rejects stale and legacy JWTs before terminal admission."
+        },
+        {
+          "implementation_id": "impl-05-03-tabs",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/auth-session.test.mjs",
+            "symbol": "auth-session"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A storage event clears the local session across tabs and advances the authentication epoch."
+        },
+        {
+          "implementation_id": "impl-05-03-api-key",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/auth_revocation_test.go",
+            "symbol": "TestChangePasswordPreservesAPIKeyIdentity"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Password revocation preserves an API Key identity, authorization, and ownership binding version."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-05-04",
+      "requirement_ids": [
+        "REQ-05"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/14/scenario",
+      "scenario": "Serialize registration, ready admission, and revocation around COMMIT; cancel preparing sessions and reject new ready or input permissions for revoked versions.",
+      "implementations": [
+        {
+          "implementation_id": "impl-05-04-ready",
+          "run_id": "terminal-e2e",
+          "implementation": {
+            "path": "backend/internal/handler/terminal_e2e_test.go",
+            "symbol": "TestTerminalE2ERevocationBeforeReady"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Revocation during SSH preparation prevents ready admission and reclaims the session."
+        },
+        {
+          "implementation_id": "impl-05-04-input",
+          "run_id": "terminal-e2e",
+          "implementation": {
+            "path": "backend/internal/handler/terminal_e2e_test.go",
+            "symbol": "TestTerminalE2EInputCannotCrossPasswordCommit"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "New terminal input permissions wait for the shared user gate and reject a version committed as revoked."
+        },
+        {
+          "implementation_id": "impl-05-04-cleanup-evidence",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/usage/recorder_test.go",
+            "symbol": "TestTerminalRevocationPreservesCleanupEvidence"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Retain terminal revocation and cleanup-pending facts in final usage records while rejecting untrusted metadata."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-05-05",
+      "requirement_ids": [
+        "REQ-05"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/15/scenario",
+      "scenario": "Read the primary database without positive version caching, enforce authentication budgets, and reject admission during unresolved commits, including restart recovery.",
+      "implementations": [
+        {
+          "implementation_id": "impl-05-05",
+          "run_id": "integration-agent",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentGateReadsPrimaryWithoutPositiveCaching"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-05-05-unknown",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/auth_commit_test.go",
+            "symbol": "TestChangePasswordUnresolvedCommitFencesUntilLockedRecovery"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "An unresolved COMMIT stays fenced until a locking database read resolves commit or rollback."
+        },
+        {
+          "implementation_id": "impl-05-05-restart",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/auth_commit_test.go",
+            "symbol": "TestUserGateRestartWaitsForPasswordTransaction"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The first admission after a fresh process gate waits for a previously active password transaction."
+        },
+        {
+          "implementation_id": "impl-05-05-db-unavailable",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentVersionLookupFailureIsServiceUnavailable"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A failed primary version read returns service unavailable instead of admitting the request."
+        },
+        {
+          "implementation_id": "impl-05-05-shared-budget",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/gate/gate_test.go",
+            "symbol": "TestGateBudgetIncludesLockWaitAndLookup"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Lock wait and version lookup consume the same authentication budget."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-06-01",
+      "requirement_ids": [
+        "REQ-06"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/16/scenario",
+      "scenario": "Release upload leases on success and every error path; preserve capacity after repeated uploads.",
+      "implementations": [
+        {
+          "implementation_id": "impl-06-01",
+          "run_id": "integration-agent",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentUploadQuotaRecoversAfterRepeatedUploads"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-06-01-lease-owner",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestLeaseRetainsOwnershipAcrossSequentialPrimitives"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Sequential Exec and Upload primitives retain one lease until its unique owner explicitly releases it."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-06-02",
+      "requirement_ids": [
+        "REQ-06"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/17/scenario",
+      "scenario": "Recover from blocked or canceled uploads and prevent stale-generation lease returns.",
+      "implementations": [
+        {
+          "implementation_id": "impl-06-02",
+          "run_id": "integration-agent",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentCancelledUploadIsBoundedAndReclaimsQuota"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-06-02-channel-open",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_upload_open_test.go",
+            "symbol": "TestUploadCancellationDuringChannelOpen"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Cancellation unblocks an SSH channel-open request and returns capacity only after workers join."
+        },
+        {
+          "implementation_id": "impl-06-02-cancel-owner",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestLeaseCancelJoinsBeforeReturningQuota"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Cancel and an early Release retain quota while workers are active, then settle exactly once."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-06-03",
+      "requirement_ids": [
+        "REQ-06"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/18/scenario",
+      "scenario": "Reuse one target-pinned lease, propagate copy errors, and reclaim resources within one absolute 3-second deadline with a 100-ms grace; nested deployment and Monitor stages never reset it.",
+      "implementations": [
+        {
+          "implementation_id": "impl-06-03",
+          "run_id": "integration-agent",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentUploadRejectsRemoteFailureWithoutReportingSuccess"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-06-03-shared-grace",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestSSHCleanupSharesAnExistingGraceDeadline"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A caller that already consumed the SSH grace forces transport close without restarting grace."
+        },
+        {
+          "implementation_id": "impl-06-03-absolute-deadline",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestSSHCleanupAbsoluteDeadlineRetainsLeaseUntilJoined"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "An expired absolute cleanup deadline returns promptly while a pending worker retains lease ownership until it joins."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-07-01",
+      "requirement_ids": [
+        "REQ-07"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/19/scenario",
+      "scenario": "Return complete results for 20-30-second commands and honor the configured default timeout.",
+      "implementations": [
+        {
+          "implementation_id": "impl-07-01",
+          "run_id": "integration-agent",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentExecUsesConfiguredDefaultAndReturnsCompleteResults"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-07-01-quota-budget",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestExecBudgetIncludesQuotaWait"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Waiting for connection quota consumes the configured execution budget."
+        },
+        {
+          "implementation_id": "impl-07-01-lookup-budget",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestExecBudgetIncludesServerLookup"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Server lookup consumes the same execution budget as SSH setup and command execution."
+        },
+        {
+          "implementation_id": "impl-07-01-timeout",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentExecBudgetExceededReclaimsResources"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "An expired command returns timeout and restores connection capacity."
+        },
+        {
+          "implementation_id": "impl-07-01-handler-cap",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/handler/exec_test.go",
+            "symbol": "TestExecHandlerOptionsCannotRaiseHardTimeoutCap"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Handler options cannot raise the absolute 300-second execution limit."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-07-02",
+      "requirement_ids": [
+        "REQ-07"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/20/scenario",
+      "scenario": "Enforce an 8-MiB retained-output total and 4-MiB per-stream limits, distinguish exact-limit from discarded output, preserve true exit status, and reclaim resources after timeout or cancellation.",
+      "implementations": [
+        {
+          "implementation_id": "impl-07-02",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/execlimit_test.go",
+            "symbol": "TestExecOutputTruncationMetadata"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-07-02-exact-limit",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/execlimit_test.go",
+            "symbol": "TestExecExactLimitIsNotTruncated"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Output exactly at the retained limit is not mislabeled as truncated."
+        },
+        {
+          "implementation_id": "impl-07-02-writer-boundaries",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/execlimit_test.go",
+            "symbol": "TestCappedWriterBoundaries"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Stream and combined output limits retain bounded bytes while reporting discarded output."
+        },
+        {
+          "implementation_id": "impl-07-02-exit-code",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_exec_test.go",
+            "symbol": "TestExecPreservesRealExitCode"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Draining output preserves the actual SSH exit status."
+        },
+        {
+          "implementation_id": "impl-07-02-TestValidateRejectsIllegalValues",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/config/config_test.go",
+            "symbol": "TestValidateRejectsIllegalValues"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject configuration above the frozen 300-second, 8-MiB total and 4-MiB per-stream limits."
+        },
+        {
+          "implementation_id": "impl-07-02-TestValidateAcceptsReducedExecutionLimits",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/config/config_test.go",
+            "symbol": "TestValidateAcceptsReducedExecutionLimits"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Allow operators to reduce execution time and retained-output limits."
+        },
+        {
+          "implementation_id": "impl-07-02-TestExecHandlerOptionsCannotRaiseHardTimeoutCap",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/handler/exec_test.go",
+            "symbol": "TestExecHandlerOptionsCannotRaiseHardTimeoutCap"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Prevent handler options from raising the hard execution timeout cap."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-07-03",
+      "requirement_ids": [
+        "REQ-07"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/21/scenario",
+      "scenario": "Enforce explicit ordinary/stream Relay modes with 30/300-second totals and a 30-second progress idle limit; handle header/body timeouts, write failures, and cancellation.",
+      "implementations": [
+        {
+          "implementation_id": "impl-07-03",
+          "run_id": "integration-agent",
+          "implementation": {
+            "path": "backend/internal/service/agent_acceptance_test.go",
+            "symbol": "TestAgentRelayBudgetsAndIdleAreEnforced"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-07-03-lookup-budget",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_regression_test.go",
+            "symbol": "TestRelayLookupUsesFrozenBudget"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Resource lookup cannot restart the frozen Relay operation budget."
+        },
+        {
+          "implementation_id": "impl-07-03-shared-budget",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_regression_test.go",
+            "symbol": "TestRelayStagesShareRemainingBudget"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Lookup and upstream stages consume one remaining total budget."
+        },
+        {
+          "implementation_id": "impl-07-03-initial-flush",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_regression_test.go",
+            "symbol": "TestRelayBlockedInitialFlushHonorsCancellation"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A blocked initial response flush exits on cancellation."
+        },
+        {
+          "implementation_id": "impl-07-03-blocked-write",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_regression_test.go",
+            "symbol": "TestRelayBlockedWriteHonorsCancellationAndTotalBudget"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Real downstream backpressure obeys cancellation and the frozen total budget."
+        },
+        {
+          "implementation_id": "impl-07-03-idle-write",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_regression_test.go",
+            "symbol": "TestRelayBlockedDownstreamHonorsIdleBudget"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A blocked downstream connection is closed when progress idle expires."
+        },
+        {
+          "implementation_id": "impl-07-03-http-truncation",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/handler/service_relay_test.go",
+            "symbol": "TestRelayHandlerAbortsTruncatedHTTPResponse"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The real HTTP route aborts a truncated chunked response and records the original Relay failure."
+        },
+        {
+          "implementation_id": "impl-07-03-handler-budget",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/handler/service_relay_test.go",
+            "symbol": "TestRelayHandlerFreezesBudgetBeforeResourceLookup"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Handler resource lookup uses the already-frozen Relay context deadline."
+        },
+        {
+          "implementation_id": "impl-07-03-invalid-mode",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/handler/service_relay_test.go",
+            "symbol": "TestRelayHandlerRejectsInvalidModeBeforeLookup"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Invalid Relay modes are rejected before resource lookup or side effects."
+        },
+        {
+          "implementation_id": "impl-07-03-TestRelayHandlerLookupTimeoutReturnsGatewayTimeout",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/handler/service_relay_test.go",
+            "symbol": "TestRelayHandlerLookupTimeoutReturnsGatewayTimeout"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Return HTTP 504 when resource lookup consumes the Relay deadline."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-07-04",
+      "requirement_ids": [
+        "REQ-07"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/22/scenario",
+      "scenario": "Verify 100-ms SSH/Relay and 2-second terminal graces inside one absolute 3-second teardown deadline; preserve the original outcome and never reset budgets or falsely publish done/release.",
+      "implementations": [
+        {
+          "implementation_id": "impl-07-04-shared-terminal-deadline",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/gate/registry_test.go",
+            "symbol": "TestAwaitSharesFrozenDeadlineAcrossSessionsAndCalls"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Concurrent session waits and repeated Await calls reuse the original grace and absolute deadline."
+        },
+        {
+          "implementation_id": "impl-07-04-independent-cleanup",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/auth_revocation_test.go",
+            "symbol": "TestChangePasswordCleanupSurvivesRequestCancellation"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "HTTP request cancellation after COMMIT cannot skip independent terminal cleanup."
+        },
+        {
+          "implementation_id": "impl-07-04-cleanup-pending",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/auth_revocation_test.go",
+            "symbol": "TestChangePasswordReportsIncompleteCleanup"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The production three-second cleanup deadline returns an incomplete result and preserves pending session ownership."
+        },
+        {
+          "implementation_id": "impl-07-04-ssh-join",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestSSHCleanupAbsoluteDeadlineRetainsLeaseUntilJoined"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A cleanup timeout does not release active SSH quota or publish Done before the worker joins."
+        },
+        {
+          "implementation_id": "impl-07-04-terminal-original-result",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/terminal_result_test.go",
+            "symbol": "TestTerminalForcedResourceReleaseDoesNotReplaceCleanClose"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Forced terminal transport closure preserves the original clean WebSocket outcome."
+        },
+        {
+          "implementation_id": "impl-07-04-terminal-slow-close",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/terminal_cleanup_test.go",
+            "symbol": "TestTerminalCleanupDeadlineRetainsOwnershipUntilJoin"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Live revocation and rejected ready admission share the production two-second grace and three-second absolute deadline even when transport Close blocks; ownership remains until all workers join."
+        },
+        {
+          "implementation_id": "impl-07-04-blocked-force",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/gate/registry_test.go",
+            "symbol": "TestAwaitDeadlineSurvivesBlockedForceCallback"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A blocked force-close callback cannot extend the registry absolute deadline or release session ownership prematurely."
+        },
+        {
+          "implementation_id": "impl-07-04-TestLeaseSettlementUsesExistingCleanupDeadline",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestLeaseSettlementUsesExistingCleanupDeadline"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Keep transport settlement inside the original cleanup deadline and retain ownership until Close completes."
+        },
+        {
+          "implementation_id": "impl-07-04-exec-cleanup-reason",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestExecCleanupPendingPreservesOriginalReason"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Preserve the original execution timeout or caller cancellation and report cleanup-only exhaustion as HTTP 503."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-08-01",
+      "requirement_ids": [
+        "REQ-08"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/23/scenario",
+      "scenario": "Enforce min(nodes, 16) active collections, one in-flight task per node, bounded pending work, capped jittered backoff, cancellation exclusions, successful recovery, and shutdown cleanup.",
+      "implementations": [
+        {
+          "implementation_id": "impl-08-01a",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_schedule_test.go",
+            "symbol": "TestMonitorBackoffSequenceMatchesContract"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01b",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_schedule_test.go",
+            "symbol": "TestMonitorAdmissionRespectsGlobalCap"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01c",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_loop_test.go",
+            "symbol": "TestMonitorLoopRespectsGlobalCapAndJoinsOnShutdown"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01d",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_loop_test.go",
+            "symbol": "TestMonitorLoopDeadlineCountsAsFailureAndBacksOff"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01e",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestReviewMonitorDoesNotBusyPollDuringHealthyCollection"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01f",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestReviewDeletedCollectionKeepsCapacityUntilJoined"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01g",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestReviewMonitorShutdownWaitsForLeaseSettlement"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01h",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestRereviewCleanupWaitSurvivesTaskCancellation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01i",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestRereviewSettlementDeadlineIsSharedWithTheOwner"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01j",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestRereviewLeaseGaugeFollowsThePoolSlot"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01k",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestRereviewQuotaGaugeCountsTheProbePhase"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-01l",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/ssh_lease_lifecycle_test.go",
+            "symbol": "TestRereviewQuotaGaugeBalancesFailedAcquire"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-08-02",
+      "requirement_ids": [
+        "REQ-08"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/24/scenario",
+      "scenario": "Select architecture-compatible Agents, check version/hash, update atomically, report permission failures, and reconcile unknown activation outcomes.",
+      "implementations": [
+        {
+          "implementation_id": "impl-08-02a",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployProbesMapsAndSkipsUploadWhenActive"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-02b",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployRejectsLegacyAndMismatchedProtocols"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-02c",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployConfirmsAmbiguousActivationByRemoteHash"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-02d",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestReviewGenerationInvalidationPreventsActivation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-02e",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestReviewMatchingVersionStillRequiresArtifactHash"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-08-03",
+      "requirement_ids": [
+        "REQ-08"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/25/scenario",
+      "scenario": "Calculate adjacent-sample rates correctly across resets, gaps, and duplicate timestamps; retain observed maxima.",
+      "implementations": [
+        {
+          "implementation_id": "impl-08-03a",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_delta_test.go",
+            "symbol": "TestDeltaRatesFollowRequirementRules"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03b",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_delta_test.go",
+            "symbol": "TestDeltaGapThresholdIsThreeCollectionIntervals"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03c",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewPredecessorIsRateContextOnly"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03d",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewFractionalEndpointCountsAllBuckets"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03e",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewGapThresholdTracksConfiguredCollectionInterval"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03f",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewSampleTimeIsNotTheBucketStart"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03g",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewPartialWindowClipsCounterWeights"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03h",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewShortCollectionPeriodRejectsLongGap"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03i",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewLongCollectionPeriodProducesValidRate"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03j",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewInternalBucketOverlapSplitsRate"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03k",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewInternalRollupBucketOverlapSplitsRate"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03l",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewGapIsNotReportedAsFullCoverage"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-03m",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewRateOnlyBucketStillCounts"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-08-04",
+      "requirement_ids": [
+        "REQ-08"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/26/scenario",
+      "scenario": "Probe the target OS and architecture before upload; preserve failure classes and perform zero uploads when probing or artifact selection fails.",
+      "implementations": [
+        {
+          "implementation_id": "impl-08-04a",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployRejectsUnsupportedPlatformWithoutUploading"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-04b",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployClassifiesRemoteFailures"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-04c",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployReportsLostActivationAndRecoversIdempotently"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-04d",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestReviewFailedUploadCleansTemporaryArtifact"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-04e",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestRereviewRemoteCleanupExitFailureIsReported"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-08-05",
+      "requirement_ids": [
+        "REQ-08"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/27/scenario",
+      "scenario": "Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile.",
+      "implementations": [
+        {
+          "implementation_id": "impl-08-05a",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/agentproto/agentproto_test.go",
+            "symbol": "TestVerifyAcceptsMatchingArtifacts"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-05b",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/agent/main_test.go",
+            "symbol": "TestAgentOutputCarriesVersionContract"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-05c",
+          "run_id": "image-agents",
+          "implementation": {
+            "path": "tests/verify-agent-images.sh",
+            "symbol": "verify-artifacts"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-05d",
+          "run_id": "image-agents",
+          "implementation": {
+            "path": "tests/verify-agent-images.sh",
+            "symbol": "protocol-smoke"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-05f",
+          "run_id": "image-agents",
+          "implementation": {
+            "path": "tests/verify-agent-images.sh",
+            "symbol": "final-stage acceptance in the built image"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-05g",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/agentverify/main_test.go",
+            "symbol": "TestVerifyReportRejectsNonIntegerProtocols"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-08-06",
+      "requirement_ids": [
+        "REQ-08"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/28/scenario",
+      "scenario": "Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs.",
+      "implementations": [
+        {
+          "implementation_id": "impl-08-06a",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_rollup_test.go",
+            "symbol": "TestPrepareMetricsRollupSchemaIsIdempotent"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06b",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_rollup_test.go",
+            "symbol": "TestRefreshRollupsMaterializesBucketsAndCheckpoint"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06c",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_rollup_test.go",
+            "symbol": "TestPruneMetricsPausesUntilAggregationIsComplete"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06d",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewRefreshRecoversGapBeyond48Hours"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06e",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewRefreshRecomputesRecentClosedBuckets"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06f",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewMissingRollupFallsBackToRaw"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06g",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewRetentionEventuallyPrunesOfflineServers"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06h",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/metrics_maintenance_test.go",
+            "symbol": "TestReviewRetentionRolloutDecision"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06i",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewRetentionDropsCompleteChunks"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06j",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestReviewStorageReportMeasuresAndProjects"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06k",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/metrics_retention_test.go",
+            "symbol": "TestRereviewInvalidDryRunCannotEnableDeletion"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06l",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewCapacityUsesHypertableChunks"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06m",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewBootstrapDiscardPolicyIsExplicit"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06n",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/metrics_retention_test.go",
+            "symbol": "TestRereviewEnabledRetentionWithoutDryRunStaysDry"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06o",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/metrics_maintenance_test.go",
+            "symbol": "TestRereviewOmittedDryRunKeepsTheRolloutDry"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06p",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_review_regression_test.go",
+            "symbol": "TestRereviewHypertableComponentsComeFromDetailedSize"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-08-07",
+      "requirement_ids": [
+        "REQ-08"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/29/scenario",
+      "scenario": "Correlate scheduled collections and deployment attempts, count failures and skips, and emit alerts at the defined lag and retention thresholds.",
+      "implementations": [
+        {
+          "implementation_id": "impl-08-07a",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_test.go",
+            "symbol": "TestAgentDeployEventsCorrelateWithServerID"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07b",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_schedule_test.go",
+            "symbol": "TestMonitorFailureEscalationIsExactlyOncePerStreak"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07c",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_schedule_test.go",
+            "symbol": "TestMonitorDeferEscalationIsExactlyOncePerStreak"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07d",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestReviewTelemetryVocabularyIsClosed"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07e",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestReviewCollectionEventCountsExactlyOnce"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07f",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestReviewAgentUpdateLabelsStayBounded"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07g",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestReviewDeploymentStageDurationsAreRecorded"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07h",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestRereviewCollectionReasonBelongsToItsAttempt"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07i",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestRereviewTimeoutReasonIsNotBorrowed"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07j",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestRereviewSkippedAdmissionsAreCounted"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07k",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestRereviewCollectionIDReachesTheDeployment"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07l",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/telemetry_events_test.go",
+            "symbol": "TestRereviewLeaseGaugeVocabulary"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-07m",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/monitor_review_regression_test.go",
+            "symbol": "TestRereviewNestedCleanupDoesNotRestartTheBudget"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-08-08",
+      "requirement_ids": [
+        "REQ-08"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/30/scenario",
+      "scenario": "Fail startup before HTTP/Monitor on invalid bundled artifacts; accept only matching protocol/version JSON, reject legacy output without metric insertion, and preserve node isolation and history.",
+      "implementations": [
+        {
+          "implementation_id": "impl-08-08a",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/server/startup_test.go",
+            "symbol": "TestServerRejectsInvalidAgentArtifacts"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-08b",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/agentproto/agentproto_test.go",
+            "symbol": "TestLoadManifestRejectsIncompleteContracts"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-01",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/31/scenario",
+      "scenario": "Provide usable toolbar controls, search, font sizing, fullscreen, clipboard actions, and client-side clearing.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-01a",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "toolbar shows the server identity, connection state and controls"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01b",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "connect, disconnect and reconnect are explicit user actions"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01c",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "an automatic retry is announced, counted and can be cancelled"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01d",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "font size can be changed, reset and is remembered across a reload"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01e",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "search runs locally, reports misses and closes with Esc"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01f",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "clipboard actions are explicit and multi-line pastes are confirmed"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01g",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "clearing the screen only changes the local display"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01h",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "fullscreen and shortcuts are wired to the terminal, and Ctrl+C is not stolen"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01i",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-controls.test.mjs",
+            "symbol": "font size is clamped into the usable range"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01j",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-controls.test.mjs",
+            "symbol": "a multi-line paste is described before it is sent"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01k",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-controls.test.mjs",
+            "symbol": "the advertised shortcuts cover copy, paste, search and clear"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01l",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-controls.test.mjs",
+            "symbol": "each connection state is distinct and actionable"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01m",
+          "run_id": "e2e-core",
+          "implementation": {
+            "path": "tests/e2e/terminal.spec.mjs",
+            "symbol": "a fresh Hub walks the browser through first-admin setup and sign-in"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01n",
+          "run_id": "e2e-core",
+          "implementation": {
+            "path": "tests/e2e/terminal.spec.mjs",
+            "symbol": "a server is registered against the peer with a key credential"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01o",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "local editor paste never reaches the remote PTY, and search stays local"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01p",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "every native multi-line paste waits for confirmation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01q",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "late clipboard results and pending confirmations cannot cross a connection generation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01r",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a rejected or unavailable clipboard write reports failure, not success"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01s",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a backend-format error keeps its reason readable outside the terminal"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01t",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/terminal_e2e_test.go",
+            "symbol": "TestTerminalE2ERevocationAnnouncesItself"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01u",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/e2efixture/main_test.go",
+            "symbol": "TestReplaceDatabasePathKeepsConnectionOptions"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01v",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "each keyboard paste action produces exactly one remote payload"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01w",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a native paste keeps its own payload and needs no second clipboard read"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01x",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/terminal_e2e_test.go",
+            "symbol": "TestTerminalE2EStaleTokenVersionIsAnnounced"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-01y",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a separate native paste is preserved after a keyboard paste"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-02",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/32/scenario",
+      "scenario": "Support 375px and landscape layouts, PTY resizing, stable focus, and reconnect cleanup.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-02a",
+          "run_id": "terminal-e2e",
+          "implementation": {
+            "path": "backend/internal/handler/terminal_e2e_test.go",
+            "symbol": "TestTerminalE2EWindowChangeReachesThePTY"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02b",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "PTY resizes are debounced and follow font-size changes"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02c",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "repeated reconnects and leaving the page never stack sockets or timers"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02d",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "375px and landscape keep the terminal usable with 44px controls"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02e",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "landscape phones keep the toolbar and terminal visible"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02f",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-controls.test.mjs",
+            "symbol": "a reconnect announces a new session, never a restored one"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02g",
+          "run_id": "e2e-core",
+          "implementation": {
+            "path": "tests/e2e/terminal.spec.mjs",
+            "symbol": "the terminal connects through a real SSH PTY"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02h",
+          "run_id": "e2e-core",
+          "implementation": {
+            "path": "tests/e2e/terminal.spec.mjs",
+            "symbol": "typing reaches the PTY and the output returns to the browser"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02i",
+          "run_id": "e2e-core",
+          "implementation": {
+            "path": "tests/e2e/terminal.spec.mjs",
+            "symbol": "a layout change resizes the PTY over the live session"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02j",
+          "run_id": "e2e-core",
+          "implementation": {
+            "path": "tests/e2e/terminal.spec.mjs",
+            "symbol": "disconnect and reconnect start a new session"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02k",
+          "run_id": "e2e-core",
+          "implementation": {
+            "path": "tests/e2e/terminal.spec.mjs",
+            "symbol": "leaving the terminal reclaims the session"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02l",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a delayed handshake still synchronizes the initial PTY size"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02m",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "revocation stops the retry loop and keeps its reason"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02n",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "an in-flight reconnect still shows its attempt and new-session hint"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02o",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a selection keeps its scrollback in view while output arrives"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02p",
+          "run_id": "e2e-core",
+          "implementation": {
+            "path": "tests/e2e/terminal.spec.mjs",
+            "symbol": "the terminal connects through a real SSH PTY"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02q",
+          "run_id": "e2e-core",
+          "implementation": {
+            "path": "tests/e2e/terminal.spec.mjs",
+            "symbol": "leaving the terminal reclaims the session"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02r",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-controls.test.mjs",
+            "symbol": "a reconnect announces a new session, never a restored one"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02s",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a selection survives the scrollback buffer trimming older lines"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02t",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/e2efixture/main_test.go",
+            "symbol": "TestReplaceDatabasePathKeepsConnectionOptions"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02u",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a surviving selection stays visible when the top anchor is trimmed"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-09-02v",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/terminal.browser.mjs",
+            "symbol": "a session that ended normally is not shown as a failure"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "scan_exemptions": [
+    {
+      "path": "tests/static/adapters-removed.sh",
+      "kind": "checker",
+      "reason": "The checker itself must contain the banned patterns it searches for."
+    }
+  ]
+}

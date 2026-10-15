@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/agentproto"
+
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/host"
@@ -15,18 +17,21 @@ import (
 	"github.com/shirou/gopsutil/v4/net"
 )
 
-// AgentOutput contains all collected system metrics.
+// AgentOutput contains all collected system metrics plus the version contract
+// the Hub validates before trusting a deployment.
 type AgentOutput struct {
-	Timestamp  string      `json:"timestamp"`
-	Hostname   string      `json:"hostname"`
-	CPU        CPUInfo     `json:"cpu"`
-	Memory     MemoryInfo  `json:"memory"`
-	Swap       *SwapInfo   `json:"swap,omitempty"`
-	Disks      []DiskInfo  `json:"disks"`
-	DiskIO     *DiskIOInfo `json:"disk_io,omitempty"`
-	NetIO      *NetIOInfo  `json:"net_io,omitempty"`
-	OS         OSInfo      `json:"os"`
-	UptimeSecs uint64      `json:"uptime_seconds"`
+	AgentVersion    string      `json:"agent_version"`
+	ProtocolVersion int         `json:"protocol_version"`
+	Timestamp       string      `json:"timestamp"`
+	Hostname        string      `json:"hostname"`
+	CPU             CPUInfo     `json:"cpu"`
+	Memory          MemoryInfo  `json:"memory"`
+	Swap            *SwapInfo   `json:"swap,omitempty"`
+	Disks           []DiskInfo  `json:"disks"`
+	DiskIO          *DiskIOInfo `json:"disk_io,omitempty"`
+	NetIO           *NetIOInfo  `json:"net_io,omitempty"`
+	OS              OSInfo      `json:"os"`
+	UptimeSecs      uint64      `json:"uptime_seconds"`
 }
 
 type CPUInfo struct {
@@ -88,7 +93,9 @@ func main() {
 	flag.Parse()
 
 	output := AgentOutput{
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		AgentVersion:    agentproto.Version,
+		ProtocolVersion: agentproto.ProtocolVersion,
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
 	}
 
 	hostname, err := os.Hostname()

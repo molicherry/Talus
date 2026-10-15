@@ -32,6 +32,19 @@ func testDatabaseURL(t *testing.T) string {
 // TEST_DATABASE_URL at any Postgres, including a development one.
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
+	return newTestDBSchema(t, "")
+}
+
+// newTestDBWithExtensions keeps the extension schema on the search path, so
+// TimescaleDB helpers such as create_hypertable and drop_chunks resolve exactly
+// as they do in production.
+func newTestDBWithExtensions(t *testing.T) *gorm.DB {
+	t.Helper()
+	return newTestDBSchema(t, ",public")
+}
+
+func newTestDBSchema(t *testing.T, searchPathSuffix string) *gorm.DB {
+	t.Helper()
 	dsn := testDatabaseURL(t)
 	schema := fmt.Sprintf("talus_test_%d", time.Now().UnixNano())
 
@@ -61,7 +74,7 @@ func newTestDB(t *testing.T) *gorm.DB {
 	if scopedCfg.RuntimeParams == nil {
 		scopedCfg.RuntimeParams = map[string]string{}
 	}
-	scopedCfg.RuntimeParams["search_path"] = schema
+	scopedCfg.RuntimeParams["search_path"] = schema + searchPathSuffix
 	db := openGorm(t, scopedCfg)
 	t.Cleanup(func() { closeGorm(db) })
 	return db

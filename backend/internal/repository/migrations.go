@@ -70,32 +70,41 @@ func migrationTable(db *gorm.DB) (string, error) {
 // ApplyOnce runs sql exactly once, keyed by id. It returns true when this call
 // performed the migration and false when it had already been applied.
 //
-// The marker is written after sql; a crash between the two would re-run the
-// migration on the next start, so sql must itself be idempotent.
+// The SQL and its marker commit in one transaction, serialized per migration
+// id by a transaction-scoped advisory lock. A failure rolls back both, so a
+// retry never leaves a partial marker and concurrent callers apply it once.
 func ApplyOnce(db *gorm.DB, id, sql string) (bool, error) {
-	table, err := migrationTable(db)
+	applied := false
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", "talus_migration:"+id).Error; err != nil {
+			return fmt.Errorf("lock migration %s: %w", id, err)
+		}
+		table, err := migrationTable(tx)
+		if err != nil {
+			return err
+		}
+		var count int64
+		if err := tx.Table(table).Where("id = ?", id).Count(&count).Error; err != nil {
+			return fmt.Errorf("check migration %s: %w", id, err)
+		}
+		if count > 0 {
+			return nil
+		}
+		if err := tx.Exec(sql).Error; err != nil {
+			return fmt.Errorf("apply migration %s: %w", id, err)
+		}
+		insert := insertMigrationSQL
+		if table == migrationsFallbackTable {
+			insert = insertFallbackMigrationSQL
+		}
+		if err := tx.Exec(insert, id).Error; err != nil {
+			return fmt.Errorf("record migration %s: %w", id, err)
+		}
+		applied = true
+		return nil
+	})
 	if err != nil {
 		return false, err
 	}
-
-	var count int64
-	if err := db.Table(table).Where("id = ?", id).Count(&count).Error; err != nil {
-		return false, fmt.Errorf("check migration %s: %w", id, err)
-	}
-	if count > 0 {
-		return false, nil
-	}
-
-	if err := db.Exec(sql).Error; err != nil {
-		return false, fmt.Errorf("apply migration %s: %w", id, err)
-	}
-
-	insert := insertMigrationSQL
-	if table == migrationsFallbackTable {
-		insert = insertFallbackMigrationSQL
-	}
-	if err := db.Exec(insert, id).Error; err != nil {
-		return false, fmt.Errorf("record migration %s: %w", id, err)
-	}
-	return true, nil
+	return applied, nil
 }

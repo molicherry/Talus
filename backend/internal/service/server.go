@@ -23,6 +23,11 @@ type ConnectionInvalidator interface {
 
 // ServerService provides business logic for server management.
 type ServerService struct {
+	// freshness is the derived online/expired cutoff (0 = default).
+	freshness time.Duration
+	// topology notifier receives create/delete so the monitor refreshes
+	// the managed node list instead of waiting for its next interval.
+	notifier   topologyNotifier
 	repo       *repository.ServerRepo
 	metricRepo *repository.MetricRepo
 	pool       ConnectionInvalidator
@@ -33,9 +38,19 @@ func NewServerService(repo *repository.ServerRepo, metricRepo *repository.Metric
 	return &ServerService{repo: repo, metricRepo: metricRepo, pool: pool}
 }
 
-// statusThreshold is the cutoff for considering a server "online"
-// based on the age of its most recent metric. 120s = 2× default monitor interval.
-const statusThreshold = 120 * time.Second
+// defaultFreshnessThreshold keeps the historical behaviour (2× the default
+// monitor interval) when no derived threshold is configured.
+const defaultFreshnessThreshold = 120 * time.Second
+
+// freshnessThreshold reports the configured online/expired cutoff. It is derived
+// from the monitor interval, the tolerated rounds and the allowed latency
+// instead of a fixed 120 seconds.
+func (s *ServerService) freshnessThreshold() time.Duration {
+	if s.freshness > 0 {
+		return s.freshness
+	}
+	return defaultFreshnessThreshold
+}
 
 // List returns all servers enriched with status and latest metrics.
 func (s *ServerService) List(ctx context.Context) ([]model.Server, error) {
@@ -79,7 +94,7 @@ func (s *ServerService) List(ctx context.Context) ([]model.Server, error) {
 		seen := row.Time.Format(time.RFC3339)
 		servers[i].LastSeen = &seen
 
-		if now.Sub(row.Time) <= statusThreshold {
+		if now.Sub(row.Time) <= s.freshnessThreshold() {
 			servers[i].Status = "online"
 		} else {
 			servers[i].Status = "offline"
@@ -129,7 +144,7 @@ func (s *ServerService) Get(ctx context.Context, id uint) (*model.Server, error)
 	seen := row.Time.Format(time.RFC3339)
 	srv.LastSeen = &seen
 
-	if now.Sub(row.Time) <= statusThreshold {
+	if now.Sub(row.Time) <= s.freshnessThreshold() {
 		srv.Status = "online"
 	} else {
 		srv.Status = "offline"
@@ -193,7 +208,7 @@ func (s *ServerService) ListFiltered(ctx context.Context, serverIDs []uint) ([]m
 		seen := row.Time.Format(time.RFC3339)
 		servers[i].LastSeen = &seen
 
-		if now.Sub(row.Time) <= statusThreshold {
+		if now.Sub(row.Time) <= s.freshnessThreshold() {
 			servers[i].Status = "online"
 		} else {
 			servers[i].Status = "offline"
@@ -269,7 +284,7 @@ func (s *ServerService) applyStatus(ctx context.Context, summaries []model.Serve
 			summaries[i].Status = "unknown"
 			continue
 		}
-		if now.Sub(t) <= statusThreshold {
+		if now.Sub(t) <= s.freshnessThreshold() {
 			summaries[i].Status = "online"
 		} else {
 			summaries[i].Status = "offline"
@@ -279,6 +294,28 @@ func (s *ServerService) applyStatus(ctx context.Context, summaries []model.Serve
 }
 
 // Create validates and inserts a new server.
+// SetFreshnessThreshold configures the online/expired cutoff derived from the
+// monitor interval, tolerated rounds and allowed latency.
+func (s *ServerService) SetFreshnessThreshold(d time.Duration) {
+	s.freshness = d
+}
+
+// topologyNotifier is implemented by the monitor scheduler.
+type topologyNotifier interface{ NotifyTopologyChange() }
+
+// SetTopologyNotifier wires the monitor so node create/delete is observed
+// immediately. It is optional: without it the monitor still converges on its
+// next interval.
+func (s *ServerService) SetTopologyNotifier(n topologyNotifier) {
+	s.notifier = n
+}
+
+func (s *ServerService) notifyTopology() {
+	if s.notifier != nil {
+		s.notifier.NotifyTopologyChange()
+	}
+}
+
 func (s *ServerService) Create(ctx context.Context, server *model.Server) (*model.Server, error) {
 	if server.Name == "" {
 		return nil, fmt.Errorf("create server: name is required")
@@ -294,6 +331,7 @@ func (s *ServerService) Create(ctx context.Context, server *model.Server) (*mode
 		return nil, fmt.Errorf("create server: %w", err)
 	}
 	server.Status = "unknown"
+	s.notifyTopology()
 	return server, nil
 }
 
@@ -369,6 +407,7 @@ func (s *ServerService) Delete(ctx context.Context, id uint) error {
 		return fmt.Errorf("server %d: %w", id, err)
 	}
 	s.invalidate(id)
+	s.notifyTopology()
 	return nil
 }
 

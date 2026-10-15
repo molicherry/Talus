@@ -9,7 +9,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/agentproto"
 	"github.com/vpsmanager/backend/internal/config"
+	"github.com/vpsmanager/backend/internal/gate"
 	"github.com/vpsmanager/backend/internal/handler"
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/crypto"
@@ -19,6 +21,7 @@ import (
 	"github.com/vpsmanager/backend/internal/server"
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
+	"github.com/vpsmanager/backend/internal/telemetry"
 	"github.com/vpsmanager/backend/internal/usage"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -30,8 +33,22 @@ func main() {
 
 	setupLogger(cfg.LogFormat, cfg.LogLevel)
 
+	if err := cfg.Validate(); err != nil {
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(1)
+	}
+
 	// Initialize JWT service
 	jwtSvc := token.NewJWTService(cfg.JWTSecret, 24*time.Hour)
+
+	// Agent artifacts: validate the bundled agent binaries and
+	// their manifest before touching the database or binding a port. A missing,
+	// corrupt, mis-architecture or mis-versioned artifact is fatal — the Hub never
+	// falls back to a single architecture.
+	if err := verifyAgentArtifacts(cfg.AgentArtifactsDir); err != nil {
+		slog.Error("agent artifacts are invalid", "error", err)
+		os.Exit(1)
+	}
 
 	// Decrypt master key for credential encryption
 	masterKey, err := crypto.NewMasterKey(cfg.MasterKey)
@@ -99,6 +116,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// JWT session versioning (REQ-05). Explicit, idempotent schema migration
+	// rather than relying on AutoMigrate for this security-relevant column.
+	if err := repository.PrepareUserTokenVersionSchema(db); err != nil {
+		slog.Error("failed to add users.token_version", "error", err)
+		os.Exit(1)
+	}
+
+	// Metrics rollup storage: the 6h rollup table and its
+	// materialization checkpoints. Idempotent and explicit.
+	if err := repository.PrepareMetricsRollupSchema(db); err != nil {
+		slog.Error("failed to prepare metrics rollup schema", "error", err)
+		os.Exit(1)
+	}
+
 	// 4. AutoMigrate all models in FK dependency order (User → Credential → Server → APIKey → Metric)
 	var autoMigrateErr error
 	for attempt := 0; attempt < 30; attempt++ {
@@ -147,7 +178,11 @@ func main() {
 
 	// Dependency chain — Auth
 	userRepo := repository.NewUserRepo(db)
+	userGate := gate.New(userRepo.TokenVersion, userRepo.LockedTokenVersion)
+	terminalRegistry := gate.NewRegistry()
 	authSvc := service.NewAuthService(userRepo, jwtSvc, db)
+	authSvc.SetUserGate(userGate)
+	authSvc.SetTerminalRegistry(terminalRegistry)
 	authHandler := handler.NewAuthHandler(authSvc)
 
 	// Dependency chain — SSH pool. Created before the server/credential services
@@ -163,7 +198,12 @@ func main() {
 	// Dependency chain — Servers (needed before API Keys for server ID validation)
 	serverRepo := repository.NewServerRepo(db)
 	metricRepo := repository.NewMetricRepo(db)
+	// One shared telemetry registry for the background paths: the frozen
+	// vocabulary is validated at the call site, so an unknown label value fails
+	// closed instead of reaching the metrics.
+	telemetryRegistry := telemetry.NewRegistry()
 	serverSvc := service.NewServerService(serverRepo, metricRepo, sshPool)
+	serverSvc.SetFreshnessThreshold(cfg.MonitorFreshnessThreshold())
 
 	// Dependency chain — API Keys
 	apiKeyRepo := repository.NewAPIKeyRepo(db)
@@ -275,16 +315,59 @@ func main() {
 	sshDialTimeout := time.Duration(cfg.SSHTimeout) * time.Second
 	execDefaultTimeout := time.Duration(cfg.ExecTimeout) * time.Second
 	sshSvc := service.NewSSHService(sshPool, serverRepo, credSvc, sshDialTimeout, execDefaultTimeout)
+	// The SSH layer owns the in-use gauge: one increment per acquired pool slot and
+	// one decrement per real settlement, so the reading follows the resource and
+	// not a caller's foreground return (N03).
+	sshSvc.SetLeaseObserver(func(consumer service.LeaseConsumer, delta float64) {
+		_ = telemetryRegistry.AddGauge("talus_ssh_leases_in_use",
+			map[string]string{"consumer": string(consumer)}, delta)
+	})
+	sshSvc.SetOutputLimits(cfg.ExecOutputLimit, cfg.ExecOutputStreamLimit)
 	terminalSvc := service.NewTerminalService(sshSvc)
+	terminalSvc.SetSessionRegistry(terminalRegistry)
 
-	execH := handler.NewExecHandler(sshSvc)
+	execH := handler.NewExecHandler(sshSvc, handler.ExecOptions{
+		DefaultTimeoutSeconds: cfg.ExecTimeout,
+		MaxTimeoutSeconds:     cfg.ExecTimeoutMax,
+	})
 	terminalH := handler.NewTerminalHandler(terminalSvc, jwtSvc)
+	terminalH.SetUserGate(userGate)
 
 	// Dependency chain — Metrics
+	// The sampling-gap threshold follows the effective collection interval (R07).
+	metricRepo.SetDeltaGapThreshold(time.Duration(cfg.MonitorInterval) * time.Second)
 	monitorSvc := service.NewMonitorService(sshSvc, metricRepo, serverRepo, time.Duration(cfg.MonitorInterval)*time.Second)
+	monitorSvc.SetAgentDeployer(service.NewAgentDeploymentService(sshSvc, cfg.AgentArtifactsDir))
+	monitorSvc.SetTelemetry(telemetryRegistry)
 	metricsH := handler.NewMetricsHandler(metricRepo)
 
-	go monitorSvc.Start(context.Background())
+	// The monitor joins the application root context so shutdown can stop the
+	// scheduler, cancel in-flight collections and wait for them before the
+	// connection pool and storage are closed below.
+	// A created or deleted node is picked up immediately instead of waiting for
+	// the monitor's next interval.
+	serverSvc.SetTopologyNotifier(monitorSvc)
+
+	appCtx, stopApp := context.WithCancel(context.Background())
+	defer stopApp()
+	monitorDone := make(chan struct{})
+	go func() {
+		defer close(monitorDone)
+		monitorSvc.Start(appCtx)
+	}()
+
+	// Metrics storage maintenance: hourly rollup refresh and the
+	// daily retention pass, joined on the same root context.
+	maintenance := service.NewMetricsMaintenance(metricRepo)
+	// Retention follows the documented rollout: disabled by default, a dry run
+	// reports the plan, and only enabled && !dry-run deletes.
+	maintenance.SetRetention(cfg.MetricsRetentionEnabled, cfg.MetricsRetentionDryRun)
+	maintenance.SetTelemetry(telemetryRegistry, nil)
+	maintenanceDone := make(chan struct{})
+	go func() {
+		defer close(maintenanceDone)
+		maintenance.Run(appCtx)
+	}()
 
 	apiKeyAuth := mw.APIKeyIdentityValidatorFunc(func(ctx context.Context, rawKey string) (usage.Principal, error) {
 		k, err := apiKeySvc.Validate(ctx, rawKey)
@@ -300,6 +383,7 @@ func main() {
 
 	router := server.NewRouter(server.RouteConfig{
 		JWTService:                   jwtSvc,
+		UserGate:                     userGate,
 		APIKeyAuth:                   apiKeyAuth,
 		UsageRecorder:                usageRecorder,
 		ListUsageLogsHandler:         usageHandler.List,
@@ -350,10 +434,13 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:         ":" + cfg.Port,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		Addr:        ":" + cfg.Port,
+		Handler:     router,
+		ReadTimeout: 15 * time.Second,
+		// WriteTimeout is disabled globally: a single 15s deadline truncates
+		// long Exec/Relay responses. Per-route budgets are applied by
+		// middleware.WriteDeadline.
+		WriteTimeout: 0,
 		IdleTimeout:  60 * time.Second,
 	}
 
@@ -372,6 +459,12 @@ func main() {
 	<-quit
 
 	slog.Info("server shutting down...")
+
+	// Stop scheduling and drain in-flight collections before the pool and the
+	// database are closed by the deferred cleanups.
+	stopApp()
+	<-monitorDone
+	<-maintenanceDone
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -412,4 +505,19 @@ func parseLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// verifyAgentArtifacts validates the bundled agent artifacts. AGENT_ARTIFACTS_DIR
+// points at the directory holding the manifest and both arch-specific binaries
+// (the Hub image ships them in /usr/local/bin).
+func verifyAgentArtifacts(dir string) error {
+	manifest, err := agentproto.LoadManifest(dir)
+	if err != nil {
+		return err
+	}
+	if err := manifest.Verify(dir); err != nil {
+		return err
+	}
+	slog.Info("agent artifacts verified", "dir", dir, "build_version", manifest.BuildVersion, "protocol_version", manifest.ProtocolVersion, "agents", len(manifest.Agents))
+	return nil
 }
