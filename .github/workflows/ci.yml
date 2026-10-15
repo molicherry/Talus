@@ -200,15 +200,15 @@ jobs:
       - name: Coverage manifest + report drift
         run: node tests/render-coverage.mjs --check
 
-      # The phase gate runs the pre-registered M1 set, including the adapter
-      # scan and the isolated-database migration subset.
+      # M1 runs adapter checks, migrations and current-source Hub acceptance in
+      # temporary databases. It never requires a personal deployment or old Git refs.
       - name: Phase gate M1
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
         run: bash tests/run.sh --gate M1
 
-      # M2 is independently exercised even when M1 needs fresh deployment
-      # evidence. M1 remains failed/pending; this never overrides its result.
+      # Exercise later gates independently of earlier failures; their success
+      # never overrides a failed gate.
       - name: Phase gate M2 (race and real terminal protocols)
         if: ${{ !cancelled() }}
         env:

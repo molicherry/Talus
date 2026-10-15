@@ -92,9 +92,13 @@ written back into `automation_status`.
 | `ui` | Playwright + Chromium | Production build against mock APIs; manual screen-reader records are listed separately |
 | `e2e` | `TEST_DATABASE_URL`, Go, Node, curl; Playwright + Chromium for the browser flow | M2 starts real HTTP/WS handlers and a controlled SSH peer in Go; M4 builds and starts its own frontend, Hub, scratch database and SSH peer |
 
-Mock-API browser checks are **UI regressions**, not real E2E. `e2e` is
-automated. Deployment verification is manual; the optional screen-reader review
-also uses manual evidence.
+Mock-API browser checks are **UI regressions**, not real E2E. Deployment
+verification is automated: M1's `deploy-verify` run starts the current Hub in an
+isolated process, with its own temporary database and a local HTTP upstream. It
+checks bootstrap/restart, session revocation, scoped service discovery, usage
+guides, credential injection, and Relay modes. It needs no personal server,
+public endpoint, historical commit or checked-in deployment evidence. The
+optional screen-reader review still uses manual evidence.
 
 M2 explicitly includes `go-race` and `terminal-e2e`. The latter drives the real
 authentication and terminal handlers over HTTP/WebSocket against PostgreSQL and
@@ -114,10 +118,12 @@ same TimescaleDB PostgreSQL 16 image family as `docker-compose.yml` with a
 test-only superuser. M1's migration prerequisite tests are separately indexed
 as `TC-02-03`, so skipping their database setup cannot satisfy the gate.
 
-CI runs M1–M4 separately and publishes their execution artifacts. Changed
-deployment-covered code invalidates the old manual M1 evidence; later gate
-success does not clear that pending result or authorize a deployment. M4's
-browser flow starts a local Hub and does not require an external Hub URL.
+CI runs M1–M4 separately and publishes fresh execution artifacts for the checked
+out commit. M1 requires both isolated Hub acceptance tests to execute and pass;
+a missing database or a skipped test blocks the gate. Squash/rebase merges need
+no historical deployment record. These local checks do not access or authorize
+deployment to a personal server. M4's browser flow also starts a local Hub and
+does not require an external Hub URL.
 
 ## Static scan exemptions
 
