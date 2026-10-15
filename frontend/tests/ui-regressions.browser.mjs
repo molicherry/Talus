@@ -397,6 +397,123 @@ try {
     assert.equal(await page.locator("#connection-host").inputValue(), "draft-proxy.test");
     assert.equal(await page.getByRole("button", { name: "Test saved connection", exact: true }).isDisabled(), true);
   });
+  await test("a slow server save freezes every reset field until its response arrives", async ({ page, state, goto }) => {
+    const save = gate();
+    state.servers[0] = { ...state.servers[0], connection: { mode: "direct" }, connection_revision: 1 };
+    state.custom = async ({ path, method, body, reply }) => {
+      if (path === "/api/v1/servers/1" && method === "PUT") {
+        await save.promise;
+        state.servers[0] = { ...state.servers[0], ...body };
+        await reply(state.servers[0]);
+        return true;
+      }
+      return false;
+    };
+    await goto("/servers/1/edit");
+    await page.locator("#name").fill("Submitted name");
+    await page.locator("#host").fill("submitted.example.test");
+    await page.getByRole("button", { name: "Update Server", exact: true }).click();
+    await until(() => state.writes.some((write) => write.method === "PUT"));
+    try {
+      for (const field of ["name", "host", "port", "description", "notes", "credential_id", "connection-mode"]) {
+        assert.equal(await page.locator(`#${field}`).isDisabled(), true, `${field} stays frozen during PUT`);
+      }
+      assert.equal(await page.getByRole("button", { name: "New credential", exact: true }).isDisabled(), true);
+      // Attempt actual input while the old request is in flight. A disabled
+      // control cannot accept a newer edit that its response would later reset.
+      await page.locator("#host").click({ force: true });
+      await page.keyboard.type("newer-edit");
+      await valueIs(page.locator("#host"), "submitted.example.test");
+      assert.equal(state.writes.filter((write) => write.method === "PUT").length, 1);
+    } finally {
+      save.release();
+    }
+    await until(() => page.locator("#host").isEnabled());
+    await valueIs(page.locator("#name"), "Submitted name");
+    await page.locator("#host").fill("after-save.example.test");
+    await valueIs(page.locator("#host"), "after-save.example.test");
+  });
+  await test("a pending connection test cannot move from one cached server detail to another", async ({ page, state, goto }) => {
+    const firstTest = gate();
+    state.servers[0] = { ...state.servers[0], connection: { mode: "ssh_jump", jump_server_id: 2 }, connection_revision: 1 };
+    state.servers[1] = { ...state.servers[1], connection: { mode: "direct" }, connection_revision: 1 };
+    state.custom = async ({ path, method, reply }) => {
+      if (path === "/api/v1/servers/1/connection/test" && method === "POST") {
+        await firstTest.promise;
+        await reply({ mode: "ssh_jump", latency_ms: 123, success: true });
+        return true;
+      }
+      if (path === "/api/v1/servers/2/connection/test" && method === "POST") {
+        await reply({ mode: "direct", latency_ms: 456, success: true });
+        return true;
+      }
+      return false;
+    };
+    // Prime Beta's detail cache through client-side navigation, then visit
+    // Alpha. The later jump link reuses the same mounted detail component.
+    await goto("/servers");
+    await page.getByRole("button", { name: "Beta", exact: true }).click();
+    await page.getByRole("heading", { name: "Beta", exact: true }).waitFor();
+    await page.getByRole("link", { name: "Servers", exact: true }).click();
+    await page.getByRole("button", { name: "Alpha", exact: true }).click();
+    await page.getByRole("heading", { name: "Alpha", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Test saved connection", exact: true }).click();
+    await until(() => state.writes.some((write) => write.path === "/api/v1/servers/1/connection/test"));
+    let readsBeforeLateResponse;
+    try {
+      await page.getByRole("link", { name: "Jump server #2", exact: true }).click();
+      await page.getByRole("heading", { name: "Beta", exact: true }).waitFor();
+      assert.equal(state.counts.get("GET /api/v1/servers/2"), 1, "Beta is already cached");
+      assert.equal(await page.getByRole("button", { name: "Test saved connection", exact: true }).isEnabled(), true, "Alpha's pending state does not disable Beta");
+      const refreshed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/v1/servers/2" && response.request().method() === "GET");
+      await page.getByRole("button", { name: "Test saved connection", exact: true }).click();
+      await page.getByRole("status").filter({ hasText: "Connection succeeded (456 ms)." }).waitFor();
+      await refreshed;
+      await page.evaluate(() => new Promise(requestAnimationFrame));
+      readsBeforeLateResponse = state.counts.get("GET /api/v1/servers/2") ?? 0;
+    } finally {
+      firstTest.release();
+    }
+    await until(() => (state.counts.get("GET /api/v1/servers/2") ?? 0) > readsBeforeLateResponse, "late Alpha callback has completed its query invalidation");
+    assert.equal(await page.getByRole("status").filter({ hasText: "Connection succeeded (123 ms)." }).count(), 0);
+    await page.getByRole("status").filter({ hasText: "Connection succeeded (456 ms)." }).waitFor();
+  });
+  await test("failed connection tests refresh host-key warnings and the editor revision", async ({ page, state, goto }) => {
+    state.servers[0] = { ...state.servers[0], connection: { mode: "direct" }, connection_revision: 4, host_key_fingerprint: "SHA256:recorded-key" };
+    let tests = 0;
+    state.custom = async ({ path, method, body, reply }) => {
+      if (path === "/api/v1/servers/1/connection/test" && method === "POST") {
+        tests++;
+        state.servers[0] = { ...state.servers[0], connection_revision: state.servers[0].connection_revision + 1,
+          host_key_mismatch: true, host_key_mismatch_at: timestamp, host_key_seen_fingerprint: `SHA256:presented-key-${tests}` };
+        await reply({ error: { reason: "ssh_host_key_mismatch", params: { stage: "target_host_key", role: "target" } } }, 502);
+        return true;
+      }
+      if (path === "/api/v1/servers/1" && method === "PUT") {
+        assert.equal(body.expected_connection_revision, state.servers[0].connection_revision, "save uses the failed handshake's new revision");
+        state.servers[0] = { ...state.servers[0], ...body, connection_revision: state.servers[0].connection_revision + 1 };
+        await reply(state.servers[0]);
+        return true;
+      }
+      return false;
+    };
+    await goto("/servers/1");
+    assert.equal(await page.getByRole("alert").count(), 0);
+    await page.getByRole("button", { name: "Test saved connection", exact: true }).click();
+    await page.getByRole("alert").filter({ hasText: "SHA256:presented-key-1" }).waitFor();
+    await page.getByRole("link", { name: "Edit Server", exact: true }).click();
+    await page.getByRole("button", { name: "Test saved connection", exact: true }).click();
+    await page.getByRole("status").filter({ hasText: "SSH host key changed" }).waitFor();
+    await until(() => (state.counts.get("GET /api/v1/servers/1") ?? 0) >= 3);
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await page.locator("#connection-mode").selectOption("socks5");
+    await page.locator("#connection-host").fill("saved-after-warning.test");
+    await page.getByRole("button", { name: "Update Server", exact: true }).click();
+    await until(() => state.writes.some((write) => write.method === "PUT"));
+    await until(() => page.getByRole("button", { name: "Test saved connection", exact: true }).isEnabled());
+    assert.equal(state.writes.find((write) => write.method === "PUT").body.expected_connection_revision, 6);
+    await valueIs(page.locator("#connection-host"), "saved-after-warning.test");
+  });
   await test("late service secrets preserve edits; duplicate keys never overwrite rows", async ({
     page,
     state,

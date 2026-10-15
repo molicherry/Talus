@@ -76,6 +76,17 @@ func NewPool(maxIdle time.Duration, maxConns int, slotTimeout time.Duration) *Po
 
 // AcquireContext transfers a cached client, or a vacant slot for a new dial.
 func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint string) (*Lease, error) {
+	return p.acquireContext(ctx, serverID, fingerprint, false)
+}
+
+// AcquireFreshContext reserves a normal slot but discards any idle cached
+// transport without probing it. A fresh connection test must be independent
+// of the old connection's health. Other active leases retain their generation.
+func (p *Pool) AcquireFreshContext(ctx context.Context, serverID uint, fingerprint string) (*Lease, error) {
+	return p.acquireContext(ctx, serverID, fingerprint, true)
+}
+
+func (p *Pool) acquireContext(ctx context.Context, serverID uint, fingerprint string, fresh bool) (*Lease, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -140,6 +151,10 @@ func (p *Pool) AcquireContext(ctx context.Context, serverID uint, fingerprint st
 	entry.client = nil
 	entry.lastUsed = time.Now()
 	p.mu.Unlock()
+	if fresh && client != nil {
+		_ = client.Close()
+		client = nil
+	}
 	if client != nil {
 		probed := make(chan bool, 1)
 		go func() { probed <- p.probe(client) }()

@@ -319,7 +319,7 @@ func TestConcurrentJumpBindingsCannotCreateCycle(t *testing.T) {
 
 func TestConnectionMigrationPreservesLegacyServersAndForeignKeys(t *testing.T) {
 	db := authOwnerTestDB(t)
-	if db.Config.DisableForeignKeyConstraintWhenMigrating {
+	if db.DisableForeignKeyConstraintWhenMigrating {
 		t.Fatal("migration test must use production foreign-key behavior")
 	}
 	if err := db.AutoMigrate(&model.SSHCredential{}, &model.Server{}); err != nil {

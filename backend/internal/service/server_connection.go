@@ -117,7 +117,7 @@ func normalizeProxyHost(host string) (string, bool) {
 			return "", false
 		}
 		for _, char := range label {
-			if !(char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' || char == '_') {
+			if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' && char != '_' {
 				return "", false
 			}
 		}
@@ -233,7 +233,7 @@ func validateJump(ctx context.Context, repo *repository.ServerRepo, serverID uin
 		return invalidConnection()
 	}
 	credential := jump.Credential
-	if !(credential.AuthType == "password" && credential.EncryptedPassword != nil || credential.AuthType == "private_key" && credential.EncryptedPrivateKey != nil) {
+	if (credential.AuthType != "password" || credential.EncryptedPassword == nil) && (credential.AuthType != "private_key" || credential.EncryptedPrivateKey == nil) {
 		return invalidConnection()
 	}
 	upstream, err := repo.FindConnectionConfig(ctx, jump.ID)

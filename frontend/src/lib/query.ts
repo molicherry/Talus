@@ -29,6 +29,7 @@ interface MutationOptions<TData, TVars> {
   mutationFn: (vars: TVars) => Promise<TData>;
   onSuccess?: (data: TData, vars: TVars) => void;
   onError?: (error: unknown, vars: TVars) => void;
+  onSettled?: (data: TData | undefined, error: Error | null, vars: TVars) => void;
 }
 
 export interface UseMutationResult<TData, TError, TVars> {
@@ -282,12 +283,14 @@ export function useMutation<TData, TVars>(
           setState({ data, error: null, isPending: false, isSuccess: true, isError: false });
           optsRef.current.onSuccess?.(data, vars);
           callbacks?.onSuccess?.(data, vars);
+          optsRef.current.onSettled?.(data, null, vars);
         },
         (err: unknown) => {
           const error = err instanceof Error ? err : new Error(String(err));
           setState({ data: undefined, error, isPending: false, isSuccess: false, isError: true });
           optsRef.current.onError?.(error, vars);
           callbacks?.onError?.(error, vars);
+          optsRef.current.onSettled?.(undefined, error, vars);
         },
       );
   };

@@ -12,6 +12,7 @@ import (
 	"github.com/vpsmanager/backend/internal/model"
 	appcrypto "github.com/vpsmanager/backend/internal/pkg/crypto"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
+	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
 	"github.com/vpsmanager/backend/internal/usage"
 	"golang.org/x/crypto/ssh"
@@ -27,7 +28,10 @@ type connectionSource interface {
 	FindConnectionConfig(context.Context, uint) (*model.ServerConnectionConfig, error)
 }
 type sshHostKeyStore interface {
-	CommitSSHHostKey(context.Context, *model.Server, []byte, string) (bool, error)
+	CommitSSHRouteHostKey(context.Context, *repository.SSHRouteSnapshot, uint, []byte, string) (bool, error)
+}
+type sshRouteSource interface {
+	FindSSHRouteSnapshot(context.Context, uint) (*repository.SSHRouteSnapshot, error)
 }
 
 type sshRouteSnapshot struct {
@@ -48,15 +52,36 @@ func connectionConflict() error {
 }
 
 func (s *SSHService) readRoute(ctx context.Context, id uint) (*sshRouteSnapshot, error) {
-	target, err := s.serverRepo.FindByID(ctx, id)
+	var snap *sshRouteSnapshot
+	var err error
+	coherent := false
+	if source, ok := s.serverRepo.(sshRouteSource); ok {
+		var stored *repository.SSHRouteSnapshot
+		stored, err = source.FindSSHRouteSnapshot(ctx, id)
+		if err == nil {
+			snap = &sshRouteSnapshot{target: stored.Target, config: stored.Config, jump: stored.Jump}
+			coherent = true
+		}
+	} else {
+		var target *model.Server
+		target, err = s.serverRepo.FindByID(ctx, id)
+		if err == nil {
+			snap = &sshRouteSnapshot{target: target}
+		}
+	}
 	if err != nil {
+		if errors.Is(err, repository.ErrSSHJumpUnavailable) {
+			return nil, routeFailure("ssh_connection_failed", "jump_connect", "jump")
+		}
+		if errors.Is(err, repository.ErrSSHJumpProxied) {
+			return nil, connectionConflict()
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, server.ErrNotFound
 		}
 		return nil, fmt.Errorf("read SSH target: %w", err)
 	}
-	snap := &sshRouteSnapshot{target: target}
-	if source, ok := s.serverRepo.(connectionSource); ok {
+	if source, ok := s.serverRepo.(connectionSource); ok && !coherent {
 		snap.config, err = source.FindConnectionConfig(ctx, id)
 		if err != nil {
 			return nil, fmt.Errorf("read SSH route: %w", err)
@@ -68,11 +93,16 @@ func (s *SSHService) readRoute(ctx context.Context, id uint) (*sshRouteSnapshot,
 		if snap.config.JumpServerID == nil || *snap.config.JumpServerID == id {
 			return nil, connectionConflict()
 		}
-		snap.jump, err = s.serverRepo.FindByID(ctx, *snap.config.JumpServerID)
-		if err != nil {
+		if !coherent {
+			snap.jump, err = s.serverRepo.FindByID(ctx, *snap.config.JumpServerID)
+			if err != nil {
+				return nil, routeFailure("ssh_connection_failed", "jump_connect", "jump")
+			}
+		}
+		if snap.jump == nil {
 			return nil, routeFailure("ssh_connection_failed", "jump_connect", "jump")
 		}
-		if source, ok := s.serverRepo.(connectionSource); ok {
+		if source, ok := s.serverRepo.(connectionSource); ok && !coherent {
 			cfg, err := source.FindConnectionConfig(ctx, snap.jump.ID)
 			if err != nil || (cfg != nil && cfg.Mode != "direct") {
 				return nil, connectionConflict()
@@ -94,13 +124,17 @@ func (s *SSHService) readRoute(ctx context.Context, id uint) (*sshRouteSnapshot,
 	default:
 		return nil, connectionConflict()
 	}
-	if !validSSHCredential(target) {
+	if !validSSHCredential(snap.target) {
 		return nil, routeFailure("ssh_authentication_failed", "target_auth", "target")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, context.Cause(ctx)
 	}
 	return snap, nil
+}
+
+func (r *sshRouteSnapshot) stored() *repository.SSHRouteSnapshot {
+	return &repository.SSHRouteSnapshot{Target: r.target, Config: r.config, Jump: r.jump}
 }
 
 func validSSHCredential(srv *model.Server) bool {
@@ -241,27 +275,37 @@ func (s *SSHService) GetClient(ctx context.Context, id uint) (*ssh.Client, error
 }
 
 func (s *SSHService) getLease(ctx context.Context, id uint, fresh bool) (*sshpool.Lease, error) {
+	lease, _, err := s.getLeaseWithSnapshot(ctx, id, fresh)
+	return lease, err
+}
+
+// getLeaseWithSnapshot returns the exact route verified for the borrowed client.
+// Callers reporting a connection test must not read a newer route after handoff
+// and attribute that route to an earlier successful handshake.
+func (s *SSHService) getLeaseWithSnapshot(ctx context.Context, id uint, fresh bool) (*sshpool.Lease, *sshRouteSnapshot, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return nil, context.Cause(ctx)
+			return nil, nil, context.Cause(ctx)
 		}
 		snap, err := s.readRoute(ctx, id)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		usage.FromContext(ctx).SetResource("server", &snap.target.ID, snap.target.Name, &snap.target.ID)
 		op := usage.FromContext(ctx)
 		op.SetMetadata("connection_mode", snap.mode())
 		op.SetMetadata("connection_revision", snap.target.ConnectionRevision)
-		lease, err := s.pool.AcquireContext(ctx, id, snap.fingerprint())
+		var lease *sshpool.Lease
+		if fresh {
+			lease, err = s.pool.AcquireFreshContext(ctx, id, snap.fingerprint())
+		} else {
+			lease, err = s.pool.AcquireContext(ctx, id, snap.fingerprint())
+		}
 		if err != nil {
 			if errors.Is(err, sshpool.ErrStaleLease) {
 				continue
 			}
-			return nil, fmt.Errorf("acquire SSH connection: %w", err)
-		}
-		if fresh && lease.Client != nil {
-			lease.SetClient(nil)
+			return nil, nil, fmt.Errorf("acquire SSH connection: %w", err)
 		}
 		var targetKey, jumpKey []byte
 		if lease.Client == nil {
@@ -281,18 +325,18 @@ func (s *SSHService) getLease(ctx context.Context, id uint, fresh bool) (*sshpoo
 				}
 				lease.Discard()
 				if ctx.Err() != nil {
-					return nil, context.Cause(ctx)
+					return nil, nil, context.Cause(ctx)
 				}
 				if errors.Is(dialErr, context.Canceled) {
-					return nil, sshpool.ErrClosed
+					return nil, nil, sshpool.ErrClosed
 				}
 				s.recordMismatch(ctx, snap, dialErr)
-				return nil, safeRouteError(ctx, dialErr)
+				return nil, nil, safeRouteError(ctx, dialErr)
 			}
 		}
 		if ctx.Err() != nil {
 			lease.Discard()
-			return nil, context.Cause(ctx)
+			return nil, nil, context.Cause(ctx)
 		}
 		// The slot wait, cache probe and handshake can all span a configuration
 		// update. Re-read before committing identity or opening a business session.
@@ -300,10 +344,10 @@ func (s *SSHService) getLease(ctx context.Context, id uint, fresh bool) (*sshpoo
 		if readErr != nil || current.fingerprint() != snap.fingerprint() || !lease.Valid() {
 			lease.Discard()
 			if ctx.Err() != nil {
-				return nil, context.Cause(ctx)
+				return nil, nil, context.Cause(ctx)
 			}
 			if readErr != nil && !errors.Is(readErr, server.ErrNotFound) {
-				return nil, readErr
+				return nil, nil, readErr
 			}
 			continue
 		}
@@ -313,13 +357,13 @@ func (s *SSHService) getLease(ctx context.Context, id uint, fresh bool) (*sshpoo
 			if errors.Is(commitErr, errRouteChanged) {
 				continue
 			}
-			return nil, commitErr
+			return nil, nil, commitErr
 		}
 		current, readErr = s.readRoute(ctx, id)
 		if readErr != nil || current.fingerprint() != snap.fingerprint() || !lease.Valid() {
 			lease.Discard()
 			if ctx.Err() != nil {
-				return nil, context.Cause(ctx)
+				return nil, nil, context.Cause(ctx)
 			}
 			continue
 		}
@@ -327,9 +371,9 @@ func (s *SSHService) getLease(ctx context.Context, id uint, fresh bool) (*sshpoo
 			lease.Discard()
 			continue
 		}
-		return lease, nil
+		return lease, snap, nil
 	}
-	return nil, connectionConflict()
+	return nil, nil, connectionConflict()
 }
 
 var errRouteChanged = errors.New("SSH connection configuration changed")
@@ -357,7 +401,7 @@ func (s *SSHService) confirmHostKeys(ctx context.Context, snap *sshRouteSnapshot
 		if !ok {
 			return false, server.ErrInternal
 		}
-		updated, err := store.CommitSSHHostKey(ctx, srv, pair.key, kind)
+		updated, err := store.CommitSSHRouteHostKey(ctx, snap.stored(), srv.ID, pair.key, kind)
 		if err != nil {
 			return false, fmt.Errorf("commit SSH host identity: %w", err)
 		}
@@ -371,8 +415,14 @@ func (s *SSHService) confirmHostKeys(ctx context.Context, snap *sshRouteSnapshot
 		if !updated {
 			// An identical concurrent TOFU may win once. Accept only that exact
 			// identity transition; a route, endpoint or credential edit is a conflict.
-			latest, err := s.serverRepo.FindByID(ctx, srv.ID)
-			if err != nil || serverFingerprint(latest) != serverFingerprint(&confirmed) {
+			confirmedRoute := *snap
+			if srv == snap.target {
+				confirmedRoute.target = &confirmed
+			} else {
+				confirmedRoute.jump = &confirmed
+			}
+			latest, err := s.readRoute(ctx, snap.target.ID)
+			if err != nil || latest.fingerprint() != confirmedRoute.fingerprint() {
 				return false, errRouteChanged
 			}
 		}
@@ -396,7 +446,7 @@ func (s *SSHService) recordMismatch(ctx context.Context, snap *sshRouteSnapshot,
 		return
 	}
 	if store, ok := s.serverRepo.(sshHostKeyStore); ok {
-		if updated, _ := store.CommitSSHHostKey(ctx, srv, mismatch.Presented, "mismatch"); updated {
+		if updated, _ := store.CommitSSHRouteHostKey(ctx, snap.stored(), srv.ID, mismatch.Presented, "mismatch"); updated {
 			s.invalidateRouteIdentity(ctx, srv.ID)
 			s.pool.Invalidate(snap.target.ID)
 		}

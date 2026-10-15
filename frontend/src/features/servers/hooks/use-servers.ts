@@ -74,8 +74,8 @@ export function useTrustHostKey() {
 export function useTestServerConnection() {
   return useMutation({
     mutationFn: testServerConnection,
-    onSuccess: (_data, id) => {
-      // A real handshake may pin a host key and advance the saved revision.
+    onSettled: (_data, _error, id) => {
+      // Failed host-key checks also update warnings and advance the revision.
       invalidateQueries(["servers"]);
       invalidateQueries(["servers", id]);
     },

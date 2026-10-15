@@ -187,90 +187,92 @@ export function ServerForm({ server }: ServerFormProps) {
         </div>
       )}
 
-      <Field label={t("server.name")} htmlFor="name" error={errors.name?.message}>
-        <Input
-          id="name"
-          type="text"
-          {...register("name")}
-          placeholder={t("server.namePlaceholder")}
-        />
-      </Field>
+      <fieldset disabled={isPending} className="min-w-0 space-y-4">
+        <Field label={t("server.name")} htmlFor="name" error={errors.name?.message}>
+          <Input
+            id="name"
+            type="text"
+            {...register("name")}
+            placeholder={t("server.namePlaceholder")}
+          />
+        </Field>
 
-      <Field label={t("server.host")} htmlFor="host" error={errors.host?.message}>
-        <Input
-          id="host"
-          type="text"
-          {...register("host")}
-          placeholder={t("server.hostPlaceholder")}
-        />
-      </Field>
+        <Field label={t("server.host")} htmlFor="host" error={errors.host?.message}>
+          <Input
+            id="host"
+            type="text"
+            {...register("host")}
+            placeholder={t("server.hostPlaceholder")}
+          />
+        </Field>
 
-      <Field label={t("server.port")} htmlFor="port" error={errors.port?.message}>
-        <Input
-          id="port"
-          type="number"
-          {...register("port", { valueAsNumber: true })}
-          placeholder={t("server.portPlaceholder")}
-        />
-      </Field>
+        <Field label={t("server.port")} htmlFor="port" error={errors.port?.message}>
+          <Input
+            id="port"
+            type="number"
+            {...register("port", { valueAsNumber: true })}
+            placeholder={t("server.portPlaceholder")}
+          />
+        </Field>
 
-      <Field label={t("server.description")} htmlFor="description" error={errors.description?.message}>
-        <Textarea
-          id="description"
-          {...register("description")}
-          rows={3}
-          placeholder={t("server.descriptionPlaceholder")}
-        />
-      </Field>
+        <Field label={t("server.description")} htmlFor="description" error={errors.description?.message}>
+          <Textarea
+            id="description"
+            {...register("description")}
+            rows={3}
+            placeholder={t("server.descriptionPlaceholder")}
+          />
+        </Field>
 
-      <Field label={t("server.notes")} htmlFor="notes" error={errors.notes?.message}>
-        <Textarea
-          id="notes"
-          {...register("notes")}
-          rows={4}
-          placeholder={t("server.notesPlaceholder")}
-        />
-      </Field>
+        <Field label={t("server.notes")} htmlFor="notes" error={errors.notes?.message}>
+          <Textarea
+            id="notes"
+            {...register("notes")}
+            rows={4}
+            placeholder={t("server.notesPlaceholder")}
+          />
+        </Field>
 
-      <div>
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <Label htmlFor="credential_id" className="mb-0">
-            {t("server.credential")}
-          </Label>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowCredentialDialog(true)}
-            title={t("service.newCredentialHint")}
-            className="h-auto gap-1 px-1.5 text-xs font-medium text-link hover:bg-primary-subtle"
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <Label htmlFor="credential_id" className="mb-0">
+              {t("server.credential")}
+            </Label>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowCredentialDialog(true)}
+              title={t("service.newCredentialHint")}
+              className="h-auto gap-1 px-1.5 text-xs font-medium text-link hover:bg-primary-subtle"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t("service.newCredential")}
+            </Button>
+          </div>
+          <Select
+            id="credential_id"
+            {...register("credential_id", {
+              // Explicit null (not undefined): JSON.stringify drops undefined, so
+              // the API could not tell "clear the binding" from "leave it" and
+              // "No credential" never persisted.
+              setValueAs: (v: string) => (v === "" ? null : Number(v)),
+            })}
           >
-            <Plus className="h-3.5 w-3.5" />
-            {t("service.newCredential")}
-          </Button>
+            <option value="">{t("server.noCredential")}</option>
+            {credentialOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name || `#${c.id}`} ({c.username}@{c.auth_type})
+              </option>
+            ))}
+          </Select>
         </div>
-        <Select
-          id="credential_id"
-          {...register("credential_id", {
-            // Explicit null (not undefined): JSON.stringify drops undefined, so
-            // the API could not tell "clear the binding" from "leave it" and
-            // "No credential" never persisted.
-            setValueAs: (v: string) => (v === "" ? null : Number(v)),
-          })}
-        >
-          <option value="">{t("server.noCredential")}</option>
-          {credentialOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name || `#${c.id}`} ({c.username}@{c.auth_type})
-            </option>
-          ))}
-        </Select>
-      </div>
 
-      {isAdmin && <ServerConnectionFields draft={draft} saved={savedServer?.connection}
-        onChange={(next) => { setDraft(next); setProxyErrors({}); }} errors={proxyErrors}
-        candidates={candidates.data} candidatesError={candidates.isError ? translateApiError(candidates.error, t) : undefined}
-        serverID={server?.id} disabled={isPending} />}
+        {isAdmin && <ServerConnectionFields draft={draft} saved={savedServer?.connection}
+          onChange={(next) => { setDraft(next); setProxyErrors({}); }} errors={proxyErrors}
+          candidates={candidates.data} candidatesError={candidates.isError ? translateApiError(candidates.error, t) : undefined}
+          serverID={server?.id} disabled={isPending} />}
+      </fieldset>
       {isEdit && server && <>
         <ConnectionTestButton key={testGeneration} serverID={server.id} unsaved={unsavedConnection} disabled={isPending} />
         <p className="text-xs text-muted-foreground">{t("server.connection.sessionHint")}</p>

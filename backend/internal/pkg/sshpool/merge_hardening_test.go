@@ -169,3 +169,59 @@ func TestRebindFingerprintCannotReviveStaleLease(t *testing.T) {
 		t.Fatal("stale generation was revived")
 	}
 }
+
+func TestAcquireFreshSkipsCachedProbeAndPreservesActiveGeneration(t *testing.T) {
+	p := leaseTestPool(t, 2)
+	counts := make(map[string]int)
+	p.SetQuotaObserver(func(consumer string, delta int) { counts[consumer] += delta })
+	active, err := p.AcquireContext(context.Background(), 1, "fp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeClient, activeConn := probeTestClient()
+	active.SetClient(activeClient)
+	defer active.Discard()
+	seed, err := p.AcquireContext(context.Background(), 1, "fp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cachedClient, cachedConn := probeTestClient()
+	seed.SetClient(cachedClient)
+	seed.Release()
+	probed := false
+	p.probe = func(*ssh.Client) bool { probed = true; return true }
+	before := active.Generation()
+	fresh, err := p.AcquireFreshContext(WithQuotaConsumer(context.Background(), "connection_test"), 1, "fp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fresh.Discard()
+	if probed {
+		t.Fatal("fresh acquisition probed the obsolete cached client")
+	}
+	if fresh.Client != nil {
+		t.Fatal("fresh acquisition returned the obsolete cached client")
+	}
+	select {
+	case <-cachedConn.closed:
+	default:
+		t.Fatal("obsolete cached client remained open")
+	}
+	if !active.Valid() || active.Generation() != before || fresh.Generation() != before {
+		t.Fatal("fresh acquisition invalidated another active lease")
+	}
+	select {
+	case <-activeConn.closed:
+		t.Fatal("fresh acquisition closed another active transport")
+	default:
+	}
+	if counts["connection_test"] != 1 || counts[""] != 1 {
+		t.Fatalf("fresh quota reservation has wrong consumer or count: %v", counts)
+	}
+	fresh.Discard()
+	fresh.Discard()
+	active.Discard()
+	if counts["connection_test"] != 0 || counts[""] != 0 {
+		t.Fatalf("fresh/active quota did not settle exactly once: %v", counts)
+	}
+}

@@ -86,7 +86,9 @@ target's real host, SSH port, and SSH credentials in the server fields. The
 target must allow the jump host or proxy's actual outbound IP.
 
 Save the server, then use **Test connection** on its edit page to check a fresh
-SSH handshake. Target names are resolved by the jump host or SOCKS5 proxy.
+SSH handshake. The complete test, including queue waits and configuration reads,
+uses the smaller of `SSH_TIMEOUT` and 10 seconds. Target names are resolved by
+the jump host or SOCKS5 proxy.
 Proxy failures never fall back to a direct connection. Passwords are encrypted
 and are not returned by ordinary server reads; leave an unchanged proxy's
 password blank to retain it. Changing its address or username requires a new

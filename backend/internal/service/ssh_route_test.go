@@ -14,6 +14,7 @@ import (
 	"github.com/vpsmanager/backend/internal/model"
 	appcrypto "github.com/vpsmanager/backend/internal/pkg/crypto"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
+	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
@@ -62,11 +63,22 @@ func (r *routeTestSource) FindConnectionConfig(_ context.Context, id uint) (*mod
 	}
 	return nil, nil
 }
-func (r *routeTestSource) CommitSSHHostKey(_ context.Context, expected *model.Server, seen []byte, kind string) (bool, error) {
+func (r *routeTestSource) CommitSSHRouteHostKey(_ context.Context, route *repository.SSHRouteSnapshot, resourceID uint, seen []byte, kind string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	expected := route.Target
+	if route.Jump != nil && route.Jump.ID == resourceID {
+		expected = route.Jump
+	}
 	if r.commitHook != nil {
 		r.commitHook(r.servers[expected.ID], kind)
+	}
+	current := &sshRouteSnapshot{target: r.servers[route.Target.ID], config: r.configs[route.Target.ID]}
+	if current.config != nil && current.config.JumpServerID != nil {
+		current.jump = r.servers[*current.config.JumpServerID]
+	}
+	if current.target == nil || current.fingerprint() != (&sshRouteSnapshot{target: route.Target, config: route.Config, jump: route.Jump}).fingerprint() {
+		return false, nil
 	}
 	srv := r.servers[expected.ID]
 	if srv == nil || serverFingerprint(srv) != serverFingerprint(expected) {

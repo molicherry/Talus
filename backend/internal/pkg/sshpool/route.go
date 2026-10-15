@@ -206,8 +206,9 @@ func DialRouteContext(parent context.Context, route Route, timeout time.Duration
 			_ = chain.Close()
 		}
 	}()
-	var targetRaw net.Conn = raw
-	if mode == "ssh_jump" {
+	targetRaw := raw
+	switch mode {
+	case "ssh_jump":
 		var jump *ssh.Client
 		jump, jumpKey, err = HandshakeContext(ctx, raw, *route.Jump)
 		if err != nil {
@@ -238,7 +239,7 @@ func DialRouteContext(parent context.Context, route Route, timeout time.Duration
 		}
 		chain.setForwarded(result.conn)
 		targetRaw = result.conn
-	} else if mode == "socks5" {
+	case "socks5":
 		if err = socksConnect(raw, route.SOCKS, route.Target); err != nil {
 			return nil, nil, nil, err
 		}

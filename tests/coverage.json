@@ -3418,6 +3418,39 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Reject fingerprint adoption after external invalidation so a stale lease cannot revive an old route."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-11",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_connection_check_budget_test.go",
+            "symbol": "TestConnectionTestReportsTheRouteActuallyHandshaken"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Report the exact route that completed the SSH handshake instead of attributing success to a newer concurrent route configuration."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-12",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/repository/ssh_route_test.go",
+            "symbol": "TestSSHRouteSnapshotReadIsCoherentAcrossAtomicUpdate"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Read target, route, jump and associated credentials from one repeatable-read snapshot while a concurrent atomic update commits; the next read observes the complete new version."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-13",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/repository/ssh_route_test.go",
+            "symbol": "TestSSHRouteHostKeyCASRejectsChangedJumpDependency"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject stale pin, mismatch and warning-clear writes after the jump dependency changes; preserve target identity and allow the fresh route snapshot to commit."
         }
       ]
     },
@@ -3549,6 +3582,17 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Balance quota exactly once when invalidation races immediately after slot reservation."
+        },
+        {
+          "implementation_id": "impl-06-09-proxy-12",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/merge_hardening_test.go",
+            "symbol": "TestAcquireFreshSkipsCachedProbeAndPreservesActiveGeneration"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reserve normal quota for a fresh acquisition, bypass probing and close only the obsolete cached chain, and preserve active transport ownership and generation."
         }
       ]
     },
@@ -3558,7 +3602,7 @@
         "REQ-06"
       ],
       "spec_ref": "tests/coverage.json#/cases/39/scenario",
-      "scenario": "Cancel stalled proxy negotiation and nested SSH handshakes within the shared dial budget, close the entire transport chain on pool shutdown, and preserve established routes after dial-context cleanup.",
+      "scenario": "Cancel stalled proxy negotiation and nested SSH handshakes within the shared budget, bound saved-connection tests across snapshot and quota waits, bypass stale cache probes for fresh tests, and close complete transport chains without affecting active owners.",
       "implementations": [
         {
           "implementation_id": "impl-06-10-proxy-01",
@@ -3625,6 +3669,50 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Propagate pool shutdown to an SSH service acquisition blocked in proxy negotiation."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-07",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_connection_check_budget_test.go",
+            "symbol": "TestConnectionTestBudgetIncludesInitialSnapshotRead"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Bound the initial route snapshot read by the same connection-test deadline and return the stable SSH timeout error when the read stalls."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-08",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_connection_check_budget_test.go",
+            "symbol": "TestConnectionTestBudgetIncludesWaitingForQuota"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Include concurrency-slot waits in the saved-connection test budget without closing or losing the transport owned by an active operation."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-09",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_connection_check_budget_test.go",
+            "symbol": "TestConnectionTestPreservesParentCancellationCause"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Preserve the parent cancellation cause while a connection test is blocked reading its initial route snapshot."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-10",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_connection_check_budget_test.go",
+            "symbol": "TestConnectionTestFreshHandshakeSkipsBlockedCachedProbe"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Establish a fresh SSH test connection even when the old cached transport cannot write, without sending a probe on that obsolete transport."
         }
       ]
     },
@@ -3730,6 +3818,69 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Return a configuration-conflict response and verify the browser retains the proxy draft and presents the translated conflict message."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-07",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/45/scenario",
+      "scenario": "Freeze all server and connection fields while an atomic save is pending so its response cannot erase later edits or apply a route the user changed during the request.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-07-proxy-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "a slow server save freezes every reset field until its response arrives"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Hold the server save response and verify every server field, credential choice, connection mode, and SOCKS5 setting remains disabled until the request completes."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-08",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/46/scenario",
+      "scenario": "Keep connection-test state and results bound to the server that started the request when navigating between cached server detail pages.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-08-proxy-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "a pending connection test cannot move from one cached server detail to another"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Start a delayed saved-connection test, navigate to another cached server, and verify the previous request cannot disable controls or display its result on the new server."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-09",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/47/scenario",
+      "scenario": "Refresh persisted host-key warnings and connection revisions after a failed connection test so detail and editor views reflect identity changes caused by the attempted handshake.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-09-proxy-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "failed connection tests refresh host-key warnings and the editor revision"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject a connection test after recording a host-key warning, verify the detail shows the warning, and save from the editor using the refreshed revision rather than the stale one."
         }
       ]
     }

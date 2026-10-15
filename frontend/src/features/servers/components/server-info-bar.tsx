@@ -78,7 +78,7 @@ export function ServerInfoBar({ server }: ServerInfoBarProps) {
         )}
         {server.connection.mode === "socks5" && server.connection.host && <span>{server.connection.host}:{server.connection.port}</span>}
       </div>
-      <div className="mt-3"><ConnectionTestButton serverID={server.id} /></div>
+      <div className="mt-3"><ConnectionTestButton key={server.id} serverID={server.id} /></div>
 
       {/* System info row */}
       {(server.cpu_model || server.uptime_seconds) && (
