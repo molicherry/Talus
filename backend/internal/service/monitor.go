@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -252,8 +251,8 @@ func (s *MonitorService) NotifyTopologyChange() {
 func (s *MonitorService) runTask(ctx context.Context, serverID uint) (outcome monitorOutcome, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			s.logger.Error("monitor goroutine panicked", "server_id", serverID, "panic", r)
-			outcome, err = outcomeFailure, fmt.Errorf("monitor panic: %v", r)
+			s.logger.Error("monitor goroutine panicked", "server_id", serverID, "reason_class", telReasonOther)
+			outcome, err = outcomeFailure, errors.New("monitor collection panicked")
 		}
 	}()
 	err = s.collectTask(ctx, serverID)
@@ -269,7 +268,8 @@ func (s *MonitorService) runTask(ctx context.Context, serverID uint) (outcome mo
 		s.logger.Info("monitor collection cancelled by a target change", "server_id", serverID)
 		return outcomeCancelled, err
 	case err != nil:
-		s.logger.Error("failed to collect metrics", "server_id", serverID, "error", err)
+		attrs := append([]slog.Attr{slog.Uint64("server_id", uint64(serverID))}, remoteFailureLogAttrs(err)...)
+		s.logger.LogAttrs(ctx, slog.LevelError, "failed to collect metrics", attrs...)
 		return outcomeFailure, err
 	}
 	return outcomeSuccess, nil

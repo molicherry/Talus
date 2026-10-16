@@ -2288,7 +2288,7 @@
         "REQ-08"
       ],
       "spec_ref": "tests/coverage.json#/cases/29/scenario",
-      "scenario": "Correlate scheduled collections and deployment attempts, count failures and skips, and emit alerts at the defined lag and retention thresholds.",
+      "scenario": "Correlate scheduled collections and deployment attempts, count failures and skips, and emit alerts at the defined lag and retention thresholds without logging credentials or raw remote error payloads.",
       "implementations": [
         {
           "implementation_id": "impl-08-07a",
@@ -2419,6 +2419,39 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-07n",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/remote_error_log_test.go",
+            "symbol": "TestMonitorFailureLogsOnlySafeDiagnostics"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Log only a closed diagnostic vocabulary for opaque, wrapped, joined and typed remote errors; exclude passwords, arbitrary error fields and application parameters while preserving the original outcome and error."
+        },
+        {
+          "implementation_id": "impl-08-07o",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/remote_error_log_test.go",
+            "symbol": "TestMonitorPanicDoesNotLogPayload"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Recover monitor panics without placing the private panic payload in the log or returned error."
+        },
+        {
+          "implementation_id": "impl-08-07p",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/remote_error_log_test.go",
+            "symbol": "TestAgentUploadCleanupLogsOnlySafeDiagnostics"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Exercise deployment cleanup after a failed upload and retain server identity, generated path and exit status without logging sensitive transport error payloads."
         }
       ]
     },
