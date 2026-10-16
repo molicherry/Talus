@@ -55,3 +55,14 @@ export async function execCommand(
   });
   return ExecResponseSchema.parse(res);
 }
+
+const ConnectionTestResultSchema = z.object({
+  mode: z.enum(["direct", "ssh_jump", "socks5"]),
+  latency_ms: z.number().nonnegative(),
+  success: z.literal(true),
+});
+
+export async function testServerConnection(id: number) {
+  const res = await apiClient.post(`/api/v1/servers/${id}/connection/test`, {});
+  return ConnectionTestResultSchema.parse(res);
+}

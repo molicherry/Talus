@@ -215,10 +215,11 @@ function UsageLogsSession({ authEpoch }: { authEpoch: number }) {
             {detailField(t("usage.exitCode"), detail.data.exit_code)}
             {detailField(t("usage.errorReason"), safeReason(detail.data.error_reason))}
             {detailField(t("usage.recoveryReason"), safeReason(detail.data.recovery_reason))}
-            {["timeout_seconds", "bytes_copied", "upstream_method", "close_reason", "handshake_at", "authenticated_at", "ready_at", "closed_at"].map(key => {
+            {["timeout_seconds", "bytes_copied", "upstream_method", "close_reason", "handshake_at", "authenticated_at", "ready_at", "closed_at", "connection_mode", "connection_revision", "jump_server_id", "connection_stage", "connection_role"].map(key => {
               const value = detail.data!.metadata?.[key];
               if (value == null) return null;
-              const rendered = key.endsWith("_at") && typeof value === "string" ? fullTimestamp(value) : typeof value === "number" ? value : typeof value === "string" && value.length <= 128 ? value : t("usage.unknown");
+              const translationKey = typeof value === "string" ? key === "connection_mode" ? `server.connection.${value}` : key === "connection_stage" ? `server.connection.stages.${value}` : key === "connection_role" ? `server.connection.roles.${value}` : undefined : undefined;
+              const rendered = translationKey ? (i18n.has(translationKey) ? t(translationKey) : t("usage.unknown")) : key.endsWith("_at") && typeof value === "string" ? fullTimestamp(value) : typeof value === "number" ? value : typeof value === "string" && value.length <= 128 ? value : t("usage.unknown");
               return <div key={key}>{detailField(t(`usage.metadata.${key}`), rendered)}</div>;
             })}
           </dl><p className="mt-4 text-xs text-muted-foreground">{t("usage.noBodies")}</p>

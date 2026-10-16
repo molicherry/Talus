@@ -4,7 +4,7 @@ export const resourceTypes = ["server", "credential", "service", "api_key"] as c
 export const actions = [
   "server.create", "server.update", "server.delete", "credential.create", "credential.update", "credential.delete",
   "service.create", "service.update", "service.delete", "api_key.create", "api_key.delete",
-  "credential.reveal", "api_key.reveal", "service.credentials", "server.host_key.trust", "server.exec", "service.relay", "server.terminal",
+  "credential.reveal", "api_key.reveal", "service.credentials", "server.host_key.trust", "server.connection.test", "server.exec", "service.relay", "server.terminal",
 ] as const;
 export type Outcome = typeof outcomes[number];
 export interface UsageLog {

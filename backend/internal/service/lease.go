@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -264,7 +265,8 @@ func (s *SSHService) copyFileOnClient(parent context.Context, client *ssh.Client
 			_ = pipe.Close()
 		}()
 		session.Stderr = stderr
-		cmd := fmt.Sprintf("cat > %s && chmod +x %s", remotePath, remotePath)
+		quotedPath := "'" + strings.ReplaceAll(remotePath, "'", "'\"'\"'") + "'"
+		cmd := fmt.Sprintf("cat > %s && chmod +x %s", quotedPath, quotedPath)
 		runDone <- session.Run(cmd)
 		<-copyDone
 	}()

@@ -55,6 +55,32 @@ func TestUpdateServerRequestRejectsBadCredentialID(t *testing.T) {
 	}
 }
 
+func TestServerConnectionFieldPresence(t *testing.T) {
+	for _, test := range []struct {
+		body       string
+		set, value bool
+	}{
+		{`{"name":"legacy"}`, false, false},
+		{`{"connection":null}`, true, false},
+		{`{"connection":{"mode":"direct"}}`, true, true},
+		{`{"connection":{"mode":"socks5","host":"proxy","port":1080,"auth_type":"none"},"expected_connection_revision":5}`, true, true},
+	} {
+		var req UpdateServerRequest
+		if err := json.Unmarshal([]byte(test.body), &req); err != nil {
+			t.Fatal(err)
+		}
+		if req.Connection.Set != test.set || (req.Connection.Config != nil) != test.value {
+			t.Fatalf("three-state connection lost for %s", test.body)
+		}
+	}
+	for _, body := range []string{`{"connection":"direct"}`, `{"connection":{"mode":"socks5","password":123}}`} {
+		var req UpdateServerRequest
+		if err := json.Unmarshal([]byte(body), &req); err == nil {
+			t.Fatalf("accepted malformed connection: %s", body)
+		}
+	}
+}
+
 func TestServerPathIDRejectsNativeOverflow(t *testing.T) {
 	request := func(id string) (uint, error) {
 		r := httptest.NewRequest("GET", "/", nil)

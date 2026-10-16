@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +21,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/vpsmanager/backend/internal/gate"
 	"github.com/vpsmanager/backend/internal/model"
+	appcrypto "github.com/vpsmanager/backend/internal/pkg/crypto"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/pkg/token"
 	"github.com/vpsmanager/backend/internal/repository"
@@ -30,22 +32,26 @@ import (
 )
 
 type terminalE2ESource struct {
-	entered chan struct{}
-	resume  chan struct{}
-	calls   atomic.Int32
+	server    model.Server
+	entered   chan struct{}
+	resume    chan struct{}
+	calls     atomic.Int32
+	enterOnce sync.Once
 }
 
 func (s *terminalE2ESource) FindByID(ctx context.Context, id uint) (*model.Server, error) {
 	s.calls.Add(1)
 	if s.entered != nil {
-		close(s.entered)
+		s.enterOnce.Do(func() { close(s.entered) })
 		select {
 		case <-s.resume:
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
 	}
-	return &model.Server{BaseModel: model.BaseModel{ID: id}, Host: "terminal-test", Port: 22}, nil
+	server := s.server
+	server.ID = id
+	return &server, nil
 }
 func (*terminalE2ESource) SetHostKeyIfUnchanged(context.Context, uint, string, int, []byte) (bool, error) {
 	return false, nil
@@ -68,12 +74,13 @@ type terminalE2EFixture struct {
 	input        chan string
 	// resizes records the PTY window size the Hub sent (cols, rows), so a resize
 	// frame from the browser can be observed at the SSH boundary (TC-09-02).
-	resizes chan [2]int
+	resizes       chan [2]int
+	transportDone chan struct{}
 }
 
 func newTerminalE2EFixture(t *testing.T) *terminalE2EFixture {
 	t.Helper()
-	f := &terminalE2EFixture{registry: gate.NewRegistry(), source: &terminalE2ESource{}, shellEntered: make(chan struct{}), shellResume: make(chan struct{}), input: make(chan string, 8), resizes: make(chan [2]int, 8)}
+	f := &terminalE2EFixture{registry: gate.NewRegistry(), source: &terminalE2ESource{}, shellEntered: make(chan struct{}), shellResume: make(chan struct{}), input: make(chan string, 8), resizes: make(chan [2]int, 8), transportDone: make(chan struct{})}
 	f.userGate = gate.New(func(context.Context, uint) (int64, error) { return f.version.Load(), nil })
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -102,6 +109,7 @@ func newTerminalE2EFixture(t *testing.T) *terminalE2EFixture {
 			return
 		}
 		defer server.Close()
+		defer close(f.transportDone)
 		go ssh.DiscardRequests(reqs)
 		for next := range chans {
 			ch, requests, err := next.Accept()
@@ -142,17 +150,39 @@ func newTerminalE2EFixture(t *testing.T) *terminalE2EFixture {
 			}()
 		}
 	}()
-	client, err := ssh.Dial("tcp", ln.Addr().String(), &ssh.ClientConfig{User: "test", HostKeyCallback: ssh.FixedHostKey(signer.PublicKey()), Timeout: time.Second})
+	host, portText, err := net.SplitHostPort(ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.pool = sshpool.NewPool(time.Minute, 1, time.Second)
-	t.Cleanup(f.pool.Close)
-	if _, err := f.pool.Get(1, "terminal-test:22:none"); err != nil {
+	port, err := strconv.Atoi(portText)
+	if err != nil {
 		t.Fatal(err)
 	}
-	f.pool.Release(1, client)
-	f.svc = service.NewTerminalService(service.NewSSHService(f.pool, f.source, nil, time.Second, time.Second))
+	master, err := appcrypto.NewMasterKey(strings.Repeat("13", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	salt, err := appcrypto.GenerateSalt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypted, err := appcrypto.Encrypt([]byte("terminal-fixture-password"), master.DeriveKey(salt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialID := uint(1)
+	pinned := signer.PublicKey().Marshal()
+	f.source.server = model.Server{
+		BaseModel: model.BaseModel{ID: 1}, Host: host, Port: port,
+		ConnectionRevision: 1, CredentialID: &credentialID, HostKey: &pinned,
+		Credential: &model.SSHCredential{BaseModel: model.BaseModel{ID: credentialID}, AuthType: "password", Username: "test", EncryptedPassword: &encrypted, Salt: salt},
+	}
+	f.pool = sshpool.NewPool(time.Minute, 1, time.Second)
+	t.Cleanup(f.pool.Close)
+	// Exercise normal route validation and dialing rather than pre-seeding an
+	// internal cache fingerprint that changes when identity validation evolves.
+	credentials := service.NewCredentialService(nil, nil, master, f.pool)
+	f.svc = service.NewTerminalService(service.NewSSHService(f.pool, f.source, credentials, time.Second, time.Second))
 	f.svc.SetSessionRegistry(f.registry)
 	f.jwt = token.NewJWTService("terminal-e2e", time.Hour)
 	return f
@@ -354,7 +384,8 @@ func TestTerminalE2EInputCannotCrossPasswordCommit(t *testing.T) {
 	if f.registry.LiveCount() != 0 {
 		t.Fatal("revoked terminal leaked its registry entry")
 	}
-	client, err := f.pool.Get(1, "terminal-test:22:none")
+	terminalE2EWait(t, f.transportDone)
+	client, err := f.pool.Get(1, "quota-check-after-revocation")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +488,8 @@ func TestTerminalE2EPasswordChangeThroughHTTP(t *testing.T) {
 	if f.registry.LiveCount() != 0 {
 		t.Fatal("HTTP password change completed before terminal resource reclamation")
 	}
-	cached, err := f.pool.Get(1, "terminal-test:22:none")
+	terminalE2EWait(t, f.transportDone)
+	cached, err := f.pool.Get(1, "quota-check-after-password-change")
 	if err != nil {
 		t.Fatalf("HTTP password change leaked SSH quota: %v", err)
 	}

@@ -234,7 +234,7 @@ func (s *CredentialService) Delete(ctx context.Context, id uint) error {
 		return fmt.Errorf("credential %d: %w", id, err)
 	}
 	for _, serverID := range serverIDs {
-		s.invalidate(serverID)
+		s.invalidateWithDependents(ctx, serverID)
 	}
 	return nil
 }
@@ -254,7 +254,16 @@ func (s *CredentialService) invalidateServers(ctx context.Context, credentialID 
 		return
 	}
 	for _, serverID := range serverIDs {
-		s.invalidate(serverID)
+		s.invalidateWithDependents(ctx, serverID)
+	}
+}
+
+func (s *CredentialService) invalidateWithDependents(ctx context.Context, serverID uint) {
+	s.invalidate(serverID)
+	if ids, err := s.serverRepo.FindJumpDependentIDs(ctx, serverID); err == nil {
+		for _, id := range ids {
+			s.invalidate(id)
+		}
 	}
 }
 

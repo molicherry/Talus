@@ -254,4 +254,3 @@ nameSuite("monitoring-series", import.meta.url);
 writeReport();
 
 process.exit(failures === 0 ? 0 : 1);
-

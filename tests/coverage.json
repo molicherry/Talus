@@ -2288,7 +2288,7 @@
         "REQ-08"
       ],
       "spec_ref": "tests/coverage.json#/cases/29/scenario",
-      "scenario": "Correlate scheduled collections and deployment attempts, count failures and skips, and emit alerts at the defined lag and retention thresholds.",
+      "scenario": "Correlate scheduled collections and deployment attempts, count failures and skips, and emit alerts at the defined lag and retention thresholds without logging credentials or raw remote error payloads.",
       "implementations": [
         {
           "implementation_id": "impl-08-07a",
@@ -2419,6 +2419,39 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-07n",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/remote_error_log_test.go",
+            "symbol": "TestMonitorFailureLogsOnlySafeDiagnostics"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Log only a closed diagnostic vocabulary for opaque, wrapped, joined and typed remote errors; exclude passwords, arbitrary error fields and application parameters while preserving the original outcome and error."
+        },
+        {
+          "implementation_id": "impl-08-07o",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/remote_error_log_test.go",
+            "symbol": "TestMonitorPanicDoesNotLogPayload"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Recover monitor panics without placing the private panic payload in the log or returned error."
+        },
+        {
+          "implementation_id": "impl-08-07p",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/remote_error_log_test.go",
+            "symbol": "TestAgentUploadCleanupLogsOnlySafeDiagnostics"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Exercise deployment cleanup after a failed upload and retain server identity, generated path and exit status without logging sensitive transport error payloads."
         }
       ]
     },
@@ -2939,6 +2972,948 @@
           },
           "automation_status": "implemented",
           "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-06-04",
+      "requirement_ids": [
+        "REQ-06"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/33/scenario",
+      "scenario": "Establish direct, single-jump SSH, and SOCKS5 routes with independent SSH identities, upstream target DNS, strict proxy authentication, and no direct fallback after proxy failure.",
+      "implementations": [
+        {
+          "implementation_id": "impl-06-04-proxy-01",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/route_test.go",
+            "symbol": "TestDialRouteJumpAuthenticatesBothPeersAndOwnsEntireChain"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Authenticate both SSH peers with independent credentials and close the jump transport with the target client."
+        },
+        {
+          "implementation_id": "impl-06-04-proxy-02",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/route_test.go",
+            "symbol": "TestDialRouteJumpHostKeyMismatchIdentifiesFailingPeer"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Attribute a rejected host key to the actual jump or target peer."
+        },
+        {
+          "implementation_id": "impl-06-04-proxy-03",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/route_test.go",
+            "symbol": "TestDialRouteJumpForwardingDeniedClosesJump"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject denied direct-tcpip forwarding and close the authenticated jump connection."
+        },
+        {
+          "implementation_id": "impl-06-04-proxy-04",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/route_test.go",
+            "symbol": "TestDialRouteSOCKSRemoteDNSAndAuthentication"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Send target names to the SOCKS5 proxy and encode IPv4/IPv6 destinations with the configured authentication."
+        },
+        {
+          "implementation_id": "impl-06-04-proxy-05",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/route_test.go",
+            "symbol": "TestDialRouteSOCKSRejectsAuthenticationDowngrade"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Offer only username/password authentication when configured and reject an unauthenticated downgrade."
+        },
+        {
+          "implementation_id": "impl-06-04-proxy-06",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/route_test.go",
+            "symbol": "TestDialRouteSOCKSConnectRejected"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Return the SOCKS5 CONNECT rejection instead of delivering an SSH connection."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-06-05",
+      "requirement_ids": [
+        "REQ-06"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/34/scenario",
+      "scenario": "Use the saved proxy route for command execution, interactive terminals, and file uploads while keeping target SSH credentials separate from proxy and jump credentials.",
+      "implementations": [
+        {
+          "implementation_id": "impl-06-05-proxy-01",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_proxy_integration_test.go",
+            "symbol": "TestSOCKSRouteExecAndCopyFileUseSameConnectionPath"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Execute a remote command and upload a file through the controlled SOCKS5 proxy using the saved route."
+        },
+        {
+          "implementation_id": "impl-06-05-proxy-02",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_proxy_integration_test.go",
+            "symbol": "TestSOCKSRouteInteractiveTerminalUsesProxy"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Open an interactive SSH shell through the saved SOCKS5 route and exchange terminal data."
+        },
+        {
+          "implementation_id": "impl-06-05-proxy-03",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_proxy_integration_test.go",
+            "symbol": "TestSOCKSRouteDecryptsSavedProxyPassword"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Decrypt the stored SOCKS5 password for proxy negotiation while authenticating target SSH independently."
+        },
+        {
+          "implementation_id": "impl-06-05-proxy-04",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_proxy_integration_test.go",
+            "symbol": "TestSSHJumpRouteExecAndCopyFileUseIndependentSavedCredentials"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Execute and upload through an SSH jump using distinct saved credentials for jump and target."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-06-06",
+      "requirement_ids": [
+        "REQ-06"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/35/scenario",
+      "scenario": "Persist server and route changes atomically, preserve routes for legacy partial updates, encrypt and retain proxy secrets only for unchanged endpoints, and migrate existing servers without altering direct access.",
+      "implementations": [
+        {
+          "implementation_id": "impl-06-06-proxy-01",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/server_connection_test.go",
+            "symbol": "TestConnectionSecretLifecycle"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Encrypt and decrypt a proxy password, retain it only for the unchanged endpoint, clear disabled authentication, and omit secrets from read projections."
+        },
+        {
+          "implementation_id": "impl-06-06-proxy-02",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/server_connection_test.go",
+            "symbol": "TestConnectionRejectsInvalidModeAndSecretCombinations"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject mixed route fields, invalid proxy endpoints, missing or empty passwords, and credentials exceeding SOCKS5 byte limits."
+        },
+        {
+          "implementation_id": "impl-06-06-proxy-03",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/server_test.go",
+            "symbol": "TestServerConnectionFieldPresence"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Distinguish omitted, null, and explicit connection writes and reject malformed JSON field types."
+        },
+        {
+          "implementation_id": "impl-06-06-proxy-04",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/server_connection_test.go",
+            "symbol": "TestServerConnectionAtomicUpdatesAndCompatibility"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Preserve routes for legacy updates, enforce optimistic revisions before any write, and clear route secrets without resetting an unchanged target identity."
+        },
+        {
+          "implementation_id": "impl-06-06-proxy-05",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/server_connection_test.go",
+            "symbol": "TestFailedConnectionCreateLeavesNoServer"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Roll back a failed route creation so no temporarily direct server remains."
+        },
+        {
+          "implementation_id": "impl-06-06-proxy-06",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/server_connection_test.go",
+            "symbol": "TestServerJumpDependencyProtection"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject invalid jump bindings and protect referenced jumps from incompatible edits or deletion."
+        },
+        {
+          "implementation_id": "impl-06-06-proxy-07",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/server_connection_test.go",
+            "symbol": "TestConcurrentJumpBindingsCannotCreateCycle"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Serialize concurrent bindings so two direct servers cannot become a jump cycle."
+        },
+        {
+          "implementation_id": "impl-06-06-proxy-08",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/server_connection_test.go",
+            "symbol": "TestConnectionMigrationPreservesLegacyServersAndForeignKeys"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Upgrade a legacy server table, preserve direct defaults, and verify real PostgreSQL route checks and foreign keys."
+        },
+        {
+          "implementation_id": "impl-06-06-proxy-09",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/server_connection_test.go",
+            "symbol": "TestServerTopologyNotificationFollowsRouteCommit"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Notify the monitor only after a successful server create or delete transaction."
+        },
+        {
+          "implementation_id": "impl-06-06-proxy-10",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/server_connection_test.go",
+            "symbol": "TestServerConnectionUsesConfiguredFreshness"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Preserve the configured monitor freshness threshold while decorating server connection responses."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-06-07",
+      "requirement_ids": [
+        "REQ-06"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/36/scenario",
+      "scenario": "Allow only JWT administrators to configure or test routes and trust proxied host keys; preserve API-key target restrictions and prevent proxy metadata or secrets from leaking through responses and logs.",
+      "implementations": [
+        {
+          "implementation_id": "impl-06-07-proxy-01",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/server_connection_test.go",
+            "symbol": "TestConnectionAdminRequiresJWTIdentity"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject an API key carrying an admin role as route-management authority."
+        },
+        {
+          "implementation_id": "impl-06-07-proxy-02",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/server_connection_test.go",
+            "symbol": "TestConnectionTestOnlyAllowsJWTAdmin"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject non-administrator and API-key identities before testing a saved connection."
+        },
+        {
+          "implementation_id": "impl-06-07-proxy-03",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/server_connection_test.go",
+            "symbol": "TestConnectionTestUsesSavedServerIDAndReportsResult"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Test only the saved server ID and return the measured handshake result."
+        },
+        {
+          "implementation_id": "impl-06-07-proxy-04",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/server_connection_test.go",
+            "symbol": "TestConnectionTestPreservesSafeFailureStage"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Return the stable proxy failure stage without exposing upstream credentials."
+        },
+        {
+          "implementation_id": "impl-06-07-proxy-05",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/server_connection_test.go",
+            "symbol": "TestConnectionTestRejectsMalformedIDBeforeDial"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject malformed server IDs before any connection test starts."
+        },
+        {
+          "implementation_id": "impl-06-07-proxy-06",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/server/connection_route_test.go",
+            "symbol": "TestConnectionRouteRejectsAPIKeysAndLimitsFreshProbes"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Register the connection test as JWT-only and enforce its request rate limit."
+        },
+        {
+          "implementation_id": "impl-06-07-proxy-07",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/usage/connection_metadata_test.go",
+            "symbol": "TestConnectionMetadataIsBoundedAndCannotCarrySecrets"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Accept only bounded route metadata labels and reject proxy secret fields from usage logs."
+        },
+        {
+          "implementation_id": "impl-06-07-proxy-08",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/ssh_route_test.go",
+            "symbol": "TestSafeSSHRouteErrorOmitsUpstreamSecrets"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Project upstream errors to stable reason, stage, and role fields without disclosing raw proxy details."
+        },
+        {
+          "implementation_id": "impl-06-07-proxy-09",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/server_connection_test.go",
+            "symbol": "TestProxyHostKeyTrustKeepsPendingFingerprintAndAdminChecks"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Require JWT administration for a proxied identity and trust only the pending fingerprint the caller verified."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-06-08",
+      "requirement_ids": [
+        "REQ-06"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/37/scenario",
+      "scenario": "Revalidate route snapshots across slot waits, cache hits, and TOFU writes; pin jump and target identities separately and reject stale identity results without breaking sequential lease primitives.",
+      "implementations": [
+        {
+          "implementation_id": "impl-06-08-proxy-01",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_route_test.go",
+            "symbol": "TestSSHRouteTOFUReturnsCurrentConnectionButDoesNotCacheOldRevision"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Allow the freshly pinned connection to finish while preventing its old revision from returning to the cache."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-02",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_route_test.go",
+            "symbol": "TestSSHRouteRechecksConfigurationAfterWaitingForSlot"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Re-read the route after waiting for capacity so a changed endpoint is not delivered to a new operation."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-03",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_route_test.go",
+            "symbol": "TestSSHConnectionTestReplacesCacheAndReturnsItsSlot"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Perform a fresh saved-route handshake and return the concurrency slot instead of reporting cached success."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-04",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_route_test.go",
+            "symbol": "TestSSHJumpMismatchUpdatesOnlyJumpIdentity"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Record a jump host-key mismatch on the jump resource without overwriting target identity state."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-05",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_route_test.go",
+            "symbol": "TestSSHRouteRejectsConcurrentIdentityEditDuringTOFU"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject a concurrent route or identity edit rather than accepting a stale TOFU result."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-06",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_route_test.go",
+            "symbol": "TestTOFUAdoptsConfirmedIdentityForSequentialLeasePrimitives"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Adopt only the confirmed TOFU identity so sequential operations on one lease remain valid."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-07",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/repository/ssh_route_test.go",
+            "symbol": "TestSSHHostKeyCASRejectsStaleIdentityAndWarningResults"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Condition identity writes on the expected key and warning state so an old success cannot clear a new warning."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-08",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/repository/ssh_route_test.go",
+            "symbol": "TestSSHHostKeyCASRejectsRouteAndEndpointEdits"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject host-key writes from a handshake whose endpoint or connection revision has changed."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-09",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/merge_hardening_test.go",
+            "symbol": "TestRebindFingerprintKeepsVerifiedLeaseAndRetiresOthers"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Adopt a fully verified TOFU fingerprint only for the current owner while retiring other borrowed and idle connections."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-10",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/merge_hardening_test.go",
+            "symbol": "TestRebindFingerprintCannotReviveStaleLease"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject fingerprint adoption after external invalidation so a stale lease cannot revive an old route."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-11",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_connection_check_budget_test.go",
+            "symbol": "TestConnectionTestReportsTheRouteActuallyHandshaken"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Report the exact route that completed the SSH handshake instead of attributing success to a newer concurrent route configuration."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-12",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/repository/ssh_route_test.go",
+            "symbol": "TestSSHRouteSnapshotReadIsCoherentAcrossAtomicUpdate"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Read target, route, jump and associated credentials from one repeatable-read snapshot while a concurrent atomic update commits; the next read observes the complete new version."
+        },
+        {
+          "implementation_id": "impl-06-08-proxy-13",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/repository/ssh_route_test.go",
+            "symbol": "TestSSHRouteHostKeyCASRejectsChangedJumpDependency"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject stale pin, mismatch and warning-clear writes after the jump dependency changes; preserve target identity and allow the fresh route snapshot to commit."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-06-09",
+      "requirement_ids": [
+        "REQ-06"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/38/scenario",
+      "scenario": "Keep concurrency slots and cached transports bound to their original lease generation; make duplicate settlement harmless and prevent stale or ambiguous returns from entering a newer route cache.",
+      "implementations": [
+        {
+          "implementation_id": "impl-06-09-proxy-01",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/lease_test.go",
+            "symbol": "TestLeaseOldReturnCannotPolluteNewGeneration"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Return a new route before an old lease and verify the old transport cannot populate the new cache."
+        },
+        {
+          "implementation_id": "impl-06-09-proxy-02",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/lease_test.go",
+            "symbol": "TestLeaseDuplicateReleaseUsesOriginalSlotOnce"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Make repeated release and discard settle the borrowed concurrency slot exactly once."
+        },
+        {
+          "implementation_id": "impl-06-09-proxy-03",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/lease_test.go",
+            "symbol": "TestLeaseWaitingAcrossInvalidationReturnsStale"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject a slot acquisition whose captured generation changed while waiting."
+        },
+        {
+          "implementation_id": "impl-06-09-proxy-04",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/lease_test.go",
+            "symbol": "TestLeaseInvalidationDoesNotInterruptActiveClient"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Allow an active connection to finish after invalidation and close it when its stale lease returns."
+        },
+        {
+          "implementation_id": "impl-06-09-proxy-05",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/lease_test.go",
+            "symbol": "TestLegacyOldCachedReturnAfterNewGetCannotPollute"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Keep a legacy cached-client return from contaminating a newer fingerprint."
+        },
+        {
+          "implementation_id": "impl-06-09-proxy-06",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/lease_test.go",
+            "symbol": "TestLegacyUnidentifiedGenerationsNeverCacheWrongClient"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Discard ambiguous legacy returns across overlapping generations rather than cache the wrong transport."
+        },
+        {
+          "implementation_id": "impl-06-09-proxy-07",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_copy_test.go",
+            "symbol": "TestCopyFileReturnsSlotAfterSuccessAndRemoteFailure"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Return upload capacity on both successful copies and remote command failures."
+        },
+        {
+          "implementation_id": "impl-06-09-proxy-08",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_copy_test.go",
+            "symbol": "TestCopyFileCancellationReturnsSlotAndRetainsOnlyHealthyTransport"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Return capacity after upload cancellation and cache a surviving transport only while it is healthy."
+        },
+        {
+          "implementation_id": "impl-06-09-proxy-09",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_copy_test.go",
+            "symbol": "TestSSHRouteErrorRetainsHostKeySentinel"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Preserve host-key mismatch classification through the route error wrapper."
+        },
+        {
+          "implementation_id": "impl-06-09-proxy-10",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/merge_hardening_test.go",
+            "symbol": "TestLeaseQuotaCountsProbeAndBalancesCancellation"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Count the reservation during a blocked cache probe and balance cancellation against the original consumer label."
+        },
+        {
+          "implementation_id": "impl-06-09-proxy-11",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/merge_hardening_test.go",
+            "symbol": "TestLeaseQuotaBalancesStaleAcquire"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Balance quota exactly once when invalidation races immediately after slot reservation."
+        },
+        {
+          "implementation_id": "impl-06-09-proxy-12",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/merge_hardening_test.go",
+            "symbol": "TestAcquireFreshSkipsCachedProbeAndPreservesActiveGeneration"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reserve normal quota for a fresh acquisition, bypass probing and close only the obsolete cached chain, and preserve active transport ownership and generation."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-06-10",
+      "requirement_ids": [
+        "REQ-06"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/39/scenario",
+      "scenario": "Cancel stalled proxy negotiation and nested SSH handshakes within the shared budget, bound saved-connection tests across snapshot and quota waits, bypass stale cache probes for fresh tests, and close complete transport chains without affecting active owners.",
+      "implementations": [
+        {
+          "implementation_id": "impl-06-10-proxy-01",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/route_test.go",
+            "symbol": "TestDialRouteCancellationClosesStalledSOCKSNegotiation"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Cancel a blocked SOCKS5 negotiation and observe the proxy socket close."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-02",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/route_test.go",
+            "symbol": "TestDialRouteCancellationClosesJumpAndStalledTargetHandshake"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Cancel a blocked target handshake and close both the forwarded stream and its jump transport."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-03",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/route_test.go",
+            "symbol": "TestLeasePoolCloseCancelsPendingRouteDial"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Close the pool while a route is still dialing and cancel its in-progress transport."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-04",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/route_test.go",
+            "symbol": "TestLeaseDialContextCleanupPreservesEstablishedRoute"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Stop dial cancellation supervision after ownership transfer without closing the established route."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-05",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/lease_test.go",
+            "symbol": "TestLeasePoolCloseClosesBorrowedChain"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Close active borrowed transports when the pool shuts down."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-06",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_route_test.go",
+            "symbol": "TestSSHServicePoolCloseCancelsPendingProxyHandshake"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Propagate pool shutdown to an SSH service acquisition blocked in proxy negotiation."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-07",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_connection_check_budget_test.go",
+            "symbol": "TestConnectionTestBudgetIncludesInitialSnapshotRead"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Bound the initial route snapshot read by the same connection-test deadline and return the stable SSH timeout error when the read stalls."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-08",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_connection_check_budget_test.go",
+            "symbol": "TestConnectionTestBudgetIncludesWaitingForQuota"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Include concurrency-slot waits in the saved-connection test budget without closing or losing the transport owned by an active operation."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-09",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_connection_check_budget_test.go",
+            "symbol": "TestConnectionTestPreservesParentCancellationCause"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Preserve the parent cancellation cause while a connection test is blocked reading its initial route snapshot."
+        },
+        {
+          "implementation_id": "impl-06-10-proxy-10",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_connection_check_budget_test.go",
+            "symbol": "TestConnectionTestFreshHandshakeSkipsBlockedCachedProbe"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Establish a fresh SSH test connection even when the old cached transport cannot write, without sending a probe on that obsolete transport."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-06-11",
+      "requirement_ids": [
+        "REQ-06"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/40/scenario",
+      "scenario": "Keep proxy passwords out of form state, preserve omitted secrets only for unchanged endpoints, validate SOCKS5 byte limits, and serialize route writes separately from safe read projections.",
+      "implementations": [
+        {
+          "implementation_id": "impl-06-11-proxy-01",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/server-connection.test.mjs",
+            "symbol": "SSH connection drafts preserve proxy secrets and serialize route modes"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Check draft password retention, endpoint-change validation, UTF-8 limits, strict mode serialization, and removal of unexpected secret response fields."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-03",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/41/scenario",
+      "scenario": "Select eligible SSH jump hosts, save route changes with the expected revision, and permit fresh connection testing only after connection edits are saved.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-03-proxy-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "SSH connection routes save atomically; jump filtering and saved connection tests"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Exercise jump candidate filtering, atomic update payloads, saved revision handling, and the saved-connection test button in the browser."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-04",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/42/scenario",
+      "scenario": "Leave saved SOCKS5 passwords blank, require a replacement after endpoint changes, and clear stale proxy secrets when switching authentication or route modes.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-04-proxy-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "SOCKS5 secrets stay blank; endpoint changes require a password and mode switches clear secrets"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Verify blank saved-password fields, endpoint-change validation, password replacement, refreshed revision state, and secret-free mode-switch payloads."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-05",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/43/scenario",
+      "scenario": "Include the complete selected connection route in the initial server creation request so a new proxy target is never briefly saved as direct.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-05-proxy-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "new server includes its route in the create request"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Create a SOCKS5 server through the browser and inspect the single initial request containing both server and route fields."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-06",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/44/scenario",
+      "scenario": "Preserve unsaved connection edits after a revision conflict and explain that the saved configuration must be reloaded before retrying.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-06-proxy-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "connection conflict keeps draft and explains reload"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Return a configuration-conflict response and verify the browser retains the proxy draft and presents the translated conflict message."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-07",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/45/scenario",
+      "scenario": "Freeze all server and connection fields while an atomic save is pending so its response cannot erase later edits or apply a route the user changed during the request.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-07-proxy-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "a slow server save freezes every reset field until its response arrives"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Hold the server save response and verify every server field, credential choice, connection mode, and SOCKS5 setting remains disabled until the request completes."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-08",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/46/scenario",
+      "scenario": "Keep connection-test state and results bound to the server that started the request when navigating between cached server detail pages.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-08-proxy-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "a pending connection test cannot move from one cached server detail to another"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Start a delayed saved-connection test, navigate to another cached server, and verify the previous request cannot disable controls or display its result on the new server."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-09",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/47/scenario",
+      "scenario": "Refresh persisted host-key warnings and connection revisions after a failed connection test so detail and editor views reflect identity changes caused by the attempted handshake.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-09-proxy-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "failed connection tests refresh host-key warnings and the editor revision"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject a connection test after recording a host-key warning, verify the detail shows the warning, and save from the editor using the refreshed revision rather than the stale one."
         }
       ]
     }

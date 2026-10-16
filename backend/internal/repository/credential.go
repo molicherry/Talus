@@ -68,7 +68,10 @@ func (r *CredentialRepo) Delete(ctx context.Context, id uint) error {
 // loaded, breaking its SSH connection.
 func (r *CredentialRepo) DeleteAndUnbind(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.Server{}).Where("credential_id = ?", id).Update("credential_id", nil).Error; err != nil {
+		if err := tx.Model(&model.Server{}).Where("credential_id = ?", id).Updates(map[string]any{
+			"credential_id":       nil,
+			"connection_revision": gorm.Expr("connection_revision + 1"),
+		}).Error; err != nil {
 			return err
 		}
 		return tx.Delete(&model.SSHCredential{}, id).Error

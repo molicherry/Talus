@@ -319,10 +319,17 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 			if result != nil {
 				exitCode = result.ExitCode
 			}
-			s.logger.Warn("agent upload cleanup failed",
-				"action", "agent.deploy", "outcome", "failure", "reason_class", "permission",
-				"server_id", lease.ServerID(), "path", tmpPath,
-				"exit_code", exitCode, "error", err)
+			attrs := []slog.Attr{
+				slog.String("action", "agent.deploy"), slog.String("outcome", "failure"),
+				slog.Uint64("server_id", uint64(lease.ServerID())), slog.String("path", tmpPath),
+				slog.Int("exit_code", exitCode),
+			}
+			if err == nil {
+				attrs = append(attrs, slog.String("reason_class", telReasonPermission))
+			} else {
+				attrs = append(attrs, remoteFailureLogAttrs(err)...)
+			}
+			s.logger.LogAttrs(ctx, slog.LevelWarn, "agent upload cleanup failed", attrs...)
 		}
 	}()
 

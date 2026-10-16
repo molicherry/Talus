@@ -1,3 +1,4 @@
+import type { ServerFormValues } from "../../../types/models";
 import { invalidateQueries, useMutation, useQuery } from "../../../lib/query";
 import {
   createServer,
@@ -6,6 +7,7 @@ import {
   getServerSummaries,
   trustHostKey,
   updateServer,
+  testServerConnection,
 } from "../api";
 
 export function useServers() {
@@ -40,13 +42,7 @@ export function useUpdateServer() {
       data,
     }: {
       id: number;
-      data: Partial<{
-        name: string;
-        host: string;
-        port: number;
-        description: string;
-        notes: string;
-      }>;
+      data: Partial<ServerFormValues>;
     }) => updateServer(id, data),
     onSuccess: (_data, variables) => {
       invalidateQueries(["servers"]);
@@ -71,6 +67,17 @@ export function useTrustHostKey() {
     onSuccess: (server) => {
       invalidateQueries(["servers"]);
       invalidateQueries(["servers", server.id]);
+    },
+  });
+}
+
+export function useTestServerConnection() {
+  return useMutation({
+    mutationFn: testServerConnection,
+    onSettled: (_data, _error, id) => {
+      // Failed host-key checks also update warnings and advance the revision.
+      invalidateQueries(["servers"]);
+      invalidateQueries(["servers", id]);
     },
   });
 }

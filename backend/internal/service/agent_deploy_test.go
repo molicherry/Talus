@@ -151,6 +151,10 @@ func (f *fakeRemote) handler() func(string, ssh.Channel, <-chan struct{}) {
 			exitStatus(ch, 0)
 		case uploadRe.MatchString(command):
 			match := uploadRe.FindStringSubmatch(command)
+			// The upload primitive shell-quotes paths; this fixture only
+			// uses simple artifact paths and removes their literal quotes.
+			match[1] = strings.Trim(match[1], "'")
+			match[2] = strings.Trim(match[2], "'")
 			if match[1] != match[2] {
 				fmt.Fprintf(ch.Stderr(), "upload target mismatch\n")
 				exitStatus(ch, 1)

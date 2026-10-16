@@ -137,6 +137,7 @@ func main() {
 			&model.User{},
 			&model.SSHCredential{},
 			&model.Server{},
+			&model.ServerConnectionConfig{},
 			&model.APIKey{},
 			&model.Metric{},
 			&model.Service{},
@@ -203,6 +204,7 @@ func main() {
 	// closed instead of reaching the metrics.
 	telemetryRegistry := telemetry.NewRegistry()
 	serverSvc := service.NewServerService(serverRepo, metricRepo, sshPool)
+	serverSvc.SetMasterKey(masterKey)
 	serverSvc.SetFreshnessThreshold(cfg.MonitorFreshnessThreshold())
 
 	// Dependency chain — API Keys
@@ -330,6 +332,7 @@ func main() {
 		DefaultTimeoutSeconds: cfg.ExecTimeout,
 		MaxTimeoutSeconds:     cfg.ExecTimeoutMax,
 	})
+	connectionH := handler.NewServerConnectionHandler(sshSvc)
 	terminalH := handler.NewTerminalHandler(terminalSvc, jwtSvc)
 	terminalH.SetUserGate(userGate)
 
@@ -397,13 +400,14 @@ func main() {
 		ProfileHandler:        authHandler.Profile,
 		ChangePasswordHandler: authHandler.ChangePassword,
 		// Servers
-		ListServersHandler:         serverHandler.List,
-		ListServerSummariesHandler: serverHandler.ListSummaries,
-		CreateServerHandler:        serverHandler.Create,
-		GetServerHandler:           serverHandler.Get,
-		UpdateServerHandler:        serverHandler.Update,
-		DeleteServerHandler:        serverHandler.Delete,
-		TrustServerHostKeyHandler:  serverHandler.TrustHostKey,
+		ListServersHandler:          serverHandler.List,
+		ListServerSummariesHandler:  serverHandler.ListSummaries,
+		CreateServerHandler:         serverHandler.Create,
+		GetServerHandler:            serverHandler.Get,
+		UpdateServerHandler:         serverHandler.Update,
+		DeleteServerHandler:         serverHandler.Delete,
+		TrustServerHostKeyHandler:   serverHandler.TrustHostKey,
+		TestServerConnectionHandler: connectionH.Test,
 		// Credentials
 		ListCredentialsHandler:  credHandler.List,
 		CreateCredentialHandler: credHandler.Create,

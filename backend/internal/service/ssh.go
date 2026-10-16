@@ -4,28 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/server"
 	"github.com/vpsmanager/backend/internal/usage"
 	"golang.org/x/crypto/ssh"
-	"gorm.io/gorm"
 )
-
-// serverSource is the subset of repository.ServerRepo the SSH service needs.
-// An interface keeps the dial path testable without a database.
-type serverSource interface {
-	FindByID(ctx context.Context, id uint) (*model.Server, error)
-	SetHostKeyIfUnchanged(ctx context.Context, id uint, host string, port int, hostKey []byte) (bool, error)
-	RecordHostKeyMismatch(ctx context.Context, id uint, host string, port int, seen []byte) (bool, error)
-	ClearHostKeyMismatch(ctx context.Context, id uint) error
-}
 
 // SSHService provides SSH command execution and connection management.
 const maxExecTimeout = 300 * time.Second
@@ -151,115 +139,6 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 	return result, err
 }
 
-// AcquireLease borrows a concurrency slot and returns a target-pinned lease,
-// dialing a new connection when no healthy cached client exists. The lease owns
-// the quota: callers must Release or Discard exactly once.
-func (s *SSHService) AcquireLease(ctx context.Context, serverID uint, consumer ...LeaseConsumer) (*sshLease, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	// Always read current server state, even on a cache hit: a pooled client is
-	// only valid for the host/port/credential it was dialed with, and a deleted
-	// server must not stay reachable through a stale connection.
-	srv, err := s.serverRepo.FindByID(ctx, serverID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, server.ErrNotFound)
-		}
-		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	usage.FromContext(ctx).SetResource("server", &srv.ID, srv.Name, &srv.ID)
-
-	// The pool records the slot against the borrowing layer, so the gauge exists for
-	// the whole reservation - probe and dial included (P2-02).
-	h, err := s.pool.AcquireContext(sshpool.WithQuotaConsumer(ctx, string(leaseConsumer(consumer))),
-		serverID, serverFingerprint(srv))
-	if err != nil {
-		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
-	}
-	if err := ctx.Err(); err != nil {
-		// AcquireContext already validated the connection. Cancellation before
-		// any session uses it does not make its transport unhealthy.
-		s.pool.ReleaseHandle(h)
-		return nil, err
-	}
-	if h.Client != nil {
-		return newSSHLease(s, h), nil
-	}
-
-	// Pool returned nil — dial a new connection.
-	if srv.CredentialID == nil {
-		s.pool.DiscardHandle(h)
-		return nil, fmt.Errorf("get ssh client for server %d: no credential configured", serverID)
-	}
-
-	username, password, privateKey, err := s.credSvc.GetDecryptedByID(ctx, *srv.CredentialID)
-	if err != nil {
-		s.pool.DiscardHandle(h)
-		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, err)
-	}
-
-	authMethod, err := buildAuthMethod(password, privateKey)
-	if err != nil {
-		s.pool.DiscardHandle(h)
-		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, server.ErrInternal)
-	}
-
-	var knownHostKey []byte
-	if srv.HostKey != nil {
-		knownHostKey = *srv.HostKey
-	}
-
-	client, capturedKey, err := sshpool.DialSSHContext(ctx, srv.Host, srv.Port, username, authMethod, knownHostKey, s.sshDialTimeout)
-	if contextErr := ctx.Err(); contextErr != nil {
-		if client != nil {
-			_ = client.Close()
-		}
-		s.pool.DiscardHandle(h)
-		return nil, contextErr
-	}
-	if err != nil {
-		s.pool.DiscardHandle(h)
-		// A host key change is fail-closed but must not be silent: record the
-		// presented key so the UI can show its fingerprint and let the operator
-		// decide whether to trust it.
-		var mismatch *sshpool.HostKeyMismatchError
-		if errors.As(err, &mismatch) {
-			if updated, recErr := s.serverRepo.RecordHostKeyMismatch(ctx, srv.ID, srv.Host, srv.Port, mismatch.Presented); recErr != nil {
-				slog.Warn("failed to record host key mismatch", "server_id", serverID, "error", recErr)
-			} else if !updated {
-				slog.Warn("host key mismatch not recorded: server changed during dial", "server_id", serverID)
-			}
-			return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, server.ErrSSHHostKeyMismatch)
-		}
-		return nil, fmt.Errorf("get ssh client for server %d: %w", serverID, wrapSSHError(err))
-	}
-
-	// Persist the host key on first connection. A conditional update (keyed on
-	// the host/port that was dialed) avoids a full-row save reverting a
-	// concurrent edit — the row was read before the dial, which can take seconds.
-	if len(knownHostKey) == 0 && len(capturedKey) > 0 {
-		updated, updateErr := s.serverRepo.SetHostKeyIfUnchanged(ctx, srv.ID, srv.Host, srv.Port, capturedKey)
-		if updateErr != nil {
-			slog.Warn("failed to persist host key", "server_id", serverID, "error", updateErr)
-		} else if !updated {
-			slog.Warn("host key not persisted: server changed during dial", "server_id", serverID)
-		}
-	}
-	// The connection succeeds, so any pending mismatch is resolved.
-	if srv.HostKeyMismatchAt != nil {
-		if clrErr := s.serverRepo.ClearHostKeyMismatch(ctx, srv.ID); clrErr != nil {
-			slog.Warn("failed to clear host key mismatch", "server_id", serverID, "error", clrErr)
-		}
-	}
-
-	h.Client = client
-	return newSSHLease(s, h), nil
-}
-
 // leaseConsumer returns the first declared consumer, or "" when the borrower did
 // not declare one (a test or tooling): an unattributed slot is measured by nobody
 // rather than by the wrong label.
@@ -268,21 +147,6 @@ func leaseConsumer(consumers []LeaseConsumer) LeaseConsumer {
 		return ""
 	}
 	return consumers[0]
-}
-
-// serverFingerprint identifies everything a pooled SSH connection depends on.
-// Two calls with the same fingerprint may reuse a connection; any change (host,
-// port, credential id or credential revision) must miss the cache.
-func serverFingerprint(srv *model.Server) string {
-	credential := "none"
-	if srv.CredentialID != nil {
-		if srv.Credential != nil {
-			credential = fmt.Sprintf("%d@%d", *srv.CredentialID, srv.Credential.UpdatedAt.UnixNano())
-		} else {
-			credential = fmt.Sprintf("%d@missing", *srv.CredentialID)
-		}
-	}
-	return fmt.Sprintf("%s:%d:%s", srv.Host, srv.Port, credential)
 }
 
 const execTeardownGrace = 100 * time.Millisecond

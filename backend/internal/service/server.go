@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
+	"github.com/vpsmanager/backend/internal/pkg/crypto"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
@@ -31,12 +31,16 @@ type ServerService struct {
 	repo       *repository.ServerRepo
 	metricRepo *repository.MetricRepo
 	pool       ConnectionInvalidator
+	masterKey  *crypto.MasterKey
 }
 
 // NewServerService creates a ServerService with the given repositories.
 func NewServerService(repo *repository.ServerRepo, metricRepo *repository.MetricRepo, pool ConnectionInvalidator) *ServerService {
 	return &ServerService{repo: repo, metricRepo: metricRepo, pool: pool}
 }
+
+// SetMasterKey enables encryption of per-server SOCKS5 credentials.
+func (s *ServerService) SetMasterKey(key *crypto.MasterKey) { s.masterKey = key }
 
 // defaultFreshnessThreshold keeps the historical behaviour (2× the default
 // monitor interval) when no derived threshold is configured.
@@ -60,6 +64,9 @@ func (s *ServerService) List(ctx context.Context) ([]model.Server, error) {
 	}
 	for i := range servers {
 		decorateHostKey(&servers[i])
+	}
+	if err := s.decorateConnectionModes(ctx, servers); err != nil {
+		return nil, err
 	}
 
 	if len(servers) == 0 {
@@ -123,6 +130,9 @@ func (s *ServerService) Get(ctx context.Context, id uint) (*model.Server, error)
 		return nil, fmt.Errorf("server %d: %w", id, err)
 	}
 	decorateHostKey(srv)
+	if err := s.decorateConnection(ctx, srv, true); err != nil {
+		return nil, err
+	}
 
 	latest, err := s.metricRepo.FindLatestByServerIDs(ctx, []uint{id})
 	if err != nil {
@@ -175,6 +185,9 @@ func (s *ServerService) ListFiltered(ctx context.Context, serverIDs []uint) ([]m
 	}
 	for i := range servers {
 		decorateHostKey(&servers[i])
+	}
+	if err := s.decorateConnectionModes(ctx, servers); err != nil {
+		return nil, err
 	}
 
 	if len(servers) == 0 {
@@ -260,6 +273,21 @@ func (s *ServerService) applyStatus(ctx context.Context, summaries []model.Serve
 	for i := range summaries {
 		summaries[i].HostKeyMismatch = summaries[i].HostKeyMismatchAt != nil
 	}
+	idsForModes := make([]uint, len(summaries))
+	for i := range summaries {
+		idsForModes[i] = summaries[i].ID
+	}
+	modes, err := s.repo.FindConnectionModes(ctx, idsForModes)
+	if err != nil {
+		return nil, err
+	}
+	for i := range summaries {
+		mode := modes[summaries[i].ID]
+		if mode == "" {
+			mode = model.ConnectionDirect
+		}
+		summaries[i].Connection = &model.ConnectionConfig{Mode: mode}
+	}
 
 	ids := make([]uint, len(summaries))
 	for i, srv := range summaries {
@@ -293,7 +321,6 @@ func (s *ServerService) applyStatus(ctx context.Context, summaries []model.Serve
 	return summaries, nil
 }
 
-// Create validates and inserts a new server.
 // SetFreshnessThreshold configures the online/expired cutoff derived from the
 // monitor interval, tolerated rounds and allowed latency.
 func (s *ServerService) SetFreshnessThreshold(d time.Duration) {
@@ -316,76 +343,22 @@ func (s *ServerService) notifyTopology() {
 	}
 }
 
-func (s *ServerService) Create(ctx context.Context, server *model.Server) (*model.Server, error) {
-	if server.Name == "" {
-		return nil, fmt.Errorf("create server: name is required")
+// Create validates and inserts a server and its route in one transaction.
+func (s *ServerService) Create(ctx context.Context, server *model.Server, connection ...ConnectionMutation) (*model.Server, error) {
+	created, err := s.createServer(ctx, server, firstConnectionMutation(connection))
+	if err != nil {
+		return nil, err
 	}
-	if server.Host == "" {
-		return nil, fmt.Errorf("create server: host is required")
-	}
-	if server.Port <= 0 {
-		server.Port = 22
-	}
-
-	if err := s.repo.Create(ctx, server); err != nil {
-		return nil, fmt.Errorf("create server: %w", err)
-	}
-	server.Status = "unknown"
 	s.notifyTopology()
-	return server, nil
+	return created, nil
 }
 
 // Update applies partial updates to an existing server.
 // Only non-zero fields from input are applied.
 // clearCredential distinguishes an explicit "credential_id": null (unbind)
 // from an absent field (leave the binding unchanged).
-func (s *ServerService) Update(ctx context.Context, id uint, input *model.Server, clearCredential bool) (*model.Server, error) {
-	existing, err := s.repo.FindByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("server %d: %w", id, server.ErrNotFound)
-		}
-		return nil, fmt.Errorf("server %d: %w", id, err)
-	}
-
-	// A different host may present a different key; the old TOFU key would
-	// reject it (or worse, pin the wrong host), so drop it and re-learn. The
-	// pending-mismatch state belongs to the old host too — keeping it would
-	// show the old host's alert for the new address and let "trust" pin the
-	// old host's key.
-	connectionChanged := (input.Host != "" && input.Host != existing.Host) ||
-		(input.Port > 0 && input.Port != existing.Port)
-	if connectionChanged {
-		existing.HostKey = nil
-		existing.HostKeySeen = nil
-		existing.HostKeyMismatchAt = nil
-	}
-
-	if input.Name != "" {
-		existing.Name = input.Name
-	}
-	if input.Host != "" {
-		existing.Host = input.Host
-	}
-	if input.Port > 0 {
-		existing.Port = input.Port
-	}
-	if input.Description != nil {
-		existing.Description = input.Description
-	}
-	if input.Notes != nil {
-		existing.Notes = input.Notes
-	}
-	existing.CredentialID = resolveCredentialBinding(existing.CredentialID, input.CredentialID, clearCredential)
-
-	if err := s.repo.Update(ctx, existing); err != nil {
-		return nil, fmt.Errorf("server %d: %w", id, err)
-	}
-	// Drop any pooled connection dialed with the previous parameters. The
-	// fingerprint check would also catch this on the next Get; invalidating
-	// here closes it immediately instead of leaving it idle.
-	s.invalidate(id)
-	return s.Get(ctx, id)
+func (s *ServerService) Update(ctx context.Context, id uint, input *model.Server, clearCredential bool, connection ...ConnectionMutation) (*model.Server, error) {
+	return s.updateServer(ctx, id, input, clearCredential, firstConnectionMutation(connection))
 }
 
 // resolveCredentialBinding applies a partial credential-binding update: an
@@ -403,10 +376,9 @@ func resolveCredentialBinding(current, input *uint, clear bool) *uint {
 
 // Delete soft-deletes a server by id.
 func (s *ServerService) Delete(ctx context.Context, id uint) error {
-	if err := s.repo.Delete(ctx, id); err != nil {
-		return fmt.Errorf("server %d: %w", id, err)
+	if err := s.deleteServer(ctx, id); err != nil {
+		return err
 	}
-	s.invalidate(id)
 	s.notifyTopology()
 	return nil
 }
@@ -424,28 +396,7 @@ func (s *ServerService) invalidate(serverID uint) {
 // newer one since the UI rendered, and trusting that by accident would defeat
 // the point of asking the user to verify. A stale request gets 409.
 func (s *ServerService) TrustHostKey(ctx context.Context, id uint, fingerprint string) (*model.Server, error) {
-	srv, err := s.repo.FindByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("server %d: %w", id, server.ErrNotFound)
-		}
-		return nil, fmt.Errorf("server %d: %w", id, err)
-	}
-	if srv.HostKeySeen == nil || srv.HostKeyMismatchAt == nil {
-		return nil, server.NewAppError(http.StatusConflict, server.ReasonNoHostKeyMismatch)
-	}
-	if fingerprint == "" || fingerprint != sshpool.Fingerprint(*srv.HostKeySeen) {
-		return nil, server.NewAppError(http.StatusConflict, server.ReasonHostKeyChanged)
-	}
-	// Conditional on the pending key still being the verified one, so a monitor
-	// write between the read above and this update cannot slip a different key in.
-	if updated, err := s.repo.TrustHostKey(ctx, id, *srv.HostKeySeen); err != nil {
-		return nil, fmt.Errorf("server %d: trust host key: %w", id, err)
-	} else if !updated {
-		return nil, server.NewAppError(http.StatusConflict, server.ReasonHostKeyChanged)
-	}
-	s.invalidate(id)
-	return s.Get(ctx, id)
+	return s.trustHostKey(ctx, id, fingerprint)
 }
 
 // decorateHostKey fills the transient host-key fields a client needs to show a

@@ -5,14 +5,16 @@ import "time"
 // Server represents a managed VPS or bare-metal host.
 type Server struct {
 	BaseModel
-	Name         string  `gorm:"uniqueIndex;size:128;not null" json:"name"`
-	Host         string  `gorm:"size:256;not null" json:"host"`
-	Port         int     `gorm:"not null;default:22" json:"port"`
-	Description  *string `gorm:"type:text" json:"description,omitempty"`
-	Notes        *string `gorm:"type:text" json:"notes,omitempty"`
-	OwnerID      uint    `gorm:"not null;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"owner_id"`
-	CredentialID *uint   `gorm:"index;constraint:OnUpdate:CASCADE,OnDelete:SET NULL" json:"credential_id,omitempty"`
-	HostKey      *[]byte `gorm:"type:bytea" json:"-"`
+	Name               string            `gorm:"uniqueIndex;size:128;not null" json:"name"`
+	Host               string            `gorm:"size:256;not null" json:"host"`
+	Port               int               `gorm:"not null;default:22" json:"port"`
+	Description        *string           `gorm:"type:text" json:"description,omitempty"`
+	Notes              *string           `gorm:"type:text" json:"notes,omitempty"`
+	OwnerID            uint              `gorm:"not null;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"owner_id"`
+	CredentialID       *uint             `gorm:"index;constraint:OnUpdate:CASCADE,OnDelete:SET NULL" json:"credential_id,omitempty"`
+	ConnectionRevision uint64            `gorm:"not null;default:1" json:"connection_revision"`
+	Connection         *ConnectionConfig `gorm:"-" json:"connection,omitempty"`
+	HostKey            *[]byte           `gorm:"type:bytea" json:"-"`
 	// HostKeySeen is the host key the server presented when it did not match the
 	// pinned HostKey. Persisted so the operator can see the new fingerprint and
 	// decide whether to trust it, instead of the connection just failing silently.
@@ -40,12 +42,13 @@ type Server struct {
 // Field set is the contract for GET /api/v1/servers/summary — keep in sync
 // with the frontend ServerSummarySchema.
 type ServerSummary struct {
-	ID           uint    `json:"id"`
-	Name         string  `json:"name"`
-	Description  *string `json:"description,omitempty"`
-	Host         string  `json:"host"`
-	CredentialID *uint   `json:"credential_id"`
-	Status       string  `gorm:"-" json:"status"`
+	ID           uint              `json:"id"`
+	Name         string            `json:"name"`
+	Description  *string           `json:"description,omitempty"`
+	Host         string            `json:"host"`
+	CredentialID *uint             `json:"credential_id"`
+	Status       string            `gorm:"-" json:"status"`
+	Connection   *ConnectionConfig `gorm:"-" json:"connection,omitempty"`
 	// HostKeyMismatchAt is read from the column; the service turns it into the
 	// HostKeyMismatch flag so the list can flag a server whose key changed.
 	HostKeyMismatchAt *time.Time `json:"-"`

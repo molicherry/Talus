@@ -203,7 +203,14 @@
     "ssh_timeout": "SSH 命令超时",
     "unauthorized": "登录已过期，请重新登录",
     "unavailable": "暂时无法验证你的会话，请稍后重试",
-    "validation_failed": "输入不合法"
+    "validation_failed": "输入不合法",
+    "invalid_connection_config": "SSH 连接配置无效",
+    "connection_config_changed": "连接配置已变化，请刷新页面后重试。",
+    "connection_in_use": "此服务器正被用作跳板，请先修改依赖服务器的连接配置。",
+    "proxy_connection_failed": "无法连接代理",
+    "proxy_auth_failed": "代理认证失败",
+    "proxy_connect_rejected": "代理拒绝连接目标",
+    "jump_forward_failed": "SSH 跳板无法转发到目标服务器"
   },
   "exec": {
     "execute": "执行",
@@ -391,7 +398,64 @@
     "listSubtitle": "管理服务器连接与配置。",
     "listSubtitleCount": "共 {{count}} 台服务器 · {{online}} 台在线",
     "lastSeen": "最后采集 {{time}}",
-    "neverSeen": "等待首次采集"
+    "neverSeen": "等待首次采集",
+    "connection": {
+      "title": "SSH 连接",
+      "mode": "连接方式",
+      "direct": "直连",
+      "ssh_jump": "SSH 跳板",
+      "socks5": "SOCKS5",
+      "targetHint": "上方始终填写真实目标 SSH 地址，代理仅改变到达目标的路线。",
+      "jump": "跳板服务器",
+      "chooseJump": "选择服务器",
+      "jumpHint": "选择已配置 SSH 凭据的直连服务器；跳板需要允许到目标的 TCP 转发。",
+      "unavailableJump": "服务器 #{{id}} 不可用",
+      "jumpNotDirect": "已使用代理",
+      "jumpNoCredential": "未配置 SSH 凭据",
+      "jumpHostKey": "主机密钥待验证",
+      "proxyHost": "代理主机",
+      "proxyPort": "代理端口",
+      "auth": "代理认证",
+      "authNone": "无认证",
+      "authPassword": "用户名和密码",
+      "username": "代理用户名",
+      "password": "代理密码",
+      "passwordKept": "已设置密码，留空保留。",
+      "passwordNew": "请输入新密码。代理地址或用户名变化后，需要重新输入密码。",
+      "passwordPlaceholder": "已设置，留空保留",
+      "socksHint": "目标域名由代理解析。SOCKS5 密码认证需在受信任网络或加密隧道中使用。",
+      "sessionHint": "新连接使用保存后的配置，已打开的终端请重新连接以使用新路线。",
+      "test": "测试已保存连接",
+      "testing": "正在测试连接…",
+      "testHint": "使用已保存配置建立新的 SSH 连接，不执行命令。",
+      "saveFirst": "连接配置有未保存修改，请先保存再测试。",
+      "testSuccess": "连接成功（{{latency}} 毫秒）。",
+      "jumpLink": "跳板服务器 #{{id}}",
+      "validation": {
+        "jumpRequired": "请选择跳板服务器。",
+        "hostInvalid": "请输入主机名或 IP 地址，不要填写 URL 或账号密码。",
+        "portInvalid": "请输入 1–65535 之间的端口。",
+        "usernameLength": "用户名需为 1–255 个 UTF-8 字节。",
+        "passwordRequired": "请输入 1–255 个 UTF-8 字节的密码；仅在代理地址和用户名未变化时可留空保留原密码。"
+      },
+      "stages": {
+        "proxy_connect": "连接代理",
+        "proxy_auth": "代理认证",
+        "proxy_connect_request": "SOCKS5 目标连接",
+        "jump_connect": "连接跳板",
+        "jump_auth": "跳板认证",
+        "jump_forward": "跳板转发",
+        "target_connect": "连接目标",
+        "target_auth": "目标认证",
+        "target_host_key": "目标主机密钥验证",
+        "jump_host_key": "跳板主机密钥验证"
+      },
+      "roles": {
+        "target": "目标服务器",
+        "jump": "跳板服务器",
+        "proxy": "SOCKS5 代理"
+      }
+    }
   },
   "service": {
     "title": "服务",
@@ -617,7 +681,12 @@
       "handshake_at": "握手时间",
       "authenticated_at": "认证时间",
       "ready_at": "就绪时间",
-      "closed_at": "关闭时间"
+      "closed_at": "关闭时间",
+      "connection_mode": "连接方式",
+      "connection_revision": "连接配置版本",
+      "jump_server_id": "跳板服务器 ID",
+      "connection_stage": "连接阶段",
+      "connection_role": "连接角色"
     },
     "actions": {
       "server_create": "创建服务器",
@@ -637,7 +706,8 @@
       "server_host_key_trust": "信任主机密钥",
       "server_exec": "执行命令",
       "service_relay": "服务转发",
-      "server_terminal": "打开终端"
+      "server_terminal": "打开终端",
+      "server_connection_test": "测试已保存 SSH 连接"
     },
     "resourceTypes": {
       "server": "服务器",
