@@ -161,3 +161,38 @@ func TestSFTPHTTPPhase2ScopesAndRangeDownload(t *testing.T) {
 		t.Fatalf("HTTP range = %d %q %v", response.StatusCode, data, err)
 	}
 }
+
+func TestSFTPHTTPPrivateResponsesAreNotCached(t *testing.T) {
+	ts, root := sftpHTTPFixture(t)
+	p := filepath.Join(root, "private.txt")
+	if err := os.WriteFile(p, []byte("private file contents"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	upload, err := json.Marshal(map[string]any{"path": filepath.Join(root, "pending.txt"), "size": 4, "sha256": strings.Repeat("a", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		method, endpoint, scope, body string
+		status                        int
+	}{
+		{"GET", "entries?path=" + url.QueryEscape(root), "files:read", "", 200},
+		{"GET", "stat?path=" + url.QueryEscape(p), "files:read", "", 200},
+		{"GET", "text?path=" + url.QueryEscape(p), "files:read", "", 200},
+		{"GET", "download?path=" + url.QueryEscape(p), "files:read", "", 200},
+		{"POST", "uploads/start", "files:write", string(upload), 200},
+		{"GET", "text?path=" + url.QueryEscape(filepath.Join(root, "missing.txt")), "files:read", "", 404},
+	} {
+		response := sftpHTTP(t, ts, tc.method, "/api/v1/servers/1/sftp/"+tc.endpoint, tc.scope, strings.NewReader(tc.body))
+		body, err := io.ReadAll(response.Body)
+		if err != nil || response.StatusCode != tc.status {
+			t.Fatalf("%s: status %d, error %v", tc.endpoint, response.StatusCode, err)
+		}
+		if response.Header.Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s can cache private file data", tc.endpoint)
+		}
+		if tc.status != 200 && strings.Contains(string(body), root) {
+			t.Fatal("remote path leaked through an error response")
+		}
+	}
+}

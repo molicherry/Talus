@@ -54,6 +54,21 @@ function persistToken(token: string | null): void {
   }
 }
 
+// Upload recovery metadata includes remote paths and follows the login lifecycle.
+function pruneFileUploadRecovery(userID: number | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    const storage = window.sessionStorage;
+    const retainedPrefix = userID === null ? null : `talus-sftp-upload:${userID}:`;
+    for (let index = storage.length - 1; index >= 0; index--) {
+      const key = storage.key(index);
+      if (key?.startsWith("talus-sftp-upload:") && (!retainedPrefix || !key.startsWith(retainedPrefix))) storage.removeItem(key);
+    }
+  } catch {
+    // Storage restrictions must not prevent logout.
+  }
+}
+
 function decodeToken(token: string): { user: AuthUser; expiresAt: number } | null {
   try {
     const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
@@ -94,6 +109,7 @@ function replaceToken(token: string | null, forceEpoch = false): void {
   const nextToken = decoded ? token : null;
   if (token !== null && !decoded) persistToken(null);
   if (nextToken === snapshot.token && !forceEpoch) return;
+  if (!decoded || snapshot.user?.id !== decoded.user.id) pruneFileUploadRecovery(null);
   expiresAt = decoded?.expiresAt ?? null;
   snapshot = {
     token: nextToken,
@@ -112,6 +128,7 @@ function initialize(): void {
   const token = readToken();
   const decoded = token === null ? null : decodeToken(token);
   if (token && !decoded) persistToken(null);
+  pruneFileUploadRecovery(decoded?.user.id ?? null);
   snapshot = {
     token: decoded ? token : null,
     user: decoded?.user ?? null,

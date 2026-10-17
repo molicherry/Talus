@@ -185,13 +185,8 @@ async function test(name, run, options) {
   }
 }
 
-const statusPill = (page) => page.getByRole("status").first();
 const surface = (page) => page.getByTestId("terminal-surface");
-const terminalText = (page) => surface(page).innerText();
-const clipboardWrite = (page, text) => page.evaluate((value) => navigator.clipboard.writeText(value), text);
-const frames = (page) => page.evaluate(() => window.__ws.frames.map((frame) => frame.message));
 const socketCount = (page) => page.evaluate(() => window.__ws.sockets.length);
-const clientInputs = async (page) => (await frames(page)).filter((frame) => frame.type === "input").map((frame) => frame.data);
 
 async function fileScenario(page, { stall = false, stallChunk = 1, conflictText = false, largeDownload = false, changeDownload = false } = {}) {
   const { createHash } = await import("node:crypto");
@@ -359,6 +354,21 @@ try {
     assert.equal(await surface(page).isVisible(), true);
     assert.equal(await socketCount(page), count);
   }, { viewport: { width: 375, height: 812 }, mobile: true });
+  await test("other-tab logout clears upload recovery during an active transfer", async ({ page, goto }) => {
+    const scenario = await fileScenario(page, { stall: true }); await openFiles(page, goto);
+    await page.getByLabel("Upload file", { exact: true }).setInputFiles({ name: "private.bin", mimeType: "application/octet-stream", buffer: Buffer.from("private") });
+    await until(() => Promise.resolve(scenario.pending.length === 1), "pending upload");
+    assert.equal(await page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("talus-sftp-upload:")).length), 1);
+    await page.evaluate(() => {
+      sessionStorage.setItem("unrelated-preference", "keep");
+      localStorage.removeItem("auth_token");
+      window.dispatchEvent(new StorageEvent("storage", { key: "auth_token" }));
+    });
+    await page.waitForURL("**/login");
+    assert.equal(await page.getByTestId("file-panel").count(), 0);
+    assert.equal(await page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("talus-sftp-upload:")).length), 0);
+    assert.equal(await page.evaluate(() => sessionStorage.getItem("unrelated-preference")), "keep");
+  });
   await test("paused upload resumes from the server offset after page reload", async ({ page, goto }) => {
     const scenario = await fileScenario(page, { stall: true, stallChunk: 2 }); await openFiles(page, goto);
     const payload = Buffer.alloc(2 * 1024 * 1024 + 4, 19);

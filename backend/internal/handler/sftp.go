@@ -22,6 +22,7 @@ type SFTPHandler struct{ svc *service.SFTPService }
 
 func NewSFTPHandler(svc *service.SFTPService) *SFTPHandler { return &SFTPHandler{svc: svc} }
 func sftpServerID(w http.ResponseWriter, r *http.Request) (uint, bool) {
+	w.Header().Set("Cache-Control", "no-store")
 	id, err := parseIDParam(r)
 	if err != nil || id == 0 {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidServerID))
