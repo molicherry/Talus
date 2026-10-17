@@ -113,7 +113,7 @@ func routeTestFixture(t *testing.T, address string, key ssh.PublicKey) (*SSHServ
 	host, portText, _ := net.SplitHostPort(address)
 	port, _ := strconv.Atoi(portText)
 	credID := uint(1)
-	srv := &model.Server{BaseModel: model.BaseModel{ID: 1}, Host: host, Port: port, ConnectionRevision: 1, CredentialID: &credID, Credential: &model.SSHCredential{BaseModel: model.BaseModel{ID: credID}, Username: "test", AuthType: "password", EncryptedPassword: &encrypted, Salt: salt}}
+	srv := &model.Server{BaseModel: model.BaseModel{ID: 1}, Host: host, Port: port, ConnectionRevision: 1, CredentialID: &credID, Credential: &model.SSHCredential{CryptoVersion: 1, BaseModel: model.BaseModel{ID: credID}, Username: "test", AuthType: "password", EncryptedPassword: &encrypted, Salt: salt}}
 	if key != nil {
 		marshaled := key.Marshal()
 		srv.HostKey = &marshaled

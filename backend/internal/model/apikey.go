@@ -17,6 +17,7 @@ var AllScopeGatedScopes = []string{
 }
 
 type APIKey struct {
+	CryptoVersion       int       `gorm:"type:smallint;not null;default:1" json:"-"`
 	ID                  uint      `gorm:"primaryKey;index:idx_api_key_legacy_owner,where:owner_binding_version = 0 AND (user_id = 0 OR user_id IS NULL)" json:"id"`
 	UserID              uint      `gorm:"default:0;index" json:"-"`
 	OwnerBindingVersion uint8     `gorm:"type:smallint;not null;default:1" json:"-"`

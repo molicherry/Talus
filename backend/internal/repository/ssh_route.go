@@ -141,14 +141,14 @@ func sameSSHServer(left, right *model.Server) bool {
 	if first == nil || second == nil {
 		return first == nil && second == nil
 	}
-	return first.ID == second.ID && first.DeletedAt.Valid == second.DeletedAt.Valid && first.UpdatedAt.Equal(second.UpdatedAt) && first.AuthType == second.AuthType && first.Username == second.Username && sameSSHString(first.EncryptedPassword, second.EncryptedPassword) && sameSSHString(first.EncryptedPrivateKey, second.EncryptedPrivateKey) && bytes.Equal(first.Salt, second.Salt)
+	return first.ID == second.ID && first.DeletedAt.Valid == second.DeletedAt.Valid && first.UpdatedAt.Equal(second.UpdatedAt) && first.AuthType == second.AuthType && first.Username == second.Username && sameSSHString(first.EncryptedPassword, second.EncryptedPassword) && sameSSHString(first.EncryptedPrivateKey, second.EncryptedPrivateKey) && bytes.Equal(first.Salt, second.Salt) && first.CryptoVersion == second.CryptoVersion
 }
 
 func sameSSHConfig(left, right *model.ServerConnectionConfig) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
 	}
-	return left.ServerID == right.ServerID && left.Mode == right.Mode && sameSSHUint(left.JumpServerID, right.JumpServerID) && left.SocksHost == right.SocksHost && left.SocksPort == right.SocksPort && left.SocksAuthType == right.SocksAuthType && left.SocksUsername == right.SocksUsername && sameSSHString(left.EncryptedPassword, right.EncryptedPassword) && bytes.Equal(left.Salt, right.Salt)
+	return left.ServerID == right.ServerID && left.Mode == right.Mode && sameSSHUint(left.JumpServerID, right.JumpServerID) && left.SocksHost == right.SocksHost && left.SocksPort == right.SocksPort && left.SocksAuthType == right.SocksAuthType && left.SocksUsername == right.SocksUsername && sameSSHString(left.EncryptedPassword, right.EncryptedPassword) && bytes.Equal(left.Salt, right.Salt) && left.CryptoVersion == right.CryptoVersion
 }
 
 func sameSSHUint(left, right *uint) bool {

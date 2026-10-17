@@ -4,6 +4,7 @@ package model
 // Credentials are encrypted with AES-256-GCM using per-service random salt,
 // matching the SSH credential encryption scheme.
 type Service struct {
+	CryptoVersion int `gorm:"type:smallint;not null;default:1" json:"-"`
 	BaseModel
 	ServerID             *uint             `gorm:"index;constraint:OnUpdate:CASCADE,OnDelete:SET NULL" json:"server_id,omitempty"`
 	Name                 string            `gorm:"uniqueIndex;size:128;not null" json:"name"`

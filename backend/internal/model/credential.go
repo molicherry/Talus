@@ -4,6 +4,7 @@ package model
 // Encrypted fields are NEVER serialized to JSON.
 // ServerID is deprecated — servers now reference credentials via servers.credential_id.
 type SSHCredential struct {
+	CryptoVersion int `gorm:"type:smallint;not null;default:1" json:"-"`
 	BaseModel
 	Name                string  `gorm:"size:128" json:"name,omitempty"`
 	ServerID            *uint   `gorm:"index;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"server_id,omitempty"`

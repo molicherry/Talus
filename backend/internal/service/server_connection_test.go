@@ -49,7 +49,14 @@ func TestConnectionSecretLifecycle(t *testing.T) {
 	if config.SocksHost != "proxy.example" || config.EncryptedPassword == nil || *config.EncryptedPassword == "private-proxy-secret" {
 		t.Fatal("proxy password was not encrypted or host was not normalized")
 	}
-	plain, err := crypto.Decrypt(*config.EncryptedPassword, svc.masterKey.DeriveKey(config.Salt))
+	cipher, err := svc.masterKey.ForRecord(config.CryptoVersion, config.Salt, crypto.PurposeSOCKS5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.CryptoVersion != crypto.VersionCurrent {
+		t.Fatal("new password uses legacy encryption")
+	}
+	plain, err := cipher.Decrypt("password", *config.EncryptedPassword)
 	if err != nil || string(plain) != "private-proxy-secret" {
 		t.Fatalf("saved password is not decryptable: %v", err)
 	}
@@ -66,6 +73,10 @@ func TestConnectionSecretLifecycle(t *testing.T) {
 	cleared, err := svc.buildConnectionConfig(4, input, config)
 	if err != nil || cleared.EncryptedPassword != nil || len(cleared.Salt) != 0 || cleared.SocksUsername != "" {
 		t.Fatalf("disabling proxy auth retained a secret: %v", err)
+	}
+	unchanged, err := svc.buildConnectionConfig(4, input, cleared)
+	if err != nil || !equalConnection(cleared, unchanged) || cleared.CryptoVersion != crypto.VersionLegacy {
+		t.Fatalf("an unchanged passwordless route changed its persisted version: %v", err)
 	}
 	for _, detail := range []bool{false, true} {
 		encoded, err := json.Marshal(connectionView(config, detail))

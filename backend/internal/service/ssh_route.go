@@ -163,9 +163,10 @@ func serverFingerprint(srv *model.Server) string {
 			UpdatedAt            any
 			AuthType, Username   string
 			Password, PrivateKey *string
+			CryptoVersion        int
 			Salt                 []byte
 			Deleted              bool
-		}{c.ID, c.UpdatedAt, c.AuthType, c.Username, c.EncryptedPassword, c.EncryptedPrivateKey, c.Salt, c.DeletedAt.Valid}
+		}{c.ID, c.UpdatedAt, c.AuthType, c.Username, c.EncryptedPassword, c.EncryptedPrivateKey, c.CryptoVersion, c.Salt, c.DeletedAt.Valid}
 	}
 	return fingerprintValue(struct {
 		Host         string
@@ -193,8 +194,9 @@ func (r *sshRouteSnapshot) fingerprint() string {
 		Port               int
 		AuthType, Username string
 		Password           *string
+		CryptoVersion      int
 		Salt               []byte
-	}{serverFingerprint(r.target), r.mode(), jump, cfg.JumpServerID, cfg.SocksHost, cfg.SocksPort, cfg.SocksAuthType, cfg.SocksUsername, cfg.EncryptedPassword, cfg.Salt})
+	}{serverFingerprint(r.target), r.mode(), jump, cfg.JumpServerID, cfg.SocksHost, cfg.SocksPort, cfg.SocksAuthType, cfg.SocksUsername, cfg.EncryptedPassword, cfg.CryptoVersion, cfg.Salt})
 }
 
 func (s *SSHService) endpoint(srv *model.Server) (sshpool.Endpoint, error) {
@@ -235,7 +237,11 @@ func (s *SSHService) dialRoute(ctx context.Context, snap *sshRouteSnapshot) (*ss
 			if s.credSvc == nil || s.credSvc.masterKey == nil {
 				return nil, nil, nil, server.ErrInternal
 			}
-			password, err := appcrypto.Decrypt(*cfg.EncryptedPassword, s.credSvc.masterKey.DeriveKey(cfg.Salt))
+			cipher, err := s.credSvc.masterKey.ForRecord(cfg.CryptoVersion, cfg.Salt, appcrypto.PurposeSOCKS5)
+			if err != nil {
+				return nil, nil, nil, server.NewAppError(http.StatusInternalServerError, server.ReasonCredentialDecrypt)
+			}
+			password, err := cipher.Decrypt("password", *cfg.EncryptedPassword)
 			if err != nil {
 				return nil, nil, nil, server.NewAppError(http.StatusInternalServerError, server.ReasonCredentialDecrypt)
 			}
