@@ -108,7 +108,7 @@ Key fields: `status` ("online"|"offline"|"unknown"), `latest_metrics` {cpu_perce
 
 ### "Manage or transfer files on server X"
 
-Use the SFTP API under `/api/v1/servers/{id}/sftp`; see `docs/SFTP.md` for the complete contract. File scopes are opt-in and existing keys do not gain them automatically. All operations also check `server_ids` and use the SSH account's filesystem permissions. An administrator must approve first-use/changed SSH host keys in the Web UI before file operations can connect.
+Use the SFTP API under `/api/v1/servers/{id}/sftp`; see the repository README's **File API** section for the complete contract. File scopes are opt-in and existing keys do not gain them automatically. All operations also check `server_ids` and use the SSH account's filesystem permissions. An administrator must approve first-use/changed SSH host keys in the Web UI before file operations can connect.
 
 - Read: `GET /entries?path=…`, `GET /stat?path=…`, binary `GET /download?path=…`, ZIP `GET /archive?path=…`, `GET /text?path=…`.
 - Write: binary `POST /upload?path=…`; JSON `POST /mkdir {"path":"…","parents":false}`, `POST /rename {"from":"…","to":"…"}`.
