@@ -105,21 +105,13 @@ jobs:
               "unsuppressed go/command-injection result(s): "
               + json.dumps([hits_on(r, line) or r.get("locations", []) for r in unsuppressed])[:2000])
 
-          # Meta-check, deliberately a warning rather than a gate: it asserts a fact
-          # about CodeQL's flow modeling, which changes with the query pack and the
-          # shape of the call path. Losing it means the `codeql[go/command-injection]`
-          # comment above this sink currently suppresses nothing - a coverage gap to
-          # restore, not a vulnerability: the route requires servers:exec plus
-          # mw.CheckServerAccess, and the command is the caller's by design.
+          # Require the intentional flow to be modeled. Otherwise an empty result
+          # set would make the suppression check pass without covering this route.
           at_sink = [result for result in results if hits_on(result, line)]
-          if at_sink:
-              print(f"modeled flow present at {source.as_posix()}:{line}; the in-source suppression is meaningful")
-          else:
-              print("::warning title=CodeQL coverage lost for the intentional SSH sink::"
-                    f"go/command-injection no longer reports {source.as_posix()}:{line}, so the "
-                    "`codeql[go/command-injection]` suppression there suppresses nothing. Follow-up: "
-                    "restore the modeled flow (suspect the handler -> sshSvc.Exec -> lease.Exec -> "
-                    "runCommand hop added by the execution hardening).")
+          assert at_sink, (
+              "CodeQL no longer models the authenticated SSH exec flow to "
+              f"{source.as_posix()}:{line}; restore coverage before merging")
+          print(f"modeled flow present at {source.as_posix()}:{line}; the in-source suppression is meaningful")
           for result in results:
               for location in result.get("locations", []):
                   physical = location["physicalLocation"]

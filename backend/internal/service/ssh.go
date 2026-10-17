@@ -132,7 +132,15 @@ func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, ti
 		return nil, err
 	}
 	defer lease.Release()
-	result, err := lease.Exec(operation, command, timeout)
+	// Keep the public exec flow visible to CodeQL while using the same lease
+	// admission, cancellation clock and settlement as multi-step primitives.
+	operationCtx, err := lease.begin(operation)
+	var result *ExecResult
+	if err == nil {
+		var transportClosed bool
+		result, err, transportClosed = s.runCommand(operationCtx, lease.client(), command, timeout)
+		lease.end(transportClosed || isConnectionError(err), err)
+	}
 	err = errors.Join(err, lease.releaseAndWait())
 	if result != nil {
 		result.DurationMs = time.Since(start).Milliseconds()
