@@ -30,6 +30,10 @@ jobs:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # The Go suppression guard requires a result at an unchanged SSH sink.
+      # PR diff filtering can omit it even when the complete flow is modeled.
+      CODEQL_ACTION_DIFF_INFORMED_QUERIES: ${{ matrix.language == 'go' && 'false' || '' }}
     permissions:
       # Required to upload SARIF results to code scanning.
       security-events: write
