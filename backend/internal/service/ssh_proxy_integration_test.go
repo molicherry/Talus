@@ -152,9 +152,9 @@ func TestSOCKSRouteExecAndCopyFileUseSameConnectionPath(t *testing.T) {
 	target, key := startExecSSHServer(t, func(command string, ch ssh.Channel, _ <-chan struct{}) {
 		if command == "echo routed" {
 			_, _ = io.WriteString(ch, "routed")
-		} else {
-			content, _ := io.ReadAll(ch)
-			uploaded <- string(content)
+		} else if command == "subsystem:sftp" {
+			serveUploadPeer(ch, &uploadPeerFS{finish: func(_ string, data []byte) error { uploaded <- string(data); return nil }})
+			return
 		}
 		_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
 		_ = ch.Close()
@@ -344,9 +344,9 @@ func TestSSHJumpRouteExecAndCopyFileUseIndependentSavedCredentials(t *testing.T)
 	target, key := startExecSSHServer(t, func(command string, ch ssh.Channel, _ <-chan struct{}) {
 		if command == "echo jump" {
 			_, _ = io.WriteString(ch, "via-jump")
-		} else {
-			content, _ := io.ReadAll(ch)
-			uploaded <- string(content)
+		} else if command == "subsystem:sftp" {
+			serveUploadPeer(ch, &uploadPeerFS{finish: func(_ string, data []byte) error { uploaded <- string(data); return nil }})
+			return
 		}
 		_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
 		_ = ch.Close()

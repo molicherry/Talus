@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,19 +16,14 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// drainUploadOK consumes the upload stream and reports a clean remote exit,
-// so the client's session.Run succeeds.
-func drainUploadOK(ch ssh.Channel) {
-	_, _ = io.Copy(io.Discard, ch)
-	_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
-	_ = ch.Close()
-}
+// drainUploadOK accepts a complete artifact over the SFTP wire protocol.
+func drainUploadOK(ch ssh.Channel) { serveUploadPeer(ch, &uploadPeerFS{}) }
 
-// routeUploads handles the CopyFile "cat > ..." command with the supplied
-// upload behaviour and answers anything else with a clean exit 0.
+// routeUploads handles an SFTP subsystem with the supplied upload behaviour
+// and answers ordinary Exec requests with a clean exit 0.
 func routeUploads(upload func(ssh.Channel, <-chan struct{})) func(string, ssh.Channel, <-chan struct{}) {
 	return func(cmd string, ch ssh.Channel, tc <-chan struct{}) {
-		if strings.HasPrefix(cmd, "cat >") {
+		if cmd == "subsystem:sftp" {
 			upload(ch, tc)
 			return
 		}
@@ -135,7 +129,7 @@ func TestCopyFileCancellationSettlesQuotaAndJoins(t *testing.T) {
 }
 
 // TestCopyFileRemoteRejectWithoutReadingStdinIsBounded pins the P1 fix: a remote
-// that rejects the exec request without draining stdin must not block the copy
+// that closes the SFTP subsystem without reading must not block the copy
 // worker forever, even when the file exceeds the SSH window.
 func TestCopyFileRemoteRejectWithoutReadingStdinIsBounded(t *testing.T) {
 	address, hostKey := startExecSSHServer(t, routeUploads(func(ch ssh.Channel, _ <-chan struct{}) {
@@ -218,8 +212,8 @@ func startRejectExecSSHServer(t *testing.T) (string, ssh.PublicKey) {
 	return listener.Addr().String(), signer.PublicKey()
 }
 
-// TestCopyFileRejectedExecIsBounded pins the P1 fix: a remote that rejects the
-// exec request and keeps the channel open must not block the upload forever.
+// TestCopyFileRejectedExecIsBounded retains its gate identity: a remote that
+// rejects the SFTP subsystem and keeps the channel open must not block uploads.
 func TestCopyFileRejectedExecIsBounded(t *testing.T) {
 	address, hostKey := startRejectExecSSHServer(t)
 	pool := newTestPool(t)

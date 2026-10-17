@@ -239,7 +239,7 @@ func TestReviewMatchingVersionStillRequiresArtifactHash(t *testing.T) {
 	if _, err := deployer.Collect(context.Background(), lease); err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	if got := h.remote.count("cat > "); got != 1 {
+	if got := h.remote.count("sftp.upload "); got != 1 {
 		t.Fatalf("uploads = %d, want the artifact replaced despite the matching version", got)
 	}
 	deployed, ok := h.remote.file(agentPath)

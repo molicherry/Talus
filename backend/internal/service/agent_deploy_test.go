@@ -5,8 +5,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -114,7 +114,6 @@ func exitStatus(ch ssh.Channel, code uint32) {
 // handler implements the peer protocol. Command shapes are matched with
 // anchored regexes so path extraction cannot drift.
 func (f *fakeRemote) handler() func(string, ssh.Channel, <-chan struct{}) {
-	uploadRe := regexp.MustCompile(`^cat > (\S+) && chmod \+x (\S+)$`)
 	activateRe := regexp.MustCompile(`^chmod 0755 (\S+) && mv -f (\S+) (\S+)$`)
 	hashRe := regexp.MustCompile(`then (?:sha256sum|shasum -a 256) (\S+) `)
 	removeRe := regexp.MustCompile(`^rm -f (\S+)$`)
@@ -149,43 +148,32 @@ func (f *fakeRemote) handler() func(string, ssh.Channel, <-chan struct{}) {
 			digest := sha256.Sum256(data)
 			fmt.Fprintf(ch, "%s  %s\n", hex.EncodeToString(digest[:]), path)
 			exitStatus(ch, 0)
-		case uploadRe.MatchString(command):
-			match := uploadRe.FindStringSubmatch(command)
-			// The upload primitive shell-quotes paths; this fixture only
-			// uses simple artifact paths and removes their literal quotes.
-			match[1] = strings.Trim(match[1], "'")
-			match[2] = strings.Trim(match[2], "'")
-			if match[1] != match[2] {
-				fmt.Fprintf(ch.Stderr(), "upload target mismatch\n")
-				exitStatus(ch, 1)
-				return
-			}
-			if f.uploadError != "" {
-				fmt.Fprintf(ch.Stderr(), "%s\n", f.uploadError)
-				exitStatus(ch, 1)
-				return
-			}
-			data, _ := io.ReadAll(ch)
-			if f.uploadWriteThenFail {
-				// The bytes are on disk, but the command still failed.
-				f.mu.Lock()
-				f.files[match[1]] = data
-				f.mu.Unlock()
-				fmt.Fprintf(ch.Stderr(), "chmod: cannot access '%s': Permission denied\n", match[1])
-				exitStatus(ch, 1)
-				return
-			}
-			if f.corruptUpload {
-				data = append(data, []byte("corrupted")...)
-			}
-			f.mu.Lock()
-			f.files[match[1]] = data
-			hook := f.afterUpload
-			f.mu.Unlock()
-			if hook != nil {
-				hook()
-			}
-			exitStatus(ch, 0)
+		case command == "subsystem:sftp":
+			serveUploadPeer(ch, &uploadPeerFS{
+				open: func(path string) error {
+					f.record("sftp.upload " + path)
+					if f.uploadError != "" {
+						return errors.New(f.uploadError)
+					}
+					return nil
+				},
+				finish: func(path string, data []byte) error {
+					if f.corruptUpload {
+						data = append(data, []byte("corrupted")...)
+					}
+					f.mu.Lock()
+					f.files[path] = data
+					hook := f.afterUpload
+					f.mu.Unlock()
+					if f.uploadWriteThenFail {
+						return errors.New("Permission denied during SFTP close")
+					}
+					if hook != nil {
+						hook()
+					}
+					return nil
+				},
+			})
 		case activateRe.MatchString(command):
 			match := activateRe.FindStringSubmatch(command)
 			f.mu.Lock()
@@ -251,10 +239,10 @@ type agentDeployHarness struct {
 
 // newAgentDeployHarness wires a deployment service over a fake peer and a real
 // artifact directory built by the shipping build script path.
-func newAgentDeployHarness(t *testing.T, version string) (*AgentDeploymentService, agentDeployHarness) {
+func newAgentDeployHarness(t *testing.T, version string, sftpEnabled ...bool) (*AgentDeploymentService, agentDeployHarness) {
 	t.Helper()
 	remote := newFakeRemote()
-	address, hostKey := startExecSSHServer(t, remote.handler())
+	address, hostKey := startExecSSHServer(t, remote.handler(), sftpEnabled...)
 	pool := newTestPool(t)
 	seedPool(t, pool, 1, dialTestSSH(t, address, hostKey))
 	sshSvc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
@@ -297,7 +285,7 @@ func TestAgentDeployProbesMapsAndSkipsUploadWhenActive(t *testing.T) {
 	if out.AgentVersion != "v1.2.3" || out.ProtocolVersion != 1 {
 		t.Fatalf("payload = %+v", out)
 	}
-	if h.remote.count("cat > ") != 0 {
+	if h.remote.count("sftp.upload ") != 0 {
 		t.Fatalf("an active matching agent must not be uploaded again: %v", h.remote.commands)
 	}
 	if h.remote.count("chmod 0755") != 0 {
@@ -320,8 +308,8 @@ func TestAgentDeployUploadsVerifiesAndActivates(t *testing.T) {
 	if _, err := deployer.Collect(context.Background(), lease); err != nil {
 		t.Fatalf("Collect: %v\ncommands: %v\nfiles: %v", err, h.remote.commands, h.remote.fileKeys())
 	}
-	if h.remote.count("cat > ") != 1 {
-		t.Fatalf("uploads = %d, want exactly 1 (%v)", h.remote.count("cat > "), h.remote.commands)
+	if h.remote.count("sftp.upload ") != 1 {
+		t.Fatalf("uploads = %d, want exactly 1 (%v)", h.remote.count("sftp.upload "), h.remote.commands)
 	}
 	if h.remote.count("chmod 0755") != 1 {
 		t.Fatalf("activations = %d, want exactly 1", h.remote.count("chmod 0755"))
@@ -365,7 +353,7 @@ func TestAgentDeployRejectsUnsupportedPlatformWithoutUploading(t *testing.T) {
 			if !asDeployError(err, &deployErr) || deployErr.Reason != ReasonAgentPlatformUnsupported {
 				t.Fatalf("error = %v, want %s", err, ReasonAgentPlatformUnsupported)
 			}
-			if h.remote.count("cat > ") != 0 {
+			if h.remote.count("sftp.upload ") != 0 {
 				t.Fatalf("nothing may be uploaded for an unsupported platform: %v", h.remote.commands)
 			}
 		})
@@ -498,7 +486,7 @@ func TestAgentDeployReportsLostActivationAndRecoversIdempotently(t *testing.T) {
 	if !asDeployError(err, &deployErr) || deployErr.Reason != ReasonAgentActivationUnknown {
 		t.Fatalf("error = %v, want %s", err, ReasonAgentActivationUnknown)
 	}
-	uploads := h.remote.count("cat > ")
+	uploads := h.remote.count("sftp.upload ")
 
 	// The rename left the verified artifact in place, so a retry with a fresh
 	// lease must skip the upload entirely.
@@ -515,7 +503,7 @@ func TestAgentDeployReportsLostActivationAndRecoversIdempotently(t *testing.T) {
 	if out.ProtocolVersion != 1 {
 		t.Fatalf("payload = %+v", out)
 	}
-	if got := h.remote.count("cat > "); got != uploads {
+	if got := h.remote.count("sftp.upload "); got != uploads {
 		t.Fatalf("uploads after retry = %d, want no additional upload (was %d)", got, uploads)
 	}
 }
@@ -590,5 +578,38 @@ func TestAgentDeployEventsCorrelateWithServerID(t *testing.T) {
 	}
 	if strings.Contains(output, "talus_") {
 		t.Fatalf("node identity must not appear as a metric label:\n%s", output)
+	}
+}
+
+func TestAgentDeployRequiresSFTPForUploadAndKeepsVerifiedArtifactReuse(t *testing.T) {
+	for _, installed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("already_installed_%v", installed), func(t *testing.T) {
+			deployer, h := newAgentDeployHarness(t, "v1.2.3", false)
+			h.remote.agentPayload = `{"agent_version":"v1.2.3","protocol_version":1}`
+			if installed {
+				h.remote.files[agentPath] = h.localArtifact(t, "amd64")
+			}
+			lease, err := h.svc.AcquireLease(context.Background(), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lease.Release()
+			_, err = deployer.Collect(context.Background(), lease)
+			if installed {
+				if err != nil {
+					t.Fatal("verified installed artifact should not need an upload", err)
+				}
+			} else {
+				fileReason(t, err, "sftp_unavailable")
+				if _, ok := h.remote.file(agentPath); ok {
+					t.Fatal("failed SFTP upload activated an agent")
+				}
+			}
+			for _, command := range h.remote.commands {
+				if strings.HasPrefix(command, "cat >") {
+					t.Fatal("shell upload fallback was attempted")
+				}
+			}
+		})
 	}
 }

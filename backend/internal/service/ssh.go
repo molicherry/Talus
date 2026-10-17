@@ -405,7 +405,7 @@ func isConnectionError(err error) bool {
 	return false
 }
 
-// CopyFile pipes a local file to a remote path over SSH.
+// CopyFile uploads a local artifact over SFTP on a verified SSH connection.
 func (s *SSHService) CopyFile(ctx context.Context, serverID uint, localPath, remotePath string) error {
 	budget := min(s.execDefaultTimeout, maxExecTimeout)
 	ctx, cancel := context.WithTimeout(ctx, budget)

@@ -20,7 +20,6 @@ import (
 	"github.com/pkg/sftp"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/server"
-	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -168,82 +167,9 @@ func (s *SFTPService) withClient(ctx context.Context, id uint, metadata bool, fn
 		return safeSFTPError(err)
 	}
 	operation = context.WithValue(operation, sftpRouteContextKey{}, snapshot.fingerprint())
-	ready := make(chan *ssh.Session, 1)
-	joined := make(chan struct{})
-	result := make(chan error, 1)
-	go func() {
-		defer close(joined)
-		session, err := lease.client().NewSession()
-		if err != nil {
-			result <- err
-			return
-		}
-		ready <- session
-		defer session.Close()
-		input, err := session.StdinPipe()
-		if err != nil {
-			result <- err
-			return
-		}
-		output, err := session.StdoutPipe()
-		if err != nil {
-			result <- err
-			return
-		}
-		stderr, err := session.StderrPipe()
-		if err != nil {
-			result <- err
-			return
-		}
-		drained := make(chan struct{})
-		go func() { _, _ = io.Copy(io.Discard, stderr); close(drained) }()
-		// Join stderr after the subsystem/session has closed.
-		defer func() { _ = session.Close(); <-drained }()
-		if err = session.RequestSubsystem("sftp"); err != nil {
-			result <- SFTPError("sftp_unavailable")
-			return
-		}
-
-		bounded := &sftpBoundedReader{source: output}
-		bounded.remaining.Store(-1)
-		if metadata {
-			bounded.remaining.Store(sftpDirectoryWireLimit)
-		}
-		workerContext := context.WithValue(operation, sftpWireContextKey{}, bounded)
-		var reader io.Reader = bounded
-		client, err := sftp.NewClientPipe(reader, input, sftp.UseConcurrentReads(false))
-		if err != nil {
-			result <- err
-			return
-		}
-		err = fn(workerContext, client)
-		if err != nil && bounded.remaining.Load() == 0 {
-			err = SFTPError("sftp_directory_too_large")
-		}
-		result <- err
-		_ = client.Close()
-	}()
-	var runErr error
-	select {
-	case runErr = <-result:
-	case <-operation.Done():
-		runErr = context.Cause(operation)
-		// HTTP body cancellation can unblock a transfer, allowing its worker to
-		// remove a temporary file before its SFTP channel is forced closed.
-		grace := time.NewTimer(execTeardownGrace)
-		select {
-		case <-result:
-		case <-grace.C:
-		}
-		grace.Stop()
-	}
-	if operation.Err() != nil {
-		runErr = context.Cause(operation)
-	}
-	forced, cleanupErr := closeSSHSession(lease.client(), ready, joined, sshTeardownDeadlines(operation, execTeardownGrace))
-	lease.end(forced || isConnectionError(runErr), errors.Join(runErr, cleanupErr))
+	runErr, forced := s.ssh.withSFTPClient(operation, lease.client(), metadata, fn)
+	lease.end(forced || isConnectionError(runErr), runErr)
 	settlementErr := lease.releaseAndWait()
-	cleanupErr = errors.Join(cleanupErr, settlementErr)
 	// Retain the file reservation until the lease actually settles.
 	select {
 	case <-lease.Done():
@@ -251,7 +177,7 @@ func (s *SFTPService) withClient(ctx context.Context, id uint, metadata bool, fn
 	default:
 		go func() { <-lease.Done(); releaseReservation() }()
 	}
-	return safeSFTPError(errors.Join(runErr, cleanupErr))
+	return safeSFTPError(errors.Join(runErr, settlementErr))
 }
 
 type SFTPEntry struct {

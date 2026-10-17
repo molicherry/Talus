@@ -13,7 +13,7 @@
 - **Credential Vault** — Store SSH passwords and private keys encrypted with AES-256-GCM at rest.
 - **Remote Shell** — Execute commands on any server and see stdout, stderr, and exit codes.
 - **Interactive Terminal** — Open a full PTY session in your browser (xterm.js, resize-aware, WebSocket-backed).
-- **Live Monitoring** — CPU, memory, disk, load, swap, network, and disk I/O charts with 15m / 1h / 6h / 24h / 7d / 30d time ranges, average/peak views, and accessible data tables. The Hub deploys the matching monitoring agent over SSH.
+- **Live Monitoring** — CPU, memory, disk, load, swap, network, and disk I/O charts with 15m / 1h / 6h / 24h / 7d / 30d time ranges, average/peak views, and accessible data tables. The Hub uploads the matching monitoring agent over SFTP and runs it over SSH.
 - **API Keys** — Create scoped API keys with per-server access control. Two-dimensional permissions (what actions × which servers). Keys are encrypted at rest and can be copied on demand. Rate-limited reveal with audit logging.
 - **SFTP Files** — Browse files alongside SSH, upload/download with resume, transfer folders, and edit UTF-8 text with version conflict checks. Scoped file APIs share SSH credentials, verified host keys and proxy routes.
 - **Service Proxy** — Register external services (Grafana, Portainer, etc.) with encrypted credentials. Proxy API requests through Talus with credential injection and placeholder substitution. Edit forms load existing credentials with show/hide toggle and copy support.
@@ -32,7 +32,7 @@
 ```
 
 - **Hub-and-spoke**: The Hub connects out to your servers via SSH. Servers never call back.
-- **On-demand agent**: Monitoring data is collected by a statically-linked Go binary that the Hub deploys and runs over SSH. It exits after collection; the verified binary is retained at `/tmp/vpsmanager-agent` for reuse. No daemon or extra open ports are needed.
+- **On-demand agent**: Monitoring data is collected by a statically-linked Go binary that the Hub uploads over SFTP and runs over SSH. It exits after collection; the verified binary is retained at `/tmp/vpsmanager-agent` for reuse. No daemon or extra open ports are needed.
 - **Credentials**: Encrypted at rest with a master key you control. Secret values are omitted from list responses; authenticated administrators can reveal them through dedicated, audited endpoints.
 
 ## Quick Start
@@ -40,7 +40,7 @@
 ### Prerequisites
 
 - Docker & Docker Compose
-- Linux servers with SSH access (Debian/Ubuntu recommended)
+- Linux servers with SSH access (Debian/Ubuntu recommended); the SSH `sftp` subsystem must be enabled for file transfers and initial monitoring-agent deployment or updates.
 
 ### 1. Clone
 
@@ -114,7 +114,7 @@ Administrators can open **Usage Logs** for filtered operation history and detail
 
 ### 7. Manage Files over SFTP
 
-Talus file management uses the configured SSH account and SSH port. It reuses encrypted credentials, explicit host-key confirmation, direct/SOCKS5/jump routing, connection revisions and pool quotas. The target must enable its SSH `sftp` subsystem. No additional FTP server or target agent is required. These operations have the filesystem permissions of that SSH account; the API does not add a directory jail or `sudo` access.
+Talus file management uses the configured SSH account and SSH port. It reuses encrypted credentials, explicit host-key confirmation, direct/SOCKS5/jump routing, connection revisions and pool quotas. The target must enable its SSH `sftp` subsystem. Internal file uploads and monitoring-agent deployment use the same supervised SFTP transport; the previous shell-based upload is replaced, with no automatic shell fallback. Agent deployment retains its pinned SSH connection through upload, SHA256 verification and atomic activation. Uploaded artifacts stay private (`0600`) until activation sets the executable permissions. No additional FTP server or target agent is required. These operations have the filesystem permissions of that SSH account; the API does not add a directory jail or `sudo` access.
 
 The terminal, file panel and text editor follow the global light/dark/system theme. Theme changes preserve the SSH session, terminal output and editor draft.
 
@@ -132,7 +132,7 @@ Transfer limits and lifecycle:
 
 - 64 MiB per file and for the combined file contents in a directory ZIP/folder upload; ZIP metadata adds at most 2 MiB. Text editing is limited to 1 MiB.
 - Directory responses show at most 2,000 entries or 2 MiB of metadata; directory protocol input is bounded to 8 MiB. ZIP manifests allow 2,000 entries and 32 levels of subdirectories. Oversized directories return a limit error or an explicit truncated listing.
-- One active SFTP operation per server, sharing the existing SSH quota; other terminal/monitor leases keep their own transports. A reservation is released only after its SSH channel and workers settle.
+- One active SFTP file API operation per server, sharing the existing SSH quota; other terminal/monitor leases keep their own transports. A reservation is released only after its SSH channel and workers settle.
 - Metadata operations have a 25-second budget. Transfers have a 10-minute total budget and HTTP reads/writes use a 30-second idle deadline. Reverse proxies must also permit these transfer sizes/timeouts.
 - Ordinary uploads clean temporary files on handled failures/cancellation where the remote remains reachable. Network loss can leave a temporary file. Resumable uploads keep temporary files for recovery until completion or explicit discard; token expiry does not remove remote temporary files. The original destination is not touched before commit.
 - Overwrite requires `posix-rename@openssh.com`. Talus never deletes the original as an overwrite fallback. New-file publication prefers the atomic hard-link extension where available, otherwise uses the SFTP v3 no-clobber rename contract.
