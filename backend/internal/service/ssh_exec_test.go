@@ -15,7 +15,7 @@ import (
 )
 
 // This server executes a supplied channel handler over a real SSH transport.
-func startExecSSHServer(t *testing.T, execute func(string, ssh.Channel, <-chan struct{})) (string, ssh.PublicKey) {
+func startExecSSHServer(t *testing.T, execute func(string, ssh.Channel, <-chan struct{}), sftpEnabled ...bool) (string, ssh.PublicKey) {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -56,6 +56,15 @@ func startExecSSHServer(t *testing.T, execute func(string, ssh.Channel, <-chan s
 					go func() {
 						for request := range requests {
 							var message struct{ Command string }
+							if request.Type == "subsystem" && ssh.Unmarshal(request.Payload, &message) == nil && message.Command == "sftp" {
+								if len(sftpEnabled) > 0 && !sftpEnabled[0] {
+									_ = request.Reply(false, nil)
+									continue
+								}
+								_ = request.Reply(true, nil)
+								execute("subsystem:sftp", channel, transportClosed)
+								return
+							}
 							if request.Type != "exec" || ssh.Unmarshal(request.Payload, &message) != nil {
 								_ = request.Reply(false, nil)
 								continue

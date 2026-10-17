@@ -23,6 +23,15 @@ const (
 // by method and path shape, independent of router internals.
 func writeBudgetFor(r *http.Request) time.Duration {
 	p := r.URL.Path
+	if strings.HasPrefix(p, "/api/v1/servers/") && strings.Contains(p, "/sftp/") {
+		if strings.Contains(p, "/sftp/uploads/") {
+			return 10*time.Minute + 10*time.Second
+		}
+		if (r.Method == http.MethodPost && strings.HasSuffix(p, "/upload")) || (r.Method == http.MethodGet && (strings.HasSuffix(p, "/download") || strings.HasSuffix(p, "/archive"))) {
+			return 10*time.Minute + 10*time.Second
+		}
+		return 35 * time.Second
+	}
 	if r.Method == http.MethodPost {
 		if strings.HasSuffix(p, "/exec") && strings.Contains(p, "/servers/") {
 			return ExecWriteBudget

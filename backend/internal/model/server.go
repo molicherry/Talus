@@ -15,12 +15,11 @@ type Server struct {
 	ConnectionRevision uint64            `gorm:"not null;default:1" json:"connection_revision"`
 	Connection         *ConnectionConfig `gorm:"-" json:"connection,omitempty"`
 	HostKey            *[]byte           `gorm:"type:bytea" json:"-"`
-	// HostKeySeen is the host key the server presented when it did not match the
-	// pinned HostKey. Persisted so the operator can see the new fingerprint and
-	// decide whether to trust it, instead of the connection just failing silently.
+	// HostKeySeen stores an untrusted first-use or changed key so an administrator
+	// can verify its fingerprint before explicitly pinning it as HostKey.
 	HostKeySeen *[]byte `gorm:"type:bytea" json:"-"`
-	// HostKeyMismatchAt is set when the last mismatch was detected, cleared once
-	// the operator trusts the key or a connection succeeds.
+	// HostKeyMismatchAt timestamps a pending first-use or changed key. It is cleared
+	// on explicit trust or a successful connection using the existing pinned key.
 	HostKeyMismatchAt *time.Time `gorm:"index" json:"host_key_mismatch_at,omitempty"`
 
 	// Transient fields — populated by service layer, never persisted.
@@ -32,6 +31,7 @@ type Server struct {
 	UptimeSeconds *int64         `gorm:"-" json:"uptime_seconds,omitempty"`
 	// HostKeyMismatch marks a pending host-key change awaiting the operator.
 	HostKeyMismatch        bool    `gorm:"-" json:"host_key_mismatch"`
+	HostKeyUnverified      bool    `gorm:"-" json:"host_key_unverified"`
 	HostKeyFingerprint     *string `gorm:"-" json:"host_key_fingerprint,omitempty"`
 	HostKeySeenFingerprint *string `gorm:"-" json:"host_key_seen_fingerprint,omitempty"`
 
@@ -52,6 +52,8 @@ type ServerSummary struct {
 	// HostKeyMismatchAt is read from the column; the service turns it into the
 	// HostKeyMismatch flag so the list can flag a server whose key changed.
 	HostKeyMismatchAt *time.Time `json:"-"`
+	HostKey           *[]byte    `json:"-"`
+	HostKeyUnverified bool       `gorm:"-" json:"host_key_unverified"`
 	HostKeyMismatch   bool       `gorm:"-" json:"host_key_mismatch"`
 }
 

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,20 +21,19 @@ func TestCopyFileReturnsSlotAfterSuccessAndRemoteFailure(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			copied := make(chan string, 1)
-			address, key := startExecSSHServer(t, func(command string, ch ssh.Channel, _ <-chan struct{}) {
-				if !strings.Contains(command, "'file'\"'\"'s target'") {
-					copied <- "bad-quoting"
-				} else {
-					data, _ := io.ReadAll(ch)
-					copied <- string(data)
-				}
-				status := uint32(0)
-				if failure {
-					status = 1
-				}
-				_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
-				_ = ch.Close()
-			})
+			address, key := startExecSSHServer(t, routeUploads(func(ch ssh.Channel, _ <-chan struct{}) {
+				serveUploadPeer(ch, &uploadPeerFS{finish: func(path string, data []byte) error {
+					if strings.TrimPrefix(path, "/") != "file's target" {
+						copied <- "bad literal path"
+					} else {
+						copied <- string(data)
+					}
+					if failure {
+						return os.ErrPermission
+					}
+					return nil
+				}})
+			}))
 			pool := newTestPool(t)
 			seedPool(t, pool, 1, dialTestSSH(t, address, key))
 			svc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)

@@ -459,6 +459,22 @@ type UsageCleanupGroupCount struct {
 }
 
 var usageReportActions = []string{
+	"server.sftp.list",
+	"server.sftp.stat",
+	"server.sftp.upload",
+	"server.sftp.download",
+	"server.sftp.mkdir",
+	"server.sftp.rename",
+	"server.sftp.delete",
+	"server.sftp.text.read",
+	"server.sftp.text.write",
+	"server.sftp.archive",
+	"server.sftp.upload.start",
+	"server.sftp.upload.status",
+	"server.sftp.upload.chunk",
+	"server.sftp.upload.complete",
+	"server.sftp.upload.cancel",
+
 	"server.create", "server.update", "server.delete", "server.host_key.trust", "server.exec", "server.terminal",
 	"credential.create", "credential.update", "credential.delete", "credential.reveal",
 	"api_key.create", "api_key.delete", "api_key.reveal",

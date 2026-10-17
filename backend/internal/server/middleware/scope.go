@@ -8,6 +8,22 @@ import (
 
 // routeScopes maps normalized "METHOD /api/v1/..." patterns to required scopes.
 var routeScopes = map[string]string{
+	"GET /api/v1/servers/{id}/sftp/text":              "files:read",
+	"PUT /api/v1/servers/{id}/sftp/text":              "files:write",
+	"GET /api/v1/servers/{id}/sftp/archive":           "files:read",
+	"POST /api/v1/servers/{id}/sftp/uploads/start":    "files:write",
+	"POST /api/v1/servers/{id}/sftp/uploads/status":   "files:write",
+	"PUT /api/v1/servers/{id}/sftp/uploads/chunk":     "files:write",
+	"POST /api/v1/servers/{id}/sftp/uploads/complete": "files:write",
+	"DELETE /api/v1/servers/{id}/sftp/uploads":        "files:write",
+
+	"GET /api/v1/servers/{id}/sftp/entries":    "files:read",
+	"GET /api/v1/servers/{id}/sftp/stat":       "files:read",
+	"GET /api/v1/servers/{id}/sftp/download":   "files:read",
+	"POST /api/v1/servers/{id}/sftp/upload":    "files:write",
+	"POST /api/v1/servers/{id}/sftp/mkdir":     "files:write",
+	"POST /api/v1/servers/{id}/sftp/rename":    "files:write",
+	"DELETE /api/v1/servers/{id}/sftp/entry":   "files:delete",
 	"GET /api/v1/servers":                      "servers:read",
 	"GET /api/v1/servers/summary":              "servers:read",
 	"POST /api/v1/servers":                     "servers:write",
@@ -138,6 +154,9 @@ func isNumeric(s string) bool {
 
 // validScopes is the set of all scope strings that a user may request.
 var validScopes = map[string]bool{
+	"files:read":       true,
+	"files:write":      true,
+	"files:delete":     true,
 	"servers:read":     true,
 	"servers:write":    true,
 	"servers:exec":     true,

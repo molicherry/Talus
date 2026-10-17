@@ -18,6 +18,9 @@ import {
 } from "../hooks/use-api-keys";
 
 const ALL_SCOPES = [
+  "files:read",
+  "files:write",
+  "files:delete",
   "servers:read",
   "servers:write",
   "servers:exec",

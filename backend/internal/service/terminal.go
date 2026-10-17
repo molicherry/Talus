@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"sync"
 	"time"
 
@@ -32,8 +33,8 @@ func newTerminalWriter(conn *websocket.Conn) *terminalWriter {
 	return &terminalWriter{sem: make(chan struct{}, 1), conn: conn}
 }
 
-// writeJSON is the output pump's path: it waits for its turn and writes in full. A
-// peer that stopped reading is unblocked by forceClose during teardown.
+// writeJSON serializes control and legacy output frames. A peer that stopped
+// reading is unblocked by forceClose during teardown.
 func (w *terminalWriter) writeJSON(message wsMessage) error {
 	w.sem <- struct{}{}
 	defer func() { <-w.sem }()
@@ -83,9 +84,11 @@ func (w *terminalWriter) forceClose() {
 }
 
 type TerminalService struct {
-	sshSvc   *SSHService
-	registry *gate.Registry
-	userGate mw.UserGate
+	sshSvc            *SSHService
+	registry          *gate.Registry
+	userGate          mw.UserGate
+	keepaliveInterval time.Duration
+	keepaliveTimeout  time.Duration
 }
 
 func NewTerminalService(sshSvc *SSHService) *TerminalService { return &TerminalService{sshSvc: sshSvc} }
@@ -440,6 +443,16 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 		startFailed("terminal_ssh_failed")
 		return result, sessionCtx.Err()
 	}
+	// Initialize the read deadline before announcing readiness. A client may
+	// revoke or close the session immediately after receiving "connected".
+	interval, timeout := s.keepaliveSettings()
+	if err := wsConn.SetReadDeadline(time.Now().Add(interval + timeout)); err != nil {
+		end("failed", "terminal_transport_failed", "transport_error")
+		return result, err
+	}
+	wsConn.SetPongHandler(func(string) error {
+		return wsConn.SetReadDeadline(time.Now().Add(interval + timeout))
+	})
 	if err := writer.writeJSON(wsMessage{Type: "connected"}); err != nil {
 		startFailed("terminal_output_failed")
 		return result, err
@@ -449,16 +462,20 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 	readyAt = result.ReadyAt
 	resourceMu.Unlock()
 	usage.FromContext(ctx).SetPhase("ready")
-
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
+		keepTerminalAlive(sessionCtx, client, writer, interval, timeout, end, force)
+	}()
+	go func() {
+		defer wg.Done()
+		output := terminalOutputWriter{writer: writer, binary: wsConn.Subprotocol() == TerminalBinaryProtocol}
 		buf := make([]byte, 4096)
 		for {
 			n, readErr := stdout.Read(buf)
-			if n > 0 {
-				if err := writer.writeJSON(wsMessage{Type: "output", Data: string(buf[:n])}); err != nil {
+			if n > 0 || readErr != nil {
+				if err := output.write(buf[:n], readErr != nil); err != nil {
 					end("failed", "terminal_output_failed", "transport_error")
 					return
 				}
@@ -479,8 +496,11 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 		for {
 			var msg wsMessage
 			if readErr := wsConn.ReadJSON(&msg); readErr != nil {
+				var netErr net.Error
 				if websocket.IsCloseError(readErr, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
 					end("succeeded", "", "normal_close")
+				} else if errors.As(readErr, &netErr) && netErr.Timeout() {
+					end("failed", "terminal_transport_timeout", "transport_error")
 				} else {
 					end("failed", "terminal_transport_failed", "transport_error")
 				}

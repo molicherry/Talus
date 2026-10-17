@@ -504,9 +504,13 @@ func safeReason(reason string) string {
 		return ""
 	}
 	switch reason {
+	case "sftp_invalid_upload", "sftp_upload_expired", "sftp_checksum_mismatch", "sftp_text_too_large", "sftp_not_text", "sftp_not_directory", "sftp_invalid_range":
+		return reason
+	case "sftp_invalid_path", "sftp_not_found", "sftp_permission_denied", "sftp_exists", "sftp_conflict", "sftp_not_empty", "sftp_busy", "sftp_too_large", "sftp_directory_too_large", "sftp_unavailable", "sftp_failed", "sftp_not_regular", "sftp_atomic_unsupported", "sftp_size_mismatch":
+		return reason
 	case "unauthorized", "invalid_credentials", "current_password_incorrect", "forbidden", "not_found", "conflict", "validation_failed", "internal_error", "rate_limited", "invalid_request", "invalid_server_id", "invalid_service_id", "invalid_credential_id", "invalid_key_id", "invalid_relay_request", "invalid_relay_path", "invalid_scopes", "scopes_required", "servers_not_found", "method_required", "command_required", "service_not_found", "credential_not_found", "api_key_not_found", "raw_key_unavailable", "credential_decrypt_failed", "api_key_server_denied", "api_key_service_denied", "relay_timeout", "relay_unreachable", "invalid_query", "ssh_connection_failed", "ssh_authentication_failed", "ssh_timeout", "ssh_host_key_mismatch", "no_host_key_mismatch", "host_key_changed", "request_rejected", "client_cancelled", "relay_copy_failed", "relay_upstream_failed", "terminal_auth_timeout", "terminal_auth_failed", "terminal_ssh_failed", "terminal_transport_failed", "terminal_closed", "terminal_cancelled", "websocket_upgrade_failed", "ssh_nonzero_exit", "client_closed", "remote_closed", "normal_close", "transport_error", "ssh_error", "server_shutdown":
 		return reason
-	case "terminal_permission_denied", "terminal_input_failed", "terminal_output_failed", "terminal_resize_failed":
+	case "terminal_permission_denied", "terminal_input_failed", "terminal_output_failed", "terminal_resize_failed", "terminal_keepalive_failed", "terminal_keepalive_timeout", "terminal_transport_timeout", "ssh_host_key_unverified":
 		return reason
 	case "invalid_connection_config", "connection_config_changed", "connection_in_use", "proxy_connection_failed", "proxy_auth_failed", "proxy_connect_rejected", "jump_forward_failed":
 		return reason

@@ -248,7 +248,8 @@ func (h *ServerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // trustHostKeyRequest carries the exact fingerprint the operator verified, so
 // the backend can refuse to trust a key that changed since it was displayed.
 type trustHostKeyRequest struct {
-	Fingerprint string `json:"fingerprint"`
+	Fingerprint      string  `json:"fingerprint"`
+	ExpectedRevision *uint64 `json:"expected_revision,omitempty"`
 }
 
 func (h *ServerHandler) TrustHostKey(w http.ResponseWriter, r *http.Request) {
@@ -270,7 +271,11 @@ func (h *ServerHandler) TrustHostKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := h.svc.TrustHostKey(r.Context(), id, req.Fingerprint)
+	var revision []uint64
+	if req.ExpectedRevision != nil {
+		revision = append(revision, *req.ExpectedRevision)
+	}
+	updated, err := h.svc.TrustHostKey(r.Context(), id, req.Fingerprint, revision...)
 	if err != nil {
 		server.WriteError(w, r, err)
 		return

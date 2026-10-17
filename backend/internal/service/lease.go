@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
@@ -206,17 +206,14 @@ func (l *sshLease) Upload(ctx context.Context, localPath, remotePath string, bud
 	return err
 }
 
-// copyFileOnClient streams localPath to remotePath over an exclusively owned
-// client. Foreground cleanup has one absolute deadline. If workers outlive it,
-// the lease retains ownership in a background finalizer until they join.
+// copyFileOnClient uploads an artifact over the same supervised SFTP channel
+// as the file API, while retaining the deployment's existing SSH lease.
 func (s *SSHService) copyFileOnClient(parent context.Context, client *ssh.Client, localPath, remotePath string, budget time.Duration) (error, bool) {
 	ctx, cancel := context.WithTimeout(parent, budget)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return err, false
 	}
-	// Uploads accept regular artifacts only. In particular, opening a FIFO before
-	// cancellation supervision could block indefinitely in the local filesystem.
 	info, err := os.Stat(localPath)
 	if err != nil {
 		return fmt.Errorf("stat source: %w", err), false
@@ -224,83 +221,38 @@ func (s *SSHService) copyFileOnClient(parent context.Context, client *ssh.Client
 	if !info.Mode().IsRegular() {
 		return errors.New("upload source must be a regular file"), false
 	}
-	f, err := os.Open(localPath)
+	source, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open source: %w", err), false
 	}
-	defer f.Close()
-
-	var stderrMu sync.Mutex
-	var stderrTotal int64
-	stderr := newCappedWriter(&stderrMu, &stderrTotal, maxExecOutput, maxExecStreamOutput)
-	var copyErr error
-	ready := make(chan *ssh.Session, 1)
-	runDone := make(chan error, 1)
-	joined := make(chan struct{})
-	go func() {
-		defer close(joined)
-		if err := ctx.Err(); err != nil {
-			runDone <- err
-			return
-		}
-		session, err := client.NewSession()
+	defer source.Close()
+	// A caller cancellation also interrupts a pending local read before teardown.
+	stop := context.AfterFunc(ctx, func() { _ = source.Close() })
+	defer stop()
+	err, closed := s.withSFTPClient(ctx, client, false, func(ctx context.Context, c *sftp.Client) error {
+		remote, err := c.OpenFile(remotePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY)
 		if err != nil {
-			runDone <- fmt.Errorf("create session: %w", err)
-			return
+			return err
 		}
-		ready <- session
-		if err := ctx.Err(); err != nil {
-			runDone <- err
-			return
+		defer remote.Close()
+		// Agent artifacts stay private until hash verification and activation.
+		if err = remote.Chmod(0600); err != nil {
+			return err
 		}
-		pipe, err := session.StdinPipe()
+		count, err := io.CopyBuffer(remote, source, make([]byte, 32<<10))
 		if err != nil {
-			runDone <- fmt.Errorf("stdin pipe: %w", err)
-			return
+			return err
 		}
-		copyDone := make(chan struct{})
-		go func() {
-			defer close(copyDone)
-			_, copyErr = io.Copy(pipe, f)
-			_ = pipe.Close()
-		}()
-		session.Stderr = stderr
-		quotedPath := "'" + strings.ReplaceAll(remotePath, "'", "'\"'\"'") + "'"
-		cmd := fmt.Sprintf("cat > %s && chmod +x %s", quotedPath, quotedPath)
-		runDone <- session.Run(cmd)
-		<-copyDone
-	}()
-
-	var runErr, cause error
-	completed := false
-	select {
-	case runErr = <-runDone:
-		completed = true
-	case <-ctx.Done():
-		cause = context.Cause(ctx)
+		if count != info.Size() {
+			return SFTPError("sftp_size_mismatch")
+		}
+		if err = remote.Close(); err != nil {
+			return err
+		}
+		return ctx.Err()
+	})
+	if err != nil {
+		return fmt.Errorf("copy file over SFTP: %w", err), closed
 	}
-	// NewSession, stdin transfer, Run and Close are all supervised. Closing the
-	// local source also interrupts pending reads before joining the copy worker.
-	_ = f.Close()
-	grace := s.uploadTeardownGrace
-	if grace <= 0 || grace > execTeardownGrace {
-		grace = execTeardownGrace
-	}
-	forceClosed, cleanupErr := closeSSHSession(client, ready, joined, sshTeardownDeadlines(ctx, grace))
-	if cleanupErr != nil {
-		return errors.Join(cause, runErr, cleanupErr), true
-	}
-	if !completed {
-		runErr = <-runDone
-	}
-	if cause != nil {
-		return cause, forceClosed
-	}
-	if runErr != nil {
-		return fmt.Errorf("copy failed: %w (stderr: %s)", runErr, stderr.String()), forceClosed
-	}
-	if copyErr != nil {
-		return fmt.Errorf("copy file: %w", copyErr), forceClosed
-	}
-	return nil, forceClosed
+	return nil, closed
 }

@@ -22,7 +22,12 @@ import (
 // with a PTY and then never writes output or EOF on it. It stands in for a
 // remote full-screen program (top, vim) that ignores stdin EOF — the case
 // where a terminal session used to stay parked forever.
-func startTestSSHServer(t *testing.T) (addr string, hostKey ssh.PublicKey) {
+type terminalPeerHooks struct {
+	globalRequest func(*ssh.Request)
+	shell         func(ssh.Channel)
+}
+
+func startTestSSHServer(t *testing.T, hooks ...terminalPeerHooks) (addr string, hostKey ssh.PublicKey) {
 	t.Helper()
 
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -49,7 +54,7 @@ func startTestSSHServer(t *testing.T) (addr string, hostKey ssh.PublicKey) {
 			if err != nil {
 				return
 			}
-			go serveTestSSHConn(conn, cfg)
+			go serveTestSSHConn(conn, cfg, hooks...)
 		}
 	}()
 
@@ -59,14 +64,26 @@ func startTestSSHServer(t *testing.T) (addr string, hostKey ssh.PublicKey) {
 // serveTestSSHConn serves one SSH connection. Global requests are rejected,
 // which is all the pool keepalive probe needs, and every session channel is
 // accepted and kept open without ever being written to.
-func serveTestSSHConn(conn net.Conn, cfg *ssh.ServerConfig) {
+func serveTestSSHConn(conn net.Conn, cfg *ssh.ServerConfig, hooks ...terminalPeerHooks) {
 	sshConn, chans, reqs, err := ssh.NewServerConn(conn, cfg)
 	if err != nil {
 		_ = conn.Close()
 		return
 	}
 	defer sshConn.Close()
-	go ssh.DiscardRequests(reqs)
+	var hook terminalPeerHooks
+	if len(hooks) > 0 {
+		hook = hooks[0]
+	}
+	go func() {
+		for req := range reqs {
+			if hook.globalRequest != nil {
+				hook.globalRequest(req)
+			} else {
+				_ = req.Reply(false, nil)
+			}
+		}
+	}()
 
 	for newChan := range chans {
 		if newChan.ChannelType() != "session" {
@@ -80,6 +97,9 @@ func serveTestSSHConn(conn net.Conn, cfg *ssh.ServerConfig) {
 		go func() {
 			for req := range channelReqs {
 				_ = req.Reply(req.Type == "shell" || req.Type == "pty-req", nil)
+				if req.Type == "shell" && hook.shell != nil {
+					hook.shell(ch)
+				}
 			}
 		}()
 		// Drain stdin but never treat its EOF as the shell exiting, and never
@@ -167,13 +187,19 @@ func beginSession(t *testing.T, svc *TerminalService, serverID uint) *sessionHar
 }
 
 func beginSessionWithContext(t *testing.T, svc *TerminalService, serverID uint, parent context.Context) *sessionHarness {
+	return beginSessionWithProtocol(t, svc, serverID, parent, "")
+}
+
+func beginSessionWithProtocol(t *testing.T, svc *TerminalService, serverID uint, parent context.Context, protocol string) *sessionHarness {
 	t.Helper()
 
 	started := make(chan struct{})
 	result := make(chan error, 1)
 	facts := make(chan TerminalResult, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := terminalTestUpgrader.Upgrade(w, r, nil)
+		upgrader := terminalTestUpgrader
+		upgrader.Subprotocols = []string{TerminalBinaryProtocol}
+		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			result <- err
 			return
@@ -191,7 +217,11 @@ func beginSessionWithContext(t *testing.T, svc *TerminalService, serverID uint, 
 	}))
 	t.Cleanup(srv.Close)
 
-	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	dialer := *websocket.DefaultDialer
+	if protocol != "" {
+		dialer.Subprotocols = []string{protocol}
+	}
+	ws, _, err := dialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -565,7 +595,8 @@ func (staticServerSource) ClearHostKeyMismatch(context.Context, uint) error {
 func testServerFor(id uint) *model.Server {
 	credID := uint(1)
 	password := "encrypted-test-password"
-	return &model.Server{BaseModel: model.BaseModel{ID: id}, Host: "test-host", Port: 22, CredentialID: &credID, Credential: &model.SSHCredential{BaseModel: model.BaseModel{ID: credID}, AuthType: "password", Username: "tester", EncryptedPassword: &password}}
+	key := []byte("verified-cached-test-host-key")
+	return &model.Server{BaseModel: model.BaseModel{ID: id}, Host: "test-host", Port: 22, HostKey: &key, CredentialID: &credID, Credential: &model.SSHCredential{BaseModel: model.BaseModel{ID: credID}, AuthType: "password", Username: "tester", EncryptedPassword: &password}}
 }
 
 func testFP(id uint) string { return serverFingerprint(testServerFor(id)) }

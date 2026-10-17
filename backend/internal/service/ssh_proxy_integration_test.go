@@ -150,11 +150,12 @@ func configureServiceSOCKS(t *testing.T, source *routeTestSource, proxy string) 
 func TestSOCKSRouteExecAndCopyFileUseSameConnectionPath(t *testing.T) {
 	uploaded := make(chan string, 1)
 	target, key := startExecSSHServer(t, func(command string, ch ssh.Channel, _ <-chan struct{}) {
-		if command == "echo routed" {
+		switch command {
+		case "echo routed":
 			_, _ = io.WriteString(ch, "routed")
-		} else {
-			content, _ := io.ReadAll(ch)
-			uploaded <- string(content)
+		case "subsystem:sftp":
+			serveUploadPeer(ch, &uploadPeerFS{finish: func(_ string, data []byte) error { uploaded <- string(data); return nil }})
+			return
 		}
 		_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
 		_ = ch.Close()
@@ -342,11 +343,12 @@ func startServiceSSHJump(t *testing.T, target string) (string, ssh.PublicKey, <-
 func TestSSHJumpRouteExecAndCopyFileUseIndependentSavedCredentials(t *testing.T) {
 	uploaded := make(chan string, 1)
 	target, key := startExecSSHServer(t, func(command string, ch ssh.Channel, _ <-chan struct{}) {
-		if command == "echo jump" {
+		switch command {
+		case "echo jump":
 			_, _ = io.WriteString(ch, "via-jump")
-		} else {
-			content, _ := io.ReadAll(ch)
-			uploaded <- string(content)
+		case "subsystem:sftp":
+			serveUploadPeer(ch, &uploadPeerFS{finish: func(_ string, data []byte) error { uploaded <- string(data); return nil }})
+			return
 		}
 		_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
 		_ = ch.Close()

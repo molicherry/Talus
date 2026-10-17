@@ -10,12 +10,17 @@
 - **SSH 连接方式** — 每台服务器可选直连、单个 SSH 跳板或 SOCKS5，命令执行、浏览器终端、监控和 Agent 上传统一使用所选路线。
 - **凭证保险库** — 使用 AES-256-GCM 加密存储 SSH 密码和私钥。
 - **远程 Shell** — 在任意服务器上执行命令，查看 stdout、stderr 和退出码。
-- **交互式终端** — 在浏览器中打开完整的 PTY 会话（xterm.js，支持窗口缩放，基于 WebSocket）。
-- **实时监控** — CPU、内存、磁盘、负载、Swap、网络和磁盘 I/O 图表，支持 15 分钟 / 1 小时 / 6 小时 / 24 小时 / 7 天 / 30 天时间范围、平均值与峰值视图及可访问的数据表格。Hub 通过 SSH 部署适配目标架构的监控 Agent。
+- **交互式终端** — 在浏览器中打开完整的 PTY 会话（xterm.js，支持窗口缩放、二进制输出和活跃会话保活），中文及 Emoji 跨帧输出可连续解码。
+- **实时监控** — CPU、内存、磁盘、负载、Swap、网络和磁盘 I/O 图表，支持 15 分钟 / 1 小时 / 6 小时 / 24 小时 / 7 天 / 30 天时间范围、平均值与峰值视图及可访问的数据表格。Hub 通过 SFTP 上传适配目标架构的监控 Agent，再通过 SSH 执行。
 - **API 密钥** — 创建带作用域和服务器级别访问控制的 API 密钥。二维权限模型（操作 × 服务器）。密钥加密存储，支持按需复制，带有审计日志和速率限制。
+- **SFTP 文件管理** — 在 SSH 工作区浏览文件、上传下载与续传、传输目录，以及编辑 UTF-8 文本并检查版本冲突。文件 API 复用 SSH 凭据、已确认的主机指纹和代理路线。
 - **服务代理** — 注册外部服务（Grafana、Portainer 等），加密存储凭据。通过 Talus 代理 API 请求，支持凭据注入和占位符替换。编辑时可加载已有凭据，支持显示/隐藏切换和复制。
 
 ## 架构
+
+终端使用 `talus.terminal.v2` WebSocket 子协议，输出为 SSH 原始字节的二进制帧；认证、输入、窗口调整、状态及错误仍使用 JSON。调用方需按 UTF-8 字节流连续解码，不能逐帧单独转换。未指定子协议的旧客户端继续接收 JSON 输出，服务端会保留读取边界上不完整的 UTF-8 字符。
+
+会话就绪后，每 25 秒发送 WebSocket Ping 和 SSH keepalive。浏览器自动回复 Pong；SSH 探测超过 10 秒未收到响应，或 WebSocket 超过 35 秒未收到 Pong，会结束会话并丢弃连接。SSH 明确拒绝探测请求也视为连接存活。断开、取消或撤销会话时，会停止探测并等待相关工作退出。
 
 ```
   浏览器                   Talus Hub                    目标服务器
@@ -29,7 +34,7 @@
 ```
 
 - **中心辐射架构**：Hub 通过 SSH 连接到你的服务器，服务器无需回连。
-- **按需运行 Agent**：监控数据由 Hub 通过 SSH 部署并运行一个静态编译的 Go 二进制文件来采集。采集后进程退出，已校验的二进制文件保留在 `/tmp/vpsmanager-agent` 供后续复用，无需守护进程或额外开放端口。
+- **按需运行 Agent**：监控数据由 Hub 通过 SFTP 上传、再通过 SSH 运行一个静态编译的 Go 二进制文件来采集。采集后进程退出，已校验的二进制文件保留在 `/tmp/vpsmanager-agent` 供后续复用，无需守护进程或额外开放端口。
 - **凭证加密**：使用你掌控的主密钥进行静态加密存储。列表响应不返回秘密值，已认证的管理员可通过专用接口查看，并记录审计日志。
 
 ## 快速开始
@@ -37,7 +42,7 @@
 ### 前置条件
 
 - Docker 和 Docker Compose
-- 可通过 SSH 访问的 Linux 服务器（推荐 Debian/Ubuntu）
+- 可通过 SSH 访问的 Linux 服务器（推荐 Debian/Ubuntu）；文件传输及监控 Agent 首次部署或更新需要启用 SSH 的 `sftp` 子系统。
 
 ### 1. 克隆仓库
 
@@ -97,6 +102,30 @@ docker compose up -d --build
 
 管理员可进入 **使用日志**，筛选操作历史并查看详情。日志覆盖资源变更、敏感信息查看、SSH 命令执行、服务转发和终端会话，不记录密钥等秘密信息、命令内容或流式传输内容。API 密钥无法查询这些日志。
 
+### 7. 通过 SFTP 管理文件
+
+打开 SSH 终端工具栏中的“文件”。桌面使用分栏，手机在终端和文件面板间切换，保留原 SSH 会话。终端、文件面板和文本编辑器统一跟随浅色、深色或系统主题，切换时保留终端内容和编辑草稿。
+
+文件管理复用 SSH 账号、端口、加密凭据、主机指纹确认、直连 / SOCKS5 / 跳板路线和连接池配额。目标须启用 SSH 的 `sftp` 子系统，无需额外安装 FTP 服务或 Agent。内部文件上传和监控 Agent 部署也共用这套 SFTP 传输层，原 shell 上传方式已替换，不会自动回退。Agent 上传、SHA256 校验和原子激活始终使用同一条锁定的 SSH 连接；上传时文件权限为 `0600`，激活时再设置可执行权限。文件权限取决于 SSH 账号，Talus 不提供目录沙箱或 `sudo` 提权。
+
+支持路径导航、上传下载、新建目录、改名或移动、删除文件或空目录。覆盖上传需要确认。新文件权限为 `0600`；替换文件保留原权限位，所有者为创建临时文件的 SSH 账号。覆盖要求服务器支持 `posix-rename@openssh.com`，不会通过先删除原文件来降级覆盖。新文件优先通过原子硬链接发布，否则使用 SFTP v3 的禁止覆盖重命名约定。
+
+上传按 1 MiB 分块，并校验整个文件的 SHA256。“取消”暂停上传，重新选择同一文件即可从服务器确认的实际偏移继续；“放弃未完成上传”删除临时文件，保留目标文件。当前标签页刷新后仍保留上传恢复信息；退出登录、会话过期或切换账号会清除这些信息。签名令牌有效期 24 小时，绑定用户或 API 密钥身份、服务器、SSH 路线、目标路径、大小和校验和。`JWT_SECRET`、凭据和连接配置不变时，Hub 重启后仍可恢复；令牌过期后，同一调用者仍可通过原路线清理临时文件。路线变化后遗留的临时文件可由具备删除权限的账号通过普通文件管理清理。
+
+下载以 16 MiB 为块，通过 `Range`、`If-Range` 和 SHA256 ETag 校验版本与内容。文件面板保持打开时，可从上一个完整块继续；关闭面板或刷新页面会释放浏览器中暂存的数据，重新下载须从头开始。
+
+“上传目录”保留相对子目录，不会自动覆盖已有文件；失败或取消前已成功上传的文件保留。浏览器仅提供选中的文件，空本地目录不会上传。“下载目录 ZIP”包含嵌套目录和空远程目录，跳过符号链接及特殊文件，并在开始响应前检查大小限制。符号链接可展示、改名和删除，但不主动跟随它们进行文件下载、编辑或覆盖；需要文件系统隔离时，应在目标 SSH 账号或 chroot 上配置。
+
+“编辑文本”支持最大 1 MiB 的 UTF-8 文本，保留换行和权限位，保存时携带内容哈希版本。版本过期返回 `409 sftp_conflict`，界面保留草稿；关闭或重新加载未保存的内容须确认丢弃。保存通过同目录临时文件发布。SFTP 不支持条件重命名，因此版本检查属于乐观并发控制，外部写入仍可能发生在最终检查与重命名之间。
+
+传输和清理限制：
+
+- 单文件、目录 ZIP 内容总量及一次目录上传总量均不超过 64 MiB；ZIP 元数据额外不超过 2 MiB。文本编辑上限 1 MiB。
+- 目录列表最多返回 2,000 项或 2 MiB 元数据，目录协议输入限制为 8 MiB；ZIP 最多 2,000 项、32 层子目录。超过限制时返回错误或明确标记列表已截断。
+- 每台服务器最多一个活跃 SFTP 文件 API 操作，与现有 SSH 配额共享限制；终端和监控使用各自的传输连接。SSH 通道及工作协程退出后才释放文件操作槽。
+- 元数据操作预算为 25 秒，传输总预算为 10 分钟，HTTP 读写空闲超时为 30 秒。反向代理须允许相应大小和时长。
+- 普通上传在可连接远端的失败或取消时清理临时文件；网络中断可能留下临时文件。可续传上传主动保留临时文件供恢复或放弃，发布前保留原目标文件；令牌过期不代表远端临时文件被自动删除。
+
 ## 技术栈
 
 | 层级 | 技术 |
@@ -107,17 +136,19 @@ docker compose up -d --build
 | 监控 Agent | Go + [gopsutil](https://github.com/shirou/gopsutil) |
 | 部署 | Docker Compose |
 
+SSH 工作区的文件面板、二进制传输、进度与取消、临时文件发布等交互思路参考了 [EdgeSSH](https://github.com/aozorae/EdgeSSH)，协议由 Talus Go 后端通过 `github.com/pkg/sftp` 实现。
+
 ## AI 集成
 
 Talus 附带一个**可移植的** [agent skill](../skills/talus/SKILL.md)，任何 AI 编程助手
 （OpenCode、Claude Code、Cursor 等）都可以通过 Talus REST API 操作它：
-列出服务器、执行命令、查询指标、向已注册服务转发请求、添加/更新服务器。
+列出服务器、执行命令、查询指标、向已注册服务转发请求、通过 SFTP 管理文件、添加/更新服务器。
 
 ### 准备
 
 - 一个运行中的 Talus 实例（见上文部署）
 - 一个 API 密钥——在 **Talus Web UI → API Keys** 创建（默认作用域覆盖读/执行/指标；
-  `servers:write` 和 `services:relay` 为可选勾选）
+  `servers:write`、`services:relay` 及文件作用域需主动勾选）
 
 ### 安装
 
@@ -159,6 +190,60 @@ POST /api/v1/services/{id}/relay → 按指南构造请求
 **Talus Web UI → 服务 → 添加/编辑服务 → 使用指南** 字段中编写。它告诉 AI 如何使用该服务
 （端点、认证头、请求示例），而无需把任何服务细节硬编码进通用 skill。
 
+### 文件 API
+
+使用用户 JWT（`Authorization: Bearer …`）或 API 密钥（`X-API-Key: …`）认证。所有接口校验 API 密钥的 `server_ids`。文件作用域需单独授予，已有密钥不会自动获得文件权限。具备 Exec 或终端权限的调用方仍拥有底层 SSH 账号的命令能力。
+
+| 作用域 | 操作 |
+| --- | --- |
+| `files:read` | 列表、属性、下载、读取文本、目录 ZIP |
+| `files:write` | 上传、续传及状态、清理自身上传的临时文件、新建目录、改名、保存文本 |
+| `files:delete` | 删除文件、符号链接或空目录 |
+
+API 密钥无法确认首次或变更后的主机指纹，须先由管理员在 Web UI 核对并信任。目标不支持 SFTP 时会明确报错，不会回退为执行 shell 命令。
+
+以下接口统一位于 `/api/v1/servers/{id}/sftp` 下。查询参数中的远程路径须 URL 编码，也可通过对应 JSON 请求体传递。普通响应为 `{"data": …}`，错误为 `{"error":{"code":…,"reason":…,"message":…}}`；文件和 ZIP 下载返回二进制。上传体直接发送原始字节，无需 base64 或 JSON 包装。
+
+| 方法和路径 | 请求 | 响应 |
+| --- | --- | --- |
+| `GET /entries?path=…` | 默认路径 `.` | `path`、`parent`、`entries`、`truncated` |
+| `GET /stat?path=…` | 远程路径 | `name`、`path`、`kind`、`size`、`mode`、`modified_at` |
+| `GET /download?path=…` | 可选 `Range`、`If-Range` | 二进制、`ETag`、`Accept-Ranges`、`Content-Length`；分段响应为 `206` 并带 `Content-Range` |
+| `POST /upload?path=…&overwrite=false` | 原始字节；`Content-Length` 或 `size` 参数 | 上传大小；单次上传，取消时尽可能清理临时文件 |
+| `POST /mkdir` | `{"path":"…","parents":false}` | 成功；`parents:true` 创建缺失的父目录 |
+| `POST /rename` | `{"from":"…","to":"…"}` | 成功；目标路径必须不存在 |
+| `DELETE /entry?path=…` | 远程路径 | 删除文件、链接或空目录，不递归删除 |
+| `GET /archive?path=…` | 远程目录 | 流式 ZIP 附件 |
+| `GET /text?path=…` | 远程文本文件 | `path`、`content`、`version` |
+| `PUT /text` | `{"path":"…","content":"…","version":"sha256:…"}` | 新内容和版本；版本过期返回 `409` |
+| `POST /uploads/start` | `{"path":"…","size":123,"sha256":"64 位十六进制","overwrite":false}` | 签名 `token`、`path`、`size`、`offset`、`sha256`、`expires_at` |
+| `POST /uploads/status` | `{"token":"…"}` | 实际偏移及元数据；`completed:true` 可恢复丢失的完成确认 |
+| `PUT /uploads/chunk?offset=…&size=…` | 最多 1 MiB 原始字节，`X-Upload-Token` 请求头 | 已确认的远端偏移；偏移过期返回 `409` |
+| `POST /uploads/complete` | `{"token":"…"}` | 校验总大小和校验和后发布；完成确认丢失时可重试 |
+| `DELETE /uploads` | `X-Upload-Token` 请求头 | 清理该上传者的临时文件 |
+
+每次分块、状态查询和完成请求都重新认证。恢复要求同一 JWT 用户或同一 API 密钥身份，角色相同不代表可以互用令牌；更改路线或凭据会使原上传令牌无法用于新路线。分块失败后先查询 `/uploads/status`，因为部分字节可能已到达远端。
+
+目录条目的 `kind` 为 `file`、`directory`、`symlink` 或 `other`。大小和修改时间不保证不存在并发外部写入；编辑使用内容版本，续传下载使用 `If-Range`。远程读取失败可能在响应头发送后中止连接，调用方应校验 `Content-Length`、校验和或 ZIP 完整性。
+
+使用日志记录操作、调用者、服务器、结果、路线及受限字节计数，不记录文件内容、恢复令牌或远程路径字符串。
+
+#### 文件 API 示例
+
+```bash
+# 列出目录。
+curl --get "$TALUS_URL/api/v1/servers/1/sftp/entries" \
+  -H "X-API-Key: $TALUS_API_KEY" --data-urlencode 'path=/home/deploy'
+
+# 上传原始二进制；默认保留已存在的目标文件。
+curl -X POST "$TALUS_URL/api/v1/servers/1/sftp/upload?path=%2Fhome%2Fdeploy%2Fdata.bin" \
+  -H "X-API-Key: $TALUS_API_KEY" -H 'Content-Type: application/octet-stream' \
+  --data-binary @data.bin
+
+# 下载；续传时保存并使用 ETag / If-Range，以免混入不同版本。
+curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin" \
+  -H "X-API-Key: $TALUS_API_KEY" -o data.bin
+```
 
 ### 示例提示词
 
@@ -207,7 +292,7 @@ POST /api/v1/services/{id}/relay → 按指南构造请求
 - 目标服务器**无需开放额外端口**——监控数据通过现有的 SSH 通道传输。
 - 监控 Agent **按需运行**，采集指标后进程退出。Hub 复用前校验保留的二进制文件，必要时原子替换，目标服务器无需运行 Agent 守护进程。
 - 修改密码会使已有 JWT 失效，并主动关闭该用户的终端会话。API 密钥使用独立的生命周期。
-- SSH 主机密钥采用 **TOFU（首次信任）** 机制验证：首次连接时记录密钥，后续连接验证匹配，防止中间人攻击。
+- **SSH 主机指纹显式确认**：首次连接仅读取并展示 SHA256 指纹，在发送 SSH 认证信息前中止。管理员通过可信渠道核对并确认后才能连接；跳板机和目标主机分别确认。已有可信密钥继续有效，密钥变化时会阻止认证并要求重新确认。确认请求校验展示的指纹和连接版本，拒绝过期操作。
 
 ## 生产部署（GHCR 镜像）
 
@@ -288,7 +373,10 @@ Talus 使用路由级写入预算：普通 HTTP API 为 15 秒，Exec 最长执�
 | 路由 | 代理超时下限 |
 | --- | --- |
 | `POST /api/v1/servers/*/exec`、`POST /api/v1/services/*/relay` | ≥ 330 秒 |
-| 普通 HTTP API | ≥ 15 秒 |
+| SFTP 元数据 / 传输 | ≥ 30 秒 / ≥ 630 秒 |
+| 其他普通 HTTP API | ≥ 15 秒 |
+
+SFTP 传输总预算为 10 分钟，HTTP 读写空闲超时为 30 秒。代理须允许至少 64 MiB 的文件请求体，并对 SFTP 文件和 ZIP 下载关闭响应缓冲。
 
 `/api/v1/services/*/relay` 应关闭响应缓冲，以便增量转发流式内容。终端路由须启用 WebSocket 升级，并按预期交互会话时长配置空闲超时；上表中的普通 HTTP 超时不代表终端会话时限。
 

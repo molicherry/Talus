@@ -277,7 +277,7 @@ func (r *Recorder) AdmitShort(op *Operation) {
 }
 
 func longAction(action string) bool {
-	return action == "server.exec" || action == "service.relay" || action == "server.terminal"
+	return action == "server.sftp.archive" || action == "server.sftp.upload.start" || action == "server.sftp.upload.complete" || action == "server.sftp.upload.chunk" || action == "server.sftp.upload" || action == "server.sftp.download" || action == "server.exec" || action == "service.relay" || action == "server.terminal"
 }
 
 func (r *Recorder) Begin(op *Operation) bool {

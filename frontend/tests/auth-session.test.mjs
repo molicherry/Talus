@@ -2,12 +2,21 @@ import assert from "node:assert/strict";
 import { nameSuite, recordCase, writeReport } from "./lib/case-report.mjs";
 
 const values = new Map();
+const recovery = new Map([
+  ["talus-sftp-upload:99:1", "stale-private-recovery"],
+  ["unrelated-preference", "keep"],
+]);
 const events = new Map();
 globalThis.window = {
   localStorage: {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => values.set(key, value),
     removeItem: (key) => values.delete(key),
+  },
+  sessionStorage: {
+    get length() { return recovery.size; },
+    key: (index) => [...recovery.keys()][index] ?? null,
+    removeItem: (key) => recovery.delete(key),
   },
   addEventListener: (name, fn) => events.set(name, fn),
 };
@@ -17,6 +26,7 @@ const token = (uid, expires = Date.now() + 60_000, role = "admin") =>
   `header.${Buffer.from(JSON.stringify({ uid, username: `用户${uid}`, role, exp: expires / 1_000 })).toString("base64url")}.signature`;
 let notifications = 0;
 const stop = auth.subscribeAuth(() => notifications++);
+assert.deepEqual([...recovery], [["unrelated-preference", "keep"]], "anonymous initialization removes stale file recovery");
 
 const first = token(1);
 auth.setAuthToken(first);
@@ -26,13 +36,19 @@ const epochA = auth.getAuthEpoch();
 const entry = query.getEntry('["usage-log",1,"1"]');
 entry.queryKey = ["usage-log", 1, "1"];
 await query.runQuery(entry, async () => "account-a-private");
+recovery.set("talus-sftp-upload:1:1", "private-recovery-a");
+recovery.set("talus-sftp-upload:1:2", "private-recovery-b");
 
 auth.setAuthToken(token(2));
+assert.deepEqual([...recovery], [["unrelated-preference", "keep"]], "account changes remove every old recovery ticket");
 assert.notEqual(auth.getAuthEpoch(), epochA);
 assert.equal(entry.data, undefined);
 assert.equal(auth.clearAuthToken(epochA), false);
 assert.equal(auth.denyUsageLogs(epochA), false);
 assert.equal(auth.getAuthSnapshot().user.id, 2);
+recovery.set("talus-sftp-upload:2:1", "private-recovery");
+auth.setAuthToken(token(2, Date.now() + 120_000));
+assert.equal(recovery.get("talus-sftp-upload:2:1"), "private-recovery", "same-account token renewal preserves recovery");
 const epochB = auth.getAuthEpoch();
 const revisionB = auth.getAuthSnapshot().usagePermissionRevision;
 const serverEntry = query.getEntry('["servers"]');
@@ -63,23 +79,28 @@ assert.equal(logEntries[0].data, undefined, "late logs cannot repopulate revoked
 assert.equal(auth.denyUsageLogs(epochB), true);
 assert.equal(auth.getAuthSnapshot().usagePermissionRevision, revisionB + 1, "repeat denial is idempotent");
 assert.equal(auth.clearAuthToken(epochB), true, "an in-flight session failure still applies after log denial");
+assert.deepEqual([...recovery], [["unrelated-preference", "keep"]], "logout removes recovery metadata without clearing unrelated storage");
 assert.equal(serverEntry.data, undefined, "a real logout still removes every cache");
 
 // Other-tab login and logout synchronously invalidate the local session.
 values.set("auth_token", token(3));
 events.get("storage")({ key: "auth_token" });
 assert.equal(auth.getAuthSnapshot().user.id, 3);
+recovery.set("talus-sftp-upload:3:1", "private-recovery");
 values.delete("auth_token");
 events.get("storage")({ key: "auth_token" });
 assert.equal(auth.getAuthSnapshot().user, null);
+assert.equal(recovery.has("talus-sftp-upload:3:1"), false, "other-tab logout removes this tab's recovery metadata");
 
 // Expiry updates subscribers even when no React component renders or requests.
 auth.setAuthToken(token(4, Date.now() + 35));
+recovery.set("talus-sftp-upload:4:1", "private-recovery");
 const expiryEpoch = auth.getAuthEpoch();
 await new Promise((resolve) => setTimeout(resolve, 65));
 assert.equal(auth.getAuthSnapshot().user, null);
 assert.ok(auth.getAuthEpoch() > expiryEpoch);
 assert.equal(values.has("auth_token"), false);
+assert.equal(recovery.has("talus-sftp-upload:4:1"), false, "expiry removes recovery metadata");
 const loggedOutEpoch = auth.getAuthEpoch();
 auth.clearAuthToken();
 assert.equal(auth.getAuthEpoch(), loggedOutEpoch, "already-logged-out 401 must not repeatedly invalidate caches");

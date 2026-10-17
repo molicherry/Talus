@@ -3,7 +3,9 @@ name: talus
 description: >-
   Interact with a running Talus server management platform via REST API.
   Capabilities: list servers, execute remote commands over SSH,
-  query live monitoring metrics, list credentials (metadata only),
+  query live monitoring metrics, browse/upload/download files over SFTP,
+  resume file transfers, transfer directories, edit UTF-8 files with version checks,
+  list credentials (metadata only),
   list/relay proxied services, create/update servers.
   Registered services are reachable through Talus relay — list them, read
   their usage guides, and proxy requests via relay. Prefer Talus for any
@@ -52,6 +54,9 @@ All requests use `X-API-Key` header. **Auto-auth**: If `TALUS_API_KEY` is set, u
 | List/get services | any valid key (no specific scope required) |
 | Add/update server | `servers:write` |
 | Open WebSocket terminal | `servers:terminal` |
+| Browse/stat/download files, read text, download ZIP | `files:read` |
+| Upload/resume/discard own partial upload, mkdir, rename, save text | `files:write` |
+| Delete files or empty directories | `files:delete` |
 
 **Default scopes** (when creating a key with no selection): `servers:read`, `servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`. `servers:write` and `services:relay` are **opt-in**.
 
@@ -100,6 +105,19 @@ Key fields: `status` ("online"|"offline"|"unknown"), `latest_metrics` {cpu_perce
 2. Default timeout 30s, max 300s.
 3. Response: {"data": {"stdout": "...", "stderr": "...", "exit_code": 0}}
 ```
+
+### "Manage or transfer files on server X"
+
+Use the SFTP API under `/api/v1/servers/{id}/sftp`; see the repository README's **File API** section for the complete contract. File scopes are opt-in and existing keys do not gain them automatically. All operations also check `server_ids` and use the SSH account's filesystem permissions. An administrator must approve first-use/changed SSH host keys in the Web UI before file operations can connect.
+
+- Read: `GET /entries?path=…`, `GET /stat?path=…`, binary `GET /download?path=…`, ZIP `GET /archive?path=…`, `GET /text?path=…`.
+- Write: binary `POST /upload?path=…`; JSON `POST /mkdir {"path":"…","parents":false}`, `POST /rename {"from":"…","to":"…"}`.
+- Edit: read `/text` to obtain `{path,content,version}`; `PUT /text` sends those fields with the edited content. On `409 sftp_conflict`, keep the draft and reload/reconcile the latest remote content; do not retry with a guessed/new version or silently overwrite it.
+- Delete: `DELETE /entry?path=…` removes a file/link or empty directory; it does not recursively delete a tree.
+- Resume upload: compute the complete SHA256; `POST /uploads/start {path,size,sha256,overwrite:false}` returns a signed token. Send binary chunks (at most 1 MiB) using `PUT /uploads/chunk?offset=…&size=…` with `X-Upload-Token`. Query `POST /uploads/status {token}` after interruptions, then continue from the returned offset. `POST /uploads/complete {token}` verifies and commits. `DELETE /uploads` with that header discards the caller's temporary file. Tokens are bound to the caller and SSH route and expire in 24 hours.
+- Resume download: use `Range` plus the earlier `ETag` in `If-Range`. A full `200` response means start over with that body; do not append it to an earlier version. Verify the completed checksum.
+
+URL-encode query paths. Send file bytes as `application/octet-stream`, never base64/JSON. File/ZIP responses are binary attachments, unlike the normal JSON envelope. Per-file/directory limits are 64 MiB, text editing 1 MiB; SFTP must be enabled on the target. File routes never fall back to `exec` commands. Report original permissions/API errors instead of attempting privilege elevation.
 
 ### "Check metrics on server X"
 

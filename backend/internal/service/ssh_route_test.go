@@ -123,9 +123,34 @@ func routeTestFixture(t *testing.T, address string, key ssh.PublicKey) (*SSHServ
 	return svc, source
 }
 
-func TestSSHRouteTOFUReturnsCurrentConnectionButDoesNotCacheOldRevision(t *testing.T) {
+// Simulate the separate, explicit trust action; real persistence is covered by
+// TestFirstHostKeyConfirmationLifecycle with the repository and admin service.
+func trustRouteFixture(t *testing.T, source *routeTestSource, id uint) {
+	t.Helper()
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	srv := source.servers[id]
+	if srv.HostKey != nil || srv.HostKeySeen == nil {
+		t.Fatal("fixture has no untrusted candidate")
+	}
+	srv.HostKey, srv.HostKeySeen, srv.HostKeyMismatchAt = srv.HostKeySeen, nil, nil
+	srv.ConnectionRevision++
+}
+
+func TestSSHRouteRequiresExplicitFirstHostKeyConfirmation(t *testing.T) {
 	addr, key := startTestSSHServer(t)
 	svc, source := routeTestFixture(t, addr, nil)
+	for attempt := 0; attempt < 2; attempt++ {
+		lease, err := svc.GetLease(context.Background(), 1)
+		if lease != nil || !errors.Is(err, server.ErrSSHHostKeyUnverified) {
+			t.Fatalf("untrusted connection = %v, %v", lease, err)
+		}
+		current, _ := source.FindByID(context.Background(), 1)
+		if current.ConnectionRevision != 2 || current.HostKey != nil || current.HostKeySeen == nil || string(*current.HostKeySeen) != string(key.Marshal()) {
+			t.Fatalf("pending state = %#v", current)
+		}
+	}
+	trustRouteFixture(t, source, 1)
 	lease, err := svc.GetLease(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
@@ -133,20 +158,15 @@ func TestSSHRouteTOFUReturnsCurrentConnectionButDoesNotCacheOldRevision(t *testi
 	if _, _, err := lease.Client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
 		t.Fatal(err)
 	}
-	source.mu.Lock()
-	current := cloneRouteServer(source.servers[1])
-	source.mu.Unlock()
-	if current.ConnectionRevision != 2 || current.HostKey == nil || string(*current.HostKey) != string(key.Marshal()) {
-		t.Fatalf("TOFU state = %#v", current)
-	}
 	lease.Release()
+	current, _ := source.FindByID(context.Background(), 1)
 	cached, err := svc.pool.Get(1, serverFingerprint(current))
 	if err != nil {
 		t.Fatal(err)
 	}
 	svc.pool.Release(1, cached)
-	if cached != nil {
-		t.Fatal("first-use connection was cached under its pre-TOFU revision")
+	if cached == nil {
+		t.Fatal("verified connection was not cached")
 	}
 }
 
@@ -241,7 +261,9 @@ func TestSSHJumpMismatchUpdatesOnlyJumpIdentity(t *testing.T) {
 	source.mu.Unlock()
 	target, _ := source.FindByID(context.Background(), 1)
 	presented := []byte("new-jump-key")
-	svc.recordMismatch(context.Background(), &sshRouteSnapshot{target: target, jump: cloneRouteServer(jump)}, &sshpool.RouteError{Role: "jump", Stage: "jump_host_key", Reason: server.ReasonSSHHostKeyMismatch, Cause: &sshpool.HostKeyMismatchError{Presented: presented}})
+	if err := svc.recordMismatch(context.Background(), &sshRouteSnapshot{target: target, jump: cloneRouteServer(jump)}, &sshpool.RouteError{Role: "jump", Stage: "jump_host_key", Reason: server.ReasonSSHHostKeyMismatch, Cause: &sshpool.HostKeyMismatchError{Presented: presented}}); err != nil {
+		t.Fatal(err)
+	}
 	source.mu.Lock()
 	defer source.mu.Unlock()
 	if source.servers[1].HostKeySeen != nil || source.servers[1].ConnectionRevision != 1 {
@@ -252,11 +274,11 @@ func TestSSHJumpMismatchUpdatesOnlyJumpIdentity(t *testing.T) {
 	}
 }
 
-func TestSSHRouteRejectsConcurrentIdentityEditDuringTOFU(t *testing.T) {
+func TestSSHRouteRejectsConcurrentIdentityEditDuringDiscovery(t *testing.T) {
 	addr, _ := startTestSSHServer(t)
 	svc, source := routeTestFixture(t, addr, nil)
 	source.commitHook = func(srv *model.Server, kind string) {
-		if kind == "pin" {
+		if kind == "mismatch" {
 			srv.ConnectionRevision++
 			srv.Port = 1
 		}
@@ -267,8 +289,8 @@ func TestSSHRouteRejectsConcurrentIdentityEditDuringTOFU(t *testing.T) {
 	}
 	source.mu.Lock()
 	defer source.mu.Unlock()
-	if source.servers[1].HostKey != nil {
-		t.Fatal("old endpoint key pinned after concurrent edit")
+	if source.servers[1].HostKey != nil || source.servers[1].HostKeySeen != nil {
+		t.Fatal("old endpoint key recorded after concurrent edit")
 	}
 }
 
@@ -341,7 +363,7 @@ func TestSSHServicePoolCloseCancelsPendingProxyHandshake(t *testing.T) {
 	}
 }
 
-func TestTOFUAdoptsConfirmedIdentityForSequentialLeasePrimitives(t *testing.T) {
+func TestExplicitTrustSupportsSequentialLeasePrimitives(t *testing.T) {
 	address, _ := startExecSSHServer(t, func(command string, ch ssh.Channel, _ <-chan struct{}) {
 		_, _ = io.WriteString(ch, command)
 		_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
@@ -349,6 +371,11 @@ func TestTOFUAdoptsConfirmedIdentityForSequentialLeasePrimitives(t *testing.T) {
 	})
 	svc, source := routeTestFixture(t, address, nil)
 	lease, err := svc.AcquireLease(context.Background(), 1, LeaseConsumerAgent)
+	if lease != nil || !errors.Is(err, server.ErrSSHHostKeyUnverified) {
+		t.Fatalf("untrusted agent lease = %v, %v", lease, err)
+	}
+	trustRouteFixture(t, source, 1)
+	lease, err = svc.AcquireLease(context.Background(), 1, LeaseConsumerAgent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +383,7 @@ func TestTOFUAdoptsConfirmedIdentityForSequentialLeasePrimitives(t *testing.T) {
 	for _, command := range []string{"probe", "verify"} {
 		result, err := lease.Exec(context.Background(), command, time.Second)
 		if err != nil {
-			t.Fatalf("TOFU lease %s = %v", command, err)
+			t.Fatalf("verified lease %s = %v", command, err)
 		}
 		if result.Stdout != command {
 			t.Fatalf("primitive output = %q", result.Stdout)
@@ -374,7 +401,7 @@ func TestTOFUAdoptsConfirmedIdentityForSequentialLeasePrimitives(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.pool.Release(1, cached)
-	if cached != nil {
-		t.Fatal("first-use TOFU transport was cached")
+	if cached == nil {
+		t.Fatal("verified transport was not cached")
 	}
 }

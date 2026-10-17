@@ -18,6 +18,22 @@ import (
 // can record the presented key and let an operator decide whether to trust it.
 var ErrHostKeyMismatch = errors.New("sshpool: host key mismatch")
 
+var ErrHostKeyUnverified = errors.New("sshpool: host key requires confirmation")
+
+// HostKeyUnverifiedError carries an observed key without trusting it. The
+// handshake stops before any authentication method can send credentials.
+type HostKeyUnverifiedError struct {
+	Host      string
+	Presented []byte
+	Cause     error
+}
+
+func (e *HostKeyUnverifiedError) Error() string {
+	return "ssh host key requires confirmation for " + e.Host
+}
+func (e *HostKeyUnverifiedError) Unwrap() error        { return e.Cause }
+func (e *HostKeyUnverifiedError) Is(target error) bool { return target == ErrHostKeyUnverified }
+
 // HostKeyMismatchError carries the key the server presented so the caller can
 // surface it (a fingerprint) for out-of-band verification before re-trusting.
 type HostKeyMismatchError struct {
@@ -41,7 +57,7 @@ func Fingerprint(key []byte) string {
 }
 
 // DialSSH creates an SSH client connection and performs host key verification.
-// If knownHostKey is nil, the key presented by the server is accepted and returned (TOFU — Trust On First Use).
+// If knownHostKey is empty, the handshake stops and returns the presented key for confirmation.
 // If knownHostKey is set, the presented key must match or the connection is rejected with a *HostKeyMismatchError
 // that carries the presented key (the client is still returned as nil).
 func DialSSH(host string, port int, username string, authMethod ssh.AuthMethod, knownHostKey []byte, timeout time.Duration) (*ssh.Client, []byte, error) {
@@ -61,11 +77,16 @@ func DialSSHContext(parent context.Context, host string, port int, username stri
 func HandshakeContext(ctx context.Context, raw net.Conn, endpoint Endpoint) (*ssh.Client, []byte, error) {
 	var capturedKey []byte
 	mismatch := false
+	unverified := false
 	config := &ssh.ClientConfig{
 		User: endpoint.Username,
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			capturedKey = key.Marshal()
-			if len(endpoint.KnownHostKey) != 0 && !bytes.Equal(endpoint.KnownHostKey, capturedKey) {
+			if len(endpoint.KnownHostKey) == 0 {
+				unverified = true
+				return ErrHostKeyUnverified
+			}
+			if !bytes.Equal(endpoint.KnownHostKey, capturedKey) {
 				mismatch = true
 				return fmt.Errorf("recorded %s, presented %s", Fingerprint(endpoint.KnownHostKey), Fingerprint(capturedKey))
 			}
@@ -87,6 +108,9 @@ func HandshakeContext(ctx context.Context, raw net.Conn, endpoint Endpoint) (*ss
 	}
 	if err != nil {
 		_ = raw.Close()
+		if unverified {
+			return nil, capturedKey, &HostKeyUnverifiedError{Host: endpoint.Host, Presented: capturedKey, Cause: err}
+		}
 		if mismatch {
 			return nil, capturedKey, &HostKeyMismatchError{Host: endpoint.Host, Presented: capturedKey, Cause: err}
 		}

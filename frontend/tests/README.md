@@ -85,3 +85,5 @@ restoration, precise IDs above JavaScript's integer range, historical manual
 IDs, PostgreSQL bigint bounds, numeric names, clearing and repeated selection,
 keyboard retry, late-search cancellation, account-switch cleanup and a pending
 label lookup superseded by a same-ID selection.
+
+`files.browser.mjs` covers SFTP path handling, CRUD confirmation, binary transfer, cancellation, mobile layout, upload recovery after reload, discard, text-edit conflicts, recursive folder upload/ZIP download, and Range/If-Range download recovery. It is included in `test:ui:built`. Backend acceptance uses real local SSH/SFTP peers in `internal/testutil`, with tests for route/host-key validation, exact bytes, timeouts, partial writes, permissions, signed recovery tokens and archive bounds.

@@ -12,6 +12,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,10 +20,11 @@ import (
 )
 
 type routeSSHPeer struct {
-	host   string
-	port   int
-	key    []byte
-	closed chan struct{}
+	host         string
+	port         int
+	key          []byte
+	closed       chan struct{}
+	authAttempts *atomic.Int32
 }
 
 // A real SSH server exercises both authentication layers and direct-tcpip.
@@ -36,7 +38,9 @@ func newRouteSSHPeer(t *testing.T, username, password string, forward func(strin
 	if err != nil {
 		t.Fatal(err)
 	}
+	authAttempts := &atomic.Int32{}
 	config := &ssh.ServerConfig{PasswordCallback: func(conn ssh.ConnMetadata, supplied []byte) (*ssh.Permissions, error) {
+		authAttempts.Add(1)
 		if conn.User() != username || string(supplied) != password {
 			return nil, errors.New("wrong test credentials")
 		}
@@ -49,7 +53,7 @@ func newRouteSSHPeer(t *testing.T, username, password string, forward func(strin
 	}
 	host, portText, _ := net.SplitHostPort(listener.Addr().String())
 	port, _ := strconv.Atoi(portText)
-	peer := &routeSSHPeer{host: host, port: port, key: signer.PublicKey().Marshal(), closed: make(chan struct{}, 8)}
+	peer := &routeSSHPeer{host: host, port: port, key: signer.PublicKey().Marshal(), authAttempts: authAttempts, closed: make(chan struct{}, 8)}
 	var mu sync.Mutex
 	active := make(map[net.Conn]struct{})
 	t.Cleanup(func() {

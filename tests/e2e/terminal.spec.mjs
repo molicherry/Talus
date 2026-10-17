@@ -6,11 +6,13 @@
 //   HUB_URL      the running Hub (serving both the API and the built SPA)
 //   PEER_LOG     JSONL events recorded by cmd/e2efixture (the SSH peer)
 //   CLIENT_KEY   the private key whose public half the peer accepts
+//   PEER_HOST_PUBLIC_KEY the controlled peer's public host key for verification
 //
 // The peer echoes terminal input and records PTY requests, window changes and
 // disconnects, so every assertion below is about the real browser -> WS -> SSH -> PTY
 // path rather than a mocked one.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import { chromium } from "playwright";
@@ -18,11 +20,12 @@ import { chromium } from "playwright";
 const hubUrl = process.env.HUB_URL;
 const peerLog = process.env.PEER_LOG;
 const clientKey = process.env.CLIENT_KEY;
+const peerHostKey = process.env.PEER_HOST_PUBLIC_KEY;
 const username = process.env.E2E_USERNAME ?? "e2e-admin";
 const password = process.env.E2E_PASSWORD ?? "e2e-password-1234";
 
-if (!hubUrl || !peerLog || !clientKey) {
-	console.error("terminal.spec.mjs requires HUB_URL, PEER_LOG and CLIENT_KEY");
+if (!hubUrl || !peerLog || !clientKey || !peerHostKey) {
+	console.error("terminal.spec.mjs requires HUB_URL, PEER_LOG, CLIENT_KEY and PEER_HOST_PUBLIC_KEY");
 	process.exit(2);
 }
 
@@ -183,6 +186,7 @@ try {
 	// a server row pointing at the peer's port.
 	const peerPort = Number(process.env.PEER_PORT);
 	let serverId = Number(process.env.SERVER_ID ?? 0);
+	let createdServer = false;
 	await step(
 		"a server is registered against the peer with a key credential",
 		async () => {
@@ -201,14 +205,29 @@ try {
 					credential_id: credential.id,
 				});
 				serverId = server.id;
+				createdServer = true;
 			}
 			assert.ok(serverId > 0, "a server id is available");
 		},
 	);
 
+	await page.goto(`${hubUrl}/servers/${serverId}/terminal`);
+	if (createdServer) {
+		await step("the first host fingerprint matches the controlled peer before explicit trust", async () => {
+			const publicKey = (await readFile(peerHostKey, "utf8")).trim().split(/\s+/)[1];
+			const fingerprint = `SHA256:${createHash("sha256").update(Buffer.from(publicKey, "base64")).digest("base64").replace(/=+$/, "")}`;
+			const pending = page.getByTestId("pending-host-key");
+			await pending.waitFor();
+			assert.equal(await pending.locator("dd").innerText(), fingerprint);
+			assert.equal(await page.locator("[data-connection-status]").count(), 0, "the terminal stays blocked before trust");
+			assert.equal((await events()).some(event => event.type === "shell"), false, "no shell is opened before trust");
+			await page.getByRole("button", { name: "I verified this fingerprint — trust host", exact: true }).click();
+			await pending.waitFor({ state: "hidden" });
+		});
+	}
+
 	let firstShell = null;
 	await step("the terminal connects through a real SSH PTY", async () => {
-		await page.goto(`${hubUrl}/servers/${serverId}/terminal`);
 		await until(
 			async () =>
 				(await page
@@ -320,8 +339,8 @@ try {
 		await page.getByRole("button", { name: "Connect" }).click();
 		await until(
 			async () =>
-				(await events()).filter((event) => event.type === "shell").length >= 2,
-			"a second shell at the peer",
+				(await events()).filter((event) => event.type === "shell").length > firstShell.index,
+			"a new shell after reconnect",
 		);
 		const secondShell = await currentShell();
 		assert.notEqual(

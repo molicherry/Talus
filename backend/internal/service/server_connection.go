@@ -341,6 +341,7 @@ func (s *ServerService) createServer(ctx context.Context, srv *model.Server, mut
 		return nil, err
 	}
 	srv.Status = "unknown"
+	decorateHostKey(srv)
 	// Build the response from the committed configuration without requiring a
 	// metric sample (or a second write) for a newly created server.
 	srv.Connection = connectionView(config, IsConnectionAdmin(ctx))
@@ -488,7 +489,10 @@ func (s *ServerService) deleteServer(ctx context.Context, id uint) error {
 	return err
 }
 
-func (s *ServerService) trustHostKey(ctx context.Context, id uint, fingerprint string) (*model.Server, error) {
+func (s *ServerService) trustHostKey(ctx context.Context, id uint, fingerprint string, revision ...uint64) (*model.Server, error) {
+	if !IsConnectionAdmin(ctx) {
+		return nil, connectionForbidden()
+	}
 	err := s.repo.Transaction(ctx, func(tx *repository.ServerRepo) error {
 		if err := tx.LockConnectionServers(ctx, []uint{id}); err != nil {
 			return err
@@ -500,21 +504,13 @@ func (s *ServerService) trustHostKey(ctx context.Context, id uint, fingerprint s
 		if err != nil {
 			return err
 		}
-		config, err := tx.FindConnectionConfig(ctx, id)
-		if err != nil {
-			return err
-		}
-		deps, err := tx.FindJumpDependentIDs(ctx, id)
-		if err != nil {
-			return err
-		}
-		if (config != nil || len(deps) > 0) && !IsConnectionAdmin(ctx) {
-			return connectionForbidden()
-		}
 		if srv.HostKeySeen == nil || srv.HostKeyMismatchAt == nil {
 			return server.NewAppError(http.StatusConflict, server.ReasonNoHostKeyMismatch)
 		}
 		if fingerprint == "" || fingerprint != sshpool.Fingerprint(*srv.HostKeySeen) {
+			return server.NewAppError(http.StatusConflict, server.ReasonHostKeyChanged)
+		}
+		if len(revision) > 0 && revision[0] != srv.ConnectionRevision {
 			return server.NewAppError(http.StatusConflict, server.ReasonHostKeyChanged)
 		}
 		srv.HostKey, srv.HostKeySeen, srv.HostKeyMismatchAt = srv.HostKeySeen, nil, nil
