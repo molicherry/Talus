@@ -31,6 +31,7 @@ export const ServerSchema = z.object({
   // recorded one. The operator verifies host_key_seen_fingerprint out of band
   // and can then trust it.
   host_key_mismatch: z.boolean().optional(),
+  host_key_unverified: z.boolean().optional(),
   host_key_mismatch_at: z.string().nullable().optional(),
   host_key_fingerprint: z.string().nullable().optional(),
   host_key_seen_fingerprint: z.string().nullable().optional(),
@@ -59,6 +60,7 @@ export const ServerSummarySchema = z.object({
   port: z.number().int().min(1).max(65535).optional(),
   status: z.enum(["online", "offline", "checking", "unknown"]),
   host_key_mismatch: z.boolean().optional(),
+  host_key_unverified: z.boolean().optional(),
 });
 export type ServerSummary = z.infer<typeof ServerSummarySchema>;
 

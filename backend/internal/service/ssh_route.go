@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -296,7 +297,7 @@ func (s *SSHService) getLeaseWithSnapshot(ctx context.Context, id uint, fresh bo
 		op.SetMetadata("connection_mode", snap.mode())
 		op.SetMetadata("connection_revision", snap.target.ConnectionRevision)
 		var lease *sshpool.Lease
-		if fresh {
+		if fresh || !hasTrustedHostKey(snap.target) || (snap.jump != nil && !hasTrustedHostKey(snap.jump)) {
 			lease, err = s.pool.AcquireFreshContext(ctx, id, snap.fingerprint())
 		} else {
 			lease, err = s.pool.AcquireContext(ctx, id, snap.fingerprint())
@@ -330,7 +331,9 @@ func (s *SSHService) getLeaseWithSnapshot(ctx context.Context, id uint, fresh bo
 				if errors.Is(dialErr, context.Canceled) {
 					return nil, nil, sshpool.ErrClosed
 				}
-				s.recordMismatch(ctx, snap, dialErr)
+				if recordErr := s.recordMismatch(ctx, snap, dialErr); recordErr != nil {
+					return nil, nil, recordErr
+				}
 				return nil, nil, safeRouteError(ctx, dialErr)
 			}
 		}
@@ -378,6 +381,10 @@ func (s *SSHService) getLeaseWithSnapshot(ctx context.Context, id uint, fresh bo
 
 var errRouteChanged = errors.New("SSH connection configuration changed")
 
+func hasTrustedHostKey(srv *model.Server) bool {
+	return srv.HostKey != nil && len(*srv.HostKey) > 0
+}
+
 func (s *SSHService) confirmHostKeys(ctx context.Context, snap *sshRouteSnapshot, targetKey, jumpKey []byte) (bool, error) {
 	changed := false
 	for _, pair := range []struct {
@@ -389,8 +396,8 @@ func (s *SSHService) confirmHostKeys(ctx context.Context, snap *sshRouteSnapshot
 		}
 		srv := pair.srv
 		kind := ""
-		if srv.HostKey == nil || len(*srv.HostKey) == 0 {
-			kind = "pin"
+		if !hasTrustedHostKey(srv) {
+			return false, server.ErrSSHHostKeyUnverified
 		} else if srv.HostKeyMismatchAt != nil {
 			kind = "clear"
 		}
@@ -408,12 +415,8 @@ func (s *SSHService) confirmHostKeys(ctx context.Context, snap *sshRouteSnapshot
 		confirmed := *srv
 		confirmed.ConnectionRevision++
 		confirmed.HostKeySeen, confirmed.HostKeyMismatchAt = nil, nil
-		if kind == "pin" {
-			key := append([]byte(nil), pair.key...)
-			confirmed.HostKey = &key
-		}
 		if !updated {
-			// An identical concurrent TOFU may win once. Accept only that exact
+			// An identical concurrent clear may win once. Accept only that exact
 			// identity transition; a route, endpoint or credential edit is a conflict.
 			confirmedRoute := *snap
 			if srv == snap.target {
@@ -432,10 +435,16 @@ func (s *SSHService) confirmHostKeys(ctx context.Context, snap *sshRouteSnapshot
 	return changed, nil
 }
 
-func (s *SSHService) recordMismatch(ctx context.Context, snap *sshRouteSnapshot, err error) {
+func (s *SSHService) recordMismatch(ctx context.Context, snap *sshRouteSnapshot, err error) error {
 	var mismatch *sshpool.HostKeyMismatchError
-	if !errors.As(err, &mismatch) {
-		return
+	var unverified *sshpool.HostKeyUnverifiedError
+	var presented []byte
+	if errors.As(err, &mismatch) {
+		presented = mismatch.Presented
+	} else if errors.As(err, &unverified) {
+		presented = unverified.Presented
+	} else {
+		return nil
 	}
 	srv := snap.target
 	var routeErr *sshpool.RouteError
@@ -443,20 +452,33 @@ func (s *SSHService) recordMismatch(ctx context.Context, snap *sshRouteSnapshot,
 		srv = snap.jump
 	}
 	if srv == nil {
-		return
+		return server.ErrInternal
 	}
-	if store, ok := s.serverRepo.(sshHostKeyStore); ok {
-		if updated, _ := store.CommitSSHRouteHostKey(ctx, snap.stored(), srv.ID, mismatch.Presented, "mismatch"); updated {
-			s.invalidateRouteIdentity(ctx, srv.ID)
-			s.pool.Invalidate(snap.target.ID)
-		}
+	if srv.HostKeySeen != nil && bytes.Equal(*srv.HostKeySeen, presented) && srv.HostKeyMismatchAt != nil {
+		return nil
 	}
+	store, ok := s.serverRepo.(sshHostKeyStore)
+	if !ok {
+		return server.ErrInternal
+	}
+	updated, commitErr := store.CommitSSHRouteHostKey(ctx, snap.stored(), srv.ID, presented, "mismatch")
+	if commitErr != nil {
+		return server.ErrInternal
+	}
+	if !updated {
+		return connectionConflict()
+	}
+	s.invalidateRouteIdentity(ctx, srv.ID)
+	s.pool.Invalidate(snap.target.ID)
+	return nil
 }
 
 func routeFailure(reason, stage, role string) *server.AppError {
 	status := http.StatusBadGateway
 	if reason == server.ReasonSSHTimeout {
 		status = http.StatusGatewayTimeout
+	} else if reason == server.ReasonSSHHostKeyUnverified {
+		status = http.StatusConflict
 	}
 	app := server.NewAppErrorParams(status, reason, map[string]any{"stage": stage, "role": role})
 	switch reason {
@@ -468,6 +490,8 @@ func routeFailure(reason, stage, role string) *server.AppError {
 		app.Err = server.ErrSSHTimeout
 	case server.ReasonSSHHostKeyMismatch:
 		app.Err = server.ErrSSHHostKeyMismatch
+	case server.ReasonSSHHostKeyUnverified:
+		app.Err = server.ErrSSHHostKeyUnverified
 	}
 	return app
 }
@@ -486,6 +510,9 @@ func safeRouteError(ctx context.Context, err error) error {
 	}
 	if errors.Is(err, sshpool.ErrHostKeyMismatch) {
 		reason = server.ReasonSSHHostKeyMismatch
+	}
+	if errors.Is(err, sshpool.ErrHostKeyUnverified) {
+		reason = server.ReasonSSHHostKeyUnverified
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		reason = server.ReasonSSHTimeout

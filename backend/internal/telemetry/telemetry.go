@@ -102,7 +102,7 @@ const (
 var (
 	actionValues    = []string{"server.exec", "server.terminal", "service.relay", "auth.jwt_check", "auth.password_change", "ssh.upload", "agent.deploy", "monitor.collect", "metrics.aggregate", "metrics.retention"}
 	channelValues   = []string{"http", "ws", "register", "ready"}
-	consumerValues  = []string{"exec", "terminal", "agent"}
+	consumerValues  = []string{"exec", "terminal", "agent", "sftp"}
 	archValues      = []string{"amd64", "arm64", "unsupported"}
 	resultValues    = []string{"clean", "forced", "budget_exceeded"}
 	componentValues = []string{

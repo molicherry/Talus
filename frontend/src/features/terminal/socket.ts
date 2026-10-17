@@ -12,9 +12,16 @@ export function createTerminalSocket(
   // Authentication happens via the FIRST message after the handshake
   // (browsers cannot set custom headers on WebSocket connections), so the
   // token never appears in the URL or in access logs.
-  const ws = new WebSocket(`${wsBase}/api/v1/servers/${serverId}/terminal`);
+  const ws = new WebSocket(`${wsBase}/api/v1/servers/${serverId}/terminal`, "talus.terminal.v2");
+  ws.binaryType = "arraybuffer";
 
   ws.onmessage = (event: MessageEvent) => {
+    if (event.data instanceof ArrayBuffer) {
+      // xterm owns the streaming UTF-8 decoder: a rune may span several frames.
+      onMessage({ type: "output", data: new Uint8Array(event.data) });
+      return;
+    }
+    if (typeof event.data !== "string") return;
     try {
       const msg = JSON.parse(event.data as string) as TerminalServerMessage;
       onMessage(msg);

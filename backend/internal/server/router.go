@@ -54,6 +54,24 @@ type RouteConfig struct {
 	// Exec
 	ExecHandler http.HandlerFunc
 
+	// SFTP
+	SFTPListHandler     http.HandlerFunc
+	SFTPStatHandler     http.HandlerFunc
+	SFTPUploadHandler   http.HandlerFunc
+	SFTPDownloadHandler http.HandlerFunc
+	SFTPMkdirHandler    http.HandlerFunc
+	SFTPRenameHandler   http.HandlerFunc
+	SFTPRemoveHandler   http.HandlerFunc
+
+	SFTPReadTextHandler       http.HandlerFunc
+	SFTPSaveTextHandler       http.HandlerFunc
+	SFTPStartUploadHandler    http.HandlerFunc
+	SFTPUploadStatusHandler   http.HandlerFunc
+	SFTPUploadChunkHandler    http.HandlerFunc
+	SFTPCompleteUploadHandler http.HandlerFunc
+	SFTPCancelUploadHandler   http.HandlerFunc
+	SFTPArchiveHandler        http.HandlerFunc
+
 	// Terminal
 	TerminalHandler http.HandlerFunc
 
@@ -152,6 +170,27 @@ func NewRouter(cfg RouteConfig) chi.Router {
 				r.Post("/exec", cfg.ExecHandler)
 				r.Get("/metrics", cfg.MetricsHandler)
 				r.Get("/terminal", cfg.TerminalHandler)
+				if cfg.SFTPListHandler != nil {
+					r.Route("/sftp", func(r chi.Router) {
+						r.Get("/entries", cfg.SFTPListHandler)
+						r.Get("/stat", cfg.SFTPStatHandler)
+						r.Get("/download", cfg.SFTPDownloadHandler)
+						r.Post("/upload", cfg.SFTPUploadHandler)
+						r.Post("/mkdir", cfg.SFTPMkdirHandler)
+						r.Post("/rename", cfg.SFTPRenameHandler)
+						r.Delete("/entry", cfg.SFTPRemoveHandler)
+						if cfg.SFTPReadTextHandler != nil {
+							r.Get("/text", cfg.SFTPReadTextHandler)
+							r.Put("/text", cfg.SFTPSaveTextHandler)
+							r.Get("/archive", cfg.SFTPArchiveHandler)
+							r.Post("/uploads/start", cfg.SFTPStartUploadHandler)
+							r.Post("/uploads/status", cfg.SFTPUploadStatusHandler)
+							r.Put("/uploads/chunk", cfg.SFTPUploadChunkHandler)
+							r.Post("/uploads/complete", cfg.SFTPCompleteUploadHandler)
+							r.Delete("/uploads", cfg.SFTPCancelUploadHandler)
+						}
+					})
+				}
 			})
 		})
 

@@ -271,7 +271,8 @@ func (s *ServerService) applyStatus(ctx context.Context, summaries []model.Serve
 		return summaries, nil
 	}
 	for i := range summaries {
-		summaries[i].HostKeyMismatch = summaries[i].HostKeyMismatchAt != nil
+		summaries[i].HostKeyUnverified = summaries[i].HostKey == nil || len(*summaries[i].HostKey) == 0
+		summaries[i].HostKeyMismatch = !summaries[i].HostKeyUnverified && summaries[i].HostKeyMismatchAt != nil
 	}
 	idsForModes := make([]uint, len(summaries))
 	for i := range summaries {
@@ -389,21 +390,23 @@ func (s *ServerService) invalidate(serverID uint) {
 	}
 }
 
-// TrustHostKey re-pins the host key a server last presented when it changed.
+// TrustHostKey pins a first-use or changed host key after explicit verification.
 //
 // fingerprint is the exact fingerprint the operator verified. It must still
 // match the recorded pending key: the background monitor may have recorded a
 // newer one since the UI rendered, and trusting that by accident would defeat
 // the point of asking the user to verify. A stale request gets 409.
-func (s *ServerService) TrustHostKey(ctx context.Context, id uint, fingerprint string) (*model.Server, error) {
-	return s.trustHostKey(ctx, id, fingerprint)
+func (s *ServerService) TrustHostKey(ctx context.Context, id uint, fingerprint string, revision ...uint64) (*model.Server, error) {
+	return s.trustHostKey(ctx, id, fingerprint, revision...)
 }
 
 // decorateHostKey fills the transient host-key fields a client needs to show a
-// pending host-key change: the flag, and both fingerprints for comparison.
+// first-use or changed host key: trust state and fingerprints for comparison.
 func decorateHostKey(srv *model.Server) {
-	srv.HostKeyMismatch = srv.HostKeyMismatchAt != nil
-	if srv.HostKey != nil {
+	srv.HostKeyUnverified = !hasTrustedHostKey(srv)
+	srv.HostKeyMismatch = !srv.HostKeyUnverified && srv.HostKeyMismatchAt != nil
+	srv.HostKeyFingerprint, srv.HostKeySeenFingerprint = nil, nil
+	if !srv.HostKeyUnverified {
 		fp := sshpool.Fingerprint(*srv.HostKey)
 		srv.HostKeyFingerprint = &fp
 	}

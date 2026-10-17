@@ -92,6 +92,7 @@ const (
 	LeaseConsumerExec     LeaseConsumer = "exec"
 	LeaseConsumerTerminal LeaseConsumer = "terminal"
 	LeaseConsumerAgent    LeaseConsumer = "agent"
+	LeaseConsumerSFTP     LeaseConsumer = "sftp"
 )
 
 // SetLeaseObserver wires the shared concurrency gauge. The measurement belongs to

@@ -232,7 +232,7 @@ func TestRereviewCollectionIDReachesTheDeployment(t *testing.T) {
 // and anything else is rejected, so a mislabeled borrow cannot reach the metrics.
 func TestRereviewLeaseGaugeVocabulary(t *testing.T) {
 	registry := telemetry.NewRegistry()
-	for _, consumer := range []LeaseConsumer{LeaseConsumerExec, LeaseConsumerTerminal, LeaseConsumerAgent} {
+	for _, consumer := range []LeaseConsumer{LeaseConsumerExec, LeaseConsumerTerminal, LeaseConsumerAgent, LeaseConsumerSFTP} {
 		key := fmt.Sprintf(`talus_ssh_leases_in_use{consumer=%s}`, consumer)
 		if err := registry.AddGauge("talus_ssh_leases_in_use",
 			map[string]string{"consumer": string(consumer)}, 1); err != nil {

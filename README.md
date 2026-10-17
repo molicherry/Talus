@@ -15,6 +15,7 @@
 - **Interactive Terminal** — Open a full PTY session in your browser (xterm.js, resize-aware, WebSocket-backed).
 - **Live Monitoring** — CPU, memory, disk, load, swap, network, and disk I/O charts with 15m / 1h / 6h / 24h / 7d / 30d time ranges, average/peak views, and accessible data tables. The Hub deploys the matching monitoring agent over SSH.
 - **API Keys** — Create scoped API keys with per-server access control. Two-dimensional permissions (what actions × which servers). Keys are encrypted at rest and can be copied on demand. Rate-limited reveal with audit logging.
+- **SFTP Files** — Browse files alongside SSH, upload/download with resume, transfer folders, and edit UTF-8 text with version conflict checks. Scoped file APIs share SSH credentials, verified host keys and proxy routes. See [SFTP guide and API](docs/SFTP.md).
 - **Service Proxy** — Register external services (Grafana, Portainer, etc.) with encrypted credentials. Proxy API requests through Talus with credential injection and placeholder substitution. Edit forms load existing credentials with show/hide toggle and copy support.
 
 ## Architecture
@@ -205,6 +206,18 @@ bodies are forwarded incrementally. Enable WebSocket upgrades for terminal
 routes and configure their idle timeout for the intended interactive session
 length; the ordinary HTTP timeout above does not define a terminal session limit.
 
+The browser negotiates the `talus.terminal.v2` WebSocket subprotocol: terminal
+output uses binary frames containing the original SSH bytes, while authentication,
+input, resize, connection status and errors remain JSON. Decode binary output as
+a UTF-8 stream across frame boundaries. Clients that omit the subprotocol retain
+the JSON output format; incomplete UTF-8 characters are carried between reads.
+
+Ready terminal sessions send WebSocket Ping and SSH `keepalive@openssh.com`
+requests every 25 seconds. Browsers answer Ping automatically. An SSH request
+without a reply within 10 seconds, or a missing WebSocket Pong for 35 seconds,
+ends the session and discards its connection. An SSH rejection reply still counts
+as a live peer. Probes stop and join during disconnect, cancellation or revocation.
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -325,7 +338,7 @@ default).
 - Target servers require **no additional open ports** — monitoring data flows over the existing SSH channel.
 - The monitoring agent runs **on demand** and exits after collection. The Hub verifies the retained binary before reuse and atomically replaces it when needed; no agent daemon runs on the target.
 - Changing a password invalidates existing JWTs and actively closes that user's terminal sessions. API keys have a separate lifecycle.
-- SSH host keys are verified using **TOFU (Trust On First Use)**: the key presented on first connection is recorded and verified on all subsequent connections, preventing MITM attacks.
+- **Explicit SSH host-key confirmation**: on first connection, Talus records the presented SHA256 fingerprint and stops before SSH authentication. An administrator must verify it against a trusted source and confirm it before connecting. Jump and target hosts are confirmed separately. Existing trusted keys remain valid; changed keys block authentication until explicitly approved. Confirmation checks the displayed fingerprint and connection revision to reject stale requests.
 
 ## Tests
 

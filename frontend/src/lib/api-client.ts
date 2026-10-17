@@ -1,6 +1,6 @@
 import type { ApiError, ApiErrorDetail } from "../types/api";
 import i18n from "../i18n";
-import { clearAuthToken, denyUsageLogs, getAuthEpoch, getAuthSnapshot, getAuthToken } from "./auth";
+import { clearAuthToken, denyUsageLogs, getAuthEpoch, getAuthSnapshot, getAuthToken, subscribeAuth } from "./auth";
 import { classifyUnauthorized, isUsageLogPermissionDenied, isUsageLogRequest, shouldApplyAuthorizationFailure } from "./unauthorized";
 
 /**
@@ -105,7 +105,78 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return (json as { data: T }).data;
 }
 
+export interface FileTransferOptions {
+  method?: "GET" | "POST" | "PUT";
+  body?: Blob;
+  signal?: AbortSignal;
+  onProgress?: (loaded: number, total: number) => void;
+  download?: boolean;
+  onHeaders?: (headers: Headers, status: number) => void;
+  headers?: Record<string, string>;
+}
+
+/** Binary transfers share the API client's auth, epoch and error handling. */
+function transfer<T>(path: string, options: FileTransferOptions): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const requestEpoch = getAuthEpoch();
+    if (options.signal?.aborted) { reject(new DOMException("Aborted", "AbortError")); return; }
+    const xhr = new XMLHttpRequest();
+    let settled = false;
+    let unsubscribe = () => {};
+    const abort = () => xhr.abort();
+    const finish = (error: unknown, data?: T) => {
+      if (settled) return;
+      settled = true;
+      options.signal?.removeEventListener("abort", abort);
+      unsubscribe();
+      if (error) reject(error); else resolve(data as T);
+    };
+    xhr.open(options.method ?? "GET", `${API_BASE_URL}${path}`);
+    xhr.responseType = "blob";
+    xhr.timeout = 610_000;
+    const token = getAuthToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    if (options.body) xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    for (const [key, value] of Object.entries(options.headers ?? {})) xhr.setRequestHeader(key, value);
+    const progress = (event: ProgressEvent) => {
+      if (!settled && getAuthEpoch() === requestEpoch) options.onProgress?.(event.loaded, event.lengthComputable ? event.total : 0);
+    };
+    if (options.download) xhr.onprogress = progress;
+    else xhr.upload.onprogress = progress;
+    xhr.onabort = () => finish(new DOMException("Aborted", "AbortError"));
+    xhr.onerror = () => finish(new TypeError("Network request failed"));
+    xhr.ontimeout = () => finish(new ApiClientError(504, { error: { code: 504, reason: "ssh_timeout", message: "" } }));
+    xhr.onload = async () => {
+      try {
+        if (options.signal?.aborted || getAuthEpoch() !== requestEpoch) throw new DOMException("Aborted", "AbortError");
+        const headers = new Headers();
+        for (const line of (xhr.getAllResponseHeaders?.() ?? "").trim().split(/[\r\n]+/)) {
+          const colon = line.indexOf(":"); if (colon > 0) headers.append(line.slice(0, colon).trim(), line.slice(colon + 1).trim());
+        }
+        const response = new Response(xhr.response, { status: xhr.status, headers });
+        if (!response.ok) {
+          const error = await errorFromResponse(response);
+          if (xhr.status === 401 && shouldApplyAuthorizationFailure(requestEpoch, getAuthEpoch(), options.signal?.aborted ?? false)) {
+            const action = classifyUnauthorized(error.reason, window.location.pathname);
+            if (action !== "inline") clearAuthToken(requestEpoch);
+            if (action === "clear-token-and-redirect") window.location.replace("/login");
+          }
+          throw error;
+        }
+        options.onHeaders?.(headers, xhr.status);
+        const data = options.download ? xhr.response : (await response.json()).data;
+        if (options.signal?.aborted || getAuthEpoch() !== requestEpoch) throw new DOMException("Aborted", "AbortError");
+        finish(null, data as T);
+      } catch (error) { finish(error); }
+    };
+    options.signal?.addEventListener("abort", abort, { once: true });
+    unsubscribe = subscribeAuth(() => { if (getAuthEpoch() !== requestEpoch) abort(); });
+    xhr.send(options.body);
+  });
+}
+
 export const apiClient = {
+  transfer,
   get<T>(path: string, options?: RequestInit): Promise<T> {
     return request<T>(path, { ...options, method: "GET" });
   },

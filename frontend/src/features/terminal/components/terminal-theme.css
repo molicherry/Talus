@@ -1,0 +1,76 @@
+/* Shared by the terminal, file pane and portal-mounted text editor. */
+.ssh-workspace,
+.sftp-panel,
+.sftp-editor {
+  --ssh-background: var(--color-card);
+  --ssh-panel: var(--color-card);
+  --ssh-control: var(--color-secondary);
+  --ssh-border: var(--color-border);
+  --ssh-text: var(--color-card-foreground);
+  --ssh-muted: var(--color-muted-foreground);
+  --ssh-accent: var(--color-link);
+  --ssh-control-text: var(--color-secondary-foreground);
+  --ssh-control-hover: var(--color-muted);
+  --ssh-border-hover: var(--color-border-hover);
+  --ssh-accent-border: color-mix(in srgb, var(--ssh-accent) 25%, transparent);
+  --ssh-accent-subtle: var(--color-primary-subtle);
+  --ssh-success: var(--color-success);
+  --ssh-success-border: color-mix(in srgb, var(--ssh-success) 25%, transparent);
+  --ssh-success-subtle: var(--color-success-subtle);
+  --ssh-warning: #92400e;
+  --ssh-warning-border: var(--color-warning);
+  --ssh-warning-subtle: var(--color-warning-subtle);
+  --ssh-danger: var(--color-danger);
+  --ssh-danger-border: color-mix(in srgb, var(--ssh-danger) 25%, transparent);
+  --ssh-danger-subtle: var(--color-danger-subtle);
+  --ssh-search: var(--color-background);
+  --ssh-message: var(--color-primary-subtle);
+  --ssh-message-text: var(--color-link-hover);
+  --ssh-scrollbar: var(--color-border-hover);
+  --ssh-menu: var(--color-card-elevated);
+  --ssh-menu-text: var(--color-foreground);
+  --ssh-menu-hover: var(--color-secondary);
+  --ssh-terminal-text: var(--color-foreground);
+  --ssh-selection: #bfdbfe;
+  --ssh-shadow: var(--shadow-card);
+  --ssh-menu-shadow: var(--shadow-dropdown);
+  color-scheme: light;
+}
+
+.dark .ssh-workspace,
+.dark .sftp-panel,
+.dark .sftp-editor {
+  --ssh-background: #080d12;
+  --ssh-panel: #101820;
+  --ssh-control: #17212b;
+  --ssh-border: #253341;
+  --ssh-text: #e9f0f3;
+  --ssh-muted: #94a6b3;
+  --ssh-accent: #69e6b4;
+  --ssh-control-text: #b7c7d0;
+  --ssh-control-hover: #20303b;
+  --ssh-border-hover: #466172;
+  --ssh-accent-border: #69e6b44d;
+  --ssh-accent-subtle: #69e6b414;
+  --ssh-success: #69e6b4;
+  --ssh-success-border: #69e6b42b;
+  --ssh-success-subtle: #69e6b40a;
+  --ssh-warning: #f5d99e;
+  --ssh-warning-border: #f5c76b33;
+  --ssh-warning-subtle: #211e16;
+  --ssh-danger: #ffabb0;
+  --ssh-danger-border: #ff7b8233;
+  --ssh-danger-subtle: #23151b;
+  --ssh-search: #0d151c;
+  --ssh-message: #111d24;
+  --ssh-message-text: #bbd0dc;
+  --ssh-scrollbar: #31424e;
+  --ssh-menu: #14212b;
+  --ssh-menu-text: #d1dfe6;
+  --ssh-menu-hover: #223440;
+  --ssh-terminal-text: #d7e2e6;
+  --ssh-selection: #21483e;
+  --ssh-shadow: 0 12px 32px #080d1214;
+  --ssh-menu-shadow: 0 16px 32px #0006;
+  color-scheme: dark;
+}

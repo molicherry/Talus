@@ -325,6 +325,7 @@ func main() {
 			map[string]string{"consumer": string(consumer)}, delta)
 	})
 	sshSvc.SetOutputLimits(cfg.ExecOutputLimit, cfg.ExecOutputStreamLimit)
+	sftpH := handler.NewSFTPHandler(service.NewSFTPService(sshSvc, []byte(cfg.JWTSecret)))
 	terminalSvc := service.NewTerminalService(sshSvc)
 	terminalSvc.SetSessionRegistry(terminalRegistry)
 
@@ -417,7 +418,22 @@ func main() {
 		// Exec
 		ExecHandler: execH.Execute,
 		// Terminal
-		TerminalHandler: terminalH.Handle,
+		TerminalHandler:           terminalH.Handle,
+		SFTPListHandler:           sftpH.List,
+		SFTPStatHandler:           sftpH.Stat,
+		SFTPUploadHandler:         sftpH.Upload,
+		SFTPDownloadHandler:       sftpH.Download,
+		SFTPMkdirHandler:          sftpH.Mkdir,
+		SFTPRenameHandler:         sftpH.Rename,
+		SFTPRemoveHandler:         sftpH.Remove,
+		SFTPReadTextHandler:       sftpH.ReadText,
+		SFTPSaveTextHandler:       sftpH.SaveText,
+		SFTPStartUploadHandler:    sftpH.StartUpload,
+		SFTPUploadStatusHandler:   sftpH.UploadStatus,
+		SFTPUploadChunkHandler:    sftpH.UploadChunk,
+		SFTPCompleteUploadHandler: sftpH.CompleteUpload,
+		SFTPCancelUploadHandler:   sftpH.CancelUpload,
+		SFTPArchiveHandler:        sftpH.Archive,
 		// Metrics
 		MetricsHandler: metricsH.Get,
 		// API Keys

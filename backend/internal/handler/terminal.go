@@ -17,7 +17,8 @@ import (
 
 // upgrader configures WebSocket connection upgrades.
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	Subprotocols: []string{service.TerminalBinaryProtocol},
+	CheckOrigin:  func(r *http.Request) bool { return true },
 }
 
 // authTimeout bounds how long a client may take to send its first

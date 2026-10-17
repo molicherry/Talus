@@ -12,6 +12,7 @@ import {
   stepFontSize,
 } from "../lib/terminal-preferences";
 import { classifyPaste } from "../lib/terminal-input";
+import { terminalTheme } from "../lib/terminal-theme";
 import { createTerminalSocket, sendTerminalMessage } from "../socket";
 
 const MAX_RETRIES = 5;
@@ -164,6 +165,18 @@ export function useTerminal(serverId: number): UseTerminalReturn {
     shortcutsRef.current?.onPastePayload?.(payload);
   }, []);
 
+  // The app resolves light/dark/system on the root. Repaint the live terminal
+  // when that class changes, preserving its socket, scrollback and selection.
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      if (termInstanceRef.current && terminalRef.current) {
+        termInstanceRef.current.options.theme = terminalTheme(terminalRef.current);
+      }
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
   const disconnect = useCallback(() => {
     manualDisconnectRef.current = true;
     // A new generation invalidates in-flight clipboard reads and confirmations.
@@ -267,28 +280,7 @@ export function useTerminal(serverId: number): UseTerminalReturn {
       cursorBlink: true,
       fontSize: fontSizeRef.current,
       fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
-      theme: {
-        background: "#0d1117",
-        foreground: "#c9d1d9",
-        cursor: "#58a6ff",
-        selectionBackground: "#264f78",
-        black: "#484f58",
-        red: "#ff7b72",
-        green: "#3fb950",
-        yellow: "#d29922",
-        blue: "#58a6ff",
-        magenta: "#bc8cff",
-        cyan: "#39c5d0",
-        white: "#b1bac4",
-        brightBlack: "#6e7681",
-        brightRed: "#ffa198",
-        brightGreen: "#56d364",
-        brightYellow: "#e3b341",
-        brightBlue: "#79c0ff",
-        brightMagenta: "#d2a8ff",
-        brightCyan: "#56d4dd",
-        brightWhite: "#f0f6fc",
-      },
+      theme: terminalTheme(terminalRef.current),
       allowProposedApi: true,
     });
 

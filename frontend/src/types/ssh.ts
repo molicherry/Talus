@@ -17,10 +17,14 @@ export interface TerminalClientMessage {
   rows?: number;
 }
 
-export interface TerminalServerMessage {
+export interface TerminalControlMessage {
   type: "connected" | "output" | "error" | "disconnected";
   data?: string;
   message?: string;
   session_id?: string;
   reason?: string;
 }
+
+export type TerminalServerMessage =
+  | TerminalControlMessage
+  | { type: "output"; data: Uint8Array };

@@ -2,6 +2,22 @@ export const outcomes = ["running", "succeeded", "failed", "rejected", "cancelle
 export const authTypes = ["jwt", "api_key", "unauthenticated", "legacy_unknown"] as const;
 export const resourceTypes = ["server", "credential", "service", "api_key"] as const;
 export const actions = [
+  "server.sftp.list",
+  "server.sftp.stat",
+  "server.sftp.upload",
+  "server.sftp.download",
+  "server.sftp.mkdir",
+  "server.sftp.rename",
+  "server.sftp.delete",
+  "server.sftp.text.read",
+  "server.sftp.text.write",
+  "server.sftp.archive",
+  "server.sftp.upload.start",
+  "server.sftp.upload.status",
+  "server.sftp.upload.chunk",
+  "server.sftp.upload.complete",
+  "server.sftp.upload.cancel",
+
   "server.create", "server.update", "server.delete", "credential.create", "credential.update", "credential.delete",
   "service.create", "service.update", "service.delete", "api_key.create", "api_key.delete",
   "credential.reveal", "api_key.reveal", "service.credentials", "server.host_key.trust", "server.connection.test", "server.exec", "service.relay", "server.terminal",

@@ -4,11 +4,14 @@ import {
   ClipboardCopy,
   ClipboardPaste,
   Eraser,
+  Ellipsis,
   Loader2,
+  FolderOpen,
   Maximize2,
   Minimize2,
   Plug,
   Search,
+  SquareTerminal,
   Unplug,
   Wifi,
   WifiOff,
@@ -20,6 +23,8 @@ import { Link } from "react-router-dom";
 import { describeConnection } from "../lib/connection-status";
 import { classifyPaste, TERMINAL_SHORTCUTS } from "../lib/terminal-input";
 import { useTerminal } from "../hooks/use-terminal";
+import "@xterm/xterm/css/xterm.css";
+import "./terminal.css";
 
 const MAX_RETRIES = 5;
 
@@ -28,6 +33,8 @@ interface TerminalViewProps {
   serverName: string;
   host: string;
   port: number;
+  filesOpen?: boolean;
+  onToggleFiles?: () => void;
 }
 
 /**
@@ -35,12 +42,9 @@ interface TerminalViewProps {
  * pointers (a phone in landscape included) while the density classes keep the
  * desktop toolbar compact.
  */
-const controlClass =
-  "touch-target inline-flex h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-medium " +
-  "transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:h-8 sm:min-w-8 sm:px-2 " +
-  "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700";
+const controlClass = "ssh-control touch-target";
 
-export function TerminalView({ serverId, serverName, host, port }: TerminalViewProps) {
+export function TerminalView({ serverId, serverName, host, port, filesOpen = false, onToggleFiles }: TerminalViewProps) {
   const {
     terminalRef,
     status,
@@ -240,74 +244,79 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
   }, [setShortcuts, runCopy, runPaste, applyPaste, clearTerminal]);
 
   const statusIcon = () => {
-    if (view.tone === "ok") return <Wifi className="h-3.5 w-3.5 text-green-400" aria-hidden />;
-    if (view.tone === "error") return <WifiOff className="h-3.5 w-3.5 text-danger" aria-hidden />;
-    if (view.tone === "busy") return <Loader2 className="h-3.5 w-3.5 animate-spin text-yellow-500" aria-hidden />;
-    return <WifiOff className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" aria-hidden />;
+    if (view.tone === "ok") return <Wifi className="h-3.5 w-3.5" aria-hidden />;
+    if (view.tone === "busy") return <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />;
+    return <WifiOff className="h-3.5 w-3.5" aria-hidden />;
   };
 
   return (
-    <div ref={containerRef} className="flex h-full flex-col overflow-hidden bg-background">
+    <div ref={containerRef} className="ssh-workspace">
       {/* Toolbar: server identity, connection state and every control (REQ-09). */}
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-gray-200 px-2 py-1.5 dark:border-gray-800">
-        <Link
-          to={`/servers/${serverId}`}
-          aria-label={t("terminal.backToServer")}
-          className="inline-flex h-11 min-w-11 items-center gap-1.5 rounded-lg px-2 text-sm text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200 sm:h-8 sm:min-w-8"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden />
-        </Link>
-        <div className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-sm font-medium text-foreground" data-testid="terminal-server-name">
-            {serverName}
+      <div className="ssh-toolbar">
+        <div className="ssh-identity">
+          <Link
+            to={`/servers/${serverId}`}
+            aria-label={t("terminal.backToServer")}
+            title={t("terminal.backToServer")}
+            className={`${controlClass} ssh-back`}
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden />
+          </Link>
+          <span className="ssh-terminal-icon" aria-hidden="true">
+            <SquareTerminal className="h-4 w-4" />
           </span>
-          <span className="truncate font-mono text-[11px] text-muted-foreground" data-testid="terminal-server-address">
-            {host}:{port}
+          <div className="ssh-host">
+            <span className="ssh-host-name" data-testid="terminal-server-name" title={serverName}>
+              {serverName}
+            </span>
+            <span className="ssh-host-address" data-testid="terminal-server-address" title={`${host}:${port}`}>
+              {host}:{port}
+            </span>
+          </div>
+
+          <span
+            role="status"
+            aria-live="polite"
+            data-connection-status={status}
+            data-tone={view.tone}
+            className="ssh-connection-status"
+          >
+            {statusIcon()}
+            <span>
+              {t(view.labelKey, view.vars)}
+              {view.isNewSession && t("terminal.newSessionSuffix")}
+            </span>
           </span>
         </div>
 
-        <span
-          role="status"
-          aria-live="polite"
-          data-connection-status={status}
-          data-tone={view.tone}
-          className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs"
-        >
-          {statusIcon()}
-          <span>
-            {t(view.labelKey, view.vars)}
-            {view.isNewSession && t("terminal.newSessionSuffix")}
-          </span>
-        </span>
-
-        <div className="ml-auto flex flex-wrap items-center gap-1">
+        <div className="ssh-actions">
           {/* Primary control: connect / reconnect / cancel / disconnect. */}
           {view.canCancelRetry && (
             <button
               type="button"
-              className={controlClass}
+              className={`${controlClass} ssh-connection-action`}
               onClick={status === "connecting" ? disconnect : cancelRetry}
               aria-label={t("terminal.cancelConnect")}
             >
               <X className="h-3.5 w-3.5" aria-hidden />
-              <span className="hidden sm:inline">{t("terminal.cancelConnect")}</span>
+              <span>{t("terminal.cancelConnect")}</span>
             </button>
           )}
           {view.canDisconnect && (
             <button
               type="button"
-              className={controlClass}
+              className={`${controlClass} ssh-disconnect-action`}
               onClick={disconnect}
               aria-label={t("terminal.disconnect")}
             >
               <Unplug className="h-3.5 w-3.5" aria-hidden />
-              <span className="hidden sm:inline">{t("terminal.disconnect")}</span>
+              <span>{t("terminal.disconnect")}</span>
             </button>
           )}
           {view.canConnect && (
             <button
               type="button"
-              className={controlClass}
+              className={`${controlClass} ssh-connection-action`}
               onClick={() => {
                 connect();
                 focusTerminal();
@@ -315,48 +324,58 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
               aria-label={view.isRetry ? t("terminal.reconnect") : t("terminal.connect")}
             >
               <Plug className="h-3.5 w-3.5" aria-hidden />
-              <span className="hidden sm:inline">
+              <span>
                 {view.isRetry ? t("terminal.reconnect") : t("terminal.connect")}
               </span>
             </button>
           )}
 
+          {onToggleFiles && <button type="button" className={controlClass} aria-label={t("files.title")} aria-pressed={filesOpen} onClick={onToggleFiles}>
+            <FolderOpen className="h-3.5 w-3.5" aria-hidden /><span>{t("files.title")}</span>
+          </button>}
+
           {/* Desktop-only controls; narrow layouts get them behind "More". */}
-          <div className="hidden flex-wrap items-center gap-1 sm:flex">
+          <div className="ssh-desktop-actions hidden sm:flex">
             <button
               type="button"
               className={controlClass}
               aria-label={t("terminal.search")}
+              title={t("terminal.search")}
               aria-pressed={searchOpen}
               onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
             >
               <Search className="h-3.5 w-3.5" aria-hidden />
             </button>
-            <button type="button" className={controlClass} aria-label={t("terminal.fontDecrease")} onClick={decreaseFontSize}>
-              A−
-            </button>
-            <span data-font-size={fontSize} className="px-1 text-[11px] text-muted-foreground">
-              {fontSize}px
-            </span>
-            <button type="button" className={controlClass} aria-label={t("terminal.fontIncrease")} onClick={increaseFontSize}>
-              A+
-            </button>
-            <button type="button" className={controlClass} aria-label={t("terminal.fontReset")} onClick={resetFontSize}>
-              {t("terminal.fontResetShort")}
-            </button>
-            <button type="button" className={controlClass} aria-label={t("terminal.copy")} onClick={() => void runCopy()}>
+            <span className="ssh-action-divider" aria-hidden="true" />
+            <div className="ssh-font-controls">
+              <button type="button" className={controlClass} aria-label={t("terminal.fontDecrease")} title={t("terminal.fontDecrease")} onClick={decreaseFontSize}>
+                A−
+              </button>
+              <span data-font-size={fontSize} className="ssh-font-size">
+                {fontSize}px
+              </span>
+              <button type="button" className={controlClass} aria-label={t("terminal.fontIncrease")} title={t("terminal.fontIncrease")} onClick={increaseFontSize}>
+                A+
+              </button>
+              <button type="button" className={controlClass} aria-label={t("terminal.fontReset")} title={t("terminal.fontReset")} onClick={resetFontSize}>
+                {t("terminal.fontResetShort")}
+              </button>
+            </div>
+            <span className="ssh-action-divider" aria-hidden="true" />
+            <button type="button" className={controlClass} aria-label={t("terminal.copy")} title={t("terminal.copy")} onClick={() => void runCopy()}>
               <ClipboardCopy className="h-3.5 w-3.5" aria-hidden />
             </button>
-            <button type="button" className={controlClass} aria-label={t("terminal.paste")} onClick={() => void runPaste()}>
+            <button type="button" className={controlClass} aria-label={t("terminal.paste")} title={t("terminal.paste")} onClick={() => void runPaste()}>
               <ClipboardPaste className="h-3.5 w-3.5" aria-hidden />
             </button>
-            <button type="button" className={controlClass} aria-label={t("terminal.clear")} onClick={clearTerminal}>
+            <button type="button" className={controlClass} aria-label={t("terminal.clear")} title={t("terminal.clear")} onClick={clearTerminal}>
               <Eraser className="h-3.5 w-3.5" aria-hidden />
             </button>
             <button
               type="button"
               className={controlClass}
               aria-label={isFullscreen ? t("terminal.exitFullscreen") : t("terminal.fullscreen")}
+              title={isFullscreen ? t("terminal.exitFullscreen") : t("terminal.fullscreen")}
               aria-pressed={isFullscreen}
               data-fullscreen={isFullscreen}
               onClick={toggleFullscreen}
@@ -366,11 +385,12 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
           </div>
 
           {/* Narrow layouts: one menu holds the same actions, 44px tall each. */}
-          <details className="sm:hidden" data-testid="terminal-more">
+          <details className="ssh-more sm:hidden" data-testid="terminal-more">
             <summary className={`${controlClass} cursor-pointer list-none`} aria-label={t("terminal.more")}>
-              {t("terminal.more")}
+              <Ellipsis className="h-4 w-4" aria-hidden="true" />
+              <span>{t("terminal.more")}</span>
             </summary>
-            <div className="absolute right-2 z-20 mt-1 flex w-44 flex-col rounded-xl border border-border bg-card p-1 shadow-lg">
+            <div className="ssh-more-menu">
               <MenuButton label={t("terminal.search")} onClick={() => setSearchOpen(true)}>
                 <Search className="h-4 w-4" aria-hidden />
               </MenuButton>
@@ -396,7 +416,8 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
 
       {/* Search bar: local scrollback only, Esc closes it. */}
       {searchOpen && (
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
+        <div className="ssh-search-panel">
+          <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
           <input
             autoFocus
             type="text"
@@ -417,7 +438,7 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
             }}
             // min-w-0 lets the field shrink on a 375px screen instead of pushing the
             // search actions out of the viewport (F09).
-            className="touch-target h-11 min-w-0 flex-1 basis-40 rounded-lg border border-border bg-background px-3 text-sm text-foreground sm:h-8"
+            className="ssh-search-input touch-target"
           />
           <button type="button" className={controlClass} aria-label={t("terminal.searchPrevious")} onClick={() => runSearch("previous")}>
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
@@ -433,23 +454,23 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
 
       {/* Connection failures are readable outside the terminal. */}
       {error && (
-        <div className="flex-shrink-0 border-b border-danger/30 bg-danger-subtle px-4 py-2" role="alert">
-          <p className="text-sm text-danger">{error}</p>
+        <div className="ssh-message ssh-message--error" role="alert">
+          <p>{error}</p>
         </div>
       )}
 
       {notice && (
-        <div className="flex-shrink-0 border-b border-border bg-muted px-4 py-2" role="status">
-          <p className="text-xs text-muted-foreground">{notice}</p>
+        <div className="ssh-message" role="status">
+          <p>{notice}</p>
         </div>
       )}
 
       {pendingPaste && (
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-yellow-300 bg-yellow-50 px-4 py-2 dark:border-yellow-800 dark:bg-yellow-900/20" role="alertdialog" aria-label={t("terminal.pasteConfirmTitle")}>
-          <p className="text-xs text-yellow-800 dark:text-yellow-200">
+        <div className="ssh-message ssh-message--confirm" role="alertdialog" aria-label={t("terminal.pasteConfirmTitle")}>
+          <p>
             {t("terminal.pasteConfirm", { lines: pendingPaste.lines, preview: pendingPaste.preview })}
           </p>
-          <button type="button" className={controlClass} onClick={confirmPaste}>
+          <button type="button" className={`${controlClass} ssh-connection-action`} onClick={confirmPaste}>
             {t("terminal.pasteConfirmSend")}
           </button>
           <button type="button" className={controlClass} onClick={() => setPendingPaste(null)}>
@@ -459,7 +480,7 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
       )}
 
       {/* The terminal owns the remaining height; the container is the fit target. */}
-      <div className="min-h-0 flex-1 overflow-hidden p-1">
+      <div className="ssh-terminal-stage">
         <div
           ref={terminalRef}
           data-testid="terminal-surface"
@@ -469,10 +490,10 @@ export function TerminalView({ serverId, serverName, host, port }: TerminalViewP
       </div>
 
       {/* The documented shortcut surface. */}
-      <div className="hidden flex-shrink-0 flex-wrap gap-x-3 gap-y-1 border-t border-gray-200 px-3 py-1 text-[11px] text-muted-foreground sm:flex dark:border-gray-800">
+      <div className="ssh-shortcuts hidden sm:flex">
         {TERMINAL_SHORTCUTS.map((hint) => (
           <span key={hint.keys}>
-            <kbd className="font-mono">{hint.keys}</kbd> {t(hint.labelKey)}
+            <kbd>{hint.keys}</kbd> {t(hint.labelKey)}
           </span>
         ))}
       </div>
@@ -494,7 +515,7 @@ function MenuButton({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="touch-target inline-flex h-11 items-center gap-2 rounded-lg px-3 text-left text-xs font-medium text-foreground hover:bg-muted"
+      className="ssh-menu-button touch-target"
     >
       {children}
       <span>{label}</span>

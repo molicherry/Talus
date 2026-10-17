@@ -57,6 +57,9 @@ func routeFailure(role, stage, reason string, err error) error {
 	return &RouteError{Reason: reason, Stage: stage, Role: role, Cause: err}
 }
 func handshakeFailure(role string, err error) error {
+	if errors.Is(err, ErrHostKeyUnverified) {
+		return routeFailure(role, role+"_host_key", "ssh_host_key_unverified", err)
+	}
 	if errors.Is(err, ErrHostKeyMismatch) {
 		return routeFailure(role, role+"_host_key", "ssh_host_key_mismatch", err)
 	}

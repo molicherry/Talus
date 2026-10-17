@@ -188,7 +188,7 @@ func newTerminalE2EFixture(t *testing.T) *terminalE2EFixture {
 	return f
 }
 
-func (f *terminalE2EFixture) connect(t *testing.T, g mw.UserGate, raw string) (*websocket.Conn, <-chan struct{}) {
+func (f *terminalE2EFixture) connect(t *testing.T, g mw.UserGate, raw string, protocols ...string) (*websocket.Conn, <-chan struct{}) {
 	t.Helper()
 	h := NewTerminalHandler(f.svc, f.jwt)
 	h.SetUserGate(g)
@@ -197,7 +197,9 @@ func (f *terminalE2EFixture) connect(t *testing.T, g mw.UserGate, raw string) (*
 	router.Get("/api/v1/servers/{id}/terminal", func(w http.ResponseWriter, r *http.Request) { defer close(done); h.Handle(w, r) })
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
-	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/api/v1/servers/1/terminal", nil)
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = protocols
+	ws, _, err := dialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/api/v1/servers/1/terminal", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

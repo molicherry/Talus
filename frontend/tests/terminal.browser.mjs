@@ -51,8 +51,9 @@ const webSocketStub = () => {
     static OPEN = 1;
     static CLOSING = 2;
     static CLOSED = 3;
-    constructor(url) {
+    constructor(url, protocols) {
       this.url = url;
+      this.protocols = protocols;
       this.readyState = FakeWebSocket.CONNECTING;
       this.sent = [];
       this.onopen = null;
@@ -79,6 +80,9 @@ const webSocketStub = () => {
     deliver(message) {
       this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(message) }));
     }
+    deliverBinary(bytes) {
+      this.onmessage?.(new MessageEvent("message", { data: new Uint8Array(bytes).buffer }));
+    }
     /** Test hook: the peer drops the connection. */
     drop() {
       this.readyState = FakeWebSocket.CLOSED;
@@ -96,20 +100,20 @@ const webSocketStub = () => {
   window.WebSocket = FakeWebSocket;
 };
 
-async function fixture(browser, { viewport = { width: 1280, height: 900 }, mobile = false, language = "en" } = {}) {
+async function fixture(browser, { viewport = { width: 1280, height: 900 }, mobile = false, language = "en", role = "admin" } = {}) {
   const context = await browser.newContext({ viewport, hasTouch: mobile, isMobile: mobile, locale: "en-US" });
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: base });
   await context.addInitScript(webSocketStub);
   await context.addInitScript(
-    ([lang]) => {
+    ([lang, role]) => {
       localStorage.setItem(
         "auth_token",
-        `test.${btoa(JSON.stringify({ uid: 1, username: "terminal-user", role: "admin", exp: Date.now() / 1000 + 3600 }))}.test`,
+        `test.${btoa(JSON.stringify({ uid: 1, username: "terminal-user", role, exp: Date.now() / 1000 + 3600 }))}.test`,
       );
       localStorage.setItem("i18nextLng", lang);
       localStorage.setItem("talus-theme", "light");
     },
-    [language],
+    [language, role],
   );
   const errors = [];
   await context.route("**/api/**", async (route) => {
@@ -185,8 +189,113 @@ const frames = (page) => page.evaluate(() => window.__ws.frames.map((frame) => f
 const socketCount = (page) => page.evaluate(() => window.__ws.sockets.length);
 const clientInputs = async (page) => (await frames(page)).filter((frame) => frame.type === "input").map((frame) => frame.data);
 
+async function hostKeyScenario(page, { jump = false, stale = false, failDiscovery = false } = {}) {
+  const initial = (id, name, host) => ({
+    ...serverFixture, id, name, host, connection_revision: 1,
+    host_key_unverified: true, host_key_mismatch: false, connection: { mode: "direct" },
+  });
+  const state = { 1: initial(1, "Alpha", "alpha.example.test") };
+  if (jump) {
+    state[1].connection = { mode: "ssh_jump", jump_server_id: 2 };
+    state[2] = initial(2, "Bastion", "bastion.example.test");
+  }
+  const discoveries = [], approvals = [];
+  await page.route("**/api/v1/servers/**", async (route) => {
+    const match = new URL(route.request().url()).pathname.match(/^\/api\/v1\/servers\/(\d+)(.*)$/);
+    if (!match) return route.fallback();
+    const id = Number(match[1]), suffix = match[2];
+    const reply = (data, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(status >= 400 ? data : { data }) });
+    if (!suffix) return reply(state[id]);
+    if (suffix === "/connection/test") {
+      discoveries.push(id);
+      if (failDiscovery && discoveries.length === 1) return reply({ error: { reason: "ssh_connection_failed" } }, 502);
+      state[id].host_key_seen_fingerprint = `SHA256:host-${id}-candidate`;
+      state[id].connection_revision++;
+      return reply({ error: { reason: "ssh_host_key_unverified" } }, 409);
+    }
+    if (suffix === "/host-key/trust") {
+      const body = route.request().postDataJSON();
+      approvals.push({ id, ...body });
+      if (stale) {
+        state[id].host_key_seen_fingerprint = "SHA256:newer-candidate";
+        state[id].connection_revision++;
+        return reply({ error: { reason: "host_key_changed" } }, 409);
+      }
+      assert.equal(body.fingerprint, state[id].host_key_seen_fingerprint);
+      assert.equal(body.expected_revision, state[id].connection_revision);
+      state[id].host_key_fingerprint = body.fingerprint;
+      delete state[id].host_key_seen_fingerprint;
+      state[id].host_key_unverified = false;
+      state[id].connection_revision++;
+      return reply(state[id]);
+    }
+    return route.fallback();
+  });
+  return { discoveries, approvals };
+}
+
 try {
   await until(async () => fetch(base).then((r) => r.ok).catch(() => false), "preview server");
+
+  await test("first host key blocks WebSocket until the displayed fingerprint and revision are trusted", async ({ page, goto }) => {
+    const scenario = await hostKeyScenario(page);
+    await goto("/servers/1/terminal");
+    await page.getByTestId("pending-host-key").waitFor();
+    assert.equal(await socketCount(page), 0);
+    assert.match(await page.getByTestId("pending-host-key").innerText(), /SHA256:host-1-candidate/);
+    assert.deepEqual(scenario.discoveries, [1]);
+    await page.getByRole("button", { name: "I verified this fingerprint — trust host", exact: true }).click();
+    await until(async () => (await socketCount(page)) === 1, "terminal after trust");
+    assert.deepEqual(scenario.approvals, [{ id: 1, fingerprint: "SHA256:host-1-candidate", expected_revision: 2 }]);
+  });
+
+  await test("stale host key approval refreshes the fingerprint and keeps the terminal blocked", async ({ page, goto }) => {
+    const scenario = await hostKeyScenario(page, { stale: true });
+    await goto("/servers/1/terminal");
+    await page.getByTestId("pending-host-key").waitFor();
+    await page.getByRole("button", { name: "I verified this fingerprint — trust host", exact: true }).click();
+    await until(async () => (await page.getByTestId("pending-host-key").innerText()).includes("SHA256:newer-candidate"), "refreshed fingerprint");
+    assert.equal(await socketCount(page), 0);
+    assert.equal(scenario.approvals.length, 1);
+  });
+
+  await test("first host key discovery can be retried after a network failure", async ({ page, goto }) => {
+    const scenario = await hostKeyScenario(page, { failDiscovery: true });
+    await goto("/servers/1/terminal");
+    const read = page.getByRole("button", { name: "Read host fingerprint", exact: true });
+    await until(async () => scenario.discoveries.length === 1 && await read.isEnabled(), "failed discovery settled");
+    assert.equal(await socketCount(page), 0);
+    assert.equal(await page.getByRole("button", { name: "I verified this fingerprint — trust host", exact: true }).isDisabled(), true);
+    await read.click();
+    await page.getByTestId("pending-host-key").waitFor();
+    assert.deepEqual(scenario.discoveries, [1, 1]);
+    assert.equal(await socketCount(page), 0);
+  });
+
+  await test("jump host is confirmed before target host and terminal connects only after both", async ({ page, goto }) => {
+    const scenario = await hostKeyScenario(page, { jump: true });
+    await goto("/servers/1/terminal");
+    await page.getByTestId("pending-host-key").waitFor();
+    assert.match(await page.getByRole("alert").first().innerText(), /bastion.example.test:2222/);
+    assert.deepEqual(scenario.discoveries, [2]);
+    assert.equal(await socketCount(page), 0);
+    await page.getByRole("button", { name: "I verified this fingerprint — trust host", exact: true }).click();
+    await until(async () => (await page.getByTestId("pending-host-key").innerText()).includes("host-1-candidate"), "target fingerprint");
+    assert.deepEqual(scenario.discoveries, [2, 1]);
+    assert.equal(await socketCount(page), 0);
+    await page.getByRole("button", { name: "I verified this fingerprint — trust host", exact: true }).click();
+    await until(async () => (await socketCount(page)) === 1, "verified jump route");
+    assert.deepEqual(scenario.approvals.map((item) => item.id), [2, 1]);
+  });
+
+  await test("non-admin sees confirmation requirement without discovery or trust actions", async ({ page, goto }) => {
+    const scenario = await hostKeyScenario(page);
+    await goto("/servers/1/terminal");
+    await page.getByText("An administrator must verify and trust this host before connections can continue.").waitFor();
+    assert.equal(await page.getByRole("button", { name: /trust host|Read host fingerprint/ }).count(), 0);
+    assert.deepEqual(scenario.discoveries, []);
+    assert.equal(await socketCount(page), 0);
+  }, { role: "user" });
 
   await test("toolbar shows the server identity, connection state and controls", async ({ page, goto }) => {
     await goto("/servers/1/terminal");
@@ -201,6 +310,71 @@ try {
     await until(async () => (await frames(page)).length > 0, "auth frame");
     const [first] = await frames(page);
     assert.equal(first.type, "auth");
+  });
+
+  await test("theme changes repaint the live terminal without replacing its socket or output", async ({ page, goto }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => {
+      window.__ws.last().deliver({ type: "connected" });
+      window.__ws.last().deliverBinary([...new TextEncoder().encode("retained theme output\r\n")]);
+    });
+    await until(async () => (await terminalText(page)).includes("retained theme output"), "initial output");
+    const original = await page.locator(".xterm").elementHandle();
+    const background = () => page.locator(".xterm-scrollable-element").evaluate(node => getComputedStyle(node).backgroundColor);
+    await until(async () => await background() === "rgb(255, 255, 255)", "white terminal");
+    await page.getByRole("button", { name: "Light", exact: true }).click();
+    await until(async () => await background() === "rgb(8, 13, 18)", "dark terminal");
+    assert.equal(await page.evaluate(() => localStorage.getItem("talus-theme")), "dark");
+    await page.getByRole("button", { name: "Dark", exact: true }).click();
+    await until(async () => await background() === "rgb(255, 255, 255)", "system light terminal");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await until(async () => await background() === "rgb(8, 13, 18)", "system dark terminal");
+    await page.emulateMedia({ colorScheme: "light" });
+    await until(async () => await background() === "rgb(255, 255, 255)", "system returns to light");
+    assert.equal(await socketCount(page), 1);
+    assert.equal(await original.evaluate(node => node === document.querySelector(".xterm")), true);
+    assert.ok((await terminalText(page)).includes("retained theme output"));
+    assert.equal(await statusPill(page).getAttribute("data-connection-status"), "connected");
+    assert.deepEqual(await clientInputs(page), []);
+  });
+
+  await test("binary output preserves split UTF-8 and treats JSON-looking bytes as terminal text", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    assert.deepEqual(await page.evaluate(() => ({ protocol: window.__ws.last().protocols, binaryType: window.__ws.last().binaryType })), {
+      protocol: "talus.terminal.v2", binaryType: "arraybuffer",
+    });
+    await page.evaluate(() => {
+      const ws = window.__ws.last();
+      ws.deliver({ type: "connected" });
+      const data = new TextEncoder().encode('\x1b[32m中文🙂跨帧\x1b[0m\r\n{"type":"error","data":"ordinary output"}\r\n');
+      for (const byte of data) ws.deliverBinary([byte]);
+    });
+    await until(async () => (await terminalText(page)).includes("中文🙂跨帧"), "split UTF-8 rendered");
+    await until(async () => (await terminalText(page)).includes('"ordinary output"'), "JSON-looking output rendered");
+    assert.ok(!(await terminalText(page)).includes("\ufffd"), "a frame boundary must not replace part of a rune");
+    assert.deepEqual(await page.getByRole("alert").allInnerTexts(), [], "binary output must never become a control frame");
+    assert.equal(await statusPill(page).getAttribute("data-connection-status"), "connected");
+  });
+
+  await test("an incomplete binary character cannot leak into a reconnected terminal", async ({ page, goto }) => {
+    await goto("/servers/1/terminal");
+    await until(async () => (await socketCount(page)) === 1, "one socket");
+    await page.evaluate(() => {
+      window.__ws.last().deliver({ type: "connected" });
+      window.__ws.last().deliverBinary([0xe4]);
+    });
+    await page.getByRole("button", { name: "Disconnect" }).click();
+    await page.getByRole("button", { name: "Connect" }).click();
+    await until(async () => (await socketCount(page)) === 2, "new socket");
+    await page.evaluate(() => {
+      window.__ws.last().deliver({ type: "connected" });
+      window.__ws.last().deliverBinary([...new TextEncoder().encode("新会话🙂\r\n")]);
+    });
+    await until(async () => (await terminalText(page)).includes("新会话🙂"), "new session output");
+    assert.ok(!(await terminalText(page)).includes("\ufffd"), "a new terminal must start with a fresh decoder");
   });
 
   await test("connect, disconnect and reconnect are explicit user actions", async ({ page, goto }) => {

@@ -16,6 +16,22 @@ type captureRoute struct {
 }
 
 var capturedRoutes = map[string]captureRoute{
+	"GET /api/v1/servers/{id}/sftp/text":              {"server.sftp.text.read", "/api/v1/servers/{id}/sftp/text", "server"},
+	"PUT /api/v1/servers/{id}/sftp/text":              {"server.sftp.text.write", "/api/v1/servers/{id}/sftp/text", "server"},
+	"GET /api/v1/servers/{id}/sftp/archive":           {"server.sftp.archive", "/api/v1/servers/{id}/sftp/archive", "server"},
+	"POST /api/v1/servers/{id}/sftp/uploads/start":    {"server.sftp.upload.start", "/api/v1/servers/{id}/sftp/uploads/start", "server"},
+	"POST /api/v1/servers/{id}/sftp/uploads/status":   {"server.sftp.upload.status", "/api/v1/servers/{id}/sftp/uploads/status", "server"},
+	"PUT /api/v1/servers/{id}/sftp/uploads/chunk":     {"server.sftp.upload.chunk", "/api/v1/servers/{id}/sftp/uploads/chunk", "server"},
+	"POST /api/v1/servers/{id}/sftp/uploads/complete": {"server.sftp.upload.complete", "/api/v1/servers/{id}/sftp/uploads/complete", "server"},
+	"DELETE /api/v1/servers/{id}/sftp/uploads":        {"server.sftp.upload.cancel", "/api/v1/servers/{id}/sftp/uploads", "server"},
+
+	"GET /api/v1/servers/{id}/sftp/entries":     {"server.sftp.list", "/api/v1/servers/{id}/sftp/entries", "server"},
+	"GET /api/v1/servers/{id}/sftp/stat":        {"server.sftp.stat", "/api/v1/servers/{id}/sftp/stat", "server"},
+	"GET /api/v1/servers/{id}/sftp/download":    {"server.sftp.download", "/api/v1/servers/{id}/sftp/download", "server"},
+	"POST /api/v1/servers/{id}/sftp/upload":     {"server.sftp.upload", "/api/v1/servers/{id}/sftp/upload", "server"},
+	"POST /api/v1/servers/{id}/sftp/mkdir":      {"server.sftp.mkdir", "/api/v1/servers/{id}/sftp/mkdir", "server"},
+	"POST /api/v1/servers/{id}/sftp/rename":     {"server.sftp.rename", "/api/v1/servers/{id}/sftp/rename", "server"},
+	"DELETE /api/v1/servers/{id}/sftp/entry":    {"server.sftp.delete", "/api/v1/servers/{id}/sftp/entry", "server"},
 	"POST /api/v1/servers/{id}/connection/test": {"server.connection.test", "/api/v1/servers/{id}/connection/test", "server"},
 	"POST /api/v1/servers":                      {"server.create", "/api/v1/servers", "server"},
 	"PUT /api/v1/servers/{id}":                  {"server.update", "/api/v1/servers/{id}", "server"},

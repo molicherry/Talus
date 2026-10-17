@@ -17,6 +17,27 @@ import (
 // `errors.<reason>`; frontend/tests/error-reasons.test.mjs fails if the two
 // sides drift, so a new reason cannot ship untranslated.
 const (
+	ReasonSftpInvalidUpload       = "sftp_invalid_upload"
+	ReasonSftpUploadExpired       = "sftp_upload_expired"
+	ReasonSftpChecksumMismatch    = "sftp_checksum_mismatch"
+	ReasonSftpTextTooLarge        = "sftp_text_too_large"
+	ReasonSftpNotText             = "sftp_not_text"
+	ReasonSftpNotDirectory        = "sftp_not_directory"
+	ReasonSftpInvalidRange        = "sftp_invalid_range"
+	ReasonSftpInvalidPath         = "sftp_invalid_path"
+	ReasonSftpNotFound            = "sftp_not_found"
+	ReasonSftpPermissionDenied    = "sftp_permission_denied"
+	ReasonSftpExists              = "sftp_exists"
+	ReasonSftpConflict            = "sftp_conflict"
+	ReasonSftpNotEmpty            = "sftp_not_empty"
+	ReasonSftpBusy                = "sftp_busy"
+	ReasonSftpTooLarge            = "sftp_too_large"
+	ReasonSftpDirectoryTooLarge   = "sftp_directory_too_large"
+	ReasonSftpUnavailable         = "sftp_unavailable"
+	ReasonSftpFailed              = "sftp_failed"
+	ReasonSftpNotRegular          = "sftp_not_regular"
+	ReasonSftpAtomicUnsupported   = "sftp_atomic_unsupported"
+	ReasonSftpSizeMismatch        = "sftp_size_mismatch"
 	ReasonUnauthorized            = "unauthorized"
 	ReasonInvalidCredentials      = "invalid_credentials"
 	ReasonWrongCurrentPassword    = "current_password_incorrect"
@@ -59,6 +80,7 @@ const (
 	ReasonSSHAuth                 = "ssh_authentication_failed"
 	ReasonSSHTimeout              = "ssh_timeout"
 	ReasonSSHHostKeyMismatch      = "ssh_host_key_mismatch"
+	ReasonSSHHostKeyUnverified    = "ssh_host_key_unverified"
 	ReasonNoHostKeyMismatch       = "no_host_key_mismatch"
 	ReasonHostKeyChanged          = "host_key_changed"
 	ReasonInvalidConnection       = "invalid_connection_config"
@@ -83,6 +105,29 @@ const (
 // API's untranslated wording lives. {{name}} placeholders are filled from
 // Params, both here and (independently translated) on the client.
 var reasonMessages = map[string]string{
+	ReasonSftpInvalidUpload:    "Invalid upload session or chunk",
+	ReasonSftpUploadExpired:    "The upload session expired; start a new upload",
+	ReasonSftpChecksumMismatch: "File checksum mismatch; the destination was not replaced",
+	ReasonSftpTextTooLarge:     "Text editing is limited to 1 MiB",
+	ReasonSftpNotText:          "This file is not UTF-8 text",
+	ReasonSftpNotDirectory:     "This operation requires a directory",
+	ReasonSftpInvalidRange:     "The requested download range is invalid",
+
+	ReasonSftpInvalidPath:       "Invalid remote path",
+	ReasonSftpNotFound:          "Remote file or directory not found",
+	ReasonSftpPermissionDenied:  "The SSH account cannot access this file",
+	ReasonSftpExists:            "The destination already exists",
+	ReasonSftpConflict:          "The file or SSH connection changed; refresh and try again",
+	ReasonSftpNotEmpty:          "The directory is not empty",
+	ReasonSftpBusy:              "Another file operation is running on this server",
+	ReasonSftpTooLarge:          "The file exceeds the 64 MiB limit",
+	ReasonSftpDirectoryTooLarge: "The directory exceeds the listing limit",
+	ReasonSftpUnavailable:       "The server did not enable the SFTP subsystem",
+	ReasonSftpFailed:            "The SFTP operation failed",
+	ReasonSftpNotRegular:        "This operation requires a regular file",
+	ReasonSftpAtomicUnsupported: "The server does not support safe replacement; choose a new filename",
+	ReasonSftpSizeMismatch:      "The upload size did not match; the original file was preserved",
+
 	ReasonUnauthorized:            "unauthorized",
 	ReasonInvalidCredentials:      "invalid username or password",
 	ReasonWrongCurrentPassword:    "current password is incorrect",
@@ -125,6 +170,7 @@ var reasonMessages = map[string]string{
 	ReasonSSHAuth:                 "ssh authentication failed",
 	ReasonSSHTimeout:              "ssh command timed out",
 	ReasonSSHHostKeyMismatch:      "ssh host key changed: verify the new fingerprint before trusting it",
+	ReasonSSHHostKeyUnverified:    "verify and confirm the SSH host key before connecting",
 	ReasonNoHostKeyMismatch:       "no pending host key change to trust",
 	ReasonHostKeyChanged:          "the pending host key changed again: re-verify the new fingerprint",
 	ReasonInvalidConnection:       "invalid server connection configuration",
@@ -230,6 +276,7 @@ var (
 	ErrSSHAuth              = &AppError{Code: http.StatusBadGateway, Reason: ReasonSSHAuth, Message: reasonMessages[ReasonSSHAuth]}
 	ErrSSHTimeout           = &AppError{Code: http.StatusGatewayTimeout, Reason: ReasonSSHTimeout, Message: reasonMessages[ReasonSSHTimeout]}
 	ErrSSHHostKeyMismatch   = &AppError{Code: http.StatusBadGateway, Reason: ReasonSSHHostKeyMismatch, Message: reasonMessages[ReasonSSHHostKeyMismatch]}
+	ErrSSHHostKeyUnverified = &AppError{Code: http.StatusConflict, Reason: ReasonSSHHostKeyUnverified, Message: reasonMessages[ReasonSSHHostKeyUnverified]}
 )
 
 // NewAppError creates an AppError for the given status and reason. The message

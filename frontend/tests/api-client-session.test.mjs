@@ -126,5 +126,43 @@ for (const reason of [undefined, "server_credentials_unavailable"]) {
   assert.equal(auth.getAuthEpoch(), epoch);
   assert.deepEqual(redirects, ["/login"]);
 }
+
+// Binary transfers cannot publish bytes after logout or an identity switch.
+{
+  const calls = [];
+  class MockXHR {
+    upload = {};
+    headers = {};
+    open(method, url) { this.method = method; this.url = url; calls.push(this); }
+    setRequestHeader(key, value) { this.headers[key] = value; }
+    send(body) { this.body = body; }
+    abort() { this.aborted = true; this.onabort?.(); }
+    async reply(status, body) { this.status = status; this.response = body; await this.onload?.(); }
+  }
+  globalThis.XMLHttpRequest = MockXHR;
+  auth.setAuthToken(token(11));
+  const controller = new AbortController();
+  const input = new Blob([new Uint8Array([0, 255, 1])]);
+  const pendingFile = apiClient.transfer("/api/v1/servers/1/sftp/upload", { method: "POST", body: input, signal: controller.signal });
+  const xhr = calls.at(-1);
+  assert.equal(xhr.headers.Authorization, `Bearer ${auth.getAuthToken()}`);
+  assert.equal(xhr.body, input);
+  controller.abort();
+  await assert.rejects(pendingFile, error => error.name === "AbortError");
+  const stale = apiClient.transfer("/api/v1/servers/1/sftp/download", { download: true });
+  const staleXHR = calls.at(-1);
+  auth.setAuthToken(token(12));
+  const switchedToken = auth.getAuthToken();
+  await assert.rejects(stale, error => error.name === "AbortError");
+  assert.equal(staleXHR.aborted, true);
+  await staleXHR.reply(200, input);
+  assert.equal(auth.getAuthToken(), switchedToken);
+  const download = apiClient.transfer("/api/v1/servers/1/sftp/download", { download: true });
+  await calls.at(-1).reply(200, input);
+  assert.deepEqual(new Uint8Array(await (await download).arrayBuffer()), new Uint8Array([0, 255, 1]));
+  const failed = apiClient.transfer("/api/v1/servers/1/sftp/upload", { method: "POST", body: input });
+  await calls.at(-1).reply(409, new Blob([JSON.stringify({error:{code:409,reason:"sftp_exists"}})]));
+  await assert.rejects(failed, error => error.reason === "sftp_exists");
+}
 auth.clearAuthToken();
 console.log("api-client-session: ALL PASS");
