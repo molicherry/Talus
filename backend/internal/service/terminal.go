@@ -443,6 +443,16 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 		startFailed("terminal_ssh_failed")
 		return result, sessionCtx.Err()
 	}
+	// Initialize the read deadline before announcing readiness. A client may
+	// revoke or close the session immediately after receiving "connected".
+	interval, timeout := s.keepaliveSettings()
+	if err := wsConn.SetReadDeadline(time.Now().Add(interval + timeout)); err != nil {
+		end("failed", "terminal_transport_failed", "transport_error")
+		return result, err
+	}
+	wsConn.SetPongHandler(func(string) error {
+		return wsConn.SetReadDeadline(time.Now().Add(interval + timeout))
+	})
 	if err := writer.writeJSON(wsMessage{Type: "connected"}); err != nil {
 		startFailed("terminal_output_failed")
 		return result, err
@@ -452,15 +462,6 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 	readyAt = result.ReadyAt
 	resourceMu.Unlock()
 	usage.FromContext(ctx).SetPhase("ready")
-	interval, timeout := s.keepaliveSettings()
-	if err := wsConn.SetReadDeadline(time.Now().Add(interval + timeout)); err != nil {
-		end("failed", "terminal_transport_failed", "transport_error")
-		return result, err
-	}
-	wsConn.SetPongHandler(func(string) error {
-		return wsConn.SetReadDeadline(time.Now().Add(interval + timeout))
-	})
-
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() {

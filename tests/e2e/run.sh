@@ -122,6 +122,7 @@ ln -sfn ../../frontend/node_modules tests/e2e/node_modules
 HUB_URL="http://127.0.0.1:$HUB_PORT" \
 	PEER_LOG="$WORK/peer.jsonl" \
 	PEER_PORT="${PEER_ADDR##*:}" \
+	PEER_HOST_PUBLIC_KEY="$WORK/peer_host_key.pub" \
 	CLIENT_KEY="$WORK/client_key" \
 	node tests/e2e/terminal.spec.mjs || exit 1
 
