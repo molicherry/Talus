@@ -210,8 +210,12 @@ func TestSFTPDoesNotFollowSymlinksOrShellPaths(t *testing.T) {
 	svc, _, root, _ := fileServiceFixture(t)
 	target := filepath.Join(root, "original")
 	link := filepath.Join(root, "link")
-	os.WriteFile(target, []byte("keep"), 0600)
-	os.Symlink(target, link)
+	if err := os.WriteFile(target, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
 	fileReason(t, svc.Download(context.Background(), 1, link, func(SFTPEntry) (io.Writer, error) { t.Fatal("followed symlink"); return io.Discard, nil }), "sftp_not_regular")
 	fileReason(t, svc.Upload(context.Background(), 1, link, strings.NewReader("bad"), 3, true), "sftp_not_regular")
 	if err := svc.Remove(context.Background(), 1, link); err != nil {

@@ -112,7 +112,7 @@ func (s *SFTPService) readUpload(ctx context.Context, id uint, token string, all
 	if owner != ticket.Owner {
 		return nil, server.ErrForbidden
 	}
-	if time.Now().Unix() > ticket.ExpiresAt && !(len(allowExpired) > 0 && allowExpired[0]) {
+	if time.Now().Unix() > ticket.ExpiresAt && (len(allowExpired) == 0 || !allowExpired[0]) {
 		return nil, SFTPError("sftp_upload_expired")
 	}
 	return &ticket, nil

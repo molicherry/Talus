@@ -475,9 +475,10 @@ func (s *SSHService) recordMismatch(ctx context.Context, snap *sshRouteSnapshot,
 
 func routeFailure(reason, stage, role string) *server.AppError {
 	status := http.StatusBadGateway
-	if reason == server.ReasonSSHTimeout {
+	switch reason {
+	case server.ReasonSSHTimeout:
 		status = http.StatusGatewayTimeout
-	} else if reason == server.ReasonSSHHostKeyUnverified {
+	case server.ReasonSSHHostKeyUnverified:
 		status = http.StatusConflict
 	}
 	app := server.NewAppErrorParams(status, reason, map[string]any{"stage": stage, "role": role})

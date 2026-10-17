@@ -261,7 +261,9 @@ func TestSSHJumpMismatchUpdatesOnlyJumpIdentity(t *testing.T) {
 	source.mu.Unlock()
 	target, _ := source.FindByID(context.Background(), 1)
 	presented := []byte("new-jump-key")
-	svc.recordMismatch(context.Background(), &sshRouteSnapshot{target: target, jump: cloneRouteServer(jump)}, &sshpool.RouteError{Role: "jump", Stage: "jump_host_key", Reason: server.ReasonSSHHostKeyMismatch, Cause: &sshpool.HostKeyMismatchError{Presented: presented}})
+	if err := svc.recordMismatch(context.Background(), &sshRouteSnapshot{target: target, jump: cloneRouteServer(jump)}, &sshpool.RouteError{Role: "jump", Stage: "jump_host_key", Reason: server.ReasonSSHHostKeyMismatch, Cause: &sshpool.HostKeyMismatchError{Presented: presented}}); err != nil {
+		t.Fatal(err)
+	}
 	source.mu.Lock()
 	defer source.mu.Unlock()
 	if source.servers[1].HostKeySeen != nil || source.servers[1].ConnectionRevision != 1 {

@@ -141,7 +141,9 @@ func TestSFTPHTTPBinaryTransferAndReadDeadline(t *testing.T) {
 func TestSFTPHTTPPhase2ScopesAndRangeDownload(t *testing.T) {
 	ts, root := sftpHTTPFixture(t)
 	p := filepath.Join(root, "range.txt")
-	os.WriteFile(p, []byte("0123456789"), 0600)
+	if err := os.WriteFile(p, []byte("0123456789"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct{ method, path string }{{"GET", "text"}, {"PUT", "text"}, {"GET", "archive"}, {"POST", "uploads/start"}, {"POST", "uploads/status"}, {"PUT", "uploads/chunk"}, {"POST", "uploads/complete"}, {"DELETE", "uploads"}} {
 		response := sftpHTTP(t, ts, tc.method, "/api/v1/servers/1/sftp/"+tc.path, "servers:exec", nil)
 		if response.StatusCode != 403 {

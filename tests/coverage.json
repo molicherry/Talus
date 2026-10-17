@@ -3340,18 +3340,18 @@
         "REQ-06"
       ],
       "spec_ref": "tests/coverage.json#/cases/37/scenario",
-      "scenario": "Revalidate route snapshots across slot waits, cache hits, and TOFU writes; pin jump and target identities separately and reject stale identity results without breaking sequential lease primitives.",
+      "scenario": "Revalidate route snapshots across slot waits, cache hits, and explicit host-key confirmation; pin jump and target identities separately and reject stale identity results without breaking sequential lease primitives.",
       "implementations": [
         {
           "implementation_id": "impl-06-08-proxy-01",
           "run_id": "go-race",
           "implementation": {
             "path": "backend/internal/service/ssh_route_test.go",
-            "symbol": "TestSSHRouteTOFUReturnsCurrentConnectionButDoesNotCacheOldRevision"
+            "symbol": "TestSSHRouteRequiresExplicitFirstHostKeyConfirmation"
           },
           "automation_status": "implemented",
           "required": true,
-          "verification": "Allow the freshly pinned connection to finish while preventing its old revision from returning to the cache."
+          "verification": "Reject unconfirmed host keys without caching a connection, then cache only the explicitly trusted identity."
         },
         {
           "implementation_id": "impl-06-08-proxy-02",
@@ -3391,22 +3391,22 @@
           "run_id": "go-race",
           "implementation": {
             "path": "backend/internal/service/ssh_route_test.go",
-            "symbol": "TestSSHRouteRejectsConcurrentIdentityEditDuringTOFU"
+            "symbol": "TestSSHRouteRejectsConcurrentIdentityEditDuringDiscovery"
           },
           "automation_status": "implemented",
           "required": true,
-          "verification": "Reject a concurrent route or identity edit rather than accepting a stale TOFU result."
+          "verification": "Reject a concurrent route or identity edit rather than recording a stale discovery result."
         },
         {
           "implementation_id": "impl-06-08-proxy-06",
           "run_id": "go-race",
           "implementation": {
             "path": "backend/internal/service/ssh_route_test.go",
-            "symbol": "TestTOFUAdoptsConfirmedIdentityForSequentialLeasePrimitives"
+            "symbol": "TestExplicitTrustSupportsSequentialLeasePrimitives"
           },
           "automation_status": "implemented",
           "required": true,
-          "verification": "Adopt only the confirmed TOFU identity so sequential operations on one lease remain valid."
+          "verification": "Require explicit trust before acquiring a lease, then preserve that identity across sequential operations."
         },
         {
           "implementation_id": "impl-06-08-proxy-07",
@@ -3439,7 +3439,7 @@
           },
           "automation_status": "implemented",
           "required": true,
-          "verification": "Adopt a fully verified TOFU fingerprint only for the current owner while retiring other borrowed and idle connections."
+          "verification": "Adopt a fully verified fingerprint only for the current owner while retiring other borrowed and idle connections."
         },
         {
           "implementation_id": "impl-06-08-proxy-10",

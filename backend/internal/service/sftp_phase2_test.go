@@ -71,7 +71,9 @@ func TestSFTPResumeRejectsWrongIdentityRouteHashAndExpiry(t *testing.T) {
 	svc, source, root, _ := fileServiceFixture(t)
 	ctx := fileUser(1)
 	p := filepath.Join(root, "original")
-	os.WriteFile(p, []byte("original"), 0640)
+	if err := os.WriteFile(p, []byte("original"), 0640); err != nil {
+		t.Fatal(err)
+	}
 	session, err := svc.StartUpload(ctx, 1, p, 3, fileDigest([]byte("new")), true)
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +123,9 @@ func TestSFTPResumableOverwriteDetectsSameSecondEdit(t *testing.T) {
 	svc, _, root, _ := fileServiceFixture(t)
 	ctx := fileUser(1)
 	p := filepath.Join(root, "config")
-	os.WriteFile(p, []byte("aaaa"), 0640)
+	if err := os.WriteFile(p, []byte("aaaa"), 0640); err != nil {
+		t.Fatal(err)
+	}
 	before, _ := os.Stat(p)
 	session, err := svc.StartUpload(ctx, 1, p, 4, fileDigest([]byte("new!")), true)
 	if err != nil {
@@ -130,8 +134,12 @@ func TestSFTPResumableOverwriteDetectsSameSecondEdit(t *testing.T) {
 	if _, err = svc.UploadChunk(ctx, 1, session.Token, 0, 4, strings.NewReader("new!")); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(p, []byte("bbbb"), 0640)
-	os.Chtimes(p, before.ModTime(), before.ModTime())
+	if err := os.WriteFile(p, []byte("bbbb"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, before.ModTime(), before.ModTime()); err != nil {
+		t.Fatal(err)
+	}
 	fileReason(t, svc.CompleteUpload(ctx, 1, session.Token), "sftp_conflict")
 	data, _ := os.ReadFile(p)
 	if string(data) != "bbbb" {
@@ -142,8 +150,12 @@ func TestSFTPTextVersionConflictAndEncoding(t *testing.T) {
 	svc, _, root, _ := fileServiceFixture(t)
 	ctx := context.Background()
 	p := filepath.Join(root, "config.txt")
-	os.WriteFile(p, []byte("alpha\r\n中文\n"), 0640)
-	os.Chmod(p, 0640)
+	if err := os.WriteFile(p, []byte("alpha\r\n中文\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(p, 0640); err != nil {
+		t.Fatal(err)
+	}
 	initial, err := svc.ReadText(ctx, 1, p)
 	if err != nil || initial.Content != "alpha\r\n中文\n" {
 		t.Fatal(initial, err)
@@ -156,8 +168,12 @@ func TestSFTPTextVersionConflictAndEncoding(t *testing.T) {
 	if info.Mode().Perm() != 0640 {
 		t.Fatal("editor changed permissions")
 	}
-	os.WriteFile(p, []byte("xxxx\r\n中文\n"), 0640)
-	os.Chtimes(p, info.ModTime(), info.ModTime())
+	if err := os.WriteFile(p, []byte("xxxx\r\n中文\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
 	_, err = svc.SaveText(ctx, 1, p, "my draft", saved.Version)
 	fileReason(t, err, "sftp_conflict")
 	actual, _ := os.ReadFile(p)
@@ -165,11 +181,15 @@ func TestSFTPTextVersionConflictAndEncoding(t *testing.T) {
 		t.Fatal("stale save replaced external edit")
 	}
 	for _, data := range [][]byte{{0, 1}, {255, 254}} {
-		os.WriteFile(p, data, 0640)
+		if err := os.WriteFile(p, data, 0640); err != nil {
+			t.Fatal(err)
+		}
 		_, err = svc.ReadText(ctx, 1, p)
 		fileReason(t, err, "sftp_not_text")
 	}
-	os.WriteFile(p, bytes.Repeat([]byte{'x'}, int(MaxSFTPTextBytes+1)), 0640)
+	if err := os.WriteFile(p, bytes.Repeat([]byte{'x'}, int(MaxSFTPTextBytes+1)), 0640); err != nil {
+		t.Fatal(err)
+	}
 	_, err = svc.ReadText(ctx, 1, p)
 	fileReason(t, err, "sftp_text_too_large")
 }
@@ -182,10 +202,16 @@ func TestSFTPRecursiveZIPIncludesEmptyDirectoriesAndSkipsLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := []byte{0, 255, 7, 8}
-	os.WriteFile(filepath.Join(folder, "nested", "中文.bin"), data, 0600)
+	if err := os.WriteFile(filepath.Join(folder, "nested", "中文.bin"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
 	outside := filepath.Join(root, "outside")
-	os.WriteFile(outside, []byte("excluded"), 0600)
-	os.Symlink(outside, filepath.Join(folder, "link"))
+	if err := os.WriteFile(outside, []byte("excluded"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(folder, "link")); err != nil {
+		t.Fatal(err)
+	}
 	var output bytes.Buffer
 	err := svc.Archive(ctx, 1, folder, func(name string) (io.Writer, error) {
 		if name != "folder.zip" {
@@ -223,14 +249,18 @@ func TestSFTPRecursiveZIPIncludesEmptyDirectoriesAndSkipsLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Truncate(MaxSFTPFileBytes + 1)
+	if err := f.Truncate(MaxSFTPFileBytes + 1); err != nil {
+		t.Fatal(err)
+	}
 	f.Close()
 	fileReason(t, svc.Archive(ctx, 1, folder, func(string) (io.Writer, error) { t.Fatal("started oversized archive"); return io.Discard, nil }), "sftp_too_large")
 }
 func TestSFTPDownloadRangesAndIfRange(t *testing.T) {
 	svc, _, root, _ := fileServiceFixture(t)
 	p := filepath.Join(root, "range")
-	os.WriteFile(p, []byte("0123456789"), 0600)
+	if err := os.WriteFile(p, []byte("0123456789"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	var first bytes.Buffer
 	var etag string
@@ -249,7 +279,9 @@ func TestSFTPDownloadRangesAndIfRange(t *testing.T) {
 	if err != nil || rest.String() != "456789" {
 		t.Fatal(rest.String(), err)
 	}
-	os.WriteFile(p, []byte("abcdefghij"), 0600)
+	if err := os.WriteFile(p, []byte("abcdefghij"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	var changed bytes.Buffer
 	err = svc.DownloadRange(ctx, 1, p, SFTPDownloadRequest{Range: "bytes=4-", IfRange: etag}, func(response SFTPDownload) (io.Writer, error) {
 		if response.Partial || response.Start != 0 {
