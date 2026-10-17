@@ -134,13 +134,16 @@ func (s *ServiceRelayService) validateAndEncryptCredentials(input CreateServiceI
 		return nil, nil, nil, fmt.Errorf("generate salt: %w", err)
 	}
 
-	key := s.masterKey.DeriveKey(salt)
+	cipher, err := s.masterKey.ForRecord(crypto.VersionCurrent, salt, crypto.PurposeService)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	encryptedCreds = make(map[string]string, len(input.Credentials))
 	for k, v := range input.Credentials {
 		if v == "" {
 			return nil, nil, nil, fmt.Errorf("credential '%s' value is required", k)
 		}
-		encrypted, encErr := crypto.Encrypt([]byte(v), key)
+		encrypted, encErr := cipher.Encrypt(k, []byte(v))
 		if encErr != nil {
 			return nil, nil, nil, fmt.Errorf("encrypt '%s': %w", k, encErr)
 		}
@@ -158,6 +161,7 @@ func (s *ServiceRelayService) Create(ctx context.Context, input CreateServiceInp
 	}
 
 	svc := &model.Service{
+		CryptoVersion:        crypto.VersionCurrent,
 		Name:                 input.Name,
 		DisplayName:          input.DisplayName,
 		BaseURL:              input.BaseURL,
@@ -200,10 +204,13 @@ func (s *ServiceRelayService) GetCredentials(ctx context.Context, id uint) (map[
 		}
 		return nil, fmt.Errorf("get credentials %d: %w", id, err)
 	}
-	key := s.masterKey.DeriveKey(svc.Salt)
+	cipher, err := s.masterKey.ForRecord(svc.CryptoVersion, svc.Salt, crypto.PurposeService)
+	if err != nil {
+		return nil, err
+	}
 	creds := make(map[string]string, len(svc.EncryptedCredentials))
 	for k, v := range svc.EncryptedCredentials {
-		plain, err := crypto.Decrypt(v, key)
+		plain, err := cipher.Decrypt(k, v)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt credential '%s': %w", k, server.NewAppError(http.StatusInternalServerError, server.ReasonCredentialDecrypt))
 		}
@@ -241,6 +248,7 @@ func (s *ServiceRelayService) Update(ctx context.Context, id uint, input CreateS
 		existing.UsageGuide = input.UsageGuide
 	}
 	existing.Salt = salt
+	existing.CryptoVersion = crypto.VersionCurrent
 	existing.ServerID = input.ServerID
 
 	if err := s.repo.Update(ctx, existing); err != nil {
@@ -383,13 +391,17 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 	defer cancel(nil)
 
 	// Decrypt all credentials.
-	var key []byte
+	var cipher *crypto.RecordCipher
 	if len(svc.EncryptedCredentials) > 0 {
-		key = s.masterKey.DeriveKey(svc.Salt)
+		cipher, err = s.masterKey.ForRecord(svc.CryptoVersion, svc.Salt, crypto.PurposeService)
+		if err != nil {
+			result.Reason = server.ReasonCredentialDecrypt
+			return result, server.NewAppError(http.StatusInternalServerError, server.ReasonCredentialDecrypt)
+		}
 	}
 	creds := make(map[string]string, len(svc.EncryptedCredentials))
 	for k, v := range svc.EncryptedCredentials {
-		plain, err := crypto.Decrypt(v, key)
+		plain, err := cipher.Decrypt(k, v)
 		if err != nil {
 			result.Reason = server.ReasonCredentialDecrypt
 			return result, server.NewAppError(http.StatusInternalServerError, server.ReasonCredentialDecrypt)

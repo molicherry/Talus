@@ -56,6 +56,7 @@ function isolatedDeploymentFixture(t) {
     .filter((entry) => entry.implementations.length > 0);
   const implementations = cases.flatMap((entry) => entry.implementations);
   assert.deepEqual(implementations.map((impl) => impl.implementation.symbol).sort(), [
+    "TestServerAutomaticallyUpgradesEncryptedData",
     "TestServerEmptyDatabaseBootstrapAndRestart",
     "TestServerIsolatedServiceCatalogAndRelay",
   ]);

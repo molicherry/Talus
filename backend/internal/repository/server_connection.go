@@ -70,7 +70,7 @@ func (r *ServerRepo) FindJumpDependentIDs(ctx context.Context, jumpID uint) ([]u
 func (r *ServerRepo) SaveConnectionConfig(ctx context.Context, config *model.ServerConnectionConfig) error {
 	return r.db.WithContext(ctx).Omit("Server", "JumpServer").Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "server_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"mode", "jump_server_id", "socks_host", "socks_port", "socks_auth_type", "socks_username", "encrypted_password", "salt"}),
+		DoUpdates: clause.AssignmentColumns([]string{"mode", "jump_server_id", "socks_host", "socks_port", "socks_auth_type", "socks_username", "encrypted_password", "salt", "crypto_version"}),
 	}).Create(config).Error
 }
 

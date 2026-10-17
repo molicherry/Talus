@@ -42,7 +42,7 @@ func sftpHTTPFixture(t *testing.T) (*httptest.Server, string) {
 	port, _ := strconv.Atoi(portText)
 	key := peer.Key.Marshal()
 	credentialID := uint(1)
-	source := &terminalE2ESource{server: model.Server{BaseModel: model.BaseModel{ID: 1}, Host: host, Port: port, ConnectionRevision: 1, HostKey: &key, CredentialID: &credentialID, Credential: &model.SSHCredential{BaseModel: model.BaseModel{ID: 1}, Username: "test", AuthType: "password", EncryptedPassword: &encrypted, Salt: salt}}}
+	source := &terminalE2ESource{server: model.Server{BaseModel: model.BaseModel{ID: 1}, Host: host, Port: port, ConnectionRevision: 1, HostKey: &key, CredentialID: &credentialID, Credential: &model.SSHCredential{CryptoVersion: 1, BaseModel: model.BaseModel{ID: 1}, Username: "test", AuthType: "password", EncryptedPassword: &encrypted, Salt: salt}}}
 	pool := sshpool.NewPool(time.Minute, 3, time.Second)
 	t.Cleanup(pool.Close)
 	svc := service.NewSFTPService(service.NewSSHService(pool, source, service.NewCredentialService(nil, nil, master, pool), time.Second, time.Second))

@@ -29,7 +29,7 @@ func TestFirstHostKeyConfirmationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	credential := &model.SSHCredential{Name: "first-use", Username: "test", AuthType: "password", EncryptedPassword: &password, Salt: salt}
+	credential := &model.SSHCredential{CryptoVersion: 1, Name: "first-use", Username: "test", AuthType: "password", EncryptedPassword: &password, Salt: salt}
 	if err := db.Create(credential).Error; err != nil {
 		t.Fatal(err)
 	}

@@ -74,7 +74,7 @@
         "test",
         "./internal/repository/...",
         "-run",
-        "ApplyOnce|PrepareUserTokenVersion|Delta|Rollup|Prune|Bucket|Peak|Deadline|RawSample|Review|Rereview",
+        "ApplyOnce|PrepareUserTokenVersion|Delta|Rollup|Prune|Bucket|Peak|Deadline|RawSample|Review|Rereview|Secrets",
         "-count=1"
       ],
       "timeout_seconds": 600,
@@ -193,7 +193,7 @@
         "test",
         "./cmd/server",
         "-run",
-        "^TestServer(EmptyDatabaseBootstrapAndRestart|IsolatedServiceCatalogAndRelay)$",
+        "^TestServer(EmptyDatabaseBootstrapAndRestart|IsolatedServiceCatalogAndRelay|AutomaticallyUpgradesEncryptedData)$",
         "-count=1"
       ],
       "timeout_seconds": 600,
@@ -504,6 +504,127 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Start the real Hub on an empty owned database, bootstrap the administrator, revoke a session and restart; verify persistent users, migrations and token revocation."
+        },
+        {
+          "implementation_id": "impl-02-03-hkdf-vector",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/pkg/crypto/record_test.go",
+            "symbol": "TestRecordHKDFKnownAnswer"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Verify the purpose-separated HKDF-SHA256 result against an independently calculated known-answer vector."
+        },
+        {
+          "implementation_id": "impl-02-03-cipher-auth",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/pkg/crypto/record_test.go",
+            "symbol": "TestRecordAuthenticationAndVersionIsolation"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject wrong keys, salts, field or purpose swaps, tampering, invalid salts and unknown versions without algorithm fallback."
+        },
+        {
+          "implementation_id": "impl-02-03-legacy-read",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/pkg/crypto/record_test.go",
+            "symbol": "TestRecordReadsLegacyAndFixedSaltSSH"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Read both historical SSH salt formats while rejecting a v1 ciphertext presented as v2."
+        },
+        {
+          "implementation_id": "impl-02-03-secrets-upgrade",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/secret_migration_test.go",
+            "symbol": "TestSecretsUpgradeAllFormatsAndRestart"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Upgrade databases without version columns across all four secret types, include deleted rows, preserve metadata and API-key identity, and verify idempotence and wrong-master-key rejection."
+        },
+        {
+          "implementation_id": "impl-02-03-secrets-resume",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/secret_migration_test.go",
+            "symbol": "TestSecretsMigrationFailureIsResumableAndPrivate"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Keep bad rows unchanged, retain successful per-record commits and resume after repair without logging secrets."
+        },
+        {
+          "implementation_id": "impl-02-03-secrets-edit",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/secret_migration_test.go",
+            "symbol": "TestSecretsMigrationRejectsConcurrentEdit"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Compare encrypted snapshots before replacement and preserve a concurrent credential edit."
+        },
+        {
+          "implementation_id": "impl-02-03-secrets-lock",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/secret_migration_test.go",
+            "symbol": "TestSecretsMigrationLockCancellationAndRelease"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Cancel a migration lock wait and verify that its database connection cannot retain a session lock."
+        },
+        {
+          "implementation_id": "impl-02-03-secrets-startup",
+          "run_id": "deploy-verify",
+          "implementation": {
+            "path": "backend/cmd/server/secret_startup_test.go",
+            "symbol": "TestServerAutomaticallyUpgradesEncryptedData"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Replace the Hub against a pre-version-column database, verify original credentials, relay and API keys, and stop before HTTP on corrupt data with recovery after repair."
+        },
+        {
+          "implementation_id": "impl-02-03-secrets-route",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/secret_route_test.go",
+            "symbol": "TestCurrentSecretsAuthenticateSSHAndSOCKS"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Authenticate a real SSH route directly and through a password-authenticated SOCKS5 proxy using v2 credentials."
+        },
+        {
+          "implementation_id": "impl-02-03-secrets-cancel",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/secret_migration_test.go",
+            "symbol": "TestSecretsMigrationResumesAfterCancellation"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Cancel after the first committed row, release the session lock, and resume only the remaining legacy rows on restart."
+        },
+        {
+          "implementation_id": "impl-02-03-secrets-concurrent",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/secret_migration_test.go",
+            "symbol": "TestSecretsMigrationSerializesConcurrentStarts"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Run two startup migrations against the same database and verify the encrypted record is upgraded exactly once under the session lock."
         }
       ]
     },

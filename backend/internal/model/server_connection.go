@@ -11,6 +11,7 @@ const (
 // ServerConnectionConfig is the private, one-to-one SSH routing configuration.
 // An absent row means direct. Secrets never belong to ordinary server JSON.
 type ServerConnectionConfig struct {
+	CryptoVersion     int     `gorm:"type:smallint;not null;default:1" json:"-"`
 	ServerID          uint    `gorm:"primaryKey" json:"-"`
 	Server            *Server `gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE" json:"-"`
 	Mode              string  `gorm:"size:16;not null;check:server_connection_mode,(mode = 'ssh_jump' AND jump_server_id IS NOT NULL AND socks_host = '' AND socks_port = 0 AND socks_auth_type = '' AND socks_username = '' AND encrypted_password IS NULL AND salt IS NULL) OR (mode = 'socks5' AND jump_server_id IS NULL AND socks_host <> '' AND socks_port BETWEEN 1 AND 65535 AND ((socks_auth_type = 'none' AND socks_username = '' AND encrypted_password IS NULL AND salt IS NULL) OR (socks_auth_type = 'username_password' AND socks_username <> '' AND encrypted_password IS NOT NULL AND salt IS NOT NULL)))" json:"-"`

@@ -91,13 +91,17 @@ func (s *APIKeyService) Create(ctx context.Context, name string, scopes *[]strin
 	if err != nil {
 		return nil, fmt.Errorf("generate salt: %w", err)
 	}
-	key := s.masterKey.DeriveKey(salt)
-	encryptedRaw, err := crypto.Encrypt([]byte(rawStr), key)
+	cipher, err := s.masterKey.ForRecord(crypto.VersionCurrent, salt, crypto.PurposeAPIKey)
+	if err != nil {
+		return nil, err
+	}
+	encryptedRaw, err := cipher.Encrypt("raw_key", []byte(rawStr))
 	if err != nil {
 		return nil, fmt.Errorf("encrypt raw key: %w", err)
 	}
 
 	k := &model.APIKey{
+		CryptoVersion:   crypto.VersionCurrent,
 		Name:            name,
 		KeyHash:         hashStr,
 		KeyPrefix:       prefix,
@@ -148,8 +152,11 @@ func (s *APIKeyService) Reveal(ctx context.Context, id uint) (string, error) {
 		return "", server.NewAppError(http.StatusNotFound, server.ReasonRawKeyUnavailable)
 	}
 	usage.FromContext(ctx).SetResource("api_key", &id, k.Name, nil)
-	key := s.masterKey.DeriveKey(k.Salt)
-	plain, err := crypto.Decrypt(k.EncryptedRawKey, key)
+	cipher, err := s.masterKey.ForRecord(k.CryptoVersion, k.Salt, crypto.PurposeAPIKey)
+	if err != nil {
+		return "", err
+	}
+	plain, err := cipher.Decrypt("raw_key", k.EncryptedRawKey)
 	if err != nil {
 		return "", fmt.Errorf("decrypt key: %w", err)
 	}

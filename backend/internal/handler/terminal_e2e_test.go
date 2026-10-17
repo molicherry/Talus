@@ -175,7 +175,7 @@ func newTerminalE2EFixture(t *testing.T) *terminalE2EFixture {
 	f.source.server = model.Server{
 		BaseModel: model.BaseModel{ID: 1}, Host: host, Port: port,
 		ConnectionRevision: 1, CredentialID: &credentialID, HostKey: &pinned,
-		Credential: &model.SSHCredential{BaseModel: model.BaseModel{ID: credentialID}, AuthType: "password", Username: "test", EncryptedPassword: &encrypted, Salt: salt},
+		Credential: &model.SSHCredential{CryptoVersion: 1, BaseModel: model.BaseModel{ID: credentialID}, AuthType: "password", Username: "test", EncryptedPassword: &encrypted, Salt: salt},
 	}
 	f.pool = sshpool.NewPool(time.Minute, 1, time.Second)
 	t.Cleanup(f.pool.Close)

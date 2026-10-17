@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -157,6 +158,23 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("auto-migrate complete")
+
+	// Upgrade encrypted records before starting HTTP, connection pools or any
+	// background writer. Keep the original master key and database volume when
+	// replacing the Docker container. Per-record commits make retries resumable.
+	migrationCtx, stopMigration := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	migrationReport, migrationErr := repository.MigrateSecrets(migrationCtx, db, masterKey, slog.Default())
+	stopMigration()
+	if migrationErr != nil {
+		slog.Error("credential migration failed; startup stopped", "error", migrationErr)
+		os.Exit(1)
+	}
+
+	if migrationReport.Migrated > 0 {
+		// Return the old Argon2 workspace once, before serving traffic. Normal
+		// v2 startups/requests do not force GC or allocate that workspace.
+		debug.FreeOSMemory()
+	}
 
 	// 4.5 One-time backfill: API keys created before services:read existed (the
 	// API used to be fail-open) get the scope once. Recorded in schema_migrations

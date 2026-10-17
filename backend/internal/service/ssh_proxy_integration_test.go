@@ -241,6 +241,7 @@ func TestSOCKSRouteDecryptsSavedProxyPassword(t *testing.T) {
 	}
 	source.mu.Lock()
 	cfg := source.configs[1]
+	cfg.CryptoVersion = 1
 	cfg.SocksAuthType, cfg.SocksUsername, cfg.EncryptedPassword, cfg.Salt = "username_password", "proxy-user", &encrypted, salt
 	source.mu.Unlock()
 	result, err := svc.Exec(context.Background(), 1, "routed", time.Second)
@@ -367,7 +368,7 @@ func TestSSHJumpRouteExecAndCopyFileUseIndependentSavedCredentials(t *testing.T)
 	source.mu.Lock()
 	source.servers[1].Host = "target-only-via-jump.invalid"
 	expected := net.JoinHostPort(source.servers[1].Host, strconv.Itoa(source.servers[1].Port))
-	source.servers[2] = &model.Server{BaseModel: model.BaseModel{ID: 2}, Host: host, Port: port, ConnectionRevision: 1, HostKey: &jumpHostKey, CredentialID: &credID, Credential: &model.SSHCredential{BaseModel: model.BaseModel{ID: credID}, AuthType: "password", Username: "jump-user", EncryptedPassword: &encrypted, Salt: salt}}
+	source.servers[2] = &model.Server{BaseModel: model.BaseModel{ID: 2}, Host: host, Port: port, ConnectionRevision: 1, HostKey: &jumpHostKey, CredentialID: &credID, Credential: &model.SSHCredential{CryptoVersion: 1, BaseModel: model.BaseModel{ID: credID}, AuthType: "password", Username: "jump-user", EncryptedPassword: &encrypted, Salt: salt}}
 	source.configs[1] = &model.ServerConnectionConfig{ServerID: 1, Mode: "ssh_jump", JumpServerID: &jumpID}
 	source.mu.Unlock()
 	result, err := svc.Exec(context.Background(), 1, "echo jump", time.Second)

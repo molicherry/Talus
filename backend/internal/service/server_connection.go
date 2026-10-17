@@ -184,7 +184,9 @@ func (s *ServerService) buildConnectionConfig(serverID uint, input *ConnectionIn
 	if input == nil || input.Mode == model.ConnectionDirect {
 		return nil, nil
 	}
-	config := &model.ServerConnectionConfig{ServerID: serverID, Mode: input.Mode, JumpServerID: input.JumpServerID}
+	// Match the persisted default for routes without a secret. Password writes
+	// below explicitly select v2; retained passwords keep their stored version.
+	config := &model.ServerConnectionConfig{CryptoVersion: crypto.VersionLegacy, ServerID: serverID, Mode: input.Mode, JumpServerID: input.JumpServerID}
 	if input.Mode == model.ConnectionSSHJump {
 		return config, nil
 	}
@@ -198,6 +200,7 @@ func (s *ServerService) buildConnectionConfig(serverID uint, input *ConnectionIn
 			return nil, invalidConnection()
 		}
 		config.EncryptedPassword, config.Salt = old.EncryptedPassword, append([]byte(nil), old.Salt...)
+		config.CryptoVersion = old.CryptoVersion
 		return config, nil
 	}
 	if s.masterKey == nil {
@@ -207,11 +210,16 @@ func (s *ServerService) buildConnectionConfig(serverID uint, input *ConnectionIn
 	if err != nil {
 		return nil, errors.New("generate connection encryption salt")
 	}
-	encrypted, err := crypto.Encrypt([]byte(*input.Password.Value), s.masterKey.DeriveKey(salt))
+	cipher, err := s.masterKey.ForRecord(crypto.VersionCurrent, salt, crypto.PurposeSOCKS5)
+	if err != nil {
+		return nil, err
+	}
+	encrypted, err := cipher.Encrypt("password", []byte(*input.Password.Value))
 	if err != nil {
 		return nil, errors.New("encrypt connection password")
 	}
 	config.Salt, config.EncryptedPassword = salt, &encrypted
+	config.CryptoVersion = crypto.VersionCurrent
 	return config, nil
 }
 
@@ -356,7 +364,7 @@ func equalConnection(left, right *model.ServerConnectionConfig) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
 	}
-	if left.Mode != right.Mode || !equalUint(left.JumpServerID, right.JumpServerID) || left.SocksHost != right.SocksHost || left.SocksPort != right.SocksPort || left.SocksAuthType != right.SocksAuthType || left.SocksUsername != right.SocksUsername || !bytes.Equal(left.Salt, right.Salt) {
+	if left.CryptoVersion != right.CryptoVersion || left.Mode != right.Mode || !equalUint(left.JumpServerID, right.JumpServerID) || left.SocksHost != right.SocksHost || left.SocksPort != right.SocksPort || left.SocksAuthType != right.SocksAuthType || left.SocksUsername != right.SocksUsername || !bytes.Equal(left.Salt, right.Salt) {
 		return false
 	}
 	return left.EncryptedPassword == nil && right.EncryptedPassword == nil || left.EncryptedPassword != nil && right.EncryptedPassword != nil && *left.EncryptedPassword == *right.EncryptedPassword

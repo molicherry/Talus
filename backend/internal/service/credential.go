@@ -57,19 +57,23 @@ func (s *CredentialService) Create(ctx context.Context, input CreateCredentialIn
 	}
 
 	cred := &model.SSHCredential{
-		Name:     input.Name,
-		AuthType: input.AuthType,
-		Username: input.Username,
-		Salt:     salt,
+		CryptoVersion: crypto.VersionCurrent,
+		Name:          input.Name,
+		AuthType:      input.AuthType,
+		Username:      input.Username,
+		Salt:          salt,
 	}
 
-	key := s.masterKey.DeriveKey(salt)
+	cipher, err := s.masterKey.ForRecord(crypto.VersionCurrent, salt, crypto.PurposeSSH)
+	if err != nil {
+		return nil, err
+	}
 	switch input.AuthType {
 	case "password":
 		if input.Password == "" {
 			return nil, fmt.Errorf("create credential: password is required for auth_type 'password'")
 		}
-		encrypted, err := crypto.Encrypt([]byte(input.Password), key)
+		encrypted, err := cipher.Encrypt("password", []byte(input.Password))
 		if err != nil {
 			return nil, fmt.Errorf("create credential: encrypt password: %w", err)
 		}
@@ -79,7 +83,7 @@ func (s *CredentialService) Create(ctx context.Context, input CreateCredentialIn
 		if input.PrivateKey == "" {
 			return nil, fmt.Errorf("create credential: private_key is required for auth_type 'private_key'")
 		}
-		encrypted, err := crypto.Encrypt([]byte(input.PrivateKey), key)
+		encrypted, err := cipher.Encrypt("private_key", []byte(input.PrivateKey))
 		if err != nil {
 			return nil, fmt.Errorf("create credential: encrypt private key: %w", err)
 		}
@@ -131,31 +135,25 @@ func (s *CredentialService) GetDecrypted(ctx context.Context, serverID uint) (us
 }
 
 func (s *CredentialService) decryptCredential(cred *model.SSHCredential) (string, string, string, error) {
-	key := s.deriveKeyForCredential(cred)
+	cipher, err := s.masterKey.ForRecord(cred.CryptoVersion, cred.Salt, crypto.PurposeSSH)
+	if err != nil {
+		return "", "", "", err
+	}
 	if cred.AuthType == "password" && cred.EncryptedPassword != nil {
-		plaintext, err := crypto.Decrypt(*cred.EncryptedPassword, key)
+		plaintext, err := cipher.Decrypt("password", *cred.EncryptedPassword)
 		if err != nil {
 			return "", "", "", fmt.Errorf("decrypt password: %w", err)
 		}
 		return cred.Username, string(plaintext), "", nil
 	}
 	if cred.AuthType == "private_key" && cred.EncryptedPrivateKey != nil {
-		plaintext, err := crypto.Decrypt(*cred.EncryptedPrivateKey, key)
+		plaintext, err := cipher.Decrypt("private_key", *cred.EncryptedPrivateKey)
 		if err != nil {
 			return "", "", "", fmt.Errorf("decrypt private key: %w", err)
 		}
 		return cred.Username, "", string(plaintext), nil
 	}
 	return "", "", "", fmt.Errorf("no encrypted credential found")
-}
-
-// deriveKeyForCredential returns the AES key for the credential, using either
-// the per-credential salt or the legacy fixed salt for unmigrated records.
-func (s *CredentialService) deriveKeyForCredential(cred *model.SSHCredential) []byte {
-	if len(cred.Salt) > 0 {
-		return s.masterKey.DeriveKey(cred.Salt)
-	}
-	return s.masterKey.LegacyDeriveKey()
 }
 
 // UpdateCredentialInput is the validated input for updating a credential.
@@ -187,10 +185,14 @@ func (s *CredentialService) Update(ctx context.Context, id uint, input UpdateCre
 			return nil, fmt.Errorf("credential %d: %w", id, err)
 		}
 		cred.Salt = salt
-		key := s.masterKey.DeriveKey(salt)
+		cred.CryptoVersion = crypto.VersionCurrent
+		cipher, err := s.masterKey.ForRecord(crypto.VersionCurrent, salt, crypto.PurposeSSH)
+		if err != nil {
+			return nil, err
+		}
 
 		if input.Password != nil && *input.Password != "" {
-			encrypted, err := crypto.Encrypt([]byte(*input.Password), key)
+			encrypted, err := cipher.Encrypt("password", []byte(*input.Password))
 			if err != nil {
 				return nil, fmt.Errorf("credential %d: encrypt password: %w", id, err)
 			}
@@ -199,7 +201,7 @@ func (s *CredentialService) Update(ctx context.Context, id uint, input UpdateCre
 			cred.AuthType = "password"
 		}
 		if input.PrivateKey != nil && *input.PrivateKey != "" {
-			encrypted, err := crypto.Encrypt([]byte(*input.PrivateKey), key)
+			encrypted, err := cipher.Encrypt("private_key", []byte(*input.PrivateKey))
 			if err != nil {
 				return nil, fmt.Errorf("credential %d: encrypt private key: %w", id, err)
 			}
@@ -289,19 +291,22 @@ func (s *CredentialService) Reveal(ctx context.Context, id uint) (*RevealCredent
 		return nil, fmt.Errorf("reveal credential %d: %w", id, err)
 	}
 
-	key := s.masterKey.DeriveKey(cred.Salt)
+	cipher, err := s.masterKey.ForRecord(cred.CryptoVersion, cred.Salt, crypto.PurposeSSH)
+	if err != nil {
+		return nil, err
+	}
 	result := &RevealCredential{}
 	usage.FromContext(ctx).SetResource("credential", &id, cred.Name, nil)
 
 	if cred.EncryptedPassword != nil && *cred.EncryptedPassword != "" {
-		plain, err := crypto.Decrypt(*cred.EncryptedPassword, key)
+		plain, err := cipher.Decrypt("password", *cred.EncryptedPassword)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt password: %w", err)
 		}
 		result.Password = string(plain)
 	}
 	if cred.EncryptedPrivateKey != nil && *cred.EncryptedPrivateKey != "" {
-		plain, err := crypto.Decrypt(*cred.EncryptedPrivateKey, key)
+		plain, err := cipher.Decrypt("private_key", *cred.EncryptedPrivateKey)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt private key: %w", err)
 		}

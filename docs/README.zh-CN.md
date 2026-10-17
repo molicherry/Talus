@@ -261,7 +261,7 @@ curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin
 | 变量 | 默认值 | 描述 |
 |------|--------|------|
 | `DB_PASSWORD` | *(必填)* | PostgreSQL 数据库密码 |
-| `VPSMANAGER_MASTER_KEY` | *(必填)* | SSH 凭证加密的 64 位十六进制主密钥 |
+| `VPSMANAGER_MASTER_KEY` | *(必填)* | 由密码学安全随机源生成的十六进制主密钥（至少 32 字节）；升级时须保持不变 |
 | `JWT_SECRET` | *(必填)* | JWT 签名密钥 |
 | `PORT` | `8080` | HTTP 服务端口 |
 | `LOG_LEVEL` | `info` | 日志级别：`debug`、`info`、`warn`、`error` |
@@ -285,9 +285,31 @@ curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin
 
 未收到新样本超过 `MONITOR_INTERVAL × (MONITOR_TOLERATED_ROUNDS + 1) + MONITOR_ALLOWED_LATENCY_SECONDS` 秒后，节点数据视为过期，默认阈值为 120 秒。
 
+### Docker 升级与加密数据
+
+保留现有数据库卷和原始 `.env`，尤其是 `VPSMANAGER_MASTER_KEY`。替换前先停止旧 Hub；升级按单 Hub 部署设计，需要短暂维护窗口。数据库咨询锁会让新版本 Hub 串行执行迁移，但无法阻止旧二进制继续写入。
+
+使用预构建镜像的 Compose 部署，先在 Compose 配置中选定新镜像标签，再执行：
+
+```bash
+docker compose stop hub
+docker compose exec -T db pg_dump -U vpsmanager -d vpsmanager -Fc > talus-before-upgrade.dump
+docker compose pull hub
+docker compose up -d --no-deps hub
+docker compose logs -f hub
+```
+
+确认备份能够配合原始主密钥恢复，不要删除数据库卷。源码构建部署无需拉取镜像，改用 `docker compose up -d --no-deps --build hub` 启动新版本。
+
+Hub 启动时会添加内部加密版本字段，自动升级 SSH 凭证、服务凭据、SOCKS5 密码及可恢复原文的 API 密钥。迁移逐条处理记录，验证新密文后，原子提交盐值、密文和版本；软删除记录也包含在内。没有可恢复原文的历史 API 密钥保留已有认证哈希，无需重新签发。迁移完成后才启动 HTTP 服务、监控和 SSH 连接池。迁移期间 Docker 健康检查可能保持 `starting`，数据量较大时应留足启动时间。
+
+迁移失败时 Hub 停止启动，日志只记录表名、记录 ID 和失败阶段，不记录秘密值。保留原始主密钥及数据，修复原因后重启：已提交的记录会校验并跳过，其余记录继续迁移。后续启动也会校验已有 v2 密文，包括从备份恢复后的首次启动。
+
+只要已有一条记录升级，原来仅支持 Argon2id 的镜像就无法读取全部凭据，即使迁移随后失败也一样。回滚须使用原始主密钥恢复升级前的数据库备份，备份之后的修改会丢失。仅切换镜像标签或更换主密钥无法完成回滚。反向迁移需要另行提供兼容工具。
+
 ## 安全性
 
-- SSH 私钥和密码、服务凭据及 API 密钥原文在存储前使用 **AES-256-GCM** 加密，密钥通过 Argon2id 从 `VPSMANAGER_MASTER_KEY` 派生。
+- SSH 私钥和密码、SOCKS5 密码、服务凭据及可恢复的 API 密钥原文使用 **AES-256-GCM** 静态加密。新记录通过 **HKDF-SHA256** 从 `VPSMANAGER_MASTER_KEY` 派生密钥，并按用途隔离。主密钥必须由密码学安全随机源生成（`openssl rand -hex 32`）。登录密码继续使用 bcrypt。旧版 Argon2id 加密记录会在 Hub 对外提供服务前自动升级。
 - 列表响应不返回凭证或 API 密钥原文。专用查看接口仅允许 JWT 认证，按用户限流（每分钟 5 次）并记录审计日志。
 - 目标服务器**无需开放额外端口**——监控数据通过现有的 SSH 通道传输。
 - 监控 Agent **按需运行**，采集指标后进程退出。Hub 复用前校验保留的二进制文件，必要时原子替换，目标服务器无需运行 Agent 守护进程。
@@ -360,8 +382,10 @@ docker compose -f docker-compose.prod.yml up -d
 **升级到新版本：**
 
 ```bash
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml stop hub
+docker compose -f docker-compose.prod.yml exec -T db pg_dump -U vpsmanager -d vpsmanager -Fc > talus-before-upgrade.dump
+docker compose -f docker-compose.prod.yml pull hub
+docker compose -f docker-compose.prod.yml up -d --no-deps hub
 ```
 
 从尚未支持 JWT 撤销的版本首次升级时，须先停止全部旧 Hub 实例并结束旧 WebSocket 会话，再启动新版本，不能让两类版本并行服务。后续升级和回滚均须保留令牌版本校验与主动会话撤销。

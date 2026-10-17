@@ -31,7 +31,7 @@ var argon2Params = struct {
 }
 
 // MasterKey holds the raw hex-decoded master key bytes.
-// Derived AES-256 keys are computed on demand via DeriveKey or LegacyDeriveKey.
+// Use ForRecord for versioned encryption. Argon2id methods only read old data.
 type MasterKey struct {
 	raw []byte
 }
@@ -49,8 +49,8 @@ func NewMasterKey(hexKey string) (*MasterKey, error) {
 	return &MasterKey{raw: raw}, nil
 }
 
-// DeriveKey derives a 32-byte AES-256 key from the master key using the given salt.
-// Each credential should use a unique random salt (see GenerateSalt).
+// DeriveKey reproduces the v1 Argon2id key for migration and legacy reads.
+// New writes must use ForRecord(VersionCurrent, ...).
 func (mk *MasterKey) DeriveKey(salt []byte) []byte {
 	return argon2.IDKey(mk.raw, salt, argon2Params.time, argon2Params.memory, argon2Params.threads, argon2Params.keyLen)
 }
@@ -61,7 +61,7 @@ func (mk *MasterKey) LegacyDeriveKey() []byte {
 	return argon2.IDKey(mk.raw, []byte(legacySalt), argon2Params.time, argon2Params.memory, argon2Params.threads, argon2Params.keyLen)
 }
 
-// GenerateSalt returns a cryptographically random salt for use with DeriveKey.
+// GenerateSalt returns a cryptographically random per-record salt.
 func GenerateSalt() ([]byte, error) {
 	salt := make([]byte, SaltSize)
 	if _, err := rand.Read(salt); err != nil {
