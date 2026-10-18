@@ -1,0 +1,54 @@
+name: Promote published Release
+
+on:
+  release:
+    types: [published]
+  # Recovery after a transient registry/API failure; always reconciles the
+  # highest published stable release, never an arbitrary caller-supplied tag.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+      actions: read
+    # One writer for latest across ALL versions. The script also checks SemVer;
+    # serialization alone cannot prevent an older event completing last.
+    concurrency:
+      group: stable-release-promotion
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Published tags select data, never the privileged promotion script.
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install registry copy tool
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+      - name: Login to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_AUTH_FILE: ${{ runner.temp }}/registry-auth.json
+          REGISTRY_USER: ${{ github.repository_owner }}
+        run: printf '%s' "$GH_TOKEN" | skopeo login --username "$REGISTRY_USER" --password-stdin ghcr.io
+      - name: Verify evidence and promote highest stable digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_AUTH_FILE: ${{ runner.temp }}/registry-auth.json
+        run: node .github/scripts/release.mjs promote
+      - name: Remove registry credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/registry-auth.json"

@@ -1,0 +1,10 @@
+# Apply these labels to PRs containing ONLY the excluded kind of change.
+# Mixed PRs with user-visible behavior must remain in the generated notes.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+      - ci
+      - tests
+      - internal
+      - documentation

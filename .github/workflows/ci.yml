@@ -24,7 +24,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 # One run per ref, so a new push to an open pull request cancels its stale run.
 # Tag runs are never cancelled: a superseded release build must still finish and
@@ -34,6 +33,35 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
+  release-policy:
+    name: Release policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Release automation regression tests
+        run: node --test tests/release-policy.test.mjs
+      - name: Validate annotated tag, message and main ancestry
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node .github/scripts/release.mjs validate
+
+  security:
+    name: Release security gate
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release-policy
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+      security-events: write
+    uses: ./.github/workflows/codeql.yml
+
   backend:
     name: Backend (Go)
     runs-on: ubuntu-latest
@@ -282,6 +310,7 @@ jobs:
 
   docker:
     name: Docker
+    needs: release-policy
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -301,28 +330,6 @@ jobs:
       # parallel.
       - name: Set up QEMU (only for the final alpine stage's apk add)
         uses: docker/setup-qemu-action@v4
-
-      # Nothing is pushed outside a release tag, so the registry is only
-      # contacted when there is something to publish (and fork pull requests,
-      # whose token is read-only, never attempt it).
-      - name: Login to GHCR
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=sha,prefix=
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       # Verify what each Hub image actually ships: both agent architectures and
       # the manifest, checked inside the image rather than in the build context.
@@ -358,17 +365,109 @@ jobs:
       - name: Agent image acceptance (tests/verify-agent-images.sh)
         run: bash tests/verify-agent-images.sh
 
-      - name: Build and push Hub
+      # Export the exact multi-platform index. No registry writes occur here;
+      # publish-image copies this archive only after every release gate passes.
+      - name: Build Hub (export OCI archive for tags)
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: false
+          outputs: ${{ startsWith(github.ref, 'refs/tags/v') && format('type=oci,dest={0}/hub.tar', runner.temp) || '' }}
+          tags: talus:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+          # Keep BuildKit provenance in the copied index alongside both platforms.
+          provenance: mode=min
           build-args: |
             VERSION=${{ github.ref_name }}
-          # mode=min on purpose: mode=max bloats the 10 GB repository cache.
           cache-from: type=gha
           cache-to: type=gha,mode=min
+
+      - name: Save release image
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-image
+          path: ${{ runner.temp }}/hub.tar
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: error
+
+  publish-image:
+    name: Publish immutable version image
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release-policy, security, backend, frontend, unified, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: version-image-${{ github.ref_name }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-image
+          path: ${{ runner.temp }}/release-image
+      - name: Install registry copy tool
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+      - name: Login to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_AUTH_FILE: ${{ runner.temp }}/registry-auth.json
+          REGISTRY_USER: ${{ github.repository_owner }}
+        run: printf '%s' "$GH_TOKEN" | skopeo login --username "$REGISTRY_USER" --password-stdin ghcr.io
+      - name: Publish exact digest, preserving an existing version tag on retries
+        env:
+          REGISTRY_AUTH_FILE: ${{ runner.temp }}/registry-auth.json
+        run: node .github/scripts/release.mjs publish-image "$RUNNER_TEMP/release-image/hub.tar"
+      - name: Save release image evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-image-evidence
+          path: release-image.json
+          overwrite: true
+          if-no-files-found: error
+      - name: Remove registry credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/registry-auth.json"
+
+  release-draft:
+    name: Create Release draft
+    needs: publish-image
+    # Internal test tags publish versioned images only.
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-test.')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-image-evidence
+      - name: Create draft without overwriting reviewed notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/release.mjs draft release-image.json

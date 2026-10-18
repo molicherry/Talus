@@ -1,6 +1,7 @@
 name: CodeQL
 
 on:
+  workflow_call:
   pull_request:
     branches: [main]
     paths-ignore:
@@ -23,7 +24,7 @@ permissions:
 
 concurrency:
   group: codeql-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
   analyze:
@@ -80,6 +81,9 @@ jobs:
         with:
           category: "/language:${{ matrix.language }}"
           output: sarif-results
+          # Tag gates analyze the same source locally. Code scanning uploads
+          # belong to branch/PR refs; main keeps its existing uploaded results.
+          upload: ${{ startsWith(github.ref, 'refs/tags/v') && 'never' || 'always' }}
 
       - name: Verify the intended SSH suppression
         if: matrix.language == 'go'
