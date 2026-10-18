@@ -414,6 +414,11 @@ M1 的部署检查会使用临时数据库和本机回环 HTTP 服务启动当�
 bash tests/run.sh --gate M1
 ```
 
+## 版本发布
+
+维护者请按 [Release 与 Tag 规范](releasing.zh-CN.md)执行版本选择、草稿审核、
+不可变镜像发布及 `latest` 故障恢复。
+
 ## 许可证
 
 [MIT](../LICENSE)

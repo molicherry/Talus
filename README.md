@@ -470,6 +470,11 @@ A missing database or a skipped required test blocks the gate.
 bash tests/run.sh --gate M1
 ```
 
+## Releasing
+
+Maintainers: follow the [release and tag workflow](docs/releasing.md) for version
+selection, draft review, immutable images and `latest` recovery.
+
 ## License
 
 [MIT](LICENSE)
