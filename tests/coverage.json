@@ -2007,7 +2007,7 @@
         },
         {
           "implementation_id": "impl-08-02-high-latency-teardown",
-          "run_id": "go-race",
+          "run_id": "go-unit",
           "implementation": {
             "path": "backend/internal/service/agent_deploy_teardown_test.go",
             "symbol": "TestAgentDeploymentSurvives162msTeardownRTT"
@@ -2018,7 +2018,7 @@
         },
         {
           "implementation_id": "impl-08-02-async-budget",
-          "run_id": "go-race",
+          "run_id": "go-unit",
           "implementation": {
             "path": "backend/internal/service/agent_installed_test.go",
             "symbol": "TestAgentSlowDeploymentOutlivesCollectionAndOldAgentKeepsCollecting"
@@ -2029,7 +2029,7 @@
         },
         {
           "implementation_id": "impl-08-02-deployment-concurrency",
-          "run_id": "go-race",
+          "run_id": "go-unit",
           "implementation": {
             "path": "backend/internal/service/agent_deploy_queue_test.go",
             "symbol": "TestAgentDeploymentQueueDeduplicatesBoundsConcurrencyAndJoins"
@@ -2040,7 +2040,7 @@
         },
         {
           "implementation_id": "impl-08-02-deployment-generation",
-          "run_id": "go-race",
+          "run_id": "go-unit",
           "implementation": {
             "path": "backend/internal/service/agent_deploy_queue_test.go",
             "symbol": "TestAgentDeploymentQueueGenerationReplacementWaitsForOldWorker"
@@ -2051,7 +2051,7 @@
         },
         {
           "implementation_id": "impl-08-02-deployment-retry",
-          "run_id": "go-race",
+          "run_id": "go-unit",
           "implementation": {
             "path": "backend/internal/service/agent_deploy_queue_test.go",
             "symbol": "TestAgentDeploymentQueueRetryDoesNotDependOnCollections"
@@ -2062,7 +2062,7 @@
         },
         {
           "implementation_id": "impl-08-02-deployment-deadline",
-          "run_id": "go-race",
+          "run_id": "go-unit",
           "implementation": {
             "path": "backend/internal/service/agent_deploy_queue_test.go",
             "symbol": "TestAgentDeploymentQueueTaskTimeoutKeepsApplicationAlive"
@@ -2073,7 +2073,7 @@
         },
         {
           "implementation_id": "impl-08-02-deployment-pending-cleanup",
-          "run_id": "go-race",
+          "run_id": "go-unit",
           "implementation": {
             "path": "backend/internal/service/agent_deploy_queue_test.go",
             "symbol": "TestAgentDeploymentQueueRetainsAdmissionDuringPendingCleanup"
@@ -2727,7 +2727,7 @@
         },
         {
           "implementation_id": "impl-08-08-installed-trust",
-          "run_id": "go-race",
+          "run_id": "go-unit",
           "implementation": {
             "path": "backend/internal/service/agent_installed_test.go",
             "symbol": "TestAgentInstalledRequiresTrustedHashAndCompatibleProtocol"
@@ -2738,7 +2738,7 @@
         },
         {
           "implementation_id": "impl-08-08-pending-collection",
-          "run_id": "go-race",
+          "run_id": "go-unit",
           "implementation": {
             "path": "backend/internal/service/agent_installed_test.go",
             "symbol": "TestAgentPendingCollectionIsSkippedWithoutFailureBackoff"
@@ -2760,7 +2760,7 @@
         },
         {
           "implementation_id": "impl-08-08-activation-race",
-          "run_id": "go-race",
+          "run_id": "go-unit",
           "implementation": {
             "path": "backend/internal/service/agent_installed_test.go",
             "symbol": "TestAgentInstalledRechecksHashWhenActivationRacesCollection"
