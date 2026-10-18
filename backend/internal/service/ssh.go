@@ -27,7 +27,7 @@ type SSHService struct {
 	sshDialTimeout     time.Duration
 	execDefaultTimeout time.Duration
 	// uploadTeardownGrace bounds the graceful close phase of an upload before the
-	// transport is force-closed (100ms).
+	// transport is force-closed. Cancellation uses execTeardownGrace instead.
 	uploadTeardownGrace time.Duration
 	// outputLimit caps the total retained stdout+stderr bytes; outputStreamLimit
 	// caps each stream. Beyond the limit bytes are still read and discarded, so
@@ -48,7 +48,7 @@ func NewSSHService(pool *sshpool.Pool, serverRepo serverSource, credSvc *Credent
 		credSvc:             credSvc,
 		sshDialTimeout:      sshDialTimeout,
 		execDefaultTimeout:  execDefaultTimeout,
-		uploadTeardownGrace: 100 * time.Millisecond,
+		uploadTeardownGrace: sshCompletedTeardownGrace,
 		outputLimit:         8 << 20,
 		outputStreamLimit:   4 << 20,
 	}
@@ -152,6 +152,12 @@ func leaseConsumer(consumers []LeaseConsumer) LeaseConsumer {
 
 const execTeardownGrace = 100 * time.Millisecond
 
+// A completed transfer still needs the peer's EOF/CLOSE before its readers can
+// join. Give healthy high-latency peers time to reply; cancellation stays fast.
+const sshCompletedTeardownGrace = 2 * time.Second
+
+var errSSHTransportClosed = fmt.Errorf("SSH transport force-closed during teardown: %w", server.ErrSSHConnection)
+
 // runCommand reports transport ownership separately from command outcome: a
 // cancelled channel can leave a healthy connection available for the next call.
 func (s *SSHService) runCommand(parent context.Context, client *ssh.Client, command string, timeout time.Duration) (*ExecResult, error, bool) {
@@ -219,7 +225,11 @@ func (s *SSHService) runCommand(parent context.Context, client *ssh.Client, comm
 	if completed && (errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)) && cancellation == nil {
 		cancellation = execCancellation(parent)
 	}
-	transportClosed, cleanupErr := closeSSHSession(client, ready, joined, sshTeardownDeadlines(ctx, execTeardownGrace))
+	grace := execTeardownGrace
+	if completed && cancellation == nil {
+		grace = sshCompletedTeardownGrace
+	}
+	transportClosed, cleanupErr := closeSSHSessionContext(ctx, client, ready, joined, sshTeardownDeadlines(ctx, grace))
 	if cleanupErr != nil {
 		if cancellation != nil {
 			// Preserve the reason frozen before teardown. A worker may return a
@@ -302,6 +312,10 @@ func newSSHCleanupDeadlines(start time.Time, grace time.Duration) sshCleanupDead
 
 // closeSSHSession only consumes the caller's remaining cleanup budget.
 func closeSSHSession(client *ssh.Client, ready <-chan *ssh.Session, joined <-chan struct{}, deadlines sshCleanupDeadlines) (bool, error) {
+	return closeSSHSessionContext(context.Background(), client, ready, joined, deadlines)
+}
+
+func closeSSHSessionContext(ctx context.Context, client *ssh.Client, ready <-chan *ssh.Session, joined <-chan struct{}, deadlines sshCleanupDeadlines) (bool, error) {
 	closed := make(chan struct{})
 	go func() {
 		defer close(closed)
@@ -322,15 +336,27 @@ func closeSSHSession(client *ssh.Client, ready <-chan *ssh.Session, joined <-cha
 	go func() { <-joined; <-closed; close(allJoined) }()
 	grace := time.NewTimer(max(time.Until(deadlines.grace), 0))
 	defer grace.Stop()
-	select {
-	case <-allJoined:
-		return false, nil
-	case <-grace.C:
+	cancelled := ctx.Done()
+waiting:
+	for {
 		select {
 		case <-allJoined:
 			return false, nil
-		default:
+		case <-cancelled:
+			// Cancellation during normal teardown must shorten the remaining
+			// grace, without restarting either the grace or the total budget.
+			cancelled = nil
+			if time.Until(deadlines.grace) > execTeardownGrace {
+				grace.Reset(execTeardownGrace)
+			}
+		case <-grace.C:
+			break waiting
 		}
+	}
+	select {
+	case <-allJoined:
+		return false, nil
+	default:
 	}
 	transportJoined := make(chan struct{})
 	go func() { _ = client.Close(); close(transportJoined) }()

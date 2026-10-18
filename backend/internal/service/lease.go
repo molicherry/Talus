@@ -13,7 +13,10 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
+	"github.com/vpsmanager/backend/internal/server"
 )
+
+var errSSHLeaseUnusable = fmt.Errorf("SSH lease is closed or unusable: %w", server.ErrSSHConnection)
 
 // sshLease owns one pinned connection until its owner explicitly releases it.
 // Only one primitive may run at a time. Closing an active lease delays quota
@@ -136,7 +139,7 @@ func (l *sshLease) begin(ctx context.Context) (context.Context, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.closing || l.settled || l.unhealthy {
-		return nil, errors.New("SSH lease is closed or unusable")
+		return nil, &StageError{Stage: StageSession, Err: errSSHLeaseUnusable}
 	}
 	// Admission is the short critical section that races with Invalidate: once the
 	// pinned generation is stale no stage (probe, upload, hash check, activation,
@@ -153,7 +156,12 @@ func (l *sshLease) begin(ctx context.Context) (context.Context, error) {
 	}
 	operation, cancel := context.WithCancelCause(ctx)
 	l.active, l.cancel = true, cancel
-	l.cleanup = &sshCleanupClock{}
+	// Deployment cleanup can carry the previous operation's absolute budget
+	// through a replacement connection. Ordinary primitives get a new clock.
+	l.cleanup, _ = ctx.Value(sshCleanupClockKey{}).(*sshCleanupClock)
+	if l.cleanup == nil {
+		l.cleanup = &sshCleanupClock{}
+	}
 	return context.WithValue(operation, sshCleanupClockKey{}, l.cleanup), nil
 }
 

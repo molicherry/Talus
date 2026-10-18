@@ -519,8 +519,8 @@ func TestAgentCleanupDefaults(t *testing.T) {
 		t.Fatalf("exec teardown grace = %v, want 100ms", execTeardownGrace)
 	}
 	svc := NewSSHService(nil, staticServerSource{}, nil, time.Second, time.Second)
-	if svc.uploadTeardownGrace != 100*time.Millisecond {
-		t.Fatalf("upload teardown grace = %v, want 100ms", svc.uploadTeardownGrace)
+	if svc.uploadTeardownGrace != 2*time.Second {
+		t.Fatalf("completed upload teardown grace = %v, want 2s", svc.uploadTeardownGrace)
 	}
 	if gate.CleanupBudget != 3*time.Second {
 		t.Fatalf("JWT terminal cleanup total = %v, want 3s", gate.CleanupBudget)
