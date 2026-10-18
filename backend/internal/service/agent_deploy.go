@@ -81,10 +81,12 @@ func (p AgentPlatform) String() string { return p.OS + "/" + p.Arch }
 // activation and protocol verification. The monitor only
 // schedules, validates and stores what this service returns.
 type AgentDeploymentService struct {
-	ssh          *SSHService
-	artifactsDir string
-	probeBudget  time.Duration
-	execBudget   time.Duration
+	ssh              *SSHService
+	artifactsDir     string
+	probeBudget      time.Duration
+	execBudget       time.Duration
+	uploadBudget     time.Duration
+	trustedArtifacts trustedAgentArtifacts
 	// logger emits the agent.deploy correlation events: shared
 	// server_id with monitor.collect, never a metric label.
 	logger *slog.Logger
@@ -99,6 +101,7 @@ func NewAgentDeploymentService(ssh *SSHService, artifactsDir string) *AgentDeplo
 		ssh:          ssh,
 		artifactsDir: artifactsDir,
 		probeBudget:  probeBudget,
+		uploadBudget: agentDeploymentBudget,
 		logger:       slog.Default().With("component", "agent-deploy"),
 		telemetry:    newMonitorTelemetry(nil, nil),
 	}
@@ -343,7 +346,7 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 	}()
 
 	uploadStarted := time.Now()
-	if err := lease.Upload(ctx, localPath, tmpPath, s.execBudget); err != nil {
+	if err := lease.Upload(ctx, localPath, tmpPath, s.uploadBudget); err != nil {
 		s.telemetry.stage("agent.deploy", "upload", time.Since(uploadStarted))
 		if reason := classifyRemoteStderr(err.Error()); reason != "" {
 			return deployError(reason, err)

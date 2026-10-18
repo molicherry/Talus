@@ -421,6 +421,12 @@ A node becomes stale after `MONITOR_INTERVAL × (MONITOR_TOLERATED_ROUNDS + 1) +
 MONITOR_ALLOWED_LATENCY_SECONDS` seconds without a fresh sample (120 seconds by
 default).
 
+### Monitoring agent upgrades
+
+Metric collection keeps its 30-second admission budget. Agent installation runs in a separate queue with a three-minute budget, including an explicit upload timeout, at most four concurrent deployments, and one job per server. Deployment uses its own SSH lease; failures retry with backoff from five seconds up to five minutes. Node deletion, a changed SSH generation, and Hub shutdown cancel the affected work. A missing agent waits for deployment without counting each collection as a failed sample.
+
+At startup, the Hub records the hashes, build versions and protocol versions of its verified bundled agents in PostgreSQL. An installed older agent can continue collecting during an upgrade only when its hash is in that history and its protocol remains compatible; its reported version must match the trusted artifact. Unknown binaries and incompatible protocols wait for replacement. On the first upgrade from a Hub that did not record this history, the previous binary is therefore replaced before collection resumes. Uploads still use a private temporary file, full SHA256 verification and atomic activation; interrupted uploads restart from the beginning.
+
 ### Docker upgrades and encrypted data
 
 Keep the existing database volume and the original `.env`, especially `VPSMANAGER_MASTER_KEY`. Stop the old Hub before replacing it; upgrades assume a single Hub and a brief maintenance window. A database advisory lock serializes migration by new Hubs, but cannot stop an older binary from writing.

@@ -2015,6 +2015,72 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "A complete SFTP upload over a delayed SSH transport retains its lease for hash verification, activation, execution and an idempotent second collection."
+        },
+        {
+          "implementation_id": "impl-08-02-async-budget",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_installed_test.go",
+            "symbol": "TestAgentSlowDeploymentOutlivesCollectionAndOldAgentKeepsCollecting"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A deployment outlives the collection that requested it and the default SSH timeout; a compatible verified old agent continues storing metrics during upload, then the new agent is collected after activation."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-concurrency",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueDeduplicatesBoundsConcurrencyAndJoins"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Deduplicate requests per server, cap background deployments at four, give each its own three-minute budget and join work on shutdown."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-generation",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueGenerationReplacementWaitsForOldWorker"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Cancel outdated generations and deleted nodes while retaining per-node admission until the old worker joins."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-retry",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueRetryDoesNotDependOnCollections"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Retry failed deployments independently; repeated collection requests cannot reset deployment backoff."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-deadline",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueTaskTimeoutKeepsApplicationAlive"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A deployment deadline cancels only that attempt and allows the application-owned queue to retry."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-pending-cleanup",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueRetainsAdmissionDuringPendingCleanup"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Keep one deployment admission occupied while local SSH cleanup is pending; only its resource owner settling allows a replacement generation."
         }
       ]
     },
@@ -2637,7 +2703,7 @@
         "REQ-08"
       ],
       "spec_ref": "tests/coverage.json#/cases/30/scenario",
-      "scenario": "Fail startup before HTTP/Monitor on invalid bundled artifacts; accept only matching protocol/version JSON, reject legacy output without metric insertion, and preserve node isolation and history.",
+      "scenario": "Fail startup before HTTP/Monitor on invalid bundled artifacts; accept reports matching a verified current or historically trusted compatible artifact, reject legacy output without metric insertion, and preserve node isolation and history.",
       "implementations": [
         {
           "implementation_id": "impl-08-08a",
@@ -2658,6 +2724,50 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-08-installed-trust",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_installed_test.go",
+            "symbol": "TestAgentInstalledRequiresTrustedHashAndCompatibleProtocol"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Continue collecting a trusted compatible prior build, and never execute an unknown hash or incompatible protocol."
+        },
+        {
+          "implementation_id": "impl-08-08-pending-collection",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_installed_test.go",
+            "symbol": "TestAgentPendingCollectionIsSkippedWithoutFailureBackoff"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Waiting for installation is skipped/artifact, not a collection failure or quota rejection."
+        },
+        {
+          "implementation_id": "impl-08-08-artifact-history",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/repository/agent_artifact_test.go",
+            "symbol": "TestAgentArtifactHistorySurvivesUpgradeAndRejectsConflicts"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Keep verified prior release hashes across repository restarts and reject conflicting immutable trust metadata in PostgreSQL."
+        },
+        {
+          "implementation_id": "impl-08-08-activation-race",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_installed_test.go",
+            "symbol": "TestAgentInstalledRechecksHashWhenActivationRacesCollection"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Rehash a newly activated binary when its report races the old hash check; a new-version claim alone cannot bypass artifact verification."
         }
       ]
     },

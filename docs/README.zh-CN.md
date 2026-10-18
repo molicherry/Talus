@@ -285,6 +285,12 @@ curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin
 
 未收到新样本超过 `MONITOR_INTERVAL × (MONITOR_TOLERATED_ROUNDS + 1) + MONITOR_ALLOWED_LATENCY_SECONDS` 秒后，节点数据视为过期，默认阈值为 120 秒。
 
+### 监控 Agent 升级
+
+指标采集保留从准入开始计算的 30 秒预算。Agent 安装由独立队列执行，使用单独的 SSH lease 和 3 分钟任务预算，上传也显式使用独立预算；全局最多 4 个并发部署，每台服务器最多一个任务。失败按 5 秒至 5 分钟退避重试，服务器删除、SSH generation 变化或 Hub 关闭时取消相关任务。等待首次部署的采集记为跳过，不会逐轮累加失败退避。
+
+Hub 启动时把已验证的随包 Agent 哈希、构建版本和协议版本保存在 PostgreSQL。升级期间，只有哈希已在该历史中、协议兼容且自报版本与可信制品一致的旧 Agent 才会继续采集；未知二进制和不兼容协议等待替换。首次从尚未保存可信历史的旧 Hub 升级时，旧二进制因此需要先被后台部署替换，随后恢复采集。上传仍使用权限为 `0600` 的临时文件、完整 SHA256 校验及原子激活；中断的上传会从头重试。
+
 ### Docker 升级与加密数据
 
 保留现有数据库卷和原始 `.env`，尤其是 `VPSMANAGER_MASTER_KEY`。替换前先停止旧 Hub；升级按单 Hub 部署设计，需要短暂维护窗口。数据库咨询锁会让新版本 Hub 串行执行迁移，但无法阻止旧二进制继续写入。

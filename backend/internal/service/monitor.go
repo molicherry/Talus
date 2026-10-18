@@ -75,11 +75,15 @@ type monitorServerSource interface {
 	FindAll(ctx context.Context) ([]model.Server, error)
 }
 
+type monitorMetricSink interface {
+	InsertFull(context.Context, *repository.MetricFull) error
+}
+
 // MonitorService periodically collects system metrics from all managed servers
 // via the SSH agent binary and persists them to the database.
 type MonitorService struct {
 	sshSvc     *SSHService
-	metricRepo *repository.MetricRepo
+	metricRepo monitorMetricSink
 	serverRepo monitorServerSource
 	interval   time.Duration
 	logger     *slog.Logger
@@ -88,7 +92,8 @@ type MonitorService struct {
 	// taskBudget is the per-collection deadline starting at admission.
 	taskBudget time.Duration
 	// deployer owns probing, uploading and protocol verification.
-	deployer *AgentDeploymentService
+	deployer    *AgentDeploymentService
+	deployments *agentDeploymentQueue
 	// taskFn replaces the collection step in tests; production uses collectOne.
 	taskFn func(ctx context.Context, serverID uint) error
 	// wake asks the scheduler to re-read the managed node list immediately.
@@ -130,6 +135,11 @@ const monitorDiscoveryRetry = 5 * time.Second
 // cancels in-flight collections and joins them before returning, so the caller
 // can close connection and storage dependencies afterwards.
 func (s *MonitorService) Start(ctx context.Context) {
+	if s.deployments != nil {
+		deploymentCtx, stopDeployments := context.WithCancel(ctx)
+		done := s.deployments.start(deploymentCtx)
+		defer func() { stopDeployments(); <-done }()
+	}
 	sched := newMonitorScheduler(s.interval, s.clock, s.rng)
 	notify := make(chan struct{}, 1)
 
@@ -158,6 +168,9 @@ func (s *MonitorService) Start(ctx context.Context) {
 			live = append(live, srv.ID)
 		}
 		now := s.clock.Now()
+		if s.deployments != nil {
+			s.deployments.sync(live)
+		}
 		for _, id := range sched.sync(live, now) {
 			// A deleted node's task is cancelled, never counted as a failure.
 			mu.Lock()
@@ -173,7 +186,8 @@ func (s *MonitorService) Start(ctx context.Context) {
 		for _, id := range tick.Admitted {
 			startedAt := s.clock.Now()
 			// The 30s budget starts at admission and covers the whole collection:
-			// quota wait, probe, deployment, execution, parsing and the write.
+			// quota wait, probe, execution, parsing and the write. Deployment has
+			// its own queue, lease and three-minute budget.
 			taskCtx, cancel := context.WithTimeout(ctx, s.taskBudget)
 			mu.Lock()
 			cancels[id] = cancel
@@ -267,6 +281,9 @@ func (s *MonitorService) runTask(ctx context.Context, serverID uint) (outcome mo
 		// The target changed under the lease: cancelled, never a failure.
 		s.logger.Info("monitor collection cancelled by a target change", "server_id", serverID)
 		return outcomeCancelled, err
+	case errors.Is(err, errAgentDeploymentPending):
+		s.logger.Info("monitor waiting for agent deployment", "server_id", serverID)
+		return outcomeSkipped, err
 	case err != nil:
 		attrs := append([]slog.Attr{slog.Uint64("server_id", uint64(serverID))}, remoteFailureLogAttrs(err)...)
 		s.logger.LogAttrs(ctx, slog.LevelError, "failed to collect metrics", attrs...)
@@ -289,6 +306,7 @@ func (s *MonitorService) SetTelemetry(registry *telemetry.Registry) {
 func (s *MonitorService) SetAgentDeployer(deployer *AgentDeploymentService) {
 	s.deployer = deployer
 	s.deployer.SetTelemetry(s.telemetry.registry, s.logger)
+	s.deployments = newAgentDeploymentQueue(deployer)
 }
 
 // collectTask is the injectable collection step.
@@ -366,8 +384,8 @@ func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
 	if s.deployer == nil {
 		return errors.New("monitor: agent deployment service is not configured")
 	}
-	// One lease spans the probe, the upload and the execution so the whole
-	// collection is pinned to a single target generation.
+	// Collection and deployment use separate leases so a slow upload cannot
+	// occupy a collection's deadline or prevent a compatible old agent running.
 	lease, err := s.sshSvc.AcquireLease(ctx, serverID, LeaseConsumerAgent)
 	if err != nil {
 		return err
@@ -377,7 +395,10 @@ func (s *MonitorService) collectOne(ctx context.Context, serverID uint) error {
 	// owner still holds the slot stays visible (N03).
 	defer lease.Release()
 
-	out, err := s.deployer.Collect(ctx, lease)
+	out, upgrade, err := s.deployer.CollectInstalled(ctx, lease)
+	if upgrade && s.deployments != nil {
+		s.deployments.request(serverID, lease.Generation(), CollectionIDFromContext(ctx))
+	}
 	if err != nil && isConnectionError(err) {
 		lease.Discard()
 	} else {

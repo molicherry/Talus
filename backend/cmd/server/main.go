@@ -138,6 +138,7 @@ func main() {
 			&model.User{},
 			&model.SSHCredential{},
 			&model.Server{},
+			&model.TrustedAgentArtifact{},
 			&model.ServerConnectionConfig{},
 			&model.APIKey{},
 			&model.Metric{},
@@ -359,7 +360,22 @@ func main() {
 	// The sampling-gap threshold follows the effective collection interval (R07).
 	metricRepo.SetDeltaGapThreshold(time.Duration(cfg.MonitorInterval) * time.Second)
 	monitorSvc := service.NewMonitorService(sshSvc, metricRepo, serverRepo, time.Duration(cfg.MonitorInterval)*time.Second)
-	monitorSvc.SetAgentDeployer(service.NewAgentDeploymentService(sshSvc, cfg.AgentArtifactsDir))
+	agentDeployer := service.NewAgentDeploymentService(sshSvc, cfg.AgentArtifactsDir)
+	agentArtifacts := repository.NewAgentArtifactRepo(db)
+	agentManifest, err := agentDeployer.Manifest()
+	if err != nil {
+		slog.Error("cannot load verified agent manifest")
+		os.Exit(1)
+	}
+	registerCtx, cancelRegister := context.WithTimeout(context.Background(), 15*time.Second)
+	registerErr := agentArtifacts.Register(registerCtx, agentManifest)
+	cancelRegister()
+	if registerErr != nil {
+		slog.Error("cannot register trusted agent artifacts")
+		os.Exit(1)
+	}
+	agentDeployer.SetTrustedArtifacts(agentArtifacts)
+	monitorSvc.SetAgentDeployer(agentDeployer)
 	monitorSvc.SetTelemetry(telemetryRegistry)
 	metricsH := handler.NewMetricsHandler(metricRepo)
 

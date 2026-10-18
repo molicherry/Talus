@@ -176,6 +176,9 @@ func collectionOutcome(outcome monitorOutcome, err error) (string, string) {
 		}
 		return telOutcomeCanceled, telReasonCanceled
 	case outcomeSkipped:
+		if errors.Is(err, errAgentDeploymentPending) {
+			return telOutcomeSkipped, telReasonArtifact
+		}
 		// Admission was deferred for capacity: skipped, and the reason names the
 		// resource that was exhausted.
 		return telOutcomeSkipped, telReasonQuota
