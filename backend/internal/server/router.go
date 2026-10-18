@@ -1,10 +1,10 @@
 package server
 
 import (
+	"io/fs"
 	"net/http"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -287,16 +287,34 @@ func isSPARoute(urlPath string) bool {
 }
 
 func spaFallback(staticDir string) http.HandlerFunc {
-	fs := http.FileServer(http.Dir(staticDir))
-	indexPath := filepath.Join(staticDir, "index.html")
 	return func(w http.ResponseWriter, r *http.Request) {
-		path := filepath.Join(staticDir, filepath.Clean(r.URL.Path))
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		// Reject traversal before cleaning, including URL-decoded Windows
+		// separators. URL paths use '/' on every supported platform.
+		if strings.ContainsAny(r.URL.Path, "\\\x00") || strings.Contains("/"+r.URL.Path+"/", "/../") {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Keep both the existence check and actual reads inside the same
+		// root, including symlink resolution. A per-request root gives its
+		// directory descriptor an explicit lifetime without a router Close.
+		root, err := os.OpenRoot(staticDir)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer root.Close()
+		staticFS := root.FS()
+		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if name == "" {
+			name = "index.html"
+		}
+		if _, err := fs.Stat(staticFS, name); err != nil {
 			// A miss that is not a route must 404 rather than receive HTML:
 			// answering with the entry document makes a client holding a stale
 			// index.html fail on a confusing MIME-type error instead of simply
 			// refetching what it actually asked for.
-			if !isSPARoute(r.URL.Path) {
+			if !os.IsNotExist(err) || !isSPARoute(r.URL.Path) {
 				http.NotFound(w, r)
 				return
 			}
@@ -304,11 +322,11 @@ func spaFallback(staticDir string) http.HandlerFunc {
 			// reached through: it is what names the current chunk files, so a
 			// long-lived copy is precisely what breaks a redeploy.
 			w.Header().Set("Cache-Control", revalidateCacheControl)
-			http.ServeFile(w, r, indexPath)
+			http.ServeFileFS(w, r, staticFS, "index.html")
 			return
 		}
 		setStaticCacheControl(w, r.URL.Path)
-		fs.ServeHTTP(w, r)
+		http.FileServerFS(staticFS).ServeHTTP(w, r)
 	}
 }
 
