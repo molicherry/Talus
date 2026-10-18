@@ -3,11 +3,15 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func testDeploymentQueue(t *testing.T, execute func(context.Context, uint, Generation) error) (*agentDeploymentQueue, context.CancelFunc, <-chan struct{}) {
@@ -189,4 +193,120 @@ func TestAgentDeploymentQueueRetainsAdmissionDuringPendingCleanup(t *testing.T) 
 	}
 	close(settled)
 	waitFor(t, "replacement after cleanup settlement", func() bool { return attempts.Load() == 2 })
+}
+
+func TestAgentDeploymentQueueWaitsForJoinedLeaseSettlement(t *testing.T) {
+	for _, replacement := range []bool{false, true} {
+		name := "retry"
+		if replacement {
+			name = "generation_replacement"
+		}
+		t.Run(name, func(t *testing.T) {
+			address, key := startExecSSHServer(t, func(_ string, ch ssh.Channel, _ <-chan struct{}) { exitStatus(ch, 0) })
+			pool := newTestPool(t)
+			seedPool(t, pool, 1, dialTestSSH(t, address, key))
+			svc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
+			lease, err := svc.AcquireLease(context.Background(), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lease.Release()
+			if _, err := lease.begin(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			lease.cleanup.once.Do(func() {
+				lease.cleanup.value = newSSHCleanupDeadlines(time.Now().Add(-sshCleanupBudget-time.Second), execTeardownGrace)
+			})
+			primitiveJoined := make(chan struct{})
+			var primitiveOnce sync.Once
+			joinPrimitive := func() { primitiveOnce.Do(func() { close(primitiveJoined) }) }
+			defer joinPrimitive()
+			primitiveErr := &sshCleanupPending{done: primitiveJoined}
+			lease.end(true, primitiveErr)
+			// Match ensureDeployed: Collect's wrapped primitive error precedes
+			// releaseAndWait's pending lease settlement in the joined error.
+			joinedErr := errors.Join(fmt.Errorf("upload agent: %w", primitiveErr), lease.releaseAndWait())
+			started := make(chan Generation, 2)
+			var attempts atomic.Int32
+			q, _, _ := testDeploymentQueue(t, func(_ context.Context, _ uint, generation Generation) error {
+				started <- generation
+				if attempts.Add(1) == 1 {
+					return joinedErr
+				}
+				return nil
+			})
+			q.retry = 5 * time.Millisecond
+			q.sync([]uint{1})
+			q.request(1, 1)
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("initial deployment did not start")
+			}
+			if replacement {
+				q.request(1, 2)
+			}
+			// Keep the primitive owner's l.end from settling the real lease
+			// after its worker joins. The queue must still retain admission.
+			lease.mu.Lock()
+			var unlockOnce sync.Once
+			unlock := func() { unlockOnce.Do(lease.mu.Unlock) }
+			defer unlock()
+			joinPrimitive()
+			select {
+			case generation := <-started:
+				t.Fatalf("generation %d started before the previous lease settled", generation)
+			case <-time.After(100 * time.Millisecond):
+			}
+			q.mu.Lock()
+			if q.active != 1 || !q.jobs[1].running || q.jobs[1].failures != 0 {
+				t.Error("joined cleanup released admission or started retry backoff early")
+			}
+			q.mu.Unlock()
+			unlock()
+			select {
+			case <-lease.Done():
+			case <-time.After(time.Second):
+				t.Fatal("previous lease failed to settle")
+			}
+			select {
+			case generation := <-started:
+				want := Generation(1)
+				if replacement {
+					want = 2
+				}
+				if generation != want {
+					t.Fatalf("next generation = %d, want %d", generation, want)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("deployment did not resume after lease settlement")
+			}
+		})
+	}
+}
+
+func TestAgentDeploymentQueueShutdownDuringJoinedCleanup(t *testing.T) {
+	primitiveJoined, leaseSettled := make(chan struct{}), make(chan struct{})
+	defer close(leaseSettled)
+	close(primitiveJoined)
+	var attempts atomic.Int32
+	q, cancel, done := testDeploymentQueue(t, func(context.Context, uint, Generation) error {
+		attempts.Add(1)
+		return fmt.Errorf("deploy: %w", errors.Join(
+			&sshCleanupPending{done: primitiveJoined}, &sshCleanupPending{done: leaseSettled}))
+	})
+	q.sync([]uint{1})
+	q.request(1, 1)
+	waitFor(t, "joined cleanup", func() bool { return attempts.Load() == 1 })
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not interrupt the pending lease settlement wait")
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.active != 0 || len(q.jobs) != 0 || attempts.Load() != 1 {
+		t.Fatal("shutdown retained deployment admission or admitted another attempt")
+	}
 }

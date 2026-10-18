@@ -2081,6 +2081,28 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Keep one deployment admission occupied while local SSH cleanup is pending; only its resource owner settling allows a replacement generation."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-joined-cleanup",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueWaitsForJoinedLeaseSettlement"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Retain admission across both a wrapped primitive cleanup and the real lease's pending settlement; neither retries nor generation replacements may start until the lease returns its slot."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-joined-cleanup-shutdown",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueShutdownDuringJoinedCleanup"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Application shutdown interrupts nested pending-cleanup waits, joins the deployment worker and prevents further admission."
         }
       ]
     },

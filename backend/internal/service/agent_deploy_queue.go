@@ -174,14 +174,7 @@ func (q *agentDeploymentQueue) run(ctx context.Context) {
 func (q *agentDeploymentQueue) work(ctx context.Context, id uint, job *agentDeploymentJob, generation Generation) {
 	defer q.wg.Done()
 	err := q.executeSafely(ctx, id, generation)
-	var pending *sshCleanupPending
-	if errors.As(err, &pending) {
-		// Retain this node's admission until its resource owner really joins.
-		select {
-		case <-pending.done:
-		case <-q.ctx.Done():
-		}
-	}
+	waitAgentDeploymentCleanup(q.ctx, err)
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	job.cancel()
@@ -203,6 +196,28 @@ func (q *agentDeploymentQueue) work(ctx context.Context, id uint, job *agentDepl
 		q.logger.LogAttrs(q.ctx, slog.LevelWarn, "agent deployment retry scheduled", append(attrs, remoteFailureLogAttrs(err)...)...)
 	}
 	q.signal()
+}
+
+// A failed primitive and its lease settlement can each contribute pending
+// cleanup to a joined error. Retain admission until every owner has joined;
+// errors.As would find only the primitive, before the lease returns its slot.
+func waitAgentDeploymentCleanup(ctx context.Context, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+	switch err := err.(type) {
+	case *sshCleanupPending:
+		select {
+		case <-err.done:
+		case <-ctx.Done():
+		}
+	case interface{ Unwrap() []error }:
+		for _, child := range err.Unwrap() {
+			waitAgentDeploymentCleanup(ctx, child)
+		}
+	case interface{ Unwrap() error }:
+		waitAgentDeploymentCleanup(ctx, err.Unwrap())
+	}
 }
 
 func (q *agentDeploymentQueue) executeSafely(ctx context.Context, id uint, generation Generation) (err error) {
