@@ -187,6 +187,115 @@ func TestSPAFallbackServesIndexForRoutesOnly(t *testing.T) {
 	}
 }
 
+func TestSPAFallbackRejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("spa entry"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("must not be served through traversal"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := spaFallback(dir)
+	for _, target := range []string{
+		"/../secret.txt",
+		"/%2e%2e/secret.txt",
+		"/assets/%2e%2e/%2e%2e/secret.txt",
+		"/../route",
+		"/..%5csecret.txt",
+		"/assets/..%5c..%5csecret.txt",
+		"/secret%00.txt",
+	} {
+		t.Run(target, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			handler(rr, httptest.NewRequest(http.MethodGet, target, nil))
+			if rr.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404; body = %q", rr.Code, rr.Body.String())
+			}
+			if cc := rr.Header().Get("Cache-Control"); cc != "" {
+				t.Fatalf("rejected path has Cache-Control %q", cc)
+			}
+		})
+	}
+}
+
+func TestSPAFallbackConfinesSymlinks(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "static")
+	if err := os.MkdirAll(filepath.Join(dir, "inside"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		filepath.Join(parent, "secret.txt"):      "outside secret",
+		filepath.Join(dir, "index.html"):         "spa entry",
+		filepath.Join(dir, "inside.txt"):         "inside file",
+		filepath.Join(dir, "inside", "file.txt"): "nested file",
+	} {
+		if err := os.WriteFile(name, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, target := range map[string]string{
+		"leak.txt":        "../secret.txt",
+		"absolute.txt":    filepath.Join(parent, "secret.txt"),
+		"escape":          "..",
+		"safe.txt":        "inside.txt",
+		"safe-dir":        "inside",
+		"inside/back.txt": "../inside.txt",
+	} {
+		if err := os.Symlink(target, filepath.Join(dir, name)); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+	}
+
+	handler := spaFallback(dir)
+	for _, tc := range []struct {
+		path       string
+		wantStatus int
+		wantBody   string
+	}{
+		{path: "/leak.txt", wantStatus: http.StatusNotFound},
+		{path: "/absolute.txt", wantStatus: http.StatusNotFound},
+		{path: "/escape/secret.txt", wantStatus: http.StatusNotFound},
+		{path: "/escape/", wantStatus: http.StatusNotFound},
+		{path: "/escape/missing-route", wantStatus: http.StatusNotFound},
+		{path: "/safe.txt", wantStatus: http.StatusOK, wantBody: "inside file"},
+		{path: "/safe-dir/file.txt", wantStatus: http.StatusOK, wantBody: "nested file"},
+		{path: "/inside/back.txt", wantStatus: http.StatusOK, wantBody: "inside file"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			handler(rr, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			if strings.Contains(rr.Body.String(), "outside secret") {
+				t.Fatalf("response exposed a file outside the static directory: %q", rr.Body.String())
+			}
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %q", rr.Code, tc.wantStatus, rr.Body.String())
+			}
+			if tc.wantStatus == http.StatusOK && rr.Body.String() != tc.wantBody {
+				t.Fatalf("body = %q, want %q", rr.Body.String(), tc.wantBody)
+			}
+		})
+	}
+
+	// The SPA entry document must use the same boundary as requested assets.
+	t.Run("entry document", func(t *testing.T) {
+		if err := os.Remove(filepath.Join(dir, "index.html")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("../secret.txt", filepath.Join(dir, "index.html")); err != nil {
+			t.Fatal(err)
+		}
+		for _, target := range []string{"/", "/servers/8"} {
+			rr := httptest.NewRecorder()
+			handler(rr, httptest.NewRequest(http.MethodGet, target, nil))
+			if rr.Code < 400 || strings.Contains(rr.Body.String(), "outside secret") {
+				t.Fatalf("entry document escaped static directory: status %d, body %q", rr.Code, rr.Body.String())
+			}
+		}
+	})
+}
+
 // TestEveryAuthedRouteIsRegistered guards the API-key scope map against
 // fail-open: hasScope allows any route that is not registered, so an
 // authenticated endpoint added without a scope or a jwt-only rule would be
