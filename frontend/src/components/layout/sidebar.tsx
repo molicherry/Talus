@@ -103,7 +103,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   }
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
+    <aside className="sticky top-0 flex h-dvh w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
       <div className="flex h-16 items-center border-b border-sidebar-border px-6">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white shadow-sm">
           <Logo className="h-4.5 w-4.5" />
