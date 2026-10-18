@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vpsmanager/backend/internal/agentproto"
+	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/telemetry"
 )
 
@@ -80,10 +81,12 @@ func (p AgentPlatform) String() string { return p.OS + "/" + p.Arch }
 // activation and protocol verification. The monitor only
 // schedules, validates and stores what this service returns.
 type AgentDeploymentService struct {
-	ssh          *SSHService
-	artifactsDir string
-	probeBudget  time.Duration
-	execBudget   time.Duration
+	ssh              *SSHService
+	artifactsDir     string
+	probeBudget      time.Duration
+	execBudget       time.Duration
+	uploadBudget     time.Duration
+	trustedArtifacts trustedAgentArtifacts
 	// logger emits the agent.deploy correlation events: shared
 	// server_id with monitor.collect, never a metric label.
 	logger *slog.Logger
@@ -98,6 +101,7 @@ func NewAgentDeploymentService(ssh *SSHService, artifactsDir string) *AgentDeplo
 		ssh:          ssh,
 		artifactsDir: artifactsDir,
 		probeBudget:  probeBudget,
+		uploadBudget: agentDeploymentBudget,
 		logger:       slog.Default().With("component", "agent-deploy"),
 		telemetry:    newMonitorTelemetry(nil, nil),
 	}
@@ -209,11 +213,19 @@ func (s *AgentDeploymentService) Collect(ctx context.Context, lease Lease) (*age
 			"build_version", artifact.BuildVersion, "protocol_version", manifest.ProtocolVersion)
 		if err := s.deploy(ctx, lease, artifact); err != nil {
 			s.telemetry.agentUpdate(agentArch(platform.Arch), telOutcomeFailure, deploymentReasonClass(err))
-			s.logger.Warn("agent deployment failed",
-				"action", "agent.deploy", "collection_id", CollectionIDFromContext(ctx),
-				"outcome", "failure", "reason_class", ReasonFromError(err),
-				"server_id", lease.ServerID(), "platform", platform.String(),
-				"duration_ms", time.Since(started).Milliseconds())
+			attrs := []slog.Attr{
+				slog.String("action", "agent.deploy"), slog.String("collection_id", CollectionIDFromContext(ctx)),
+				slog.String("outcome", "failure"), slog.Uint64("server_id", uint64(lease.ServerID())),
+				slog.String("platform", platform.String()), slog.Int64("duration_ms", time.Since(started).Milliseconds()),
+			}
+			diagnostics := remoteFailureLogAttrs(err)
+			if reason := ReasonFromError(err); reason != "" {
+				// Preserve existing deployment-specific classes; unclassified
+				// transport failures now receive the shared non-empty fallback.
+				diagnostics[0] = slog.String("reason_class", reason)
+			}
+			attrs = append(attrs, diagnostics...)
+			s.logger.LogAttrs(ctx, slog.LevelWarn, "agent deployment failed", attrs...)
 			return nil, err
 		}
 		s.telemetry.agentUpdate(agentArch(platform.Arch), telOutcomeSuccess, telReasonNone)
@@ -313,7 +325,7 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 		// Exec can report a clean transport with a non-zero remote exit: the file
 		// would stay and the failure would be invisible. Only exit 0 confirms the
 		// cleanup (F04).
-		result, err := lease.Exec(ctx, "rm -f "+tmpPath, s.execBudget)
+		result, err := s.cleanupUpload(ctx, lease, tmpPath)
 		if err != nil || result == nil || result.ExitCode != 0 {
 			exitCode := -1
 			if result != nil {
@@ -334,7 +346,7 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 	}()
 
 	uploadStarted := time.Now()
-	if err := lease.Upload(ctx, localPath, tmpPath, s.execBudget); err != nil {
+	if err := lease.Upload(ctx, localPath, tmpPath, s.uploadBudget); err != nil {
 		s.telemetry.stage("agent.deploy", "upload", time.Since(uploadStarted))
 		if reason := classifyRemoteStderr(err.Error()); reason != "" {
 			return deployError(reason, err)
@@ -376,6 +388,53 @@ func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifa
 	s.telemetry.stage("agent.deploy", "activate", time.Since(activateStarted))
 	activated = true
 	return nil
+}
+
+// cleanupUpload survives task cancellation but shares the failed primitive's
+// absolute cleanup deadline. A dead lease is replaced only after it settles,
+// and only the same target generation may remove the generated temporary file.
+func (s *AgentDeploymentService) cleanupUpload(ctx context.Context, lease Lease, path string) (*ExecResult, error) {
+	deadline := lease.SettlementDeadline()
+	cleanupCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+	defer cancel()
+	clock := &sshCleanupClock{}
+	clock.once.Do(func() {
+		grace := time.Now().Add(execTeardownGrace)
+		if deadline.Before(grace) {
+			grace = deadline
+		}
+		clock.value = sshCleanupDeadlines{grace: grace, total: deadline}
+	})
+	if original, ok := lease.(*sshLease); ok {
+		original.mu.Lock()
+		clock = original.cleanup
+		original.mu.Unlock()
+	}
+	cleanupCtx = context.WithValue(cleanupCtx, sshCleanupClockKey{}, clock)
+	result, err := lease.Exec(cleanupCtx, "rm -f "+path, s.execBudget)
+	if !errors.Is(err, errSSHLeaseUnusable) || s.ssh == nil {
+		return result, err
+	}
+	lease.Discard()
+	select {
+	case <-lease.Done():
+	case <-cleanupCtx.Done():
+		return nil, context.Cause(cleanupCtx)
+	}
+	replacement, err := s.ssh.AcquireLease(cleanupCtx, lease.ServerID(), LeaseConsumerAgent)
+	if err != nil {
+		return nil, err
+	}
+	defer replacement.Release()
+	replacement.mu.Lock()
+	replacement.cleanup = clock
+	replacement.mu.Unlock()
+	if replacement.Generation() != lease.Generation() {
+		replacement.Release()
+		return nil, errors.Join(sshpool.ErrStaleGeneration, replacement.releaseAndWait())
+	}
+	result, err = replacement.Exec(cleanupCtx, "rm -f "+path, s.execBudget)
+	return result, errors.Join(err, replacement.releaseAndWait())
 }
 
 var shaLine = regexp.MustCompile(`(?m)^([0-9a-fA-F]{64})\s`)

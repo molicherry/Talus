@@ -28,6 +28,9 @@ func remoteFailureLogAttrs(err error) []slog.Attr {
 	case errors.As(err, &primitive):
 		stage = string(primitive.Stage)
 	}
+	if stage == "" && errors.As(err, &primitive) {
+		stage = string(primitive.Stage)
+	}
 	if value := remoteLogReason(reason); value != "" {
 		attrs = append(attrs, slog.String("reason", value))
 	}
@@ -114,6 +117,8 @@ func remoteLogStage(stage string) string {
 		return string(StageIntegrity)
 	case string(StagePermission):
 		return string(StagePermission)
+	case string(StageTeardown):
+		return string(StageTeardown)
 	default:
 		return ""
 	}

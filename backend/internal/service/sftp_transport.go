@@ -16,12 +16,13 @@ import (
 // use the same supervisor for initialization, cancellation and bounded teardown.
 func (s *SSHService) withSFTPClient(ctx context.Context, transport *ssh.Client, metadata bool, fn func(context.Context, *sftp.Client) error) (error, bool) {
 	grace := s.uploadTeardownGrace
-	if grace <= 0 || grace > execTeardownGrace {
-		grace = execTeardownGrace
+	if grace <= 0 || grace > sshCompletedTeardownGrace {
+		grace = sshCompletedTeardownGrace
 	}
 	ready := make(chan *ssh.Session, 1)
 	joined := make(chan struct{})
 	result := make(chan error, 1)
+	initialized := make(chan struct{})
 	go func() {
 		defer close(joined)
 		session, err := transport.NewSession()
@@ -67,6 +68,12 @@ func (s *SSHService) withSFTPClient(ctx context.Context, transport *ssh.Client, 
 			result <- err
 			return
 		}
+		close(initialized)
+		if ctx.Err() != nil {
+			result <- context.Cause(ctx)
+			_ = client.Close()
+			return
+		}
 		err = fn(workerContext, client)
 		if err != nil && bounded.remaining.Load() == 0 {
 			err = SFTPError("sftp_directory_too_large")
@@ -75,23 +82,43 @@ func (s *SSHService) withSFTPClient(ctx context.Context, transport *ssh.Client, 
 		_ = client.Close()
 	}()
 	var runErr error
+	var deadlines sshCleanupDeadlines
 	select {
 	case runErr = <-result:
 	case <-ctx.Done():
 		runErr = context.Cause(ctx)
-		// HTTP body cancellation can unblock a transfer, allowing its worker to
-		// remove a temporary file before its SFTP channel is forced closed.
-		timer := time.NewTimer(grace)
+		grace = execTeardownGrace
+		deadlines = sshTeardownDeadlines(ctx, grace)
 		select {
-		case <-result:
-		case <-timer.C:
+		case <-initialized:
+			// Body cancellation can let a running transfer remove its temporary
+			// file. Reserve half the grace for channel close afterwards.
+			timer := time.NewTimer(max(time.Until(deadlines.grace)/2, 0))
+			select {
+			case <-result:
+			case <-timer.C:
+			}
+			timer.Stop()
+		default:
+			// Initialization has no callback to clean up. Close its channel now
+			// so a missing SFTP VERSION reply can join during the full grace.
 		}
-		timer.Stop()
 	}
 	if ctx.Err() != nil {
 		runErr = context.Cause(ctx)
+		grace = execTeardownGrace
 	}
-	forced, cleanupErr := closeSSHSession(transport, ready, joined, sshTeardownDeadlines(ctx, grace))
+	if deadlines.total.IsZero() {
+		deadlines = sshTeardownDeadlines(ctx, grace)
+	}
+	forced, cleanupErr := closeSSHSessionContext(ctx, transport, ready, joined, deadlines)
+	if ctx.Err() != nil {
+		runErr = context.Cause(ctx)
+	}
+	if forced && runErr == nil && cleanupErr == nil {
+		// A multi-step caller must not observe success with a dead lease.
+		cleanupErr = &StageError{Stage: StageTeardown, Err: errSSHTransportClosed}
+	}
 
 	return errors.Join(runErr, cleanupErr), forced || cleanupErr != nil
 }

@@ -34,6 +34,7 @@ const (
 	StageProtocol   StageClass = "protocol"
 	StageIntegrity  StageClass = "integrity"
 	StagePermission StageClass = "permission"
+	StageTeardown   StageClass = "teardown"
 )
 
 // StageError carries the failing stage so callers and telemetry can classify a

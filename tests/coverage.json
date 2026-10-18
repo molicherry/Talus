@@ -1350,6 +1350,17 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Cancel and an early Release retain quota while workers are active, then settle exactly once."
+        },
+        {
+          "implementation_id": "impl-06-02-cancelled-deploy-cleanup",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_teardown_test.go",
+            "symbol": "TestAgentUploadCleanupSurvivesCollectionCancellation"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A cancelled collection removes its temporary artifact using an independent context within the original cleanup deadline."
         }
       ]
     },
@@ -1359,7 +1370,7 @@
         "REQ-06"
       ],
       "spec_ref": "tests/coverage.json#/cases/18/scenario",
-      "scenario": "Reuse one target-pinned lease, propagate copy errors, and reclaim resources within one absolute 3-second deadline with a 100-ms grace; nested deployment and Monitor stages never reset it.",
+      "scenario": "Reuse one target-pinned lease, propagate copy errors, and reclaim resources within one absolute 3-second deadline; completed SSH/SFTP operations allow a 2-second grace, while cancellation uses 100 ms. Nested deployment and Monitor stages never reset the budget.",
       "implementations": [
         {
           "implementation_id": "impl-06-03",
@@ -1392,6 +1403,28 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "An expired absolute cleanup deadline returns promptly while a pending worker retains lease ownership until it joins."
+        },
+        {
+          "implementation_id": "impl-06-03-forced-upload-cleanup",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_teardown_test.go",
+            "symbol": "TestAgentForcedTeardownReportsFailureAndReconnectsOnlyForCleanup"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Forced upload teardown reports a structured transport error; cleanup reconnects only to the original generation and preserves the active agent."
+        },
+        {
+          "implementation_id": "impl-06-03-deploy-cleanup-deadline",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_teardown_test.go",
+            "symbol": "TestAgentUploadCleanupUsesOriginalDeadline"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "An expired deployment cleanup deadline refuses remote removal immediately instead of creating another cleanup budget."
         }
       ]
     },
@@ -1670,7 +1703,7 @@
         "REQ-07"
       ],
       "spec_ref": "tests/coverage.json#/cases/22/scenario",
-      "scenario": "Verify 100-ms SSH/Relay and 2-second terminal graces inside one absolute 3-second teardown deadline; preserve the original outcome and never reset budgets or falsely publish done/release.",
+      "scenario": "Verify 100-ms SSH cancellation/Relay and 2-second completed SSH/terminal graces inside one absolute 3-second teardown deadline; preserve the original outcome and never reset budgets or falsely publish done/release.",
       "implementations": [
         {
           "implementation_id": "impl-07-04-shared-terminal-deadline",
@@ -1770,6 +1803,17 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Preserve the original execution timeout or caller cancellation and report cleanup-only exhaustion as HTTP 503."
+        },
+        {
+          "implementation_id": "impl-07-04-late-sftp-cancellation",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_teardown_test.go",
+            "symbol": "TestSFTPCancellationDuringCompletedTeardownStaysFast"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Cancellation during normal SFTP teardown shortens its grace to 100 ms instead of waiting the normal two seconds."
         }
       ]
     },
@@ -1960,6 +2004,105 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-02-high-latency-teardown",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_teardown_test.go",
+            "symbol": "TestAgentDeploymentSurvives162msTeardownRTT"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A complete SFTP upload over a delayed SSH transport retains its lease for hash verification, activation, execution and an idempotent second collection."
+        },
+        {
+          "implementation_id": "impl-08-02-async-budget",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_installed_test.go",
+            "symbol": "TestAgentSlowDeploymentOutlivesCollectionAndOldAgentKeepsCollecting"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A deployment outlives the collection that requested it and the default SSH timeout; a compatible verified old agent continues storing metrics during upload, then the new agent is collected after activation."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-concurrency",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueDeduplicatesBoundsConcurrencyAndJoins"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Deduplicate requests per server, cap background deployments at four, give each its own three-minute budget and join work on shutdown."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-generation",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueGenerationReplacementWaitsForOldWorker"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Cancel outdated generations and deleted nodes while retaining per-node admission until the old worker joins."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-retry",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueRetryDoesNotDependOnCollections"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Retry failed deployments independently; repeated collection requests cannot reset deployment backoff."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-deadline",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueTaskTimeoutKeepsApplicationAlive"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A deployment deadline cancels only that attempt and allows the application-owned queue to retry."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-pending-cleanup",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueRetainsAdmissionDuringPendingCleanup"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Keep one deployment admission occupied while local SSH cleanup is pending; only its resource owner settling allows a replacement generation."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-joined-cleanup",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueWaitsForJoinedLeaseSettlement"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Retain admission across both a wrapped primitive cleanup and the real lease's pending settlement; neither retries nor generation replacements may start until the lease returns its slot."
+        },
+        {
+          "implementation_id": "impl-08-02-deployment-joined-cleanup-shutdown",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_deploy_queue_test.go",
+            "symbol": "TestAgentDeploymentQueueShutdownDuringJoinedCleanup"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Application shutdown interrupts nested pending-cleanup waits, joins the deployment worker and prevents further admission."
         }
       ]
     },
@@ -2582,7 +2725,7 @@
         "REQ-08"
       ],
       "spec_ref": "tests/coverage.json#/cases/30/scenario",
-      "scenario": "Fail startup before HTTP/Monitor on invalid bundled artifacts; accept only matching protocol/version JSON, reject legacy output without metric insertion, and preserve node isolation and history.",
+      "scenario": "Fail startup before HTTP/Monitor on invalid bundled artifacts; accept reports matching a verified current or historically trusted compatible artifact, reject legacy output without metric insertion, and preserve node isolation and history.",
       "implementations": [
         {
           "implementation_id": "impl-08-08a",
@@ -2603,6 +2746,50 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-08-installed-trust",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_installed_test.go",
+            "symbol": "TestAgentInstalledRequiresTrustedHashAndCompatibleProtocol"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Continue collecting a trusted compatible prior build, and never execute an unknown hash or incompatible protocol."
+        },
+        {
+          "implementation_id": "impl-08-08-pending-collection",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_installed_test.go",
+            "symbol": "TestAgentPendingCollectionIsSkippedWithoutFailureBackoff"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Waiting for installation is skipped/artifact, not a collection failure or quota rejection."
+        },
+        {
+          "implementation_id": "impl-08-08-artifact-history",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/repository/agent_artifact_test.go",
+            "symbol": "TestAgentArtifactHistorySurvivesUpgradeAndRejectsConflicts"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Keep verified prior release hashes across repository restarts and reject conflicting immutable trust metadata in PostgreSQL."
+        },
+        {
+          "implementation_id": "impl-08-08-activation-race",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_installed_test.go",
+            "symbol": "TestAgentInstalledRechecksHashWhenActivationRacesCollection"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Rehash a newly activated binary when its report races the old hash check; a new-version claim alone cannot bypass artifact verification."
         }
       ]
     },

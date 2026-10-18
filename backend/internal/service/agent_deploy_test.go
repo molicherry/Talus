@@ -43,9 +43,10 @@ type fakeRemote struct {
 	activateFailsSoft bool
 	corruptUpload     bool
 
-	agentPayload string
-	agentExit    int
-	agentStderr  string
+	agentPayload  string
+	agentPayloads map[string]string
+	agentExit     int
+	agentStderr   string
 	// afterUpload runs once the upload has been stored remotely, so a test can
 	// invalidate the target generation between the upload and the activation.
 	afterUpload func()
@@ -219,7 +220,13 @@ func (f *fakeRemote) handler() func(string, ssh.Channel, <-chan struct{}) {
 			if f.agentStderr != "" {
 				fmt.Fprintf(ch.Stderr(), "%s\n", f.agentStderr)
 			}
-			fmt.Fprint(ch, f.agentPayload)
+			f.mu.Lock()
+			payload := f.agentPayload
+			if candidate, ok := f.agentPayloads[fmt.Sprintf("%x", sha256.Sum256(f.files[agentPath]))]; ok {
+				payload = candidate
+			}
+			f.mu.Unlock()
+			fmt.Fprint(ch, payload)
 			exitStatus(ch, uint32(f.agentExit))
 		default:
 			fmt.Fprintf(ch.Stderr(), "unexpected command: %s\n", command)

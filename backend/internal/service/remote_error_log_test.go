@@ -57,6 +57,11 @@ func TestMonitorFailureLogsOnlySafeDiagnostics(t *testing.T) {
 			err:  &StageError{Stage: StageTransfer, Err: errors.New(remoteErrorSecret)},
 			want: map[string]string{"reason_class": telReasonOther, "stage": string(StageTransfer)},
 		},
+		{
+			name: "transport close carries application reason and primitive stage",
+			err:  &StageError{Stage: StageTeardown, Err: errors.Join(errSSHTransportClosed, errors.New(remoteErrorSecret))},
+			want: map[string]string{"reason_class": telReasonDial, "reason": server.ReasonSSHConnection, "stage": string(StageTeardown)},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer
