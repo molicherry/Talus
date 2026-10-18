@@ -4,7 +4,7 @@ on:
   release:
     types: [published]
   # Recovery after a transient registry/API failure; always reconciles the
-  # highest published stable release, never an arbitrary caller-supplied tag.
+  # highest enrolled stable release, never an arbitrary caller-supplied tag.
   workflow_dispatch:
 
 permissions:
@@ -44,7 +44,7 @@ jobs:
           REGISTRY_AUTH_FILE: ${{ runner.temp }}/registry-auth.json
           REGISTRY_USER: ${{ github.repository_owner }}
         run: printf '%s' "$GH_TOKEN" | skopeo login --username "$REGISTRY_USER" --password-stdin ghcr.io
-      - name: Verify evidence and promote highest stable digest
+      - name: Verify evidence and promote highest enrolled stable digest
         env:
           GH_TOKEN: ${{ github.token }}
           REGISTRY_AUTH_FILE: ${{ runner.temp }}/registry-auth.json

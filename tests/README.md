@@ -135,8 +135,9 @@ The separate **Release policy** CI job runs these checks for PRs, main and tags.
 They use temporary Git repositories and simulated GitHub/registry responses to
 exercise tag ancestry, immutability, stable/RC/test isolation, failed-CI and
 evidence rejection, draft retries, numeric version ordering and out-of-order
-promotion. They never publish a real tag, Release or registry image. The workflow
-also gates registry writes on the application suites and CodeQL. See the
+promotion, recovery before the first enrolled release, edited titles and
+idempotent label initialization. They never publish a real tag, Release or registry
+image. The workflow also gates registry writes on the application suites and CodeQL. See the
 [release runbook](../docs/releasing.md) for live-event verification and recovery.
 
 ## Static scan exemptions

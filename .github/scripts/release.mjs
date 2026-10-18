@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import {
-  assertReceipt, assertSuccessfulCI, highestStable, parseTag, previousStable,
+  assertReceipt, assertSuccessfulCI, stableReleases, parseTag, previousStable,
   promotionDecision, validateTag,
 } from "./release-policy.mjs";
 
@@ -123,7 +123,7 @@ export function publishImage({ archive, info, image, repository, runId, registry
 async function readReceipt(api, release) {
   const assets = await api.list(`releases/${release.id}/assets`);
   const asset = assets.find(item => item.name === RECEIPT);
-  return asset ? api.request("GET", `releases/assets/${asset.id}`, undefined, { binary: true }) : null;
+  return asset ? api.request("GET", `releases/assets/${asset.id}`, undefined, { binary: true }) : undefined;
 }
 
 function sameImage(left, right) {
@@ -146,9 +146,10 @@ export async function draftRelease({ api, receipt, baseline }) {
       body: `## Highlights\n- <!-- release:todo --> Describe the user-visible changes.\n\n## Upgrade notes\n<!-- release:todo --> Document migration, configuration and rollback steps, or remove this section.\n\n${generated.body}`,
     });
   }
-  if (release.name !== receipt.tag || release.prerelease !== (kind === "rc")) throw new Error("Existing Release does not match tag policy");
+  if (release.tag_name !== receipt.tag || release.prerelease !== (kind === "rc")) throw new Error("Existing Release does not match tag policy");
   const recorded = await readReceipt(api, release);
-  if (recorded) {
+  if (recorded !== undefined) {
+    assertReceipt(recorded, { tag: receipt.tag, image: receipt.image });
     if (!sameImage(recorded, receipt)) throw new Error("Release evidence already exists for a different image");
   } else {
     if (!release.draft) throw new Error("Cannot add evidence to an already published Release");
@@ -159,14 +160,21 @@ export async function draftRelease({ api, receipt, baseline }) {
 }
 
 export async function promoteLatest({ api, registry, validate = validateTag }) {
-  // Reconcile the highest published stable, rather than the triggering event.
+  // Reconcile the highest enrolled stable, rather than the triggering event.
   // GitHub may replace a pending concurrency-group run with a newer event.
-  const release = highestStable(await api.list("releases"));
-  if (!release) return { skipped: "no published stable release" };
+  // Absence of the evidence asset marks historical releases as unenrolled.
+  // An existing but invalid/unreadable asset must fail, never fall back.
+  let release, receipt;
+  for (const candidate of stableReleases(await api.list("releases"))) {
+    const evidence = await readReceipt(api, candidate);
+    if (evidence === undefined) continue;
+    release = candidate;
+    receipt = evidence;
+    break;
+  }
+  if (!release) return { skipped: "No stable release is enrolled in this workflow yet; skipping promotion." };
   const tag = release.tag_name, image = `ghcr.io/${api.repository.toLowerCase()}`;
-  if (release.name !== tag || /<!-- release:todo -->/.test(release.body || "")) throw new Error("Review Release title and notes before promotion");
-  const receipt = await readReceipt(api, release);
-  if (!receipt) throw new Error("Published Release has no image evidence");
+  if (/<!-- release:todo -->/.test(release.body || "")) throw new Error("Review Release notes before promotion");
   assertReceipt(receipt, { tag, image });
   validate(tag, receipt.commit, receipt.tagObject);
   const run = await api.request("GET", `actions/runs/${receipt.runId}`);

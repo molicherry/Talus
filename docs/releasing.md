@@ -10,7 +10,7 @@ the Release → promote the same image digest to `latest`.
 
 | Purpose | Tag | GitHub Release | Updates `latest` |
 | --- | --- | --- | --- |
-| Stable | `v0.12.0` | Required after successful CI; initially a draft | Only the highest published stable |
+| Stable | `v0.12.0` | Required after successful CI; initially a draft | Only the highest published stable with image evidence |
 | Release candidate | `v0.13.0-rc.1` | Draft marked pre-release | Never |
 | Internal test | `v0.13.0-test.1` | None | Never |
 
@@ -73,7 +73,9 @@ version image instead of replacing it with a new build.
    Release draft and attach this evidence. Test builds stop after image publication.
    The CI run listing alone does not prove success.
 
-4. Edit the existing draft in GitHub. Keep the title equal to the tag. Complete
+4. Edit the existing draft in GitHub. The title defaults to the tag; an optional
+   theme such as `v0.12.0 — SSH routes` is allowed. Automation identifies the
+   Release by `tag_name` and preserves edited titles on retries. Complete
    Highlights, review the generated changes and remove every
    `<!-- release:todo -->` marker. Remove Upgrade notes if unnecessary; otherwise
    explain the migration/configuration changes, required actions, rollback
@@ -112,8 +114,8 @@ version image instead of replacing it with a new build.
 
 6. Watch **Promote published Release**. It revalidates the annotated tag, main
    ancestry, successful tag CI, evidence and both image architectures, then
-   copies the highest published stable image **by digest** to `latest`, without
-   rebuilding. A global concurrency group and numeric SemVer comparison prevent
+   copies the highest published stable with image evidence **by digest** to
+   `latest`, without rebuilding. A global concurrency group and numeric SemVer comparison prevent
    old or out-of-order events from lowering the current version. The job also
    marks that stable Release as GitHub's latest. Verify its success before
    announcing `latest` availability. RC/test tags never advance either latest.
@@ -133,7 +135,11 @@ other workflows.
   preserve reviewed notes and existing evidence, including after publication.
 - The OCI archive is retained for 7 days. If it has expired, rerun all CI jobs.
   Existing version tags are still reused; they are never overwritten.
-- If a published stable Release has incomplete notes, missing/mismatched evidence,
+- Historical Releases with no `release-image.json` asset are skipped. If none
+  have been enrolled in this workflow, recovery prints
+  `No stable release is enrolled in this workflow yet; skipping promotion.`
+  and exits successfully without changing any image or Release.
+- If a published stable Release has incomplete notes, invalid/mismatched evidence,
   failed CI or a modified tag/image, promotion fails and preserves `latest`.
   Investigate the mismatch. Do not remove the check or rewrite evidence to force
   acceptance. Code/artifact mistakes require a new version.
@@ -144,10 +150,12 @@ other workflows.
   gh workflow run release.yml --ref main
   ```
 
-  Recovery always reconciles the highest published stable; it cannot select an
-  older version. If multiple published events queue up, the last job still
+  Recovery always reconciles the highest published stable with an evidence asset;
+  no caller-supplied tag can override this selection. If multiple published events queue up, the last job still
   reconciles that highest version. An existing newer `latest`, an unlabelled
-  image or a same-version digest mismatch is never silently replaced.
+  image or a same-version digest mismatch is never silently replaced. An existing
+  but invalid or unreadable evidence asset fails the job; it never causes fallback
+  to an older release. Absence of the asset alone means a release is unenrolled.
 
 Published Releases are not deleted. Correct spelling or erroneous upgrade/security
 instructions in place, adding a correction note for substantive documentation
@@ -155,6 +163,20 @@ fixes; changed code or artifacts need a new version. The evidence asset is not a
 editable release note. Failed tags are retained and are not missing-Release debt.
 
 ## Repository setup and rollout
+
+The label names in [`.github/release.yml`](../.github/release.yml) must exist in
+the repository before maintainers can use them. Initialize missing labels once,
+from the repository root, using an authenticated `gh` account with issues write
+access:
+
+```bash
+GH_TOKEN="$(gh auth token)" GITHUB_REPOSITORY=molicherry/Talus node .github/scripts/release-labels.mjs
+```
+
+The initializer creates missing `skip-changelog`, `ci`, `tests`, `internal` and
+`documentation` labels. It preserves existing labels and their descriptions/colors;
+rerunning after initialization makes no changes. This is maintainer setup, so
+release jobs do not need additional label-management permissions.
 
 Actions must be allowed to publish to the repository's GHCR package. The workflows
 use `GITHUB_TOKEN`: package write only for image publication/promotion, contents
@@ -166,4 +188,5 @@ updates/deletion of `v*` tags; CI cannot prevent a privileged owner from bypassi
 policy. Merge these workflows before creating the first new-policy tag. Do not
 rerun historical tag workflows: those tags retain the old publisher capable of
 writing `latest`. Historical Releases without evidence are not eligible for this
-automated promotion; recovery is intended for releases created by this workflow.
+automated promotion; running recovery before the first enrolled release is a
+successful no-op.

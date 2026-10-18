@@ -45,15 +45,15 @@ export function previousStable(tag) {
   }).sort((a, b) => compareTags(b, a))[0];
 }
 
-export function highestStable(releases) {
+export function stableReleases(releases) {
   return releases.filter(release => {
     try { return !release.draft && !release.prerelease && parseTag(release.tag_name).kind === "stable"; }
     catch { return false; }
-  }).sort((a, b) => compareTags(b.tag_name, a.tag_name))[0];
+  }).sort((a, b) => compareTags(b.tag_name, a.tag_name));
 }
 
 export function assertReceipt(receipt, { tag, image }) {
-  if (receipt.schema !== 1 || receipt.tag !== tag || receipt.image !== image ||
+  if (!receipt || receipt.schema !== 1 || receipt.tag !== tag || receipt.image !== image ||
       !/^[0-9a-f]{40}$/.test(receipt.commit) || !/^[0-9a-f]{40}$/.test(receipt.tagObject) ||
       !/^sha256:[0-9a-f]{64}$/.test(receipt.digest) || !/^\d+$/.test(String(receipt.runId))) {
     throw new Error("Invalid release image evidence");

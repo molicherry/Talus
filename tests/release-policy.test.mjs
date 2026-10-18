@@ -6,10 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import {
-  assertSuccessfulCI, compareTags, highestStable, parseTag, previousStable,
+  assertSuccessfulCI, compareTags, stableReleases, parseTag, previousStable,
   promotionDecision, validateTag,
 } from "../.github/scripts/release-policy.mjs";
 import { draftRelease, GitHub, promoteLatest, publishImage, Registry } from "../.github/scripts/release.mjs";
+import { ensureReleaseLabels, RELEASE_LABELS } from "../.github/scripts/release-labels.mjs";
 
 const repository = "example/Talus", image = "ghcr.io/example/talus";
 const digest = `sha256:${"a".repeat(64)}`, otherDigest = `sha256:${"b".repeat(64)}`;
@@ -37,14 +38,18 @@ function gitFixture(t, callback) {
   finally { process.chdir(cwd); }
 }
 
-function apiFixture({ releases = [structuredClone(published)], evidence = structuredClone(receipt) } = {}) {
+function apiFixture({ releases = [structuredClone(published)], evidence = structuredClone(receipt), evidenceByRelease } = {}) {
   const writes = [], calls = [];
   const api = {
-    repository, releases, evidence, run: structuredClone(successfulRun), writes, calls,
+    repository, releases, evidence, evidenceByRelease, run: structuredClone(successfulRun), writes, calls,
     async list(path) {
       calls.push(["LIST", path]);
       if (path === "releases") return this.releases;
-      if (/^releases\/\d+\/assets$/.test(path)) return this.evidence ? [{ id: 9, name: "release-image.json" }] : [];
+      const assetMatch = /^releases\/(\d+)\/assets$/.exec(path);
+      if (assetMatch) {
+        if (this.evidenceByRelease) return Object.hasOwn(this.evidenceByRelease, assetMatch[1]) ? [{ id: Number(assetMatch[1]) + 9000, name: "release-image.json" }] : [];
+        return this.evidence ? [{ id: 9, name: "release-image.json" }] : [];
+      }
       throw new Error(`Unexpected list: ${path}`);
     },
     async request(method, path, body) {
@@ -52,6 +57,7 @@ function apiFixture({ releases = [structuredClone(published)], evidence = struct
       if (method !== "GET") writes.push([method, path, body]);
       if (method === "GET" && path.startsWith("releases/tags/")) return this.releases.find(item => item.tag_name === path.slice("releases/tags/".length)) || null;
       if (method === "GET" && path === "releases/assets/9") return this.evidence;
+      if (method === "GET" && /^releases\/assets\/\d+$/.test(path)) return this.evidenceByRelease[Number(path.split("/").at(-1)) - 9000];
       if (method === "GET" && path === `actions/runs/${receipt.runId}`) return this.run;
       if (method === "POST" && path === "releases/generate-notes") return { body: "## What's Changed\n* Feature by @author in https://github.com/example/Talus/pull/1\n\n**Full Changelog**: compare" };
       if (method === "POST" && path === "releases") {
@@ -144,9 +150,9 @@ test("latest never regresses or accepts prereleases, missing version labels or s
   }
 });
 
-test("highest stable excludes drafts, prereleases, test tags and invalid names", () => {
+test("stable releases are ordered numerically and exclude drafts, prereleases, test tags and invalid names", () => {
   const releases = [published, { ...published, tag_name: "v0.9.0" }, { ...published, tag_name: "v0.13.0", draft: true }, { ...published, tag_name: "v0.14.0", prerelease: true }, { ...published, tag_name: "v0.15.0-test.1" }, { ...published, tag_name: "invalid" }];
-  assert.equal(highestStable(releases).tag_name, tag);
+  assert.deepEqual(stableReleases(releases).map(release => release.tag_name), [tag, "v0.9.0"]);
 });
 
 test("release evidence requires the completed successful CI push for this exact tag, repository and source", () => {
@@ -241,10 +247,22 @@ test("test tags never call the Release API", async () => {
 
 test("draft retries preserve all human edits and published Releases", async () => {
   for (const draft of [true, false]) {
-    const api = apiFixture({ releases: [{ ...published, draft, body: "Human-reviewed notes" }] });
+    const title = `${tag} — SSH 路由`;
+    const api = apiFixture({ releases: [{ ...published, draft, name: title, body: "Human-reviewed notes" }] });
     await draftRelease({ api, receipt });
     assert.deepEqual(api.writes, []);
     assert.equal(api.releases[0].body, "Human-reviewed notes");
+    assert.equal(api.releases[0].name, title);
+  }
+});
+
+test("draft retries still reject a different tag or incorrect prerelease flag", async () => {
+  for (const mutation of [{ tag_name: "v0.13.0" }, { prerelease: true }]) {
+    const api = apiFixture();
+    const request = api.request.bind(api);
+    api.request = async (...args) => args[1] === `releases/tags/${tag}` ? { ...published, ...mutation } : request(...args);
+    await assert.rejects(draftRelease({ api, receipt }), /tag policy/);
+    assert.deepEqual(api.writes, []);
   }
 });
 
@@ -265,6 +283,61 @@ test("stable promotion verifies CI, annotation, source and digest before copying
   assert.deepEqual(api.writes, [["PATCH", "releases/1", { make_latest: "true" }]]);
 });
 
+test("a descriptive Release title does not block promotion or get overwritten", async () => {
+  const title = `${tag} — SSH 路由`;
+  const api = apiFixture({ releases: [{ ...published, name: title }] });
+  const registry = registryFixture({ existing: { digest } });
+  assert.equal((await promoteLatest({ api, registry, validate() {} })).decision, "promote");
+  assert.equal(api.releases[0].name, title);
+  assert.deepEqual(api.writes, [["PATCH", "releases/1", { make_latest: "true" }]]);
+});
+
+test("historical releases without evidence make recovery an idempotent successful skip", async () => {
+  const api = apiFixture({ releases: [{ ...published, tag_name: "v0.11.0", body: "<!-- release:todo -->" }, { ...published, id: 2, tag_name: "v0.9.0" }], evidence: null });
+  const registry = registryFixture();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await promoteLatest({ api, registry, validate() { assert.fail("Historical tags must not be validated"); } });
+    assert.match(result.skipped, /No stable release is enrolled.*skipping/);
+  }
+  assert.deepEqual(api.writes, []);
+  assert.deepEqual(registry.copies, []);
+  assert.deepEqual(registry.inspections, []);
+  assert.ok(!api.calls.some(([, path]) => path.startsWith("actions/runs/")));
+});
+
+test("recovery finds the highest stable with evidence and skips newer unenrolled releases", async () => {
+  const api = apiFixture({ releases: [{ ...published, id: 2, tag_name: "v0.9.0" }, published, { ...published, id: 3, tag_name: "v0.13.0" }], evidenceByRelease: { 1: receipt } });
+  const registry = registryFixture({ existing: { digest } });
+  assert.equal((await promoteLatest({ api, registry, validate() {} })).tag, tag);
+  assert.deepEqual(api.calls.filter(([, path]) => /^releases\/\d+\/assets$/.test(path)), [["LIST", "releases/3/assets"], ["LIST", "releases/1/assets"]]);
+  assert.equal(registry.copies.length, 1);
+});
+
+test("an invalid evidence asset never falls back to an older enrolled release", async () => {
+  for (const evidence of [null, { ...receipt, tag: "v0.13.0", image: "ghcr.io/attacker/talus" }]) {
+    const api = apiFixture({ releases: [published, { ...published, id: 3, tag_name: "v0.13.0" }], evidenceByRelease: { 1: receipt, 3: evidence } });
+    const registry = registryFixture({ existing: { digest } });
+    await assert.rejects(promoteLatest({ api, registry, validate() {} }), /Invalid release image evidence/);
+    assert.deepEqual(api.writes, []);
+    assert.deepEqual(registry.copies, []);
+    assert.ok(!api.calls.some(([, path]) => path === "releases/1/assets"));
+  }
+});
+
+test("an unreadable evidence asset fails instead of being treated as an unenrolled release", async () => {
+  const api = apiFixture({ releases: [published, { ...published, id: 3, tag_name: "v0.13.0" }], evidenceByRelease: { 1: receipt, 3: receipt } });
+  const request = api.request.bind(api);
+  api.request = async (...args) => {
+    if (args[1] === "releases/assets/9003") throw new Error("GitHub HTTP 403");
+    return request(...args);
+  };
+  const registry = registryFixture({ existing: { digest } });
+  await assert.rejects(promoteLatest({ api, registry, validate() {} }), /403/);
+  assert.deepEqual(api.writes, []);
+  assert.deepEqual(registry.copies, []);
+  assert.ok(!api.calls.some(([, path]) => path === "releases/1/assets"));
+});
+
 test("a delayed/older event reconciles the highest published stable rather than the event tag", async () => {
   const api = apiFixture({ releases: [{ ...published, id: 2, tag_name: "v0.9.0" }, published] });
   const registry = registryFixture({ existing: { digest } });
@@ -281,10 +354,9 @@ test("promotion retries and a newer current latest never rewrite the image", asy
   }
 });
 
-test("promotion fails closed for missing evidence, a failed CI, tag mismatch or image digest mismatch", async () => {
-  for (const failure of ["missing", "evidence", "ci", "tag", "digest", "notes"]) {
+test("promotion fails closed for invalid evidence, a failed CI, tag mismatch or image digest mismatch", async () => {
+  for (const failure of ["evidence", "ci", "tag", "digest", "notes"]) {
     const api = apiFixture(), registry = registryFixture({ existing: { digest } });
-    if (failure === "missing") api.evidence = null;
     if (failure === "evidence") api.evidence = { ...receipt, image: "ghcr.io/attacker/talus" };
     if (failure === "ci") api.run.conclusion = "failure";
     if (failure === "digest") registry.existing = { digest: otherDigest };
@@ -318,6 +390,43 @@ test("GitHub client paginates, uploads JSON evidence and does not hide authentic
   assert.deepEqual(JSON.parse(calls.at(-1)[1].body), receipt);
   assert.equal(await api.request("GET", "missing", undefined, { missing: true }), null);
   await assert.rejects(api.request("GET", "forbidden", undefined, { missing: true }), /403/);
+});
+
+test("label initialization creates the four missing exclusions and preserves existing metadata on retries", async () => {
+  const existing = { name: "documentation", description: "Existing documentation label", color: "123456" };
+  const labels = [existing], writes = [];
+  const api = {
+    async list(path) { assert.equal(path, "labels"); return labels; },
+    async request(method, path, body) {
+      assert.equal(method, "POST");
+      assert.equal(path, "labels");
+      writes.push(body);
+      labels.push(structuredClone(body));
+    },
+  };
+  assert.deepEqual((await ensureReleaseLabels(api)).created, ["skip-changelog", "ci", "tests", "internal"]);
+  assert.equal(writes.length, 4);
+  assert.ok(writes.every(label => label.color === "ededed" && label.description.length > 0));
+  assert.deepEqual(labels[0], existing);
+  assert.deepEqual((await ensureReleaseLabels(api)).created, []);
+  assert.equal(writes.length, 4);
+});
+
+test("label initialization recognizes existing names case-insensitively and fails on API errors", async () => {
+  const existing = RELEASE_LABELS.map(label => ({ ...label, name: label.name.toUpperCase() }));
+  const api = { async list() { return existing; }, async request() { assert.fail("Existing labels must be preserved"); } };
+  assert.deepEqual((await ensureReleaseLabels(api)).created, []);
+  api.list = async () => { throw new Error("GitHub HTTP 401"); };
+  await assert.rejects(ensureReleaseLabels(api), /401/);
+  api.list = async () => [];
+  api.request = async () => { throw new Error("GitHub HTTP 403"); };
+  await assert.rejects(ensureReleaseLabels(api), /403/);
+});
+
+test("every configured changelog exclusion has label initialization metadata", () => {
+  const config = readFileSync(new URL("../.github/release.yml", import.meta.url), "utf8");
+  const exclusions = [...config.matchAll(/^\s+- ([\w-]+)$/gm)].map(match => match[1]);
+  assert.deepEqual(exclusions.sort(), RELEASE_LABELS.map(label => label.name).sort());
 });
 
 test("workflow mutation boundaries require all CI gates, restricted tokens and globally serialized promotion", () => {
