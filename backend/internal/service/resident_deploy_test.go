@@ -1,11 +1,17 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/vpsmanager/backend/internal/model"
+	"github.com/vpsmanager/backend/internal/server"
 )
 
 // Exercise the exact activation script with a controlled service manager. This
@@ -74,6 +80,99 @@ func TestResidentActivationRollsBackBinaryConfigurationAndUnit(t *testing.T) {
 			}
 			if _, e = os.Stat(next + ".config"); !os.IsNotExist(e) {
 				t.Fatal("staging configuration not cleaned")
+			}
+		})
+	}
+}
+
+// The uninstall script must be idempotent and remove both the unit and the
+// installation directory, including on hosts where neither exists.
+func TestResidentUninstallScriptRemovesUnitAndState(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "install ' dir")
+	base := filepath.Join(dir, "state")
+	unit := filepath.Join(dir, "talus-agent-test.service")
+	if e := os.MkdirAll(base, 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(filepath.Join(base, "config.json"), []byte("{}"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(unit, []byte("unit"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	log := filepath.Join(dir, "ctl.log")
+	ctl := filepath.Join(dir, "systemctl")
+	if e := os.WriteFile(ctl, []byte("#!/bin/sh\necho \"$@\" >> "+shellQuote(log)+"\nexit 0\n"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	script := residentUninstallScript(base, unit, "talus-agent-test.service", shellQuote(ctl))
+	if out, e := exec.Command("sh", "-c", script).CombinedOutput(); e != nil {
+		t.Fatalf("uninstall: %v %s", e, out)
+	}
+	if _, e := os.Stat(base); !os.IsNotExist(e) {
+		t.Fatal("installation directory not removed")
+	}
+	if _, e := os.Stat(unit); !os.IsNotExist(e) {
+		t.Fatal("unit file not removed")
+	}
+	calls, e := os.ReadFile(log)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, want := range []string{"disable --now talus-agent-test.service", "daemon-reload"} {
+		if !strings.Contains(string(calls), want) {
+			t.Fatalf("systemctl call %q missing in %q", want, calls)
+		}
+	}
+	// Running it again on a clean host must still succeed.
+	if out, e := exec.Command("sh", "-c", script).CombinedOutput(); e != nil {
+		t.Fatalf("second uninstall: %v %s", e, out)
+	}
+}
+
+func TestDeployFailureReasonClassifiesSSHAndAgentFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"agent reason", deployError(ReasonAgentHashMismatch, errors.New("hash")), ReasonAgentHashMismatch},
+		{"ssh host key unverified", server.ErrSSHHostKeyUnverified, server.ReasonSSHHostKeyUnverified},
+		{"ssh auth", server.NewAppError(502, server.ReasonSSHAuth), server.ReasonSSHAuth},
+		{"deadline", context.DeadlineExceeded, "deployment_timeout"},
+		{"canceled", context.Canceled, "deployment_canceled"},
+		{"unknown", errors.New("boom"), "deployment_failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := deployFailureReason(tc.err); got != tc.want {
+				t.Fatalf("reason = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A failed or interrupted deployment must be retried; only a ready deployment
+// with matching fingerprints and a fresh contact may be skipped.
+func TestResidentInstallNeededRetriesUnreadyDeployments(t *testing.T) {
+	now := time.Now()
+	fresh := now.Add(-5 * time.Second)
+	stale := now.Add(-5 * time.Minute)
+	base := model.AgentNode{Deployment: "ready", InstalledHash: "h", ConfigHash: "c"}
+	for _, tc := range []struct {
+		name string
+		node model.AgentNode
+		last time.Time
+		want bool
+	}{
+		{"ready and fresh", base, fresh, false},
+		{"ready but stale", base, stale, true},
+		{"failed with matching hashes", model.AgentNode{Deployment: "failed", InstalledHash: "h", ConfigHash: "c"}, fresh, true},
+		{"installing with matching hashes", model.AgentNode{Deployment: "installing", InstalledHash: "h", ConfigHash: "c"}, fresh, true},
+		{"ready but old fingerprint", model.AgentNode{Deployment: "ready", InstalledHash: "old", ConfigHash: "c"}, fresh, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := residentInstallNeeded(tc.node, "h", "c", tc.last, now); got != tc.want {
+				t.Fatalf("install needed = %v, want %v", got, tc.want)
 			}
 		})
 	}

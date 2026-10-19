@@ -149,6 +149,20 @@ func (r *AgentNodeRepo) Ingest(ctx context.Context, node model.AgentNode, sample
 	return ack, nil
 }
 
+// Get returns the resident credential record for a server.
+func (r *AgentNodeRepo) Get(ctx context.Context, serverID uint) (model.AgentNode, error) {
+	var n model.AgentNode
+	err := r.db.WithContext(ctx).Where("server_id = ?", serverID).Take(&n).Error
+	return n, err
+}
+
+// Delete drops the resident credential record for a server. It is used once the
+// server is deleted so a stale node cannot outlive the server or be picked up
+// again by a later topology reconciliation.
+func (r *AgentNodeRepo) Delete(ctx context.Context, serverID uint) error {
+	return r.db.WithContext(ctx).Where("server_id = ?", serverID).Delete(&model.AgentNode{}).Error
+}
+
 func (r *AgentNodeRepo) Cleanup(ctx context.Context) error {
 	if err := r.db.WithContext(ctx).Where("received_at < ?", time.Now().Add(-48*time.Hour)).Delete(&model.AgentReceipt{}).Error; err != nil {
 		return err

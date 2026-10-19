@@ -42,6 +42,13 @@
     "reasons": {
       "hub_url_required": "Configure AGENT_HUB_URL with the HTTPS address reachable from your servers.",
       "deployment_failed": "Agent deployment failed. Check SSH connectivity, credentials and service permissions; deployment retries automatically.",
+      "ssh_host_key_unverified": "The node host key is not trusted yet. Verify the fingerprint and trust it before deploying.",
+      "ssh_host_key_mismatch": "The node host key changed. Verify the new fingerprint before retrying.",
+      "ssh_authentication_failed": "SSH authentication failed. Check the credential and whether the account may log in.",
+      "ssh_connection_failed": "Could not reach the node. Check the address, port and network.",
+      "ssh_timeout": "Connecting to the node timed out. Check the network and retry.",
+      "deployment_timeout": "Deployment timed out; it will be retried automatically.",
+      "deployment_canceled": "Deployment was canceled; it will be retried automatically.",
       "service_manager_unavailable": "A running systemd service manager is required. For user services, enable lingering for the SSH account.",
       "agent_health_check_failed": "The new agent could not contact the Hub. Check the Hub address and outbound access. A previous version is restored when available.",
       "agent_target_read_only": "The persistent installation directory is not writable.",
