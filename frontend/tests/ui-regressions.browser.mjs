@@ -291,6 +291,31 @@ try {
       .then((r) => r.ok)
       .catch(() => false);
   }, "preview server");
+  for (const mobile of [false, true]) {
+    await test(`resident monitoring separates live contact, partial collection and backfill (${mobile ? "mobile" : "desktop"})`, async ({ page, state, goto }) => {
+      state.servers[0].monitoring = {
+        connection: "online", collection: "partial", data: "stale", deployment: "ready",
+        errors: { disk: "timeout", storage: "write_failed" },
+        pending_samples: 8, dropped_samples: 2, version: "resident-test",
+        last_contact_at: timestamp, last_sample_at: timestamp,
+      };
+      await goto("/servers/1");
+      await page.getByText("Collection: Partial failure", { exact: true }).waitFor();
+      await page.getByText("Disk: Collection timed out", { exact: true }).waitFor();
+      await page.getByText("8 samples pending · 2 samples dropped", { exact: true }).waitFor();
+      assert.equal(await page.getByRole("status").filter({ hasText: "Online" }).count(), 1);
+      state.servers[0].monitoring = { ...state.servers[0].monitoring, collection: "healthy", data: "backfilling", errors: {}, pending_samples: 4 };
+      await until(async () => await page.getByText("Data: Backfilling", { exact: true }).count() === 1, "monitoring refresh", 8000);
+      assert.equal(await page.getByText("Disk: Collection timed out", { exact: true }).count(), 0);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+      assert.equal(overflow, false, "monitoring status overflows viewport");
+      state.failReads.add("/api/v1/servers/1");
+      await until(async () => await page.getByRole("alert").count() > 0, "failed refresh message", 12000);
+      assert.equal(await page.getByText("Collection: Healthy", { exact: true }).count(), 1, "failed refresh discarded monitoring status");
+      await capture(page, `resident-monitoring-${mobile ? "mobile" : "desktop"}`);
+    }, mobile);
+  }
+
   await test("SSH connection routes save atomically; jump filtering and saved connection tests", async ({ page, state, goto }) => {
     state.servers[0] = { ...state.servers[0], connection: { mode: "direct" }, connection_revision: 7 };
     state.servers.push({ ...serverFixture(3), name: "Proxied", connection: { mode: "socks5" } },

@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/vpsmanager/backend/internal/agentwire"
 )
 
 // Config holds all application configuration loaded from environment variables.
@@ -26,6 +29,8 @@ type Config struct {
 	// Agent artifacts: the directory holding agents-manifest.json and both
 	// architecture-specific binaries.
 	AgentArtifactsDir string
+	AgentHubURL       string
+	AgentAllowHTTP    bool
 
 	// Metrics retention rollout (disabled by default,
 	// then an operator-visible dry run, then enabled). The dry run always plans
@@ -74,6 +79,11 @@ func (c *Config) Validate() error {
 	if c.MonitorInterval <= 0 {
 		return fmt.Errorf("MONITOR_INTERVAL must be a positive integer, got %d", c.MonitorInterval)
 	}
+	if c.AgentHubURL != "" {
+		if err := (agentwire.Config{HubURL: c.AgentHubURL, Token: strings.Repeat("0", 64), StateDir: "/configured-at-install", IntervalSeconds: c.MonitorInterval, AllowHTTP: c.AgentAllowHTTP}).Validate(); err != nil {
+			return fmt.Errorf("AGENT_HUB_URL / MONITOR_INTERVAL: %w", err)
+		}
+	}
 	if c.MetricsRetentionParseError != nil {
 		return c.MetricsRetentionParseError
 	}
@@ -119,6 +129,8 @@ func Load() *Config {
 	cfg.LogFormat = getEnvOrDefault("LOG_FORMAT", "json")
 	cfg.LogLevel = getEnvOrDefault("LOG_LEVEL", "info")
 	cfg.AgentArtifactsDir = getEnvOrDefault("AGENT_ARTIFACTS_DIR", "/usr/local/bin")
+	cfg.AgentHubURL = os.Getenv("AGENT_HUB_URL")
+	cfg.AgentAllowHTTP = getEnvBool("AGENT_ALLOW_HTTP")
 	// The retention rollout switches are parsed strictly: a value that cannot be
 	// interpreted must never turn the safe default (dry run) into deletion, and
 	// Validate refuses to start instead (F01). The safe defaults are installed
@@ -139,7 +151,7 @@ func Load() *Config {
 	} else if dryRun != nil {
 		cfg.MetricsRetentionDryRun = *dryRun
 	}
-	cfg.MonitorInterval = getEnvIntOrDefault("MONITOR_INTERVAL", 60)
+	cfg.MonitorInterval = getEnvIntOrDefault("MONITOR_INTERVAL", 5)
 	cfg.MonitorToleratedRounds = getEnvIntOrDefault("MONITOR_TOLERATED_ROUNDS", 1)
 	cfg.MonitorAllowedLatency = getEnvIntOrDefault("MONITOR_ALLOWED_LATENCY_SECONDS", 0)
 	cfg.SSHTimeout = getEnvIntOrDefault("SSH_TIMEOUT", 10)

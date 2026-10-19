@@ -57,6 +57,7 @@ func deltaSamplesCTE(bucketIntervalExpr, windowStartParam, windowEndParam string
 	rate := func(counter string) string {
 		return fmt.Sprintf(`CASE
 			WHEN prev_%[1]s IS NULL OR %[1]s IS NULL THEN NULL
+			WHEN boot_id <> prev_boot_id THEN NULL
 			WHEN %[1]s < prev_%[1]s THEN NULL
 			WHEN EXTRACT(EPOCH FROM (time - prev_time)) <= 0 THEN NULL
 			WHEN time - prev_time > $4::interval THEN NULL
@@ -88,7 +89,7 @@ func deltaSamplesCTE(bucketIntervalExpr, windowStartParam, windowEndParam string
 	WITH bounded AS (
 		(SELECT time, memory_used, memory_total, disk_used, disk_total, swap_used, swap_total,
 		        cpu_percent, load_1, load_5, load_15,
-		        net_bytes_recv, net_bytes_sent, disk_read_bytes, disk_write_bytes
+		        net_bytes_recv, net_bytes_sent, disk_read_bytes, disk_write_bytes, boot_id
 		 FROM metrics
 		 WHERE server_id = $1 AND time >= $2 AND time < $3)
 		UNION ALL
@@ -97,7 +98,7 @@ func deltaSamplesCTE(bucketIntervalExpr, windowStartParam, windowEndParam string
 		-- the planned input bounded without widening the gap semantics.
 		(SELECT time, memory_used, memory_total, disk_used, disk_total, swap_used, swap_total,
 		        cpu_percent, load_1, load_5, load_15,
-		        net_bytes_recv, net_bytes_sent, disk_read_bytes, disk_write_bytes
+		        net_bytes_recv, net_bytes_sent, disk_read_bytes, disk_write_bytes, boot_id
 		 FROM metrics
 		 WHERE server_id = $1 AND time < $2
 		 ORDER BY time DESC
@@ -106,6 +107,7 @@ func deltaSamplesCTE(bucketIntervalExpr, windowStartParam, windowEndParam string
 	lagged AS (
 		SELECT *,
 		       lag(time) OVER w AS prev_time,
+		       lag(boot_id) OVER w AS prev_boot_id,
 		       lag(net_bytes_recv) OVER w AS prev_net_bytes_recv,
 		       lag(net_bytes_sent) OVER w AS prev_net_bytes_sent,
 		       lag(disk_read_bytes) OVER w AS prev_disk_read_bytes,

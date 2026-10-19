@@ -18,6 +18,8 @@ import (
 
 // RouteConfig holds all HTTP handler functions that the router needs to mount.
 type RouteConfig struct {
+	AgentHTTPHandler             http.HandlerFunc
+	AgentWebSocketHandler        http.HandlerFunc
 	JWTService                   *token.JWTService
 	APIKeyAuth                   any
 	UserGate                     middleware.UserGate
@@ -115,6 +117,12 @@ func NewRouter(cfg RouteConfig) chi.Router {
 
 	// Public API routes (no authentication required)
 	r.Route("/api/v1", func(r chi.Router) {
+		if cfg.AgentHTTPHandler != nil {
+			r.Post("/agent/report", cfg.AgentHTTPHandler)
+		}
+		if cfg.AgentWebSocketHandler != nil {
+			r.Get("/agent/connect", cfg.AgentWebSocketHandler)
+		}
 		r.Get("/", versionHandler)
 		r.Get("/version", versionHandler)
 

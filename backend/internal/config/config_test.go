@@ -24,6 +24,27 @@ func TestValidateAcceptsDefaults(t *testing.T) {
 	}
 }
 
+func TestResidentMonitoringConfiguration(t *testing.T) {
+	c := validConfig()
+	c.MonitorInterval = 5
+	c.AgentHubURL = "https://hub.example.com/talus"
+	if e := c.Validate(); e != nil {
+		t.Fatal(e)
+	}
+	c.AgentHubURL = "http://hub.example.com"
+	if c.Validate() == nil {
+		t.Fatal("unencrypted public endpoint accepted without opt-in")
+	}
+	c.AgentAllowHTTP = true
+	if e := c.Validate(); e != nil {
+		t.Fatal(e)
+	}
+	c.MonitorInterval = 600
+	if c.Validate() == nil {
+		t.Fatal("resident interval exceeds supported bounds")
+	}
+}
+
 func TestValidateRejectsIllegalValues(t *testing.T) {
 	cases := []struct {
 		name   string

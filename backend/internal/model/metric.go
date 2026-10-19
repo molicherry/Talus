@@ -8,6 +8,7 @@ import "time"
 type Metric struct {
 	Time        time.Time `gorm:"not null" json:"time"`
 	ServerID    uint      `gorm:"not null" json:"server_id"`
+	BootID      string    `gorm:"not null;default:''" json:"-"`
 	CPUPercent  *float64  `json:"cpu_percent,omitempty"`
 	MemoryUsed  *int64    `json:"memory_used,omitempty"`
 	MemoryTotal *int64    `json:"memory_total,omitempty"`

@@ -2,16 +2,16 @@
 
 > 你的服务器舰队的青铜守卫。在一个地方完成监控、命令执行和远程连接。
 
-**Talus** 是一个自托管的单用户平台，用于管理少量 Linux 服务器。无需安装 Agent，无需开放额外端口——只需要 SSH 和一个 Web 控制台。
+**Talus** 是一个自托管的单用户 Linux 服务器管理平台。通过 SSH/SFTP 自动安装常驻监控 Agent，节点主动通过 WSS/HTTPS 上报，无需新增节点入站端口。
 
 ## 功能
 
 - **服务器清单** — 按名称、IP 和 SSH 端口注册你的 VPS 和裸金属主机。
-- **SSH 连接方式** — 每台服务器可选直连、单个 SSH 跳板或 SOCKS5，命令执行、浏览器终端、监控和 Agent 上传统一使用所选路线。
+- **SSH 连接方式** — 每台服务器可选直连、单个 SSH 跳板或 SOCKS5，命令执行、浏览器终端、文件和 Agent 安装统一使用所选路线；常驻监控使用独立的出站连接。
 - **凭证保险库** — 使用 AES-256-GCM 加密存储 SSH 密码和私钥。
 - **远程 Shell** — 在任意服务器上执行命令，查看 stdout、stderr 和退出码。
 - **交互式终端** — 在浏览器中打开完整的 PTY 会话（xterm.js，支持窗口缩放、二进制输出和活跃会话保活），中文及 Emoji 跨帧输出可连续解码。
-- **实时监控** — CPU、内存、磁盘、负载、Swap、网络和磁盘 I/O 图表，支持 15 分钟 / 1 小时 / 6 小时 / 24 小时 / 7 天 / 30 天时间范围、平均值与峰值视图及可访问的数据表格。Hub 通过 SFTP 上传适配目标架构的监控 Agent，再通过 SSH 执行。
+- **实时监控** — CPU、内存、磁盘、负载、Swap、网络和磁盘 I/O 图表，支持多时间范围、平均值与峰值视图及数据表格。常驻 Agent 默认每 5 秒采样，通过 WSS 上报，支持 HTTPS 回退、断线持久缓冲和历史补报；页面分别显示连接、采集及数据状态。
 - **API 密钥** — 创建带作用域和服务器级别访问控制的 API 密钥。二维权限模型（操作 × 服务器）。密钥加密存储，支持按需复制，带有审计日志和速率限制。
 - **SFTP 文件管理** — 在 SSH 工作区浏览文件、上传下载与续传、传输目录，以及编辑 UTF-8 文本并检查版本冲突。文件 API 复用 SSH 凭据、已确认的主机指纹和代理路线。
 - **服务代理** — 注册外部服务（Grafana、Portainer 等），加密存储凭据。通过 Talus 代理 API 请求，支持凭据注入和占位符替换。编辑时可加载已有凭据，支持显示/隐藏切换和复制。
@@ -33,8 +33,8 @@
                           └──────────────┘
 ```
 
-- **中心辐射架构**：Hub 通过 SSH 连接到你的服务器，服务器无需回连。
-- **按需运行 Agent**：监控数据由 Hub 通过 SFTP 上传、再通过 SSH 运行一个静态编译的 Go 二进制文件来采集。采集后进程退出，已校验的二进制文件保留在 `/tmp/vpsmanager-agent` 供后续复用，无需守护进程或额外开放端口。
+- **管理与监控分离**：Hub 通过 SSH 执行管理和 Agent 安装；常驻 Agent 主动连接 `AGENT_HUB_URL` 上报监控。
+- **常驻 Agent**：校验后的程序作为 systemd 系统服务或用户服务运行。本地私有目录保存最多 24 小时 / 64 MiB 的待发送样本，只有收到事务落库确认后才删除。请先设置节点可访问的 Hub HTTPS 地址。安装要求运行中的 systemd；非 root SSH 账号须启用用户 lingering，Talus 不会自动 sudo 提权。
 - **凭证加密**：使用你掌控的主密钥进行静态加密存储。列表响应不返回秘密值，已认证的管理员可通过专用接口查看，并记录审计日志。
 
 ## 快速开始
@@ -271,9 +271,11 @@ curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin
 | `USAGE_LOG_RETENTION_DAYS` | `30` | 普通使用日志保留天数 |
 | `USAGE_LOG_SENSITIVE_RETENTION_DAYS` | `90` | 敏感操作和删除操作日志保留天数 |
 | `USAGE_LOG_LEGACY_WRITERS_DRAINED` | `false` | 仅在所有旧实例及其事务停止后设为 `true`，启用历史审计日志回填；确认回填完成后可移除 |
-| `MONITOR_INTERVAL` | `60` | 指标采集间隔（秒），通过 Hub 环境变量设置 |
-| `MONITOR_TOLERATED_ROUNDS` | `1` | 节点状态允许漏采的轮数，须为非负整数 |
-| `MONITOR_ALLOWED_LATENCY_SECONDS` | `0` | 额外允许的数据延迟（秒），须为非负整数 |
+| `MONITOR_INTERVAL` | `5` | 常驻指标采样间隔，支持 1–60 秒 |
+| `AGENT_HUB_URL` | 未设置 | 节点能够访问的 Hub HTTPS 地址，自动部署常驻监控前必须配置 |
+| `AGENT_ALLOW_HTTP` | `false` | 显式允许可信测试或内网使用 HTTP |
+| `MONITOR_TOLERATED_ROUNDS` | `1` | 旧 SSH 采集设置；常驻模式使用 45 秒联系超时 |
+| `MONITOR_ALLOWED_LATENCY_SECONDS` | `0` | 旧 SSH 采集设置；常驻数据新鲜度为三个采样周期，最少 15 秒 |
 | `AGENT_ARTIFACTS_DIR` | `/usr/local/bin` | 包含 `agents-manifest.json` 及 Linux amd64/arm64 双架构 Agent 的目录，启动时校验 |
 | `METRICS_RETENTION_ENABLED` | `false` | 启用超过 35 天的合格原始指标及聚合指标清理，实际删除还须关闭演练模式 |
 | `METRICS_RETENTION_DRY_RUN` | `true` | 仅报告清理计划；只有 `METRICS_RETENTION_ENABLED=true` 且本值为 `false` 才会删除 |
@@ -283,13 +285,13 @@ curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin
 | `EXEC_OUTPUT_LIMIT` | `8388608` | 保留的 stdout 与 stderr 合计字节上限，须为正数且不超过 8 MiB |
 | `EXEC_OUTPUT_STREAM_LIMIT` | `4194304` | 单个输出流保留的字节上限，须为正数、不超过 4 MiB，且不大于 `EXEC_OUTPUT_LIMIT` |
 
-未收到新样本超过 `MONITOR_INTERVAL × (MONITOR_TOLERATED_ROUNDS + 1) + MONITOR_ALLOWED_LATENCY_SECONDS` 秒后，节点数据视为过期，默认阈值为 120 秒。
+最近联系超过 45 秒视为不可达；数据超过三个采样周期（最少 15 秒）视为过期。采集异常及写库失败分别展示。
 
 ### 监控 Agent 升级
 
-指标采集保留从准入开始计算的 30 秒预算。Agent 安装由独立队列执行，使用单独的 SSH lease 和 3 分钟任务预算，上传也显式使用独立预算；全局最多 4 个并发部署，每台服务器最多一个任务。失败按 5 秒至 5 分钟退避重试，服务器删除、SSH generation 变化或 Hub 关闭时取消相关任务。等待首次部署的采集记为跳过，不会逐轮累加失败退避。
+常驻监控不再按次调度 SSH 采集。安装和修复使用独立 SSH lease 与 3 分钟预算，全局最多 4 个并发部署，每个节点最多一个任务，失败至少等待一分钟后重试。未设置 `AGENT_HUB_URL` 时显示需要配置，已有指标历史保留。
 
-Hub 启动时把已验证的随包 Agent 哈希、构建版本和协议版本保存在 PostgreSQL。升级期间，只有哈希已在该历史中、协议兼容且自报版本与可信制品一致的旧 Agent 才会继续采集；未知二进制和不兼容协议等待替换。首次从尚未保存可信历史的旧 Hub 升级时，旧二进制因此需要先被后台部署替换，随后恢复采集。上传仍使用权限为 `0600` 的临时文件、完整 SHA256 校验及原子激活；中断的上传会从头重试。
+程序、配置和服务文件上传后先进行 SHA256 校验，再激活。兼容旧 Agent 在新版本准备期间继续上报。新服务重启后必须通过与 Hub 的认证联系检查；激活失败时恢复已有的程序、配置和服务文件。
 
 ### Docker 升级与加密数据
 

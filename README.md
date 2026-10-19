@@ -4,16 +4,16 @@
 
 > The bronze guardian of your server fleet. Monitor, command, and connect — all from one place.
 
-**Talus** is a self-hosted, single-user platform for managing a handful of Linux servers. No agents to install, no extra ports to open — just SSH and a web dashboard.
+**Talus** is a self-hosted, single-user platform for managing Linux servers. SSH/SFTP installs a resident monitoring agent automatically; nodes report over outbound WSS/HTTPS without opening additional inbound ports.
 
 ## Features
 
 - **Server Inventory** — Register your VPS and bare-metal hosts by name, IP, and SSH port.
-- **SSH Connection Routes** — Choose direct, a single SSH jump host, or SOCKS5 per server. Commands, browser terminals, monitoring, and agent uploads use the same route.
+- **SSH Connection Routes** — Choose direct, a single SSH jump host, or SOCKS5 per server. Commands, browser terminals, file operations and agent installation use the same route; resident monitoring uses a separate outbound connection.
 - **Credential Vault** — Store SSH passwords and private keys encrypted with AES-256-GCM at rest.
 - **Remote Shell** — Execute commands on any server and see stdout, stderr, and exit codes.
 - **Interactive Terminal** — Open a full PTY session in your browser (xterm.js, resize-aware, WebSocket-backed).
-- **Live Monitoring** — CPU, memory, disk, load, swap, network, and disk I/O charts with 15m / 1h / 6h / 24h / 7d / 30d time ranges, average/peak views, and accessible data tables. The Hub uploads the matching monitoring agent over SFTP and runs it over SSH.
+- **Live Monitoring** — CPU, memory, disk, load, swap, network, and disk I/O charts with 15m / 1h / 6h / 24h / 7d / 30d time ranges, average/peak views, and accessible data tables. A resident agent collects every five seconds by default, buffers samples across outages, and reports over WSS with HTTPS fallback. Connection, collection and storage states are displayed separately.
 - **API Keys** — Create scoped API keys with per-server access control. Two-dimensional permissions (what actions × which servers). Keys are encrypted at rest and can be copied on demand. Rate-limited reveal with audit logging.
 - **SFTP Files** — Browse files alongside SSH, upload/download with resume, transfer folders, and edit UTF-8 text with version conflict checks. Scoped file APIs share SSH credentials, verified host keys and proxy routes.
 - **Service Proxy** — Register external services (Grafana, Portainer, etc.) with encrypted credentials. Proxy API requests through Talus with credential injection and placeholder substitution. Edit forms load existing credentials with show/hide toggle and copy support.
@@ -31,8 +31,8 @@
                           └──────────────┘
 ```
 
-- **Hub-and-spoke**: The Hub connects out to your servers via SSH. Servers never call back.
-- **On-demand agent**: Monitoring data is collected by a statically-linked Go binary that the Hub uploads over SFTP and runs over SSH. It exits after collection; the verified binary is retained at `/tmp/vpsmanager-agent` for reuse. No daemon or extra open ports are needed.
+- **Management and monitoring**: The Hub uses SSH for management and agent installation. Resident agents call back to `AGENT_HUB_URL` over WSS/HTTPS for monitoring.
+- **Resident agent**: The verified binary runs as a systemd system/user service, with a private persistent outbox (24h / 64 MiB). Samples are removed only after transactional, deduplicated storage acknowledges them. A running systemd manager is required; user services require lingering for the SSH account. Talus does not run sudo.
 - **Credentials**: Encrypted at rest with a master key you control. Secret values are omitted from list responses; authenticated administrators can reveal them through dedicated, audited endpoints.
 
 ## Quick Start
@@ -178,7 +178,9 @@ services:
       USAGE_LOG_RETENTION_DAYS: ${USAGE_LOG_RETENTION_DAYS:-30}
       USAGE_LOG_SENSITIVE_RETENTION_DAYS: ${USAGE_LOG_SENSITIVE_RETENTION_DAYS:-90}
       USAGE_LOG_LEGACY_WRITERS_DRAINED: ${USAGE_LOG_LEGACY_WRITERS_DRAINED:-false}
-      MONITOR_INTERVAL: ${MONITOR_INTERVAL:-60}
+      AGENT_HUB_URL: ${AGENT_HUB_URL:-}
+      AGENT_ALLOW_HTTP: ${AGENT_ALLOW_HTTP:-false}
+      MONITOR_INTERVAL: ${MONITOR_INTERVAL:-5}
       SSH_TIMEOUT: ${SSH_TIMEOUT:-10}
       EXEC_TIMEOUT: ${EXEC_TIMEOUT:-30}
       EXEC_TIMEOUT_MAX: ${EXEC_TIMEOUT_MAX:-300}
@@ -405,9 +407,11 @@ setting it in `.env` alone does not pass it into the container.
 | `USAGE_LOG_RETENTION_DAYS` | `30` | Ordinary usage log retention in days |
 | `USAGE_LOG_SENSITIVE_RETENTION_DAYS` | `90` | Sensitive-operation and deletion log retention in days |
 | `USAGE_LOG_LEGACY_WRITERS_DRAINED` | `false` | Set to `true` only after all legacy instances and their transactions have stopped to enable historical audit backfill; remove after completion is confirmed |
-| `MONITOR_INTERVAL` | `60` | Metrics collection interval (seconds); set through the Hub environment |
-| `MONITOR_TOLERATED_ROUNDS` | `1` | Non-negative number of missed collection rounds allowed before a node becomes stale |
-| `MONITOR_ALLOWED_LATENCY_SECONDS` | `0` | Non-negative additional freshness allowance (seconds) |
+| `MONITOR_INTERVAL` | `5` | Resident metrics collection interval (1–60 seconds) |
+| `AGENT_HUB_URL` | unset | Hub HTTPS address reachable from nodes; required for automatic resident monitoring |
+| `AGENT_ALLOW_HTTP` | `false` | Explicit opt-in to HTTP for trusted test/private networks |
+| `MONITOR_TOLERATED_ROUNDS` | `1` | Legacy SSH monitoring setting; resident contact uses a 45-second timeout |
+| `MONITOR_ALLOWED_LATENCY_SECONDS` | `0` | Legacy SSH monitoring setting; resident data freshness uses three sampling intervals (minimum 15 seconds) |
 | `AGENT_ARTIFACTS_DIR` | `/usr/local/bin` | Directory containing `agents-manifest.json` and both Linux amd64/arm64 agent binaries; validated at startup |
 | `METRICS_RETENTION_ENABLED` | `false` | Enable cleanup of eligible raw and rollup metrics older than 35 days; deletion also requires dry-run mode to be disabled |
 | `METRICS_RETENTION_DRY_RUN` | `true` | Report the cleanup plan without deleting; deletion requires `METRICS_RETENTION_ENABLED=true` and this value `false` |
@@ -417,15 +421,13 @@ setting it in `.env` alone does not pass it into the container.
 | `EXEC_OUTPUT_LIMIT` | `8388608` | Retained stdout + stderr limit (bytes); positive and at most 8 MiB |
 | `EXEC_OUTPUT_STREAM_LIMIT` | `4194304` | Retained limit for each output stream (bytes); positive, at most 4 MiB, and no greater than `EXEC_OUTPUT_LIMIT` |
 
-A node becomes stale after `MONITOR_INTERVAL × (MONITOR_TOLERATED_ROUNDS + 1) +
-MONITOR_ALLOWED_LATENCY_SECONDS` seconds without a fresh sample (120 seconds by
-default).
+Resident contact expires after 45 seconds; data becomes stale after three sampling intervals (minimum 15 seconds). Collection errors and storage failures are shown separately.
 
 ### Monitoring agent upgrades
 
-Metric collection keeps its 30-second admission budget. Agent installation runs in a separate queue with a three-minute budget, including an explicit upload timeout, at most four concurrent deployments, and one job per server. Deployment uses its own SSH lease; failures retry with backoff from five seconds up to five minutes. Node deletion, a changed SSH generation, and Hub shutdown cancel the affected work. A missing agent waits for deployment without counting each collection as a failed sample.
+Resident monitoring does not schedule per-sample SSH commands. Installation/repair uses a separate three-minute budget, at most four concurrent deployments, and one job per server. Failed deployments retry after at least one minute. Missing `AGENT_HUB_URL` is shown as setup required. Existing metric history is retained.
 
-At startup, the Hub records the hashes, build versions and protocol versions of its verified bundled agents in PostgreSQL. An installed older agent can continue collecting during an upgrade only when its hash is in that history and its protocol remains compatible; its reported version must match the trusted artifact. Unknown binaries and incompatible protocols wait for replacement. On the first upgrade from a Hub that did not record this history, the previous binary is therefore replaced before collection resumes. Uploads still use a private temporary file, full SHA256 verification and atomic activation; interrupted uploads restart from the beginning.
+Artifacts and configuration are verified before activation. Compatible resident agents keep reporting while an update is staged. The new service must contact the Hub after restart; failed activation restores the previous executable, configuration and service unit where available.
 
 ### Docker upgrades and encrypted data
 
@@ -453,8 +455,8 @@ Once any record has been upgraded, the original Argon2id-only image cannot read 
 
 - SSH private keys and passwords, SOCKS5 passwords, service credentials, and recoverable API key raw values use **AES-256-GCM** at rest. New records use purpose-separated **HKDF-SHA256** keys derived from `VPSMANAGER_MASTER_KEY`, which must be generated by a cryptographically secure random source (`openssl rand -hex 32`). Login passwords continue to use bcrypt. Legacy Argon2id-encrypted records are automatically upgraded before the Hub starts serving requests.
 - Credential and API key values are **never returned** in list API responses (`json:"-"`). Dedicated JWT-only reveal endpoints decrypt on-demand with **audit logging** (slog structured JSON) and **rate limiting** (5 req/min per user).
-- Target servers require **no additional open ports** — monitoring data flows over the existing SSH channel.
-- The monitoring agent runs **on demand** and exits after collection. The Hub verifies the retained binary before reuse and atomically replaces it when needed; no agent daemon runs on the target.
+- Target servers require **no additional inbound ports**; resident monitoring needs outbound access to the configured Hub HTTPS endpoint.
+- Each resident agent uses a node-scoped credential encrypted at rest, independent from administrator/API keys. Installation uses the verified SSH route; normal sampling does not require SSH connectivity.
 - Changing a password invalidates existing JWTs and actively closes that user's terminal sessions. API keys have a separate lifecycle.
 - **Explicit SSH host-key confirmation**: on first connection, Talus records the presented SHA256 fingerprint and stops before SSH authentication. An administrator must verify it against a trusted source and confirm it before connecting. Jump and target hosts are confirmed separately. Existing trusted keys remain valid; changed keys block authentication until explicitly approved. Confirmation checks the displayed fingerprint and connection revision to reject stale requests.
 

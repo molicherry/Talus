@@ -21,6 +21,6 @@ export function useMetrics(
     queryKey: ["metrics", serverId, timeRange, stat],
     queryFn: () => getMetrics(serverId, timeRange, { stat }),
     staleTime: 5_000,
-    refetchInterval: isVisible ? 60_000 : false,
+    refetchInterval: isVisible ? 5_000 : false,
   });
 }

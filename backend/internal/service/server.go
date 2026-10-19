@@ -32,6 +32,9 @@ type ServerService struct {
 	metricRepo *repository.MetricRepo
 	pool       ConnectionInvalidator
 	masterKey  *crypto.MasterKey
+	monitoring interface {
+		Statuses(context.Context, []uint) map[uint]*model.MonitoringStatus
+	}
 }
 
 // NewServerService creates a ServerService with the given repositories.
@@ -41,6 +44,48 @@ func NewServerService(repo *repository.ServerRepo, metricRepo *repository.Metric
 
 // SetMasterKey enables encryption of per-server SOCKS5 credentials.
 func (s *ServerService) SetMasterKey(key *crypto.MasterKey) { s.masterKey = key }
+
+func (s *ServerService) SetMonitoringProvider(p interface {
+	Statuses(context.Context, []uint) map[uint]*model.MonitoringStatus
+}) {
+	s.monitoring = p
+}
+
+func monitoringStatus(v *model.MonitoringStatus) string {
+	if v == nil {
+		return "unknown"
+	}
+	switch v.Connection {
+	case "online":
+		return "online"
+	case "unreachable":
+		return "offline"
+	case "reconnecting":
+		return "checking"
+	}
+	return "unknown"
+}
+
+func (s *ServerService) decorateMonitoring(ctx context.Context, servers []model.Server) {
+	if s.monitoring == nil {
+		return
+	}
+	ids := make([]uint, len(servers))
+	for i := range servers {
+		ids[i] = servers[i].ID
+	}
+	states := s.monitoring.Statuses(ctx, ids)
+	for i := range servers {
+		v := states[servers[i].ID]
+		servers[i].Monitoring = v
+		servers[i].Status = monitoringStatus(v)
+		servers[i].LastSeen = nil
+		if v != nil && v.LastContact != nil {
+			seen := v.LastContact.UTC().Format(time.RFC3339)
+			servers[i].LastSeen = &seen
+		}
+	}
+}
 
 // defaultFreshnessThreshold keeps the historical behaviour (2× the default
 // monitor interval) when no derived threshold is configured.
@@ -62,6 +107,7 @@ func (s *ServerService) List(ctx context.Context) ([]model.Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list servers: %w", err)
 	}
+	defer s.decorateMonitoring(ctx, servers)
 	for i := range servers {
 		decorateHostKey(&servers[i])
 	}
@@ -130,6 +176,13 @@ func (s *ServerService) Get(ctx context.Context, id uint) (*model.Server, error)
 		return nil, fmt.Errorf("server %d: %w", id, err)
 	}
 	decorateHostKey(srv)
+	defer func() {
+		if s.monitoring != nil {
+			rows := []model.Server{*srv}
+			s.decorateMonitoring(ctx, rows)
+			*srv = rows[0]
+		}
+	}()
 	if err := s.decorateConnection(ctx, srv, true); err != nil {
 		return nil, err
 	}
@@ -183,6 +236,7 @@ func (s *ServerService) ListFiltered(ctx context.Context, serverIDs []uint) ([]m
 	if err != nil {
 		return nil, fmt.Errorf("list filtered servers: %w", err)
 	}
+	defer s.decorateMonitoring(ctx, servers)
 	for i := range servers {
 		decorateHostKey(&servers[i])
 	}
@@ -267,6 +321,20 @@ func (s *ServerService) ListSummariesFiltered(ctx context.Context, serverIDs []u
 // the timestamp of each server's most recent metric, without transferring the
 // full metric payload.
 func (s *ServerService) applyStatus(ctx context.Context, summaries []model.ServerSummary) ([]model.ServerSummary, error) {
+	defer func() {
+		if s.monitoring != nil {
+			ids := make([]uint, len(summaries))
+			for i := range summaries {
+				ids[i] = summaries[i].ID
+			}
+			states := s.monitoring.Statuses(ctx, ids)
+			for i := range summaries {
+				v := states[summaries[i].ID]
+				summaries[i].Monitoring = v
+				summaries[i].Status = monitoringStatus(v)
+			}
+		}
+	}()
 	if len(summaries) == 0 {
 		return summaries, nil
 	}
@@ -359,7 +427,11 @@ func (s *ServerService) Create(ctx context.Context, server *model.Server, connec
 // clearCredential distinguishes an explicit "credential_id": null (unbind)
 // from an absent field (leave the binding unchanged).
 func (s *ServerService) Update(ctx context.Context, id uint, input *model.Server, clearCredential bool, connection ...ConnectionMutation) (*model.Server, error) {
-	return s.updateServer(ctx, id, input, clearCredential, firstConnectionMutation(connection))
+	v, err := s.updateServer(ctx, id, input, clearCredential, firstConnectionMutation(connection))
+	if err == nil {
+		s.notifyTopology()
+	}
+	return v, err
 }
 
 // resolveCredentialBinding applies a partial credential-binding update: an
@@ -379,6 +451,9 @@ func resolveCredentialBinding(current, input *uint, clear bool) *uint {
 func (s *ServerService) Delete(ctx context.Context, id uint) error {
 	if err := s.deleteServer(ctx, id); err != nil {
 		return err
+	}
+	if p, ok := s.monitoring.(interface{ Disconnect(uint) }); ok {
+		p.Disconnect(id)
 	}
 	s.notifyTopology()
 	return nil

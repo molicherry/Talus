@@ -6,11 +6,12 @@ import { MonitoringDashboard } from "../../monitoring/components/monitoring-dash
 import { useServer } from "../hooks/use-servers";
 import { HostKeyWarning } from "./host-key-warning";
 import { ServerInfoBar } from "./server-info-bar";
+import { RefreshError } from "../../../components/ui/refresh-error";
 
 export function ServerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const serverId = id ? Number(id) : 0;
-  const { data: server, isLoading, isError, error } = useServer(serverId);
+  const { data: server, isLoading, isError, error, isFetching, refetch } = useServer(serverId);
   const { t } = useTranslation();
 
   if (isLoading) {
@@ -21,7 +22,7 @@ export function ServerDetailPage() {
     );
   }
 
-  if (isError || !server) {
+  if (!server) {
     return (
       <div className="rounded-2xl border border-danger/30 bg-danger-subtle p-6 text-center">
         <p className="text-sm text-danger">
@@ -33,6 +34,7 @@ export function ServerDetailPage() {
 
   return (
     <div>
+      {isError && <RefreshError error={error} isFetching={isFetching} onRetry={() => refetch()} />}
       <HostKeyWarning server={server} />
       <ServerInfoBar server={server} />
       <MonitoringDashboard serverId={serverId} />

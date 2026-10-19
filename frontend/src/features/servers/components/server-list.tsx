@@ -11,6 +11,7 @@ import { TBody, Table, TableCard, Td, Th, THead } from "../../../components/ui/t
 import { useTranslation } from "../../../i18n";
 import { toast } from "../../../lib/toast";
 import { useDeleteServer, useServers } from "../hooks/use-servers";
+import { AgentMonitoringStatus } from "./monitoring-status";
 
 export function ServerList() {
   const navigate = useNavigate();
@@ -116,6 +117,7 @@ export function ServerList() {
                 <Td className="text-muted-foreground">{server.host}</Td>
                 <Td>
                   <StatusIndicator status={server.status} size="sm" showLabel />
+                  <AgentMonitoringStatus status={server.monitoring} compact />
                 </Td>
                 <Td className="sticky right-0 bg-card sm:static">
                   <div className="flex items-center justify-end gap-1">

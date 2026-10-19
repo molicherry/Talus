@@ -5,6 +5,7 @@ import { StatusIndicator } from "../../../components/ui/status-indicator";
 import { useTranslation } from "../../../i18n";
 import { ConnectionTestButton } from "./connection-test-button";
 import type { Server } from "../../../types/models";
+import { AgentMonitoringStatus } from "./monitoring-status";
 
 interface ServerInfoBarProps {
   server: Server;
@@ -79,6 +80,7 @@ export function ServerInfoBar({ server }: ServerInfoBarProps) {
         {server.connection.mode === "socks5" && server.connection.host && <span>{server.connection.host}:{server.connection.port}</span>}
       </div>
       <div className="mt-3"><ConnectionTestButton key={server.id} serverID={server.id} /></div>
+      <AgentMonitoringStatus status={server.monitoring} />
 
       {/* System info row */}
       {(server.cpu_model || server.uptime_seconds) && (
