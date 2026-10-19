@@ -23,12 +23,13 @@ type Server struct {
 	HostKeyMismatchAt *time.Time `gorm:"index" json:"host_key_mismatch_at,omitempty"`
 
 	// Transient fields — populated by service layer, never persisted.
-	Status        string         `gorm:"-" json:"status,omitempty"`
-	LastSeen      *string        `gorm:"-" json:"last_seen,omitempty"`
-	LatestMetrics *LatestMetrics `gorm:"-" json:"latest_metrics,omitempty"`
-	OS            *string        `gorm:"-" json:"os,omitempty"`
-	CPUModel      *string        `gorm:"-" json:"cpu_model,omitempty"`
-	UptimeSeconds *int64         `gorm:"-" json:"uptime_seconds,omitempty"`
+	Status        string            `gorm:"-" json:"status,omitempty"`
+	Monitoring    *MonitoringStatus `gorm:"-" json:"monitoring,omitempty"`
+	LastSeen      *string           `gorm:"-" json:"last_seen,omitempty"`
+	LatestMetrics *LatestMetrics    `gorm:"-" json:"latest_metrics,omitempty"`
+	OS            *string           `gorm:"-" json:"os,omitempty"`
+	CPUModel      *string           `gorm:"-" json:"cpu_model,omitempty"`
+	UptimeSeconds *int64            `gorm:"-" json:"uptime_seconds,omitempty"`
 	// HostKeyMismatch marks a pending host-key change awaiting the operator.
 	HostKeyMismatch        bool    `gorm:"-" json:"host_key_mismatch"`
 	HostKeyUnverified      bool    `gorm:"-" json:"host_key_unverified"`
@@ -48,6 +49,7 @@ type ServerSummary struct {
 	Host         string            `json:"host"`
 	CredentialID *uint             `json:"credential_id"`
 	Status       string            `gorm:"-" json:"status"`
+	Monitoring   *MonitoringStatus `gorm:"-" json:"monitoring,omitempty"`
 	Connection   *ConnectionConfig `gorm:"-" json:"connection,omitempty"`
 	// HostKeyMismatchAt is read from the column; the service turns it into the
 	// HostKeyMismatch flag so the list can flag a server whose key changed.

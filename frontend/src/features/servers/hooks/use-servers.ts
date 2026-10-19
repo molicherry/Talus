@@ -14,7 +14,8 @@ export function useServers() {
   return useQuery({
     queryKey: ["servers"],
     queryFn: getServerSummaries,
-    staleTime: 30_000,
+    staleTime: 3_000,
+    refetchInterval: 5_000,
   });
 }
 
@@ -23,6 +24,8 @@ export function useServer(id: number) {
     queryKey: ["servers", id],
     queryFn: () => getServer(id),
     enabled: !!id,
+    refetchInterval: 5_000,
+    staleTime: 3_000,
   });
 }
 

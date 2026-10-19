@@ -1,4 +1,61 @@
 {
+  "agentMonitor": {
+    "collectionLabel": "Collection",
+    "dataLabel": "Data",
+    "contact": "Last contact",
+    "sample": "Last sample",
+    "persisted": "Last committed",
+    "pending": "{{count}} samples pending",
+    "dropped": "{{count}} samples dropped",
+    "version": "Agent version",
+    "deployment": {
+      "pending": "Agent waiting to install",
+      "installing": "Installing agent",
+      "ready": "Agent ready",
+      "failed": "Agent deployment failed",
+      "setup_required": "Monitoring setup required"
+    },
+    "collection": {
+      "healthy": "Healthy",
+      "partial": "Partial failure",
+      "failed": "Failed",
+      "unknown": "Waiting for a sample"
+    },
+    "data": {
+      "fresh": "Fresh",
+      "stale": "Stale",
+      "backfilling": "Backfilling"
+    },
+    "sections": {
+      "cpu": "CPU",
+      "memory": "Memory",
+      "swap": "Swap",
+      "load": "Load",
+      "disk": "Disk",
+      "network": "Network",
+      "disk_io": "Disk I/O",
+      "host": "System information",
+      "storage": "Storage",
+      "spool": "Local buffer",
+      "clock": "Node clock"
+    },
+    "reasons": {
+      "hub_url_required": "Configure AGENT_HUB_URL with the HTTPS address reachable from your servers.",
+      "deployment_failed": "Agent deployment failed. Check SSH connectivity, credentials and service permissions; deployment retries automatically.",
+      "service_manager_unavailable": "A running systemd service manager is required. For user services, enable lingering for the SSH account.",
+      "agent_health_check_failed": "The new agent could not contact the Hub. Check the Hub address and outbound access. A previous version is restored when available.",
+      "agent_target_read_only": "The persistent installation directory is not writable.",
+      "agent_target_noexec": "Execution is disabled in the installation directory.",
+      "agent_hash_mismatch": "The uploaded artifact failed integrity verification.",
+      "agent_platform_unsupported": "This node platform is not supported.",
+      "read_failed": "Could not read this metric",
+      "write_failed": "Data could not be persisted; pending samples will be retried",
+      "timeout": "Collection timed out",
+      "warming_up": "Collecting a CPU baseline",
+      "counter_reset": "Counter reset; waiting for the next sample",
+      "clock_skew": "Node clock is out of sync; invalid timestamps are rejected and counted as dropped samples"
+    }
+  },
   "apiKeys": {
     "loadFailed": "Failed to load API keys",
     "refreshFailed": "Could not refresh the list — showing the last loaded keys.",

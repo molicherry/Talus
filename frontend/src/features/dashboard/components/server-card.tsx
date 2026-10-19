@@ -6,6 +6,7 @@ import { StatusIndicator } from "../../../components/ui/status-indicator";
 import { useTranslation } from "../../../i18n";
 import { formatLocalTime } from "../../../lib/datetime";
 import type { Server } from "../../../types/models";
+import { AgentMonitoringStatus } from "../../servers/components/monitoring-status";
 
 interface ServerCardProps {
   server: Server;
@@ -48,6 +49,7 @@ export function ServerCard({ server }: ServerCardProps) {
         />
       </div>
 
+      <AgentMonitoringStatus status={server.monitoring} compact />
       <div className="mt-4 flex items-center justify-between gap-2 border-t border-border pt-3 text-xs">
         <span className="truncate text-muted-foreground">
           {lastSeen ? t("server.lastSeen", { time: lastSeen }) : t("server.neverSeen")}

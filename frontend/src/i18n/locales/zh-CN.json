@@ -1,4 +1,61 @@
 {
+  "agentMonitor": {
+    "collectionLabel": "采集",
+    "dataLabel": "数据",
+    "contact": "最近联系",
+    "sample": "最近采样",
+    "persisted": "最近成功落库",
+    "pending": "待发送 {{count}} 条",
+    "dropped": "已丢弃 {{count}} 条",
+    "version": "Agent 版本",
+    "deployment": {
+      "pending": "等待安装 Agent",
+      "installing": "正在安装 Agent",
+      "ready": "Agent 已就绪",
+      "failed": "Agent 部署失败",
+      "setup_required": "需要配置监控"
+    },
+    "collection": {
+      "healthy": "正常",
+      "partial": "部分异常",
+      "failed": "采集失败",
+      "unknown": "等待首次采样"
+    },
+    "data": {
+      "fresh": "最新",
+      "stale": "已过期",
+      "backfilling": "历史补报中"
+    },
+    "sections": {
+      "cpu": "CPU",
+      "memory": "内存",
+      "swap": "交换内存",
+      "load": "负载",
+      "disk": "磁盘",
+      "network": "网络",
+      "disk_io": "磁盘 I/O",
+      "host": "系统信息",
+      "storage": "数据存储",
+      "spool": "本地缓冲",
+      "clock": "节点时钟"
+    },
+    "reasons": {
+      "hub_url_required": "请设置 AGENT_HUB_URL，填写节点能够访问的 Hub HTTPS 地址。",
+      "deployment_failed": "Agent 部署失败。请检查 SSH 连接、凭据和服务管理权限；系统会自动重试。",
+      "service_manager_unavailable": "需要运行中的 systemd。使用用户服务时，须为 SSH 账号启用 lingering。",
+      "agent_health_check_failed": "新 Agent 未能联系 Hub，请检查 Hub 地址和出站访问。已有版本可用时会恢复原版本。",
+      "agent_target_read_only": "持久安装目录不可写。",
+      "agent_target_noexec": "安装目录禁止执行程序。",
+      "agent_hash_mismatch": "上传文件未通过完整性校验。",
+      "agent_platform_unsupported": "暂不支持此节点的系统或架构。",
+      "read_failed": "无法读取此项指标",
+      "write_failed": "数据暂时无法持久保存，待发送样本会继续重试",
+      "timeout": "采集超时",
+      "warming_up": "正在建立 CPU 采样基线",
+      "counter_reset": "计数器已重置，等待下一次采样",
+      "clock_skew": "节点时钟不同步；无效时间戳的样本会被拒绝并计入丢弃数量"
+    }
+  },
   "apiKeys": {
     "loadFailed": "加载 API Key 失败",
     "refreshFailed": "刷新失败，显示上次加载的列表。",

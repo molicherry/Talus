@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/agentclient"
 	"github.com/vpsmanager/backend/internal/agentproto"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -83,6 +84,13 @@ type OSInfo struct {
 }
 
 func main() {
+	if handled, err := agentclient.Command(os.Args[1:], agentproto.Version); handled {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	collectCPU := flag.Bool("cpu", true, "collect CPU metrics")
 	collectMemory := flag.Bool("memory", true, "collect memory metrics")
 	collectDisk := flag.Bool("disk", true, "collect disk metrics")

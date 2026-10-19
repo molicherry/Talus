@@ -5,7 +5,7 @@ export function useDashboardData() {
   return useQuery({
     queryKey: ["dashboard"],
     queryFn: getServersWithMetrics,
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    refetchInterval: 5_000,
+    staleTime: 3_000,
   });
 }

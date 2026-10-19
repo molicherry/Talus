@@ -2,6 +2,22 @@ import { z } from "zod";
 import i18n from "../i18n";
 import { ConnectionConfigSchema, ConnectionInputSchema } from "../features/servers/lib/connection-config";
 
+export const MonitoringStatusSchema = z.object({
+  connection: z.enum(["online", "reconnecting", "unreachable", "unknown"]),
+  collection: z.enum(["healthy", "partial", "failed", "unknown"]),
+  data: z.enum(["fresh", "stale", "backfilling"]),
+  deployment: z.enum(["pending", "installing", "ready", "failed", "setup_required"]),
+  deployment_error: z.string().optional(),
+  last_contact_at: z.string().optional(),
+  last_sample_at: z.string().optional(),
+  last_persisted_at: z.string().optional(),
+  errors: z.record(z.string(), z.string()).optional(),
+  pending_samples: z.number().int().nonnegative(),
+  dropped_samples: z.number().int().nonnegative(),
+  version: z.string().optional(),
+});
+export type MonitoringStatus = z.infer<typeof MonitoringStatusSchema>;
+
 export const ServerSchema = z.object({
   id: z.number(),
   name: z.string(),
@@ -16,6 +32,7 @@ export const ServerSchema = z.object({
   updated_at: z.string().optional(),
   status: z.enum(["online", "offline", "checking", "unknown"]).optional(),
   last_seen: z.string().optional(),
+  monitoring: MonitoringStatusSchema.optional(),
   latest_metrics: z
     .object({
       cpu_percent: z.number().nullable().optional(),
@@ -59,6 +76,7 @@ export const ServerSummarySchema = z.object({
   connection: z.object({ mode: z.enum(["direct", "ssh_jump", "socks5"]) }).default({ mode: "direct" }),
   port: z.number().int().min(1).max(65535).optional(),
   status: z.enum(["online", "offline", "checking", "unknown"]),
+  monitoring: MonitoringStatusSchema.optional(),
   host_key_mismatch: z.boolean().optional(),
   host_key_unverified: z.boolean().optional(),
 });

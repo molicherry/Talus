@@ -139,6 +139,8 @@ func main() {
 			&model.SSHCredential{},
 			&model.Server{},
 			&model.TrustedAgentArtifact{},
+			&model.AgentNode{},
+			&model.AgentReceipt{},
 			&model.ServerConnectionConfig{},
 			&model.APIKey{},
 			&model.Metric{},
@@ -359,7 +361,6 @@ func main() {
 	// Dependency chain — Metrics
 	// The sampling-gap threshold follows the effective collection interval (R07).
 	metricRepo.SetDeltaGapThreshold(time.Duration(cfg.MonitorInterval) * time.Second)
-	monitorSvc := service.NewMonitorService(sshSvc, metricRepo, serverRepo, time.Duration(cfg.MonitorInterval)*time.Second)
 	agentDeployer := service.NewAgentDeploymentService(sshSvc, cfg.AgentArtifactsDir)
 	agentArtifacts := repository.NewAgentArtifactRepo(db)
 	agentManifest, err := agentDeployer.Manifest()
@@ -375,8 +376,10 @@ func main() {
 		os.Exit(1)
 	}
 	agentDeployer.SetTrustedArtifacts(agentArtifacts)
-	monitorSvc.SetAgentDeployer(agentDeployer)
+	agentNodes := repository.NewAgentNodeRepo(db, masterKey)
+	monitorSvc := service.NewResidentMonitor(agentNodes, serverRepo, agentDeployer, cfg.AgentHubURL, cfg.AgentAllowHTTP, cfg.MonitorInterval)
 	monitorSvc.SetTelemetry(telemetryRegistry)
+	serverSvc.SetMonitoringProvider(monitorSvc)
 	metricsH := handler.NewMetricsHandler(metricRepo)
 
 	// The monitor joins the application root context so shutdown can stop the
@@ -420,6 +423,8 @@ func main() {
 	})
 
 	router := server.NewRouter(server.RouteConfig{
+		AgentHTTPHandler:             monitorSvc.AgentHTTP,
+		AgentWebSocketHandler:        monitorSvc.AgentWebSocket,
 		JWTService:                   jwtSvc,
 		UserGate:                     userGate,
 		APIKeyAuth:                   apiKeyAuth,

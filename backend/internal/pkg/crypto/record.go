@@ -14,6 +14,7 @@ const (
 	PurposeService = "service"
 	PurposeSOCKS5  = "socks5"
 	PurposeAPIKey  = "api-key"
+	PurposeAgent   = "agent"
 )
 
 // RecordCipher is scoped to one version, salt and purpose. New records always
@@ -28,7 +29,7 @@ type RecordCipher struct {
 // SSH salt denotes the historical fixed-salt format, not an HKDF fallback.
 func (mk *MasterKey) ForRecord(version int, salt []byte, purpose string) (*RecordCipher, error) {
 	switch purpose {
-	case PurposeSSH, PurposeService, PurposeSOCKS5, PurposeAPIKey:
+	case PurposeSSH, PurposeService, PurposeSOCKS5, PurposeAPIKey, PurposeAgent:
 	default:
 		return nil, fmt.Errorf("unsupported encryption purpose")
 	}
