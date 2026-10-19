@@ -32,7 +32,7 @@
 ```
 
 - **Management and monitoring**: The Hub uses SSH for management and agent installation. Resident agents call back to `AGENT_HUB_URL` over WSS/HTTPS for monitoring.
-- **Resident agent**: The verified binary runs as a systemd system/user service, with a private persistent outbox (24h / 64 MiB). Samples are removed only after transactional, deduplicated storage acknowledges them. See [resident monitoring setup and guarantees](docs/resident-monitoring.md), including systemd permissions and user lingering.
+- **Resident agent**: The verified binary runs as a systemd system/user service, with a private persistent outbox (24h / 64 MiB). Samples are removed only after transactional, deduplicated storage acknowledges them. A running systemd manager is required; user services require lingering for the SSH account. Talus does not run sudo.
 - **Credentials**: Encrypted at rest with a master key you control. Secret values are omitted from list responses; authenticated administrators can reveal them through dedicated, audited endpoints.
 
 ## Quick Start
@@ -427,7 +427,7 @@ Resident contact expires after 45 seconds; data becomes stale after three sampli
 
 Resident monitoring does not schedule per-sample SSH commands. Installation/repair uses a separate three-minute budget, at most four concurrent deployments, and one job per server. Failed deployments retry after at least one minute. Missing `AGENT_HUB_URL` is shown as setup required. Existing metric history is retained.
 
-Artifacts and configuration are verified before activation. Compatible resident agents keep reporting while an update is staged. The new service must contact the Hub after restart; failed activation restores the previous executable, configuration and service unit where available. See [configuration, migration and validation](docs/resident-monitoring.md).
+Artifacts and configuration are verified before activation. Compatible resident agents keep reporting while an update is staged. The new service must contact the Hub after restart; failed activation restores the previous executable, configuration and service unit where available.
 
 ### Docker upgrades and encrypted data
 
