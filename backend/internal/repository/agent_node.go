@@ -156,6 +156,14 @@ func (r *AgentNodeRepo) Ingest(ctx context.Context, node model.AgentNode, sample
 	return ack, nil
 }
 
+// SetInstallLayout records the account that installed the resident agent so a
+// later deletion can clean the right layout after a credential switch.
+func (r *AgentNodeRepo) SetInstallLayout(ctx context.Context, n model.AgentNode, uid int, home string) error {
+	return r.db.WithContext(ctx).Model(&model.AgentNode{}).
+		Where("server_id = ? AND token_hash = ?", n.ServerID, n.TokenHash).
+		Updates(map[string]any{"install_uid": uid, "install_home": home}).Error
+}
+
 // Get returns the resident credential record for a server.
 func (r *AgentNodeRepo) Get(ctx context.Context, serverID uint) (model.AgentNode, error) {
 	var n model.AgentNode

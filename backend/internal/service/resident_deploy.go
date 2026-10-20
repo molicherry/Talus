@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -223,19 +224,17 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 		return deployError("service_manager_unavailable", errors.New("systemd and flock are required for resident agent installation"))
 	}
 	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
-	if len(lines) != 3 || !strings.HasPrefix(lines[1], "/") || len(lines[1]) > 512 || strings.ContainsAny(lines[1], "\r\n\x00") {
+	if len(lines) != 3 {
 		return deployError("service_manager_unavailable", errors.New("cannot resolve installation paths"))
 	}
-	base := "/var/lib/talus-agent/" + n.InstallID
-	unitDir := "/etc/systemd/system"
-	ctl := "systemctl"
-	if lines[0] != "0" {
-		base = lines[1] + "/.local/share/talus-agent/" + n.InstallID
-		unitDir = lines[1] + "/.config/systemd/user"
-		ctl = "systemctl --user"
+	uid, convErr := strconv.Atoi(lines[0])
+	if convErr != nil || uid < 0 || !validInstallHome(lines[1]) {
+		return deployError("service_manager_unavailable", errors.New("cannot resolve installation paths"))
 	}
+	layout := agentLayoutFor(n.InstallID, uid, lines[1])
+	base, unitDir, ctl := layout.Base, layout.UnitDir, layout.Control()
 	check := ctl + " show-environment >/dev/null 2>&1"
-	if lines[0] != "0" {
+	if uid != 0 {
 		check += " && test -e /var/lib/systemd/linger/$(id -un)"
 	}
 	result, err = lease.Exec(ctx, check, 5*time.Second)
@@ -264,7 +263,7 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 	config := base + "/config.json"
 	unit := unitDir + "/" + unitName
 	unitText := "[Unit]\nDescription=Talus monitoring agent\nAfter=network-online.target\nStartLimitIntervalSec=0\n[Service]\nType=simple\nExecStart=" + unitQuote(binary) + " --daemon --config " + unitQuote(config) + "\nRestart=always\nRestartSec=3\nKillMode=control-group\nTimeoutStopSec=10\nUMask=0077\nNoNewPrivileges=true\n[Install]\nWantedBy="
-	if lines[0] == "0" {
+	if uid == 0 {
 		unitText += "multi-user.target\n"
 	} else {
 		unitText += "default.target\n"
@@ -323,6 +322,22 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 	if result == nil || result.ExitCode != 0 {
 		return deployError(ReasonAgentHealthCheckFailed, errors.New("new service did not authenticate; previous version restored when available"))
 	}
+	// A credential change can move the installation to another account. Retire
+	// the layout the previous account still runs so two agents cannot report
+	// for one server, then record where this install landed: deletion must clean
+	// this account's unit and state even after a later credential switch.
+	if previous, ok := recordedLayout(n); ok && previous.Base != layout.Base {
+		retireCtx, cancelRetire := context.WithTimeout(ctx, 30*time.Second)
+		if err := m.uninstall(retireCtx, nodeForLayout(n.InstallID, previous), lease); err != nil {
+			slog.Warn("retiring previous agent layout failed", "server_id", n.ServerID, "reason", deployFailureReason(err))
+		}
+		cancelRetire()
+	}
+	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	if err := m.repo.SetInstallLayout(storeCtx, n, uid, lines[1]); err != nil {
+		slog.Warn("recording agent install layout failed", "server_id", n.ServerID, "error", err)
+	}
+	cancel()
 	return lease.releaseAndWait()
 }
 
@@ -378,6 +393,11 @@ func (m *ResidentMonitor) installAllowed(id uint, epoch uint64) bool {
 	return m.removing[id] == nil && m.installEpoch == epoch
 }
 
+// errRemovalInProgress reports that another deletion already owns the removal
+// fence. A joining request must not invalidate the connection pool: the owner
+// is still using its pinned SSH connection for the uninstall.
+var errRemovalInProgress = errors.New("agent removal already in progress")
+
 func (m *ResidentMonitor) fenceRemoval(ctx context.Context, id uint) (func(), <-chan struct{}, error) {
 	for {
 		m.installJobsMu.Lock()
@@ -387,7 +407,7 @@ func (m *ResidentMonitor) fenceRemoval(ctx context.Context, id uint) (func(), <-
 			case <-pending:
 				continue
 			case <-ctx.Done():
-				return nil, nil, ctx.Err()
+				return nil, nil, errors.Join(errRemovalInProgress, ctx.Err())
 			}
 		}
 		if err := ctx.Err(); err != nil {
@@ -423,9 +443,16 @@ type residentRemoval struct {
 	node    model.AgentNode
 	lease   *sshLease
 	err     error
-	finish  func()
-	once    sync.Once
+	// owned records that this attempt acquired the removal fence. A request that
+	// merely waited for another deletion must not invalidate the pool.
+	owned  bool
+	finish func()
+	once   sync.Once
 }
+
+// Owned reports whether this request acquired the removal fence and pinned the
+// connection whose cleanup it is responsible for.
+func (r *residentRemoval) Owned() bool { return r.owned }
 
 // PrepareAgentRemoval fences and joins local installers, then pins a connection
 // while the server and its route are still live. It performs no remote removal
@@ -439,6 +466,7 @@ func (m *ResidentMonitor) PrepareAgentRemoval(ctx context.Context, id uint) prep
 	if r.err != nil {
 		return r
 	}
+	r.owned = true
 	if done != nil {
 		select {
 		case <-done:
@@ -452,7 +480,10 @@ func (m *ResidentMonitor) PrepareAgentRemoval(ctx context.Context, id uint) prep
 		r.err = nil
 		return r
 	}
-	if r.err == nil && m.deployer != nil && m.hubURL != "" {
+	if r.err == nil && m.deployer != nil {
+		// Removal must not depend on the callback URL: an operator can clear
+		// AGENT_HUB_URL and still expect the already-installed agent to be
+		// uninstalled when the server is deleted.
 		r.lease, r.err = m.deployer.ssh.AcquireLease(ctx, id, LeaseConsumerAgent)
 	}
 	return r
@@ -479,23 +510,118 @@ func (r *residentRemoval) Close() {
 	})
 }
 
-// uninstall stops the unit and removes the installation directory. The layout
-// follows the account the installer used: root installs under /var/lib and
-// /etc/systemd/system, unprivileged installs under the account's home.
-func (m *ResidentMonitor) uninstall(ctx context.Context, n model.AgentNode, lease *sshLease) error {
-	base := "/var/lib/talus-agent/" + n.InstallID
-	unitDir := "/etc/systemd/system"
-	ctl := "systemctl"
-	if result, probeErr := lease.Exec(ctx, `id -u; printf '%s\n' "$HOME"`, 5*time.Second); probeErr == nil && result != nil && result.ExitCode == 0 {
-		lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
-		if len(lines) == 2 && lines[0] != "0" && strings.HasPrefix(lines[1], "/") {
-			base = lines[1] + "/.local/share/talus-agent/" + n.InstallID
-			unitDir = lines[1] + "/.config/systemd/user"
-			ctl = "systemctl --user"
+// agentLayout is one resident-agent installation layout: the account that owns
+// it, where its state lives, and the service-manager command that controls it.
+type agentLayout struct {
+	UID     int
+	Home    string
+	Base    string
+	UnitDir string
+	// ctl overrides the service-manager command; tests inject a fake here.
+	ctl string
+}
+
+func agentLayoutFor(installID string, uid int, home string) agentLayout {
+	if uid == 0 {
+		return agentLayout{UID: 0, Home: home, Base: "/var/lib/talus-agent/" + installID, UnitDir: "/etc/systemd/system"}
+	}
+	return agentLayout{
+		UID:     uid,
+		Home:    home,
+		Base:    home + "/.local/share/talus-agent/" + installID,
+		UnitDir: home + "/.config/systemd/user",
+	}
+}
+
+// Control is the service-manager command that owns this layout's unit.
+func (l agentLayout) Control() string {
+	if l.ctl != "" {
+		return l.ctl
+	}
+	if l.UID == 0 {
+		return "systemctl"
+	}
+	return "systemctl --user"
+}
+
+// validInstallHome accepts the absolute home directory reported by the target
+// account before it is embedded in remote shell commands.
+func validInstallHome(home string) bool {
+	if len(home) == 0 || len(home) > 512 || home[0] != '/' || strings.ContainsAny(home, "\r\n\x00") {
+		return false
+	}
+	for _, part := range strings.Split(home, "/") {
+		if part == ".." {
+			return false
 		}
 	}
+	return true
+}
+
+// nodeForLayout builds the minimal node a layout-directed uninstall needs.
+func nodeForLayout(installID string, l agentLayout) model.AgentNode {
+	uid, home := l.UID, l.Home
+	return model.AgentNode{InstallID: installID, InstallUID: &uid, InstallHome: &home}
+}
+
+// recordedLayout reports the layout of the account that installed the agent.
+// Rows created before layouts were recorded carry no values, so deletion falls
+// back to probing the login it is using.
+func recordedLayout(n model.AgentNode) (agentLayout, bool) {
+	if n.InstallUID == nil || n.InstallHome == nil || *n.InstallUID < 0 || !validInstallHome(*n.InstallHome) {
+		return agentLayout{}, false
+	}
+	return agentLayoutFor(n.InstallID, *n.InstallUID, *n.InstallHome), true
+}
+
+// uninstall stops the unit and removes the installation directory. The layout
+// follows the account that installed the agent, not the account the current
+// credential logs in as: switching the credential to another user must not
+// leave the original account's unit and state behind.
+func (m *ResidentMonitor) uninstall(ctx context.Context, n model.AgentNode, lease *sshLease) error {
+	probe := `id -u; printf '%s\n' "$HOME"`
+	if n.InstallUID != nil {
+		// Resolve the owner's name so a cross-account stop can reach that
+		// account's service manager; an unknown uid is not an error here.
+		probe += "; id -un " + strconv.Itoa(*n.InstallUID) + " 2>/dev/null || true"
+	}
+	currentUID, currentHome, owner := -1, "", ""
+	if result, probeErr := lease.Exec(ctx, probe, 5*time.Second); probeErr == nil && result != nil && result.ExitCode == 0 {
+		lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+		if len(lines) >= 2 {
+			if uid, convErr := strconv.Atoi(lines[0]); convErr == nil {
+				currentUID = uid
+			}
+			currentHome = lines[1]
+		}
+		if len(lines) >= 3 {
+			owner = strings.TrimSpace(lines[2])
+		}
+	}
+	layout, recorded := recordedLayout(n)
+	if !recorded {
+		if currentUID >= 0 && validInstallHome(currentHome) {
+			layout = agentLayoutFor(n.InstallID, currentUID, currentHome)
+		} else {
+			layout = agentLayoutFor(n.InstallID, 0, "/root")
+		}
+	}
+	// A user unit is only reachable through its owner's service manager. Root
+	// can switch to that account; any other login cannot, so it removes the
+	// files without touching an unrelated manager. An unknown login (probe
+	// failed) must not guess: only a root layout is safe to address directly.
+	runAs, manage := "", true
+	switch {
+	case currentUID < 0:
+		manage = layout.UID == 0
+	case layout.UID == currentUID:
+	case currentUID == 0 && owner != "":
+		runAs = owner
+	default:
+		manage = false
+	}
 	unitName := "talus-agent-" + n.InstallID + ".service"
-	result, err := lease.Exec(ctx, residentUninstallScript(base, unitDir+"/"+unitName, unitName, ctl), 30*time.Second)
+	result, err := lease.Exec(ctx, residentUninstallScript(layout, unitName, runAs, manage), 30*time.Second)
 	if err != nil {
 		return err
 	}
@@ -516,15 +642,30 @@ func (m *ResidentMonitor) uninstall(ctx context.Context, n model.AgentNode, leas
 // lack flock, and a host whose unit directory is already gone has nothing to
 // serialize. A lock that is present but held still fails the uninstall instead
 // of racing a remote activation/rollback.
-func residentUninstallScript(base, unit, unitName, ctl string) string {
+//
+// runAs names the account that owns a user unit when the caller logged in as a
+// different account (root switching to the installer's account). manage=false
+// skips service-manager calls when that account cannot be reached; the unit and
+// state files are still removed.
+func residentUninstallScript(l agentLayout, unitName, runAs string, manage bool) string {
 	q := shellQuote
+	unit := l.UnitDir + "/" + unitName
 	lock := q(unit + ".lock")
-	return "set -eu\n" +
-		"if command -v flock >/dev/null 2>&1 && test -d " + q(filepath.Dir(unit)) + "; then\n" +
+	script := "set -eu\n" +
+		"if command -v flock >/dev/null 2>&1 && test -d " + q(l.UnitDir) + "; then\n" +
 		"  if : > " + lock + " 2>/dev/null; then exec 9> " + lock + "; flock -w 10 9; fi\n" +
-		"fi\n" +
+		"fi\n"
+	removeUnit := "rm -f " + q(unit) + " " + q(unit+".previous") + "\n"
+	if !manage {
+		return script + removeUnit + "rm -rf " + q(l.Base) + "\n"
+	}
+	ctl := l.Control()
+	if runAs != "" {
+		ctl = "runuser -u " + q(runAs) + " -- env XDG_RUNTIME_DIR=" + q("/run/user/"+strconv.Itoa(l.UID)) + " " + ctl
+	}
+	return script +
 		ctl + " disable --now " + q(unitName) + " >/dev/null 2>&1 || true\n" +
-		"rm -f " + q(unit) + " " + q(unit+".previous") + "\n" +
+		removeUnit +
 		ctl + " daemon-reload >/dev/null 2>&1 || true\n" +
-		"rm -rf " + q(base) + "\n"
+		"rm -rf " + q(l.Base) + "\n"
 }

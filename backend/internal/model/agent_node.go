@@ -20,6 +20,12 @@ type AgentNode struct {
 	LastSample    *time.Time `json:"-"`
 	LastPersisted *time.Time `json:"-"`
 	Version       string     `json:"-"`
+	// InstallUID/InstallHome record the account that installed the agent. A
+	// later deletion must clean that layout even when the server's credential
+	// now logs in as a different account. Nil means "installed before this was
+	// recorded"; callers fall back to probing the current account.
+	InstallUID  *int    `json:"-"`
+	InstallHome *string `json:"-"`
 }
 
 type AgentReceipt struct {

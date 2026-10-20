@@ -3,8 +3,15 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/vpsmanager/backend/internal/model"
+	mw "github.com/vpsmanager/backend/internal/server/middleware"
+	"golang.org/x/crypto/ssh"
+	"gorm.io/gorm"
 )
 
 func TestResidentRemovalWaitsForInstallerAndFencesStaleSnapshots(t *testing.T) {
@@ -87,4 +94,92 @@ func TestResidentRemovalSerializesConcurrentPreparation(t *testing.T) {
 		t.Fatal(err)
 	}
 	nextFinish()
+}
+
+// A deletion that cannot take the fence is a join, not an owner: it reports the
+// in-flight removal so the caller leaves the pool and credential alone.
+func TestResidentRemovalReportsJoinWhenAnotherRemovalOwnsTheFence(t *testing.T) {
+	m := NewResidentMonitor(nil, nil, nil, "", false, 1)
+	finish, _, err := m.fenceRemoval(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer finish()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	removal := m.PrepareAgentRemoval(ctx, 7)
+	if removal.Owned() {
+		t.Fatal("joined removal claimed the owner's fence")
+	}
+	if !errors.Is(removal.(*residentRemoval).err, errRemovalInProgress) {
+		t.Fatalf("join error = %v, want errRemovalInProgress", removal.(*residentRemoval).err)
+	}
+	removal.Close()
+	m.installJobsMu.Lock()
+	fenced := m.removing[7] != nil
+	m.installJobsMu.Unlock()
+	if !fenced {
+		t.Fatal("joined removal released the owner's fence")
+	}
+}
+
+// Removal must not depend on the callback URL: an operator can clear
+// AGENT_HUB_URL and still expect deletion to uninstall the agent. The layout is
+// also taken from the recorded install account, not from the current credential.
+func TestResidentRemovalCleansRecordedLayoutWithoutHubURL(t *testing.T) {
+	svc, _, db, ctx, _ := connectionServiceFixture(t)
+	srv, err := svc.Create(ctx, &model.Server{Name: "switched", Host: "target.example", Port: 22, OwnerID: mw.GetUserClaims(ctx).UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, node := serverDeleteAgent(t, db, ctx, srv)
+	uid, home := 1000, "/home/alice"
+	if err := agents.SetInstallLayout(ctx, node, uid, home); err != nil {
+		t.Fatal(err)
+	}
+	commands := make(chan string, 2)
+	address, hostKey := startExecSSHServer(t, func(command string, channel ssh.Channel, _ <-chan struct{}) {
+		commands <- command
+		if strings.HasPrefix(command, "id -u; ") {
+			_, _ = io.WriteString(channel, "0\n/root\nalice\n")
+		} else {
+			_, _ = io.WriteString(channel, "ok\n")
+		}
+		_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
+		_ = channel.Close()
+	})
+	pool := newTestPool(t)
+	seedPool(t, pool, srv.ID, dialTestSSH(t, address, hostKey))
+	sshSvc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
+	monitor := NewResidentMonitor(agents, nil, NewAgentDeploymentService(sshSvc, t.TempDir()), "", false, 5)
+
+	removal := monitor.PrepareAgentRemoval(ctx, srv.ID)
+	if !removal.Owned() {
+		t.Fatal("preparation did not own the fence")
+	}
+	if err := removal.Remove(ctx); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	removal.Close()
+
+	next := func() string {
+		select {
+		case command := <-commands:
+			return command
+		case <-time.After(10 * time.Second):
+			t.Fatal("uninstall did not run")
+			return ""
+		}
+	}
+	next() // probe
+	script := next()
+	if want := "/home/alice/.local/share/talus-agent/" + node.InstallID; !strings.Contains(script, want) {
+		t.Fatalf("uninstall did not target the recorded layout %q:\n%s", want, script)
+	}
+	if strings.Contains(script, "/var/lib/talus-agent/"+node.InstallID) {
+		t.Fatalf("uninstall targeted the logged-in account's layout:\n%s", script)
+	}
+	if _, err := agents.Get(ctx, srv.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("removal left the resident credential behind: %v", err)
+	}
 }

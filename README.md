@@ -429,6 +429,8 @@ Resident monitoring does not schedule per-sample SSH commands. Installation/repa
 
 Artifacts and configuration are verified before activation. Compatible resident agents keep reporting while an update is staged. The new service must contact the Hub after restart; failed activation restores the previous executable, configuration and service unit where available.
 
+Deleting a server uninstalls its resident agent and removes the recorded installation layout, even after `AGENT_HUB_URL` is cleared or the SSH credential changes to another account. The installer's account is recorded at activation time; deletion stops that account's unit (switching from a root login to the owning account when needed) and removes its state directory. A reinstall under a different account retires the previous layout after the new service is healthy. Root can stop the previous owner's unit; a downgraded login that cannot reach it keeps the files and logs a warning instead.
+
 ### Docker upgrades and encrypted data
 
 Keep the existing database volume and the original `.env`, especially `VPSMANAGER_MASTER_KEY`. Stop the old Hub before replacing it; upgrades assume a single Hub and a brief maintenance window. A database advisory lock serializes migration by new Hubs, but cannot stop an older binary from writing.

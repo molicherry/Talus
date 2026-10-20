@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +14,14 @@ import (
 
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/server"
+	"golang.org/x/crypto/ssh"
 )
+
+// testUninstallLayout targets the unit file a script test wrote: its directory
+// is the unit dir and ctl is the fake service manager to invoke.
+func testUninstallLayout(base, unit, ctl string) agentLayout {
+	return agentLayout{Base: base, UnitDir: filepath.Dir(unit), ctl: shellQuote(ctl)}
+}
 
 // Exercise the exact activation script with a controlled service manager. This
 // covers failures before readiness as well as the successful publish path.
@@ -109,7 +117,7 @@ func TestResidentUninstallScriptRemovesUnitAndState(t *testing.T) {
 	if e := os.WriteFile(ctl, []byte("#!/bin/sh\necho \"$@\" >> "+shellQuote(log)+"\nexit 0\n"), 0700); e != nil {
 		t.Fatal(e)
 	}
-	script := residentUninstallScript(base, unit, "talus-agent-test.service", shellQuote(ctl))
+	script := residentUninstallScript(testUninstallLayout(base, unit, ctl), "talus-agent-test.service", "", true)
 	if out, e := exec.Command("sh", "-c", script).CombinedOutput(); e != nil {
 		t.Fatalf("uninstall: %v %s", e, out)
 	}
@@ -214,7 +222,7 @@ func TestResidentUninstallWaitsForActivationRollback(t *testing.T) {
 		}
 	}
 	waitFor(rollback)
-	uninstall := exec.CommandContext(ctx, "sh", "-c", residentUninstallScript(base, unit, "agent.service", shellQuote(ctl)))
+	uninstall := exec.CommandContext(ctx, "sh", "-c", residentUninstallScript(testUninstallLayout(base, unit, ctl), "agent.service", "", true))
 	uninstall.Env = append(env, "UNINSTALL=1")
 	var uninstallOutput bytes.Buffer
 	uninstall.Stdout, uninstall.Stderr = &uninstallOutput, &uninstallOutput
@@ -278,7 +286,7 @@ func TestResidentScriptsFailClosedWithoutInstallationLock(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			script := residentUninstallScript(base, unit, "agent.service", shellQuote(ctl))
+			script := residentUninstallScript(testUninstallLayout(base, unit, ctl), "agent.service", "", true)
 			if operation == "activation" {
 				script = residentActivationScript(binary, config, unit, "agent.service", next, shellQuote(ctl), 1)
 			}
@@ -373,7 +381,7 @@ func TestResidentUninstallScriptDegradesWithoutFlock(t *testing.T) {
 	if err := os.WriteFile(ctl, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("sh", "-c", residentUninstallScript(base, unit, "agent.service", shellQuote(ctl)))
+	cmd := exec.Command("sh", "-c", residentUninstallScript(testUninstallLayout(base, unit, ctl), "agent.service", "", true))
 	// Only rm is reachable: `command -v flock` must fail and the script must
 	// still stop the unit and remove the installation.
 	cmd.Env = []string{"PATH=" + binDir}
@@ -401,10 +409,178 @@ func TestResidentUninstallScriptToleratesMissingUnitDirectory(t *testing.T) {
 	if err := os.WriteFile(ctl, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("sh", "-c", residentUninstallScript(base, unit, "agent.service", shellQuote(ctl))).CombinedOutput(); err != nil {
+	if out, err := exec.Command("sh", "-c", residentUninstallScript(testUninstallLayout(base, unit, ctl), "agent.service", "", true)).CombinedOutput(); err != nil {
 		t.Fatalf("uninstall with missing unit directory: %v %s", err, out)
 	}
 	if _, err := os.Stat(base); !os.IsNotExist(err) {
 		t.Fatal("installation directory survived a missing unit directory")
+	}
+}
+
+// The layout must follow the account that installed the agent, so deletion can
+// clean it after the credential logs in as somebody else.
+func TestAgentLayoutFollowsInstallAccount(t *testing.T) {
+	root := agentLayoutFor("install1", 0, "/root")
+	if root.Base != "/var/lib/talus-agent/install1" || root.UnitDir != "/etc/systemd/system" || root.Control() != "systemctl" {
+		t.Fatalf("root layout = %+v", root)
+	}
+	user := agentLayoutFor("install1", 1000, "/home/alice")
+	if user.Base != "/home/alice/.local/share/talus-agent/install1" ||
+		user.UnitDir != "/home/alice/.config/systemd/user" || user.Control() != "systemctl --user" {
+		t.Fatalf("user layout = %+v", user)
+	}
+	uid, home := 1000, "/home/alice"
+	node := model.AgentNode{InstallID: "install1", InstallUID: &uid, InstallHome: &home}
+	recorded, ok := recordedLayout(node)
+	if !ok || recorded != user {
+		t.Fatalf("recorded layout = %+v, ok=%t", recorded, ok)
+	}
+	node.InstallHome = nil
+	if _, ok := recordedLayout(node); ok {
+		t.Fatal("layout without a recorded home was accepted")
+	}
+	node = nodeForLayout("install1", user)
+	if node.InstallUID == nil || *node.InstallUID != 1000 || node.InstallHome == nil || *node.InstallHome != "/home/alice" {
+		t.Fatalf("layout node = %+v", node)
+	}
+	for _, invalid := range []string{"", "relative/path", "/home/../etc", "/home/alice\nrm -rf /"} {
+		if validInstallHome(invalid) {
+			t.Fatalf("invalid home %q accepted", invalid)
+		}
+	}
+}
+
+// A user unit is stopped through its owner's manager, never through the manager
+// of whichever account the credential happens to use now.
+func TestResidentUninstallScriptStopsRecordedUserUnit(t *testing.T) {
+	layout := agentLayoutFor("install1", 1000, "/home/alice")
+	script := residentUninstallScript(layout, "talus-agent-install1.service", "alice", true)
+	for _, want := range []string{
+		"runuser -u 'alice' -- env XDG_RUNTIME_DIR='/run/user/1000' systemctl --user disable --now 'talus-agent-install1.service'",
+		"rm -f '/home/alice/.config/systemd/user/talus-agent-install1.service'",
+		"rm -rf '/home/alice/.local/share/talus-agent/install1'",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("uninstall script missing %q:\n%s", want, script)
+		}
+	}
+	// Without a reachable owner no unrelated service manager may be touched.
+	blind := residentUninstallScript(layout, "talus-agent-install1.service", "", false)
+	if strings.Contains(blind, "systemctl") {
+		t.Fatalf("unreachable account touched a service manager:\n%s", blind)
+	}
+	if !strings.Contains(blind, "rm -rf '/home/alice/.local/share/talus-agent/install1'") {
+		t.Fatalf("blind cleanup did not remove the recorded state:\n%s", blind)
+	}
+}
+
+// A credential switch must not make deletion clean the layout of the account
+// that is logged in now: the recorded install layout owns the unit and state.
+func TestResidentUninstallUsesRecordedLayoutAfterCredentialSwitch(t *testing.T) {
+	commands := make(chan string, 2)
+	address, hostKey := startExecSSHServer(t, func(command string, channel ssh.Channel, _ <-chan struct{}) {
+		commands <- command
+		if strings.HasPrefix(command, "id -u; ") {
+			_, _ = io.WriteString(channel, "0\n/root\nalice\n")
+		} else {
+			_, _ = io.WriteString(channel, "ok\n")
+		}
+		_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
+		_ = channel.Close()
+	})
+	pool := newTestPool(t)
+	seedPool(t, pool, 9, dialTestSSH(t, address, hostKey))
+	sshSvc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
+	lease, err := sshSvc.AcquireLease(context.Background(), 9, LeaseConsumerAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	uid, home := 1000, "/home/alice"
+	node := model.AgentNode{ServerID: 9, InstallID: "install1", InstallUID: &uid, InstallHome: &home}
+	monitor := NewResidentMonitor(nil, nil, nil, "", false, 5)
+	if err := monitor.uninstall(context.Background(), node, lease); err != nil {
+		t.Fatal(err)
+	}
+	next := func() string {
+		select {
+		case command := <-commands:
+			return command
+		case <-time.After(10 * time.Second):
+			t.Fatal("uninstall did not run")
+			return ""
+		}
+	}
+	if probe := next(); !strings.Contains(probe, "id -un 1000") {
+		t.Fatalf("probe did not resolve the recorded owner: %q", probe)
+	}
+	script := next()
+	for _, want := range []string{
+		"runuser -u 'alice' -- env XDG_RUNTIME_DIR='/run/user/1000' systemctl --user disable --now 'talus-agent-install1.service'",
+		"rm -f '/home/alice/.config/systemd/user/talus-agent-install1.service'",
+		"rm -rf '/home/alice/.local/share/talus-agent/install1'",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("uninstall script missing %q:\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, "/var/lib/talus-agent/install1") {
+		t.Fatalf("uninstall cleaned the current login's layout instead of the recorded one:\n%s", script)
+	}
+}
+
+// The cross-account script must survive quoting when the owning home contains
+// spaces, both for the manager switch and for the state it removes.
+func TestResidentUninstallScriptCrossAccountExecutesWithQuotedPaths(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	home := filepath.Join(dir, "al ice")
+	base := filepath.Join(home, ".local/share/talus-agent/install1")
+	unitDir := filepath.Join(home, ".config/systemd/user")
+	if err := os.MkdirAll(base, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(unitDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	unit := filepath.Join(unitDir, "talus-agent-install1.service")
+	if err := os.WriteFile(unit, []byte("unit"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(binDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(dir, "calls.log")
+	runuser := "#!/bin/sh\nprintf 'runuser %s\\n' \"$*\" >> " + shellQuote(log) + "\nshift 2\nshift\nexec \"$@\"\n"
+	systemctl := "#!/bin/sh\nprintf 'systemctl %s\\n' \"$*\" >> " + shellQuote(log) + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "runuser"), []byte(runuser), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "systemctl"), []byte(systemctl), 0700); err != nil {
+		t.Fatal(err)
+	}
+	layout := agentLayoutFor("install1", 1000, home)
+	cmd := exec.Command("sh", "-c", residentUninstallScript(layout, "talus-agent-install1.service", "alice", true))
+	cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("cross-account uninstall: %v %s", err, out)
+	}
+	if _, err := os.Stat(base); !os.IsNotExist(err) {
+		t.Fatalf("recorded state survived the uninstall: %v", err)
+	}
+	if _, err := os.Stat(unit); !os.IsNotExist(err) {
+		t.Fatalf("recorded unit survived the uninstall: %v", err)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"runuser -u alice -- env XDG_RUNTIME_DIR=/run/user/1000 systemctl --user disable --now talus-agent-install1.service",
+		"systemctl --user daemon-reload",
+	} {
+		if !strings.Contains(string(calls), want) {
+			t.Fatalf("call %q missing in %q", want, calls)
+		}
 	}
 }
