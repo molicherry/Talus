@@ -54,14 +54,16 @@ func TestWriteDeadlinePerRoute(t *testing.T) {
 	}
 }
 
-// A slow uninstall can consume its full 20s budget, followed by a separate 5s
-// credential cleanup. The response deadline must still leave time for the
-// database commit and 204 response after those bounded operations complete.
+// A slow prepare (20s), commit (10s) and uninstall (20s) can run back to back,
+// followed by a separate 5s credential cleanup. The response deadline must still
+// leave time for the 204 response after those bounded operations complete.
 func TestServerDeleteDeadlineCoversResidentCleanup(t *testing.T) {
 	rec := &deadlineRecorder{ResponseWriter: httptest.NewRecorder()}
 	handler := WriteDeadline(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		cleanupFinishedAt := time.Now().Add(25 * time.Second)
-		if !rec.set || rec.deadline.Sub(cleanupFinishedAt) < 10*time.Second {
+		// 20s prepare + 10s commit + 20s uninstall, leaving room for the 5s
+		// credential cleanup that runs inside Remove.
+		cleanupFinishedAt := time.Now().Add(50 * time.Second)
+		if !rec.set || rec.deadline.Sub(cleanupFinishedAt) < 5*time.Second {
 			t.Fatalf("server deletion has insufficient response budget after cleanup: %s", rec.deadline.Sub(cleanupFinishedAt))
 		}
 		w.WriteHeader(http.StatusNoContent)

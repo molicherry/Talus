@@ -459,11 +459,19 @@ func resolveCredentialBinding(current, input *uint, clear bool) *uint {
 	return current
 }
 
+// Budgets for the three phases of a deletion that may touch the remote agent.
+// They add up to ServerDeleteWriteBudget in the middleware; each phase gets its
+// own budget so a slow SSH prepare cannot starve the uninstall that follows it.
+const (
+	agentRemovalPrepareBudget = 20 * time.Second
+	serverDeleteBudget        = 10 * time.Second
+	agentRemovalCleanupBudget = 20 * time.Second
+)
+
 // Delete commits the server deletion before best-effort agent cleanup. Prepare
 // pins the live route first; pool invalidation waits until that cleanup ends.
 func (s *ServerService) Delete(ctx context.Context, id uint) error {
-	deadline := time.Now().Add(20 * time.Second)
-	prepareCtx, cancel := context.WithDeadline(ctx, deadline)
+	prepareCtx, cancel := context.WithTimeout(ctx, agentRemovalPrepareBudget)
 	defer cancel()
 	var removal preparedAgentRemoval
 	deleted := false
@@ -478,7 +486,7 @@ func (s *ServerService) Delete(ctx context.Context, id uint) error {
 	if remover, ok := s.monitoring.(agentRemover); ok {
 		removal = remover.PrepareAgentRemoval(prepareCtx, id)
 	}
-	deleteCtx, cancelDelete := context.WithTimeout(ctx, 10*time.Second)
+	deleteCtx, cancelDelete := context.WithTimeout(ctx, serverDeleteBudget)
 	err := s.deleteServer(deleteCtx, id)
 	cancelDelete()
 	if err != nil {
@@ -490,8 +498,8 @@ func (s *ServerService) Delete(ctx context.Context, id uint) error {
 	}
 	if removal != nil {
 		// A committed deletion must finish cleanup even if the browser leaves.
-		// Keep the original absolute budget rather than starting another 20s.
-		cleanupCtx, cancelCleanup := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+		// Cleanup gets its own budget: prepare may have consumed all of its own.
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), agentRemovalCleanupBudget)
 		if err := removal.Remove(cleanupCtx); err != nil {
 			// SSH error strings can carry credential material; log only the class.
 			slog.Warn("resident agent removal failed", "server_id", id, "reason", deployFailureReason(err))

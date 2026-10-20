@@ -346,3 +346,65 @@ func TestResidentInstallNeededRetriesUnreadyDeployments(t *testing.T) {
 		})
 	}
 }
+
+// Deletion must still clean up hosts that predate the flock requirement.
+func TestResidentUninstallScriptDegradesWithoutFlock(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.Mkdir(binDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	rm, err := exec.LookPath("rm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(rm, filepath.Join(binDir, "rm")); err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Join(dir, "state")
+	if err := os.Mkdir(base, 0700); err != nil {
+		t.Fatal(err)
+	}
+	unit := filepath.Join(dir, "agent.service")
+	if err := os.WriteFile(unit, []byte("unit"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctl := filepath.Join(dir, "systemctl")
+	if err := os.WriteFile(ctl, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-c", residentUninstallScript(base, unit, "agent.service", shellQuote(ctl)))
+	// Only rm is reachable: `command -v flock` must fail and the script must
+	// still stop the unit and remove the installation.
+	cmd.Env = []string{"PATH=" + binDir}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("uninstall without flock: %v %s", err, out)
+	}
+	if _, err := os.Stat(base); !os.IsNotExist(err) {
+		t.Fatal("installation directory survived a host without flock")
+	}
+	if _, err := os.Stat(unit); !os.IsNotExist(err) {
+		t.Fatal("unit survived a host without flock")
+	}
+}
+
+// A half-cleaned host often has no unit directory left; uninstall must still
+// remove the installation instead of failing while opening the lock file.
+func TestResidentUninstallScriptToleratesMissingUnitDirectory(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "state")
+	if err := os.Mkdir(base, 0700); err != nil {
+		t.Fatal(err)
+	}
+	unit := filepath.Join(dir, "missing", "agent.service")
+	ctl := filepath.Join(dir, "systemctl")
+	if err := os.WriteFile(ctl, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("sh", "-c", residentUninstallScript(base, unit, "agent.service", shellQuote(ctl))).CombinedOutput(); err != nil {
+		t.Fatalf("uninstall with missing unit directory: %v %s", err, out)
+	}
+	if _, err := os.Stat(base); !os.IsNotExist(err) {
+		t.Fatal("installation directory survived a missing unit directory")
+	}
+}

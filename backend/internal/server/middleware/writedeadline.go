@@ -13,9 +13,10 @@ import (
 const (
 	// DefaultWriteBudget protects ordinary requests, matching the historical 15s.
 	DefaultWriteBudget = 15 * time.Second
-	// ServerDeleteWriteBudget covers 20s of agent removal, 5s of credential
-	// cleanup, and time to commit the deletion and return its response.
-	ServerDeleteWriteBudget = 40 * time.Second
+	// ServerDeleteWriteBudget covers the deletion's three bounded phases --
+	// 20s to prepare/pin the route, 10s to commit, 20s to uninstall the agent --
+	// plus 5s of credential cleanup and response margin.
+	ServerDeleteWriteBudget = 60 * time.Second
 	// ExecWriteBudget covers the 300s Exec cap plus result-return margin.
 	ExecWriteBudget = 310 * time.Second
 	// RelayWriteBudget covers a 300s bounded_stream plus margin.

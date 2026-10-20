@@ -511,9 +511,18 @@ func (m *ResidentMonitor) uninstall(ctx context.Context, n model.AgentNode, leas
 // residentUninstallScript stops and deletes one installation layout. A missing
 // unit or installation directory is not an error. The stable lock file remains
 // outside the removed directory so waiting activations keep the same lock.
+//
+// Locking is best effort on removal: a host installed by an older release may
+// lack flock, and a host whose unit directory is already gone has nothing to
+// serialize. A lock that is present but held still fails the uninstall instead
+// of racing a remote activation/rollback.
 func residentUninstallScript(base, unit, unitName, ctl string) string {
 	q := shellQuote
-	return "set -eu\nexec 9> " + q(unit+".lock") + "\nflock -w 10 9\n" +
+	lock := q(unit + ".lock")
+	return "set -eu\n" +
+		"if command -v flock >/dev/null 2>&1 && test -d " + q(filepath.Dir(unit)) + "; then\n" +
+		"  if : > " + lock + " 2>/dev/null; then exec 9> " + lock + "; flock -w 10 9; fi\n" +
+		"fi\n" +
 		ctl + " disable --now " + q(unitName) + " >/dev/null 2>&1 || true\n" +
 		"rm -f " + q(unit) + " " + q(unit+".previous") + "\n" +
 		ctl + " daemon-reload >/dev/null 2>&1 || true\n" +
