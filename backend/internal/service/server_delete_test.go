@@ -266,13 +266,19 @@ func TestServerDeleteJoinedRemovalReturnsLookupFailure(t *testing.T) {
 				callback := "reject_joined_delete_lookup"
 				if err := db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
 					if tx.Statement.Table == "servers" {
-						tx.AddError(want)
+						_ = tx.AddError(want)
 					}
 				}); err != nil {
 					t.Fatal(err)
 				}
 				var once sync.Once
-				restoreLookup = func() { once.Do(func() { db.Callback().Query().Remove(callback) }) }
+				restoreLookup = func() {
+					once.Do(func() {
+						if err := db.Callback().Query().Remove(callback); err != nil {
+							t.Errorf("remove joined-delete query callback: %v", err)
+						}
+					})
+				}
 				defer restoreLookup()
 			}
 			svc.SetMonitoringProvider(monitor)
@@ -367,12 +373,16 @@ func TestConcurrentDeletePreservesServerWhenOwnerTransactionFails(t *testing.T) 
 			// perform only a nonlocking read and cannot steal the deletion.
 			close(ownerDeleting)
 			<-releaseOwner
-			tx.AddError(ownerFailure)
+			_ = tx.AddError(ownerFailure)
 		}
 	}); err != nil {
 		t.Fatal(err)
 	}
-	defer db.Callback().Delete().Remove(callback)
+	defer func() {
+		if err := db.Callback().Delete().Remove(callback); err != nil {
+			t.Errorf("remove failed-owner delete callback: %v", err)
+		}
+	}()
 	ownerDone := make(chan error, 1)
 	go func() { ownerDone <- svc.Delete(ctx, srv.ID) }()
 	select {
