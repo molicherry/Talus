@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
 	"time"
 
 	"github.com/vpsmanager/backend/internal/agentwire"
@@ -156,12 +157,70 @@ func (r *AgentNodeRepo) Ingest(ctx context.Context, node model.AgentNode, sample
 	return ack, nil
 }
 
-// SetInstallLayout records the account that installed the resident agent so a
-// later deletion can clean the right layout after a credential switch.
+// TrackInstallLayout durably records every account an installation may touch
+// before remote files change. It leaves the last completed installation intact
+// so an interrupted migration can retire both the old and attempted layouts.
+func (r *AgentNodeRepo) TrackInstallLayout(ctx context.Context, n model.AgentNode, uid int, home string) error {
+	return r.TrackInstallLayouts(ctx, n, []model.AgentInstallLayout{{UID: uid, Home: home}})
+}
+
+// TrackInstallLayouts records a discovered set together: a failed write must
+// not publish a partial discovery that hides the remaining legacy locations.
+func (r *AgentNodeRepo) TrackInstallLayouts(ctx context.Context, n model.AgentNode, targets []model.AgentInstallLayout) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.AgentNode
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("server_id = ? AND token_hash = ?", n.ServerID, n.TokenHash).
+			Take(&current).Error; err != nil {
+			return err
+		}
+		layouts := make([]model.AgentInstallLayout, 0, len(current.PendingInstallLayouts)+len(targets)+1)
+		seen := make(map[model.AgentInstallLayout]bool, cap(layouts))
+		add := func(layout model.AgentInstallLayout) {
+			layout.Home = path.Clean(layout.Home)
+			if !seen[layout] {
+				layouts = append(layouts, layout)
+				seen[layout] = true
+			}
+		}
+		if current.InstallUID != nil && current.InstallHome != nil {
+			add(model.AgentInstallLayout{UID: *current.InstallUID, Home: *current.InstallHome})
+		}
+		for _, layout := range current.PendingInstallLayouts {
+			add(layout)
+		}
+		for _, layout := range targets {
+			add(layout)
+		}
+		result := tx.Model(&model.AgentNode{}).
+			Where("server_id = ? AND token_hash = ?", n.ServerID, n.TokenHash).
+			Select("PendingInstallLayouts").
+			Updates(&model.AgentNode{PendingInstallLayouts: layouts})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+}
+
+// SetInstallLayout finalizes a successful installation and retirement together.
+// A stale installation cannot overwrite a replacement credential's layout.
 func (r *AgentNodeRepo) SetInstallLayout(ctx context.Context, n model.AgentNode, uid int, home string) error {
-	return r.db.WithContext(ctx).Model(&model.AgentNode{}).
+	home = path.Clean(home)
+	result := r.db.WithContext(ctx).Model(&model.AgentNode{}).
 		Where("server_id = ? AND token_hash = ?", n.ServerID, n.TokenHash).
-		Updates(map[string]any{"install_uid": uid, "install_home": home}).Error
+		Select("InstallUID", "InstallHome", "PendingInstallLayouts").
+		Updates(&model.AgentNode{InstallUID: &uid, InstallHome: &home})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 // Get returns the resident credential record for a server.

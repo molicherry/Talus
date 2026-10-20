@@ -148,6 +148,51 @@ func TestResidentUninstallScriptRemovesUnitAndState(t *testing.T) {
 	}
 }
 
+// Migration must retain the old installation when its manager cannot stop it;
+// swallowing this failure would discard the only durable cleanup location.
+func TestResidentRetirementRequiresConfirmedServiceStop(t *testing.T) {
+	for _, status := range []struct {
+		name    string
+		code    string
+		stopped bool
+	}{
+		{"still-active", "0", false},
+		{"manager-unavailable", "1", false},
+		{"already-inactive", "3", true},
+		{"unit-already-absent", "4", true},
+		{"helper-missing", "127", false},
+	} {
+		t.Run(status.name, func(t *testing.T) {
+			dir := t.TempDir()
+			base, unit := filepath.Join(dir, "state"), filepath.Join(dir, "agent.service")
+			if err := os.Mkdir(base, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(unit, []byte("old unit"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			ctl := filepath.Join(dir, "systemctl")
+			body := "#!/bin/sh\ncase \"$1\" in disable) exit 1 ;; is-active) exit " + status.code + " ;; esac\nexit 0\n"
+			if err := os.WriteFile(ctl, []byte(body), 0700); err != nil {
+				t.Fatal(err)
+			}
+			script := residentRemovalScript(testUninstallLayout(base, unit, ctl), "agent.service", "", true, true)
+			if out, err := exec.Command("sh", "-c", script).CombinedOutput(); (err == nil) != status.stopped {
+				t.Fatalf("retirement with manager status %s: %v %s", status.code, err, out)
+			}
+			for _, file := range []string{base, unit} {
+				_, err := os.Stat(file)
+				if status.stopped && !os.IsNotExist(err) {
+					t.Fatalf("stopped installation retained %s: %v", file, err)
+				}
+				if !status.stopped && err != nil {
+					t.Fatalf("failed retirement removed %s: %v", file, err)
+				}
+			}
+		})
+	}
+}
+
 // A cancelled SSH command can keep rolling back remotely after its local
 // installer has returned. The remote lock must cover that entire rollback,
 // otherwise a concurrent uninstall can be followed by a late service restart.
@@ -334,7 +379,8 @@ func TestResidentInstallNeededRetriesUnreadyDeployments(t *testing.T) {
 	now := time.Now()
 	fresh := now.Add(-5 * time.Second)
 	stale := now.Add(-5 * time.Minute)
-	base := model.AgentNode{Deployment: "ready", InstalledHash: "h", ConfigHash: "c"}
+	uid, home := 1000, "/home/agent"
+	base := model.AgentNode{Deployment: "ready", InstalledHash: "h", ConfigHash: "c", InstallUID: &uid, InstallHome: &home}
 	for _, tc := range []struct {
 		name string
 		node model.AgentNode
@@ -342,6 +388,8 @@ func TestResidentInstallNeededRetriesUnreadyDeployments(t *testing.T) {
 		want bool
 	}{
 		{"ready and fresh", base, fresh, false},
+		{"legacy ready without layout", model.AgentNode{Deployment: "ready", InstalledHash: "h", ConfigHash: "c"}, fresh, true},
+		{"unfinished migration", model.AgentNode{Deployment: "ready", InstalledHash: "h", ConfigHash: "c", InstallUID: &uid, InstallHome: &home, PendingInstallLayouts: []model.AgentInstallLayout{{UID: 0, Home: "/root"}}}, fresh, true},
 		{"ready but stale", base, stale, true},
 		{"failed with matching hashes", model.AgentNode{Deployment: "failed", InstalledHash: "h", ConfigHash: "c"}, fresh, true},
 		{"installing with matching hashes", model.AgentNode{Deployment: "installing", InstalledHash: "h", ConfigHash: "c"}, fresh, true},

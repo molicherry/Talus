@@ -207,10 +207,9 @@ func TestServerDeleteCancellationDuringPreparationPreservesAgent(t *testing.T) {
 	}
 }
 
-// A deletion that only joined an in-flight removal commits the row but must not
-// invalidate the pool or repeat the cleanup: the owner's uninstall is still on
-// that pinned connection, and dropping it would leave the agent installed.
-func TestServerDeleteJoinedRemovalKeepsOwnerConnectionAlive(t *testing.T) {
+// A joining request that timed out before the owner committed must preserve the
+// live server and its agent. The owner may still fail or roll back its deletion.
+func TestServerDeleteJoinedRemovalRejectsLiveServer(t *testing.T) {
 	svc, repo, db, ctx, pool := connectionServiceFixture(t)
 	srv, err := svc.Create(ctx, &model.Server{Name: "joined", Host: "target.example", Port: 22, OwnerID: mw.GetUserClaims(ctx).UserID})
 	if err != nil {
@@ -225,11 +224,9 @@ func TestServerDeleteJoinedRemovalKeepsOwnerConnectionAlive(t *testing.T) {
 	svc.SetMonitoringProvider(monitor)
 	svc.SetTopologyNotifier(monitor)
 
-	if err := svc.Delete(ctx, srv.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.FindByID(ctx, srv.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
-		t.Fatalf("joined deletion did not commit the row: %v", err)
+	expectConnectionReason(t, svc.Delete(ctx, srv.ID), server.ReasonConflict)
+	if _, err := repo.FindByID(ctx, srv.ID); err != nil {
+		t.Fatalf("joined deletion changed the live server: %v", err)
 	}
 	if len(pool.ids) != 0 {
 		t.Fatalf("joined deletion invalidated the owner's connection: %v", pool.ids)
@@ -240,20 +237,201 @@ func TestServerDeleteJoinedRemovalKeepsOwnerConnectionAlive(t *testing.T) {
 	if _, err := agents.Get(ctx, srv.ID); err != nil {
 		t.Fatalf("joined deletion removed the credential the owner still needs: %v", err)
 	}
+	if len(monitor.disconnected) != 0 || monitor.notifications != 0 {
+		t.Fatalf("joined deletion changed the owner's lifecycle: disconnects=%v notifications=%d", monitor.disconnected, monitor.notifications)
+	}
+}
+
+func TestServerDeleteJoinedRemovalReturnsLookupFailure(t *testing.T) {
+	for _, canceled := range []bool{false, true} {
+		name := "query-error"
+		if canceled {
+			name = "request-canceled"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc, repo, db, ctx, pool := connectionServiceFixture(t)
+			srv, err := svc.Create(ctx, &model.Server{Name: "preserved", Host: "target.example", Port: 22, OwnerID: mw.GetUserClaims(ctx).UserID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			requestCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			monitor := &serverDeleteMonitor{joined: true}
+			want := errors.New("simulated server lookup failure")
+			restoreLookup := func() {}
+			if canceled {
+				want = context.Canceled
+				monitor.onPrepare = func(context.Context, uint) { cancel() }
+			} else {
+				callback := "reject_joined_delete_lookup"
+				if err := db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
+					if tx.Statement.Table == "servers" {
+						tx.AddError(want)
+					}
+				}); err != nil {
+					t.Fatal(err)
+				}
+				var once sync.Once
+				restoreLookup = func() { once.Do(func() { db.Callback().Query().Remove(callback) }) }
+				defer restoreLookup()
+			}
+			svc.SetMonitoringProvider(monitor)
+			if err := svc.Delete(requestCtx, srv.ID); !errors.Is(err, want) {
+				t.Fatalf("joined deletion error = %v, want %v", err, want)
+			}
+			if len(pool.ids) != 0 || strings.Join(monitor.events, ",") != "prepare,close" {
+				t.Fatalf("failed lookup changed deletion lifecycle: events=%v invalidations=%v", monitor.events, pool.ids)
+			}
+			restoreLookup()
+			if _, err := repo.FindByID(ctx, srv.ID); err != nil {
+				t.Fatalf("failed lookup removed server: %v", err)
+			}
+		})
+	}
+}
+
+type failedOwnerDeleteMonitor struct {
+	*ResidentMonitor
+	prepares      atomic.Int32
+	removes       atomic.Int32
+	ownerPrepared chan struct{}
+}
+
+type countedOwnerRemoval struct {
+	preparedAgentRemoval
+	monitor *failedOwnerDeleteMonitor
+}
+
+func (r *countedOwnerRemoval) Remove(ctx context.Context) error {
+	r.monitor.removes.Add(1)
+	return r.preparedAgentRemoval.Remove(ctx)
+}
+
+func (m *failedOwnerDeleteMonitor) PrepareAgentRemoval(ctx context.Context, id uint) preparedAgentRemoval {
+	first := m.prepares.Add(1) == 1
+	removal := m.ResidentMonitor.PrepareAgentRemoval(ctx, id)
+	if first {
+		close(m.ownerPrepared)
+		// Leave enough of the preparation budget for the owner to enter its
+		// transaction before the other request exhausts its fence wait.
+		select {
+		case <-time.After(100 * time.Millisecond):
+		case <-ctx.Done():
+		}
+	}
+	return &countedOwnerRemoval{preparedAgentRemoval: removal, monitor: m}
+}
+
+func TestConcurrentDeletePreservesServerWhenOwnerTransactionFails(t *testing.T) {
+	svc, repo, db, ctx, invalidations := connectionServiceFixture(t)
+	srv, err := svc.Create(ctx, &model.Server{Name: "failed-owner", Host: "target.example", Port: 22, OwnerID: mw.GetUserClaims(ctx).UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, node := serverDeleteAgent(t, db, ctx, srv)
+	if err := agents.SetInstallLayout(ctx, node, 0, "/root"); err != nil {
+		t.Fatal(err)
+	}
+	var uninstalls atomic.Int32
+	address, hostKey := startExecSSHServer(t, func(command string, channel ssh.Channel, _ <-chan struct{}) {
+		if strings.HasPrefix(command, "id -u; ") {
+			_, _ = io.WriteString(channel, "0\n/root\n")
+		} else if strings.Contains(command, "disable --now") && strings.Contains(command, "rm -rf") {
+			uninstalls.Add(1)
+		} else {
+			t.Errorf("unexpected SSH command: %s", command)
+			exitStatus(channel, 1)
+			return
+		}
+		exitStatus(channel, 0)
+	})
+	pool := newTestPool(t)
+	seedPool(t, pool, srv.ID, dialTestSSH(t, address, hostKey))
+	sshSvc := NewSSHService(pool, staticServerSource{}, nil, time.Second, time.Second)
+	monitor := &failedOwnerDeleteMonitor{
+		ResidentMonitor: NewResidentMonitor(agents, repo, NewAgentDeploymentService(sshSvc, t.TempDir()), "", false, 5),
+		ownerPrepared:   make(chan struct{}),
+	}
+	svc.SetMonitoringProvider(monitor)
+	svc.SetDeletionBudgets(200*time.Millisecond, 2*time.Second, 2*time.Second)
+	ownerDeleting, releaseOwner := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblockOwner := func() { releaseOnce.Do(func() { close(releaseOwner) }) }
+	defer unblockOwner()
+	var failFirst atomic.Bool
+	ownerFailure := errors.New("simulated owner deletion transaction failure")
+	callback := "fail_owner_delete_after_join"
+	if err := db.Callback().Delete().Before("gorm:delete").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "servers" && failFirst.CompareAndSwap(false, true) {
+			// deleteServer holds the row lock here. The joining request must
+			// perform only a nonlocking read and cannot steal the deletion.
+			close(ownerDeleting)
+			<-releaseOwner
+			tx.AddError(ownerFailure)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Callback().Delete().Remove(callback)
+	ownerDone := make(chan error, 1)
+	go func() { ownerDone <- svc.Delete(ctx, srv.ID) }()
+	select {
+	case <-monitor.ownerPrepared:
+	case <-time.After(5 * time.Second):
+		t.Fatal("owner never prepared its cleanup")
+	}
+	joinedDone := make(chan error, 1)
+	go func() { joinedDone <- svc.Delete(ctx, srv.ID) }()
+	select {
+	case <-ownerDeleting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("owner never entered its deletion transaction")
+	}
+	select {
+	case err := <-joinedDone:
+		expectConnectionReason(t, err, server.ReasonConflict)
+	case <-time.After(5 * time.Second):
+		t.Fatal("joining deletion blocked on the owner's row lock")
+	}
+	unblockOwner()
+	if err := <-ownerDone; !errors.Is(err, ownerFailure) {
+		t.Fatalf("owner deletion error = %v, want %v", err, ownerFailure)
+	}
+	if _, err := repo.FindByID(ctx, srv.ID); err != nil {
+		t.Fatalf("failed owner and joining request deleted the server: %v", err)
+	}
+	if _, err := agents.Get(ctx, srv.ID); err != nil {
+		t.Fatalf("failed deletion removed the resident credential: %v", err)
+	}
+	if monitor.removes.Load() != 0 || uninstalls.Load() != 0 || len(invalidations.ids) != 0 {
+		t.Fatalf("failed deletion changed the agent: removals=%d uninstalls=%d invalidations=%v", monitor.removes.Load(), uninstalls.Load(), invalidations.ids)
+	}
+	// After the failed owner releases its fence, a fresh request must be able
+	// to own the cleanup and complete the deletion once.
+	if err := svc.Delete(ctx, srv.ID); err != nil {
+		t.Fatalf("retry after failed owner: %v", err)
+	}
+	if monitor.removes.Load() != 1 || uninstalls.Load() != 1 || len(invalidations.ids) != 1 {
+		t.Fatalf("retry did not clean exactly once: removals=%d uninstalls=%d invalidations=%v", monitor.removes.Load(), uninstalls.Load(), invalidations.ids)
+	}
+	if _, err := agents.Get(ctx, srv.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("retry left the resident credential behind: %v", err)
+	}
 }
 
 // Reproduces the concurrent-delete race: the second request joins the first's
-// fence, commits the row, and leaves the pool alone while the owner's uninstall
-// runs. Before the fix the second invalidation killed the owner's pinned
-// connection, so the uninstall script never ran even though both calls returned
-// success.
+// fence, observes the committed deletion, and leaves the pool alone while the
+// owner's uninstall runs. Both calls may succeed once the row is committed.
 func TestConcurrentDeletesRunUninstallOnceAndKeepOwnerConnection(t *testing.T) {
 	svc, repo, db, ctx, invalidations := connectionServiceFixture(t)
 	srv, err := svc.Create(ctx, &model.Server{Name: "race", Host: "target.example", Port: 22, OwnerID: mw.GetUserClaims(ctx).UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agents, _ := serverDeleteAgent(t, db, ctx, srv)
+	agents, node := serverDeleteAgent(t, db, ctx, srv)
+	if err := agents.SetInstallLayout(ctx, node, 0, "/root"); err != nil {
+		t.Fatal(err)
+	}
 
 	uninstallStarted := make(chan struct{})
 	release := make(chan struct{})
@@ -262,11 +440,15 @@ func TestConcurrentDeletesRunUninstallOnceAndKeepOwnerConnection(t *testing.T) {
 	address, hostKey := startExecSSHServer(t, func(command string, channel ssh.Channel, _ <-chan struct{}) {
 		if strings.HasPrefix(command, "id -u; ") {
 			_, _ = io.WriteString(channel, "0\n/root\n")
-		} else {
+		} else if strings.Contains(command, "disable --now") && strings.Contains(command, "rm -rf") {
 			uninstalls.Add(1)
 			started.Do(func() { close(uninstallStarted) })
 			<-release
 			_, _ = io.WriteString(channel, "ok\n")
+		} else {
+			t.Errorf("unexpected SSH command: %s", command)
+			exitStatus(channel, 1)
+			return
 		}
 		_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
 		_ = channel.Close()

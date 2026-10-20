@@ -501,10 +501,10 @@ func deletionPhaseBudget(value, fallback time.Duration) time.Duration {
 // Delete commits the server deletion before best-effort agent cleanup. Prepare
 // pins the live route first; pool invalidation waits until that cleanup ends.
 //
-// A concurrent deletion joins the removal fence instead of racing it. The join
-// still commits the database deletion, but it must neither repeat the remote
-// cleanup nor invalidate the pool: the owner is using its pinned connection to
-// uninstall, and dropping that connection would leave the agent installed.
+// A concurrent deletion must not commit without owning the removal fence. If
+// the owner already committed, the repeated deletion is an idempotent success;
+// otherwise it returns a conflict so a failed owner cannot leave a server
+// deleted without anyone responsible for uninstalling its agent.
 func (s *ServerService) Delete(ctx context.Context, id uint) error {
 	prepareCtx, cancel := context.WithTimeout(ctx, deletionPhaseBudget(s.deletePrepareBudget, agentRemovalPrepareBudget))
 	defer cancel()
@@ -528,6 +528,17 @@ func (s *ServerService) Delete(ctx context.Context, id uint) error {
 		}
 	}
 	deleteCtx, cancelDelete := context.WithTimeout(ctx, deletionPhaseBudget(s.deleteCommitBudget, serverDeleteBudget))
+	if !ownsCleanup {
+		_, err := s.repo.FindByID(deleteCtx, id)
+		cancelDelete()
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return server.ErrConflict
+	}
 	err := s.deleteServer(deleteCtx, id)
 	cancelDelete()
 	if err != nil {

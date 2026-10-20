@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -244,6 +245,29 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 	if result == nil || result.ExitCode != 0 {
 		return deployError("service_manager_unavailable", errors.New("systemd service permissions and user lingering are required"))
 	}
+	previous := knownInstallLayouts(n)
+	if len(previous) == 0 {
+		previous, err = discoverInstallLayouts(ctx, n, lease)
+		if err != nil {
+			return err
+		}
+	}
+	for _, old := range previous {
+		if old.UID != layout.UID && old.Base == layout.Base && old.UnitDir == layout.UnitDir {
+			return errors.New("different agent accounts share the same installation directory")
+		}
+	}
+	// Persist every location before touching the remote filesystem. A failed
+	// activation, retirement, or final database write must leave enough evidence
+	// for both a retry and deletion to clean all installations.
+	pending := make([]model.AgentInstallLayout, 0, len(previous)+1)
+	for _, old := range previous {
+		pending = append(pending, model.AgentInstallLayout{UID: old.UID, Home: old.Home})
+	}
+	pending = append(pending, model.AgentInstallLayout{UID: layout.UID, Home: layout.Home})
+	if err := m.repo.TrackInstallLayouts(ctx, n, pending); err != nil {
+		return err
+	}
 	setup := "test ! -L " + shellQuote(base) + " && mkdir -p " + shellQuote(base) + " " + shellQuote(unitDir) + " && chmod 0700 " + shellQuote(base) + " && rm -f " + shellQuote(base) + "/.next-*"
 	if result, err = lease.Exec(ctx, setup, 5*time.Second); err != nil {
 		return err
@@ -326,18 +350,23 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 	// the layout the previous account still runs so two agents cannot report
 	// for one server, then record where this install landed: deletion must clean
 	// this account's unit and state even after a later credential switch.
-	if previous, ok := recordedLayout(n); ok && previous.Base != layout.Base {
-		retireCtx, cancelRetire := context.WithTimeout(ctx, 30*time.Second)
-		if err := m.uninstall(retireCtx, nodeForLayout(n.InstallID, previous), lease); err != nil {
-			slog.Warn("retiring previous agent layout failed", "server_id", n.ServerID, "reason", deployFailureReason(err))
+	for _, old := range previous {
+		if sameInstallLayout(old, layout) {
+			continue
 		}
+		retireCtx, cancelRetire := context.WithTimeout(ctx, 30*time.Second)
+		err := m.uninstallLayout(retireCtx, n.InstallID, old, lease, true)
 		cancelRetire()
+		if err != nil {
+			return err
+		}
 	}
 	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-	if err := m.repo.SetInstallLayout(storeCtx, n, uid, lines[1]); err != nil {
-		slog.Warn("recording agent install layout failed", "server_id", n.ServerID, "error", err)
-	}
+	err = m.repo.SetInstallLayout(storeCtx, n, uid, layout.Home)
 	cancel()
+	if err != nil {
+		return err
+	}
 	return lease.releaseAndWait()
 }
 
@@ -359,7 +388,8 @@ func residentActivationScript(binary, config, unit, unitName, next, ctl string, 
 // contact is skipped, so a failed or interrupted attempt is retried instead of
 // staying frozen in the failed state.
 func residentInstallNeeded(n model.AgentNode, desired, config string, lastContact, now time.Time) bool {
-	if n.Deployment == "ready" && n.InstalledHash == desired && n.ConfigHash == config && now.Sub(lastContact) < 90*time.Second {
+	_, recorded := recordedLayout(n)
+	if recorded && len(n.PendingInstallLayouts) == 0 && n.Deployment == "ready" && n.InstalledHash == desired && n.ConfigHash == config && now.Sub(lastContact) < 90*time.Second {
 		return false
 	}
 	return true
@@ -522,6 +552,7 @@ type agentLayout struct {
 }
 
 func agentLayoutFor(installID string, uid int, home string) agentLayout {
+	home = path.Clean(home)
 	if uid == 0 {
 		return agentLayout{UID: 0, Home: home, Base: "/var/lib/talus-agent/" + installID, UnitDir: "/etc/systemd/system"}
 	}
@@ -564,9 +595,7 @@ func nodeForLayout(installID string, l agentLayout) model.AgentNode {
 	return model.AgentNode{InstallID: installID, InstallUID: &uid, InstallHome: &home}
 }
 
-// recordedLayout reports the layout of the account that installed the agent.
-// Rows created before layouts were recorded carry no values, so deletion falls
-// back to probing the login it is using.
+// recordedLayout reports the layout of the last completed installation.
 func recordedLayout(n model.AgentNode) (agentLayout, bool) {
 	if n.InstallUID == nil || n.InstallHome == nil || *n.InstallUID < 0 || !validInstallHome(*n.InstallHome) {
 		return agentLayout{}, false
@@ -574,42 +603,79 @@ func recordedLayout(n model.AgentNode) (agentLayout, bool) {
 	return agentLayoutFor(n.InstallID, *n.InstallUID, *n.InstallHome), true
 }
 
+func sameInstallLayout(a, b agentLayout) bool {
+	return a.UID == b.UID && a.Base == b.Base && a.UnitDir == b.UnitDir
+}
+
+// knownInstallLayouts includes unfinished migrations, including a new service
+// activated before retirement or the final metadata write failed.
+func knownInstallLayouts(n model.AgentNode) []agentLayout {
+	var layouts []agentLayout
+	if current, ok := recordedLayout(n); ok {
+		layouts = append(layouts, current)
+	}
+	for _, pending := range n.PendingInstallLayouts {
+		if pending.UID < 0 || !validInstallHome(pending.Home) {
+			continue
+		}
+		layout := agentLayoutFor(n.InstallID, pending.UID, pending.Home)
+		duplicate := false
+		for _, existing := range layouts {
+			if sameInstallLayout(existing, layout) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			layouts = append(layouts, layout)
+		}
+	}
+	return layouts
+}
+
 // uninstall stops the unit and removes the installation directory. The layout
 // follows the account that installed the agent, not the account the current
 // credential logs in as: switching the credential to another user must not
 // leave the original account's unit and state behind.
 func (m *ResidentMonitor) uninstall(ctx context.Context, n model.AgentNode, lease *sshLease) error {
+	layouts := knownInstallLayouts(n)
+	if len(layouts) == 0 {
+		var err error
+		layouts, err = discoverInstallLayouts(ctx, n, lease)
+		if err != nil {
+			return err
+		}
+	}
+	var failures []error
+	for _, layout := range layouts {
+		if err := m.uninstallLayout(ctx, n.InstallID, layout, lease, false); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func (m *ResidentMonitor) uninstallLayout(ctx context.Context, installID string, layout agentLayout, lease *sshLease, strict bool) error {
 	probe := `id -u; printf '%s\n' "$HOME"`
-	if n.InstallUID != nil {
+	if layout.UID != 0 {
 		// Resolve the owner's name so a cross-account stop can reach that
 		// account's service manager; an unknown uid is not an error here.
-		probe += "; id -un " + strconv.Itoa(*n.InstallUID) + " 2>/dev/null || true"
+		probe += "; id -un " + strconv.Itoa(layout.UID) + " 2>/dev/null || true"
 	}
-	currentUID, currentHome, owner := -1, "", ""
+	currentUID, owner := -1, ""
 	if result, probeErr := lease.Exec(ctx, probe, 5*time.Second); probeErr == nil && result != nil && result.ExitCode == 0 {
 		lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
 		if len(lines) >= 2 {
 			if uid, convErr := strconv.Atoi(lines[0]); convErr == nil {
 				currentUID = uid
 			}
-			currentHome = lines[1]
 		}
 		if len(lines) >= 3 {
 			owner = strings.TrimSpace(lines[2])
 		}
 	}
-	layout, recorded := recordedLayout(n)
-	if !recorded {
-		if currentUID >= 0 && validInstallHome(currentHome) {
-			layout = agentLayoutFor(n.InstallID, currentUID, currentHome)
-		} else {
-			layout = agentLayoutFor(n.InstallID, 0, "/root")
-		}
-	}
 	// A user unit is only reachable through its owner's service manager. Root
-	// can switch to that account; any other login cannot, so it removes the
-	// files without touching an unrelated manager. An unknown login (probe
-	// failed) must not guess: only a root layout is safe to address directly.
+	// can switch to that account; any other login cannot use its manager.
 	runAs, manage := "", true
 	switch {
 	case currentUID < 0:
@@ -620,8 +686,11 @@ func (m *ResidentMonitor) uninstall(ctx context.Context, n model.AgentNode, leas
 	default:
 		manage = false
 	}
-	unitName := "talus-agent-" + n.InstallID + ".service"
-	result, err := lease.Exec(ctx, residentUninstallScript(layout, unitName, runAs, manage), 30*time.Second)
+	if strict && !manage {
+		return errors.New("cannot stop previous agent account's service")
+	}
+	unitName := "talus-agent-" + installID + ".service"
+	result, err := lease.Exec(ctx, residentRemovalScript(layout, unitName, runAs, manage, strict), 30*time.Second)
 	if err != nil {
 		return err
 	}
@@ -648,6 +717,10 @@ func (m *ResidentMonitor) uninstall(ctx context.Context, n model.AgentNode, leas
 // skips service-manager calls when that account cannot be reached; the unit and
 // state files are still removed.
 func residentUninstallScript(l agentLayout, unitName, runAs string, manage bool) string {
+	return residentRemovalScript(l, unitName, runAs, manage, false)
+}
+
+func residentRemovalScript(l agentLayout, unitName, runAs string, manage, strict bool) string {
 	q := shellQuote
 	unit := l.UnitDir + "/" + unitName
 	lock := q(unit + ".lock")
@@ -663,9 +736,19 @@ func residentUninstallScript(l agentLayout, unitName, runAs string, manage bool)
 	if runAs != "" {
 		ctl = "runuser -u " + q(runAs) + " -- env XDG_RUNTIME_DIR=" + q("/run/user/"+strconv.Itoa(l.UID)) + " " + ctl
 	}
-	return script +
-		ctl + " disable --now " + q(unitName) + " >/dev/null 2>&1 || true\n" +
+	stop := ctl + " disable --now " + q(unitName) + " >/dev/null 2>&1 || true\n"
+	ignoreFailure := " || true"
+	if strict {
+		ignoreFailure = ""
+		// A previously retired unit may already be absent on a retry. Accept a
+		// failed disable only if its manager explicitly confirms it is inactive
+		// (3) or unknown (4), never when the manager itself cannot be reached.
+		stop = "if " + ctl + " disable --now " + q(unitName) + " >/dev/null 2>&1; then :; else\n" +
+			"  stop_state=0; " + ctl + " is-active --quiet " + q(unitName) + " >/dev/null 2>&1 || stop_state=$?\n" +
+			"  case \"$stop_state\" in 3|4) ;; *) exit 1 ;; esac\nfi\n"
+	}
+	return script + stop +
 		removeUnit +
-		ctl + " daemon-reload >/dev/null 2>&1 || true\n" +
+		ctl + " daemon-reload >/dev/null 2>&1" + ignoreFailure + "\n" +
 		"rm -rf " + q(l.Base) + "\n"
 }
