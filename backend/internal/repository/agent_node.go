@@ -39,6 +39,13 @@ func AgentTarget(s model.Server) string {
 func (r *AgentNodeRepo) Ensure(ctx context.Context, s model.Server) (model.AgentNode, error) {
 	var n model.AgentNode
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// FindAll may have been read before a deletion. Lock and reread the live
+		// server so an old scheduler snapshot cannot recreate its credential.
+		var current model.Server
+		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).First(&current, s.ID).Error; err != nil {
+			return err
+		}
+		s = current
 		if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", int64(s.ID)+7300000000).Error; err != nil {
 			return err
 		}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
@@ -400,11 +399,16 @@ func (s *ServerService) SetFreshnessThreshold(d time.Duration) {
 // topologyNotifier is implemented by the monitor scheduler.
 type topologyNotifier interface{ NotifyTopologyChange() }
 
-// agentRemover is implemented by the resident monitor. Deletion uninstalls the
-// node's agent before the server record disappears, so the credential is
-// revoked and the remote unit is stopped instead of being left behind.
+// preparedAgentRemoval holds the installation fence and a pinned SSH lease.
+// Remove may only run after the server deletion commits; Close also handles
+// the rejected-delete path without changing the remote agent or its credential.
+type preparedAgentRemoval interface {
+	Remove(context.Context) error
+	Close()
+}
+
 type agentRemover interface {
-	RemoveAgent(context.Context, uint) error
+	PrepareAgentRemoval(context.Context, uint) preparedAgentRemoval
 }
 
 // SetTopologyNotifier wires the monitor so node create/delete is observed
@@ -455,28 +459,44 @@ func resolveCredentialBinding(current, input *uint, clear bool) *uint {
 	return current
 }
 
-// Delete soft-deletes a server by id. The resident agent is uninstalled first
-// (best effort, bounded) so a deleted node cannot keep reporting forever.
+// Delete commits the server deletion before best-effort agent cleanup. Prepare
+// pins the live route first; pool invalidation waits until that cleanup ends.
 func (s *ServerService) Delete(ctx context.Context, id uint) error {
-	// A jump server still in use is rejected by deleteServer; checking first
-	// keeps a refused delete from uninstalling an agent that must stay.
-	if deps, err := s.repo.FindJumpDependentIDs(ctx, id); err == nil && len(deps) > 0 {
-		return server.NewAppError(http.StatusConflict, server.ReasonConnectionInUse)
-	}
-	if remover, ok := s.monitoring.(agentRemover); ok {
-		removeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		if err := remover.RemoveAgent(removeCtx, id); err != nil {
-			// Log the stable reason class only: SSH error strings can carry
-			// credential material and CodeQL flags them as a sensitive sink.
-			slog.Warn("resident agent removal failed", "server_id", id, "reason", deployFailureReason(err))
+	deadline := time.Now().Add(20 * time.Second)
+	prepareCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	var removal preparedAgentRemoval
+	deleted := false
+	defer func() {
+		if removal != nil {
+			removal.Close()
 		}
-		cancel()
+		if deleted {
+			s.invalidate(id)
+		}
+	}()
+	if remover, ok := s.monitoring.(agentRemover); ok {
+		removal = remover.PrepareAgentRemoval(prepareCtx, id)
 	}
-	if err := s.deleteServer(ctx, id); err != nil {
+	deleteCtx, cancelDelete := context.WithTimeout(ctx, 10*time.Second)
+	err := s.deleteServer(deleteCtx, id)
+	cancelDelete()
+	if err != nil {
 		return err
 	}
+	deleted = true
 	if p, ok := s.monitoring.(interface{ Disconnect(uint) }); ok {
 		p.Disconnect(id)
+	}
+	if removal != nil {
+		// A committed deletion must finish cleanup even if the browser leaves.
+		// Keep the original absolute budget rather than starting another 20s.
+		cleanupCtx, cancelCleanup := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+		if err := removal.Remove(cleanupCtx); err != nil {
+			// SSH error strings can carry credential material; log only the class.
+			slog.Warn("resident agent removal failed", "server_id", id, "reason", deployFailureReason(err))
+		}
+		cancelCleanup()
 	}
 	s.notifyTopology()
 	return nil

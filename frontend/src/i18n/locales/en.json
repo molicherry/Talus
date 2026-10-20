@@ -49,7 +49,7 @@
       "ssh_timeout": "Connecting to the node timed out. Check the network and retry.",
       "deployment_timeout": "Deployment timed out; it will be retried automatically.",
       "deployment_canceled": "Deployment was canceled; it will be retried automatically.",
-      "service_manager_unavailable": "A running systemd service manager is required. For user services, enable lingering for the SSH account.",
+      "service_manager_unavailable": "A running systemd service manager and flock are required. For user services, enable lingering for the SSH account.",
       "agent_health_check_failed": "The new agent could not contact the Hub. Check the Hub address and outbound access. A previous version is restored when available.",
       "agent_target_read_only": "The persistent installation directory is not writable.",
       "agent_target_noexec": "Execution is disabled in the installation directory.",

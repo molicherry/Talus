@@ -61,10 +61,12 @@ type ResidentMonitor struct {
 	// cancel a job before it races an uninstall.
 	installJobs   map[uint]residentJob
 	installJobsMu sync.Mutex
+	removing      map[uint]chan struct{}
+	installEpoch  uint64
 }
 
 func NewResidentMonitor(repo *repository.AgentNodeRepo, servers *repository.ServerRepo, deployer *AgentDeploymentService, url string, allowHTTP bool, interval int) *ResidentMonitor {
-	return &ResidentMonitor{store: repo, repo: repo, servers: servers, deployer: deployer, hubURL: url, allowHTTP: allowHTTP, interval: interval, nodes: map[uint]*residentRuntime{}, writeSlots: make(chan struct{}, 8), wake: make(chan struct{}, 1), now: time.Now, telemetry: newMonitorTelemetry(nil, nil), revoked: map[uint]time.Time{}, installJobs: map[uint]residentJob{}}
+	return &ResidentMonitor{store: repo, repo: repo, servers: servers, deployer: deployer, hubURL: url, allowHTTP: allowHTTP, interval: interval, nodes: map[uint]*residentRuntime{}, writeSlots: make(chan struct{}, 8), wake: make(chan struct{}, 1), now: time.Now, telemetry: newMonitorTelemetry(nil, nil), revoked: map[uint]time.Time{}, installJobs: map[uint]residentJob{}, removing: map[uint]chan struct{}{}}
 }
 
 func (m *ResidentMonitor) SetTelemetry(r *telemetry.Registry) {

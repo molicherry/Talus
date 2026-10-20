@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -72,6 +73,24 @@ func TestResidentCredentialsPersistRotateAndRevoke(t *testing.T) {
 	}
 	if _, e = r.Auth(ctx, secret); e == nil {
 		t.Fatal("deleted node authenticated")
+	}
+}
+
+func TestResidentEnsureRejectsDeletedServerSnapshot(t *testing.T) {
+	db, repo, srv, _, _ := agentRepoFixture(t)
+	ctx := context.Background()
+	if err := db.Delete(&srv).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Delete(ctx, srv.ID); err != nil {
+		t.Fatal(err)
+	}
+	// A reconciliation can still hold the FindAll result from before deletion.
+	if _, err := repo.Ensure(ctx, srv); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("stale server snapshot recreated a resident credential: %v", err)
+	}
+	if _, err := repo.Get(ctx, srv.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("resident credential survived stale reconciliation: %v", err)
 	}
 }
 

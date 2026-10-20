@@ -29,6 +29,14 @@ func TestWriteDeadlinePerRoute(t *testing.T) {
 	}{
 		{"exec", http.MethodPost, "/api/v1/servers/8/exec", ExecWriteBudget},
 		{"relay", http.MethodPost, "/api/v1/services/5/relay", RelayWriteBudget},
+		{"server-delete", http.MethodDelete, "/api/v1/servers/8", ServerDeleteWriteBudget},
+		{"server-delete-trailing-slash", http.MethodDelete, "/api/v1/servers/8/", ServerDeleteWriteBudget},
+		{"server-delete-query", http.MethodDelete, "/api/v1/servers/8?source=list", ServerDeleteWriteBudget},
+		{"server-get", http.MethodGet, "/api/v1/servers/8", DefaultWriteBudget},
+		{"server-delete-nested", http.MethodDelete, "/api/v1/servers/8/exec", DefaultWriteBudget},
+		{"sftp-delete", http.MethodDelete, "/api/v1/servers/8/sftp/entry", 35 * time.Second},
+		{"server-delete-missing-id", http.MethodDelete, "/api/v1/servers/", DefaultWriteBudget},
+		{"unrelated-delete", http.MethodDelete, "/api/v1/credentials/8", DefaultWriteBudget},
 		{"server-list", http.MethodGet, "/api/v1/servers", DefaultWriteBudget},
 		{"unrelated-post", http.MethodPost, "/api/v1/credentials", DefaultWriteBudget},
 	}
@@ -44,6 +52,21 @@ func TestWriteDeadlinePerRoute(t *testing.T) {
 			t.Fatalf("%s: budget ~%s, want ~%s", tc.name, got, tc.want)
 		}
 	}
+}
+
+// A slow uninstall can consume its full 20s budget, followed by a separate 5s
+// credential cleanup. The response deadline must still leave time for the
+// database commit and 204 response after those bounded operations complete.
+func TestServerDeleteDeadlineCoversResidentCleanup(t *testing.T) {
+	rec := &deadlineRecorder{ResponseWriter: httptest.NewRecorder()}
+	handler := WriteDeadline(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		cleanupFinishedAt := time.Now().Add(25 * time.Second)
+		if !rec.set || rec.deadline.Sub(cleanupFinishedAt) < 10*time.Second {
+			t.Fatalf("server deletion has insufficient response budget after cleanup: %s", rec.deadline.Sub(cleanupFinishedAt))
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/v1/servers/8", nil))
 }
 
 // TestWriteDeadlineToleratesUnsupportedWriter ensures a ResponseWriter without

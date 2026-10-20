@@ -22,6 +22,7 @@ import (
 type residentJob struct {
 	cancel context.CancelFunc
 	hash   string
+	done   chan struct{}
 }
 
 // Start reconciles desired installations, not sampling. A healthy resident agent
@@ -42,6 +43,9 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 	var lastCleanup time.Time
 	for ctx.Err() == nil {
 		if m.hubURL != "" {
+			m.installJobsMu.Lock()
+			epoch := m.installEpoch
+			m.installJobsMu.Unlock()
 			query, cancel := context.WithTimeout(ctx, 10*time.Second)
 			servers, err := m.servers.FindAll(query)
 			cancel()
@@ -49,6 +53,9 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 				live := make(map[uint]bool, len(servers))
 				for _, s := range servers {
 					live[s.ID] = true
+					if !m.installAllowed(s.ID, epoch) {
+						continue
+					}
 					query, cancel = context.WithTimeout(ctx, 5*time.Second)
 					n, err := m.repo.Ensure(query, s)
 					cancel()
@@ -103,9 +110,10 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 					}
 					m.installJobsMu.Lock()
 					_, busy := m.installJobs[s.ID]
-					if !busy && len(m.installJobs) < 4 {
+					if !busy && m.removing[s.ID] == nil && epoch == m.installEpoch && len(m.installJobs) < 4 {
 						jobCtx, stop := context.WithTimeout(ctx, 3*time.Minute)
-						m.installJobs[s.ID] = residentJob{stop, n.TokenHash}
+						done := make(chan struct{})
+						m.installJobs[s.ID] = residentJob{cancel: stop, hash: n.TokenHash, done: done}
 						wg.Add(1)
 						go func(n model.AgentNode) {
 							defer wg.Done()
@@ -113,6 +121,7 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 							defer func() {
 								m.installJobsMu.Lock()
 								delete(m.installJobs, n.ServerID)
+								close(done)
 								m.installJobsMu.Unlock()
 								m.NotifyTopologyChange()
 							}()
@@ -206,12 +215,12 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 	if err != nil {
 		return err
 	}
-	result, err := lease.Exec(ctx, `id -u; printf '%s\n' "$HOME"; command -v systemctl`, 5*time.Second)
+	result, err := lease.Exec(ctx, `id -u; printf '%s\n' "$HOME"; command -v systemctl; command -v flock >/dev/null`, 5*time.Second)
 	if err != nil {
 		return err
 	}
 	if result == nil || result.ExitCode != 0 {
-		return deployError("service_manager_unavailable", errors.New("systemd is required for resident agent installation"))
+		return deployError("service_manager_unavailable", errors.New("systemd and flock are required for resident agent installation"))
 	}
 	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
 	if len(lines) != 3 || !strings.HasPrefix(lines[1], "/") || len(lines[1]) > 512 || strings.ContainsAny(lines[1], "\r\n\x00") {
@@ -321,6 +330,9 @@ func residentActivationScript(binary, config, unit, unitName, next, ctl string, 
 	q := shellQuote
 	return "set -eu\nhad_previous=0\nactivated=0\n" +
 		"finish() { rc=$?; set +e; trap - EXIT; if test \"$rc\" != 0 && test \"$activated\" = 1; then " + ctl + " stop " + q(unitName) + " || true; if test \"$had_previous\" = 1; then mv -f " + q(binary+".previous") + " " + q(binary) + "; mv -f " + q(config+".previous") + " " + q(config) + "; if test -f " + q(unit+".previous") + "; then mv -f " + q(unit+".previous") + " " + q(unit) + "; fi; " + ctl + " daemon-reload || true; " + ctl + " restart " + q(unitName) + " || true; fi; fi; rm -f " + q(next) + " " + q(next+".config") + " " + q(next+".unit") + "; exit \"$rc\"; }; trap finish EXIT; trap 'exit 1' HUP INT TERM\n" +
+		// Keep the same lock through EXIT rollback. The unit directory survives
+		// removal of the installation, so later commands cannot lock a new inode.
+		"exec 9> " + q(unit+".lock") + "\nflock -w 10 9\n" +
 		"if test -f " + q(binary) + " && test -f " + q(config) + "; then cp -p " + q(binary) + " " + q(binary+".previous") + "; cp -p " + q(config) + " " + q(config+".previous") + "; if test -f " + q(unit) + "; then cp -p " + q(unit) + " " + q(unit+".previous") + "; fi; had_previous=1; fi\n" +
 		"chmod 0700 " + q(next) + "\nactivated=1\nmv -f " + q(next) + " " + q(binary) + "\nmv -f " + q(next+".config") + " " + q(config) + "\nmv -f " + q(next+".unit") + " " + q(unit) + "\nrm -f " + q(filepath.Join(filepath.Dir(binary), "outbox", "health.json")) + "\n" +
 		ctl + " daemon-reload\n" + ctl + " enable " + q(unitName) + "\n" + ctl + " restart " + q(unitName) + "\n" +
@@ -357,49 +369,120 @@ func deployFailureReason(err error) string {
 	return "deployment_failed"
 }
 
-// RemoveAgent uninstalls the resident agent from a server that is about to be
-// deleted and drops its credential record. Removal is best effort -- the host
-// may already be gone -- but the record is always dropped so a revoked
-// credential cannot be resurrected by a later topology change.
-func (m *ResidentMonitor) RemoveAgent(ctx context.Context, id uint) error {
-	n, err := m.repo.Get(ctx, id)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
+// installAllowed rejects both an active removal and a reconciliation snapshot
+// taken before a removal began or finished. The final admission check uses the
+// same mutex, so a prepared deletion cannot race a newly admitted installer.
+func (m *ResidentMonitor) installAllowed(id uint, epoch uint64) bool {
+	m.installJobsMu.Lock()
+	defer m.installJobsMu.Unlock()
+	return m.removing[id] == nil && m.installEpoch == epoch
+}
+
+func (m *ResidentMonitor) fenceRemoval(ctx context.Context, id uint) (func(), <-chan struct{}, error) {
+	for {
+		m.installJobsMu.Lock()
+		if pending := m.removing[id]; pending != nil {
+			m.installJobsMu.Unlock()
+			select {
+			case <-pending:
+				continue
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			}
 		}
-		return err
+		if err := ctx.Err(); err != nil {
+			m.installJobsMu.Unlock()
+			return nil, nil, err
+		}
+		pending := make(chan struct{})
+		m.removing[id] = pending
+		m.installEpoch++
+		job, busy := m.installJobs[id]
+		m.installJobsMu.Unlock()
+		if busy {
+			job.cancel()
+		}
+		var once sync.Once
+		finish := func() {
+			once.Do(func() {
+				m.installJobsMu.Lock()
+				delete(m.removing, id)
+				m.installEpoch++
+				close(pending)
+				m.installJobsMu.Unlock()
+				m.NotifyTopologyChange()
+			})
+		}
+		return finish, job.done, nil
 	}
-	m.cancelInstall(id)
-	var removeErr error
-	if m.deployer != nil && m.hubURL != "" {
-		removeErr = m.uninstall(ctx, n)
+}
+
+type residentRemoval struct {
+	monitor *ResidentMonitor
+	id      uint
+	node    model.AgentNode
+	lease   *sshLease
+	err     error
+	finish  func()
+	once    sync.Once
+}
+
+// PrepareAgentRemoval fences and joins local installers, then pins a connection
+// while the server and its route are still live. It performs no remote removal
+// or credential deletion: Remove is called only after the server transaction
+// commits. A preparation error is retained so an unreachable host does not
+// prevent deletion, and Close always releases the fence on a rejected delete.
+func (m *ResidentMonitor) PrepareAgentRemoval(ctx context.Context, id uint) preparedAgentRemoval {
+	r := &residentRemoval{monitor: m, id: id}
+	var done <-chan struct{}
+	r.finish, done, r.err = m.fenceRemoval(ctx, id)
+	if r.err != nil {
+		return r
+	}
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			r.err = ctx.Err()
+			return r
+		}
+	}
+	r.node, r.err = m.repo.Get(ctx, id)
+	if errors.Is(r.err, gorm.ErrRecordNotFound) {
+		r.err = nil
+		return r
+	}
+	if r.err == nil && m.deployer != nil && m.hubURL != "" {
+		r.lease, r.err = m.deployer.ssh.AcquireLease(ctx, id, LeaseConsumerAgent)
+	}
+	return r
+}
+
+func (r *residentRemoval) Remove(ctx context.Context) error {
+	err := r.err
+	if err == nil && r.lease != nil {
+		err = r.monitor.uninstall(ctx, r.node, r.lease)
 	}
 	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := m.repo.Delete(storeCtx, id); err != nil && removeErr == nil {
-		removeErr = err
-	}
-	return removeErr
+	return errors.Join(err, r.monitor.repo.Delete(storeCtx, r.id))
 }
 
-func (m *ResidentMonitor) cancelInstall(id uint) {
-	m.installJobsMu.Lock()
-	job, ok := m.installJobs[id]
-	m.installJobsMu.Unlock()
-	if ok {
-		job.cancel()
-	}
+func (r *residentRemoval) Close() {
+	r.once.Do(func() {
+		if r.lease != nil {
+			r.lease.Release()
+		}
+		if r.finish != nil {
+			r.finish()
+		}
+	})
 }
 
 // uninstall stops the unit and removes the installation directory. The layout
 // follows the account the installer used: root installs under /var/lib and
 // /etc/systemd/system, unprivileged installs under the account's home.
-func (m *ResidentMonitor) uninstall(ctx context.Context, n model.AgentNode) error {
-	lease, err := m.deployer.ssh.AcquireLease(ctx, n.ServerID, LeaseConsumerAgent)
-	if err != nil {
-		return err
-	}
-	defer lease.Release()
+func (m *ResidentMonitor) uninstall(ctx context.Context, n model.AgentNode, lease *sshLease) error {
 	base := "/var/lib/talus-agent/" + n.InstallID
 	unitDir := "/etc/systemd/system"
 	ctl := "systemctl"
@@ -426,13 +509,13 @@ func (m *ResidentMonitor) uninstall(ctx context.Context, n model.AgentNode) erro
 }
 
 // residentUninstallScript stops and deletes one installation layout. A missing
-// unit or directory is not an error, so it is safe to run before deleting the
-// server record.
+// unit or installation directory is not an error. The stable lock file remains
+// outside the removed directory so waiting activations keep the same lock.
 func residentUninstallScript(base, unit, unitName, ctl string) string {
 	q := shellQuote
-	return "set -u\n" +
+	return "set -eu\nexec 9> " + q(unit+".lock") + "\nflock -w 10 9\n" +
 		ctl + " disable --now " + q(unitName) + " >/dev/null 2>&1 || true\n" +
-		"rm -f " + q(unit) + "\n" +
+		"rm -f " + q(unit) + " " + q(unit+".previous") + "\n" +
 		ctl + " daemon-reload >/dev/null 2>&1 || true\n" +
 		"rm -rf " + q(base) + "\n"
 }

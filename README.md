@@ -32,7 +32,7 @@
 ```
 
 - **Management and monitoring**: The Hub uses SSH for management and agent installation. Resident agents call back to `AGENT_HUB_URL` over WSS/HTTPS for monitoring.
-- **Resident agent**: The verified binary runs as a systemd system/user service, with a private persistent outbox (24h / 64 MiB). Samples are removed only after transactional, deduplicated storage acknowledges them. A running systemd manager is required; user services require lingering for the SSH account. Talus does not run sudo.
+- **Resident agent**: The verified binary runs as a systemd system/user service, with a private persistent outbox (24h / 64 MiB). Samples are removed only after transactional, deduplicated storage acknowledges them. A running systemd manager and `flock` are required; user services require lingering for the SSH account. Talus does not run sudo.
 - **Credentials**: Encrypted at rest with a master key you control. Secret values are omitted from list responses; authenticated administrators can reveal them through dedicated, audited endpoints.
 
 ## Quick Start
