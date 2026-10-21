@@ -27,9 +27,10 @@ func TestResidentLayoutMigrationHomeAliasesKeepActiveInstallation(t *testing.T) 
 				}
 			}
 			oldHome, currentHome := home, alias
-			if scenario == "recorded-alias" {
+			switch scenario {
+			case "recorded-alias":
 				oldHome, currentHome = alias, home
-			} else if scenario == "both-aliases" {
+			case "both-aliases":
 				oldHome, currentHome = alias, secondAlias
 			}
 			f := newResidentMigrationFixture(t, 1001, oldHome, 1001, currentHome)
