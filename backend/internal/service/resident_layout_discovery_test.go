@@ -234,7 +234,8 @@ func TestResidentLayoutDiscoveryLegacyAliceToRootServerDelete(t *testing.T) {
 		}
 	}
 	control, err := os.ReadFile(controlLog)
-	if err != nil || !strings.Contains(string(control), "runuser -u alice -- env XDG_RUNTIME_DIR=/run/user/1001 systemctl --user disable --now talus-agent-"+node.InstallID+".service") {
+	if err != nil || !strings.Contains(string(control), "runuser -u alice -- env XDG_RUNTIME_DIR=/run/user/1001 sh -c ") ||
+		!strings.Contains(string(control), "\nsystemctl --user disable --now talus-agent-"+node.InstallID+".service\n") {
 		t.Fatalf("legacy user service was not stopped as Alice: %s %v", control, err)
 	}
 	if _, err := agents.Get(ctx, srv.ID); !errors.Is(err, gorm.ErrRecordNotFound) {

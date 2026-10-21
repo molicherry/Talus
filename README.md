@@ -431,6 +431,8 @@ Artifacts and configuration are verified before activation. Compatible resident 
 
 Deleting a server uninstalls its resident agent and removes its recorded installation locations, even after `AGENT_HUB_URL` is cleared or the SSH credential changes to another account. Installation locations are saved before remote files change and retained until the new service is healthy and previous installations are retired. Cleanup or metadata failures leave deployment failed and eligible for retry. Root can stop a previous owner's user unit; a downgraded login that cannot stop it cannot complete the migration. Legacy installations without account records are discovered on the host; root checks account home directories rather than assuming the current login owns the service. A concurrent delete that cannot acquire cleanup ownership succeeds only if the server was already deleted; otherwise it returns a conflict for retry.
 
+Cross-account user cleanup runs entirely as the installation owner and requires `runuser`; if that account cannot be resolved or switched to, its files remain and cleanup reports a failure. Lock files are never truncated, and symbolic links or non-regular locks are rejected. HOME aliases pointing to the same directory keep the active installation and its outbox. Moving the same account to a different physical HOME is rejected before remote files change; migrate that account's installation manually first.
+
 ### Docker upgrades and encrypted data
 
 Keep the existing database volume and the original `.env`, especially `VPSMANAGER_MASTER_KEY`. Stop the old Hub before replacing it; upgrades assume a single Hub and a brief maintenance window. A database advisory lock serializes migration by new Hubs, but cannot stop an older binary from writing.

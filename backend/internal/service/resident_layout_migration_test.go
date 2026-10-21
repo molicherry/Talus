@@ -73,6 +73,17 @@ func (r *residentMigrationRemote) handler(t *testing.T) func(string, ssh.Channel
 		case strings.HasPrefix(command, "test ! -L"):
 			r.setups.Add(1)
 			exitStatus(ch, 0)
+		case strings.HasPrefix(command, "test ") && strings.Contains(command, " -ef "):
+			cmd := exec.Command("sh", "-c", command)
+			cmd.Stdout, cmd.Stderr = ch, ch.Stderr()
+			status := uint32(0)
+			if err := cmd.Run(); err != nil {
+				status = 1
+				if exit, ok := err.(*exec.ExitError); ok {
+					status = uint32(exit.ExitCode())
+				}
+			}
+			exitStatus(ch, status)
 		case strings.HasPrefix(command, "if command -v sha256sum"):
 			parts := strings.Split(command, "'")
 			if len(parts) < 3 {

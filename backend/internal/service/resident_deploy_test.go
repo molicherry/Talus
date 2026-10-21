@@ -504,9 +504,10 @@ func TestResidentUninstallScriptStopsRecordedUserUnit(t *testing.T) {
 	layout := agentLayoutFor("install1", 1000, "/home/alice")
 	script := residentUninstallScript(layout, "talus-agent-install1.service", "alice", true)
 	for _, want := range []string{
-		"runuser -u 'alice' -- env XDG_RUNTIME_DIR='/run/user/1000' systemctl --user disable --now 'talus-agent-install1.service'",
-		"rm -f '/home/alice/.config/systemd/user/talus-agent-install1.service'",
-		"rm -rf '/home/alice/.local/share/talus-agent/install1'",
+		"runuser -u 'alice' -- env XDG_RUNTIME_DIR='/run/user/1000' sh -c ",
+		"systemctl --user disable --now ",
+		"/home/alice/.config/systemd/user/talus-agent-install1.service",
+		"/home/alice/.local/share/talus-agent/install1",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("uninstall script missing %q:\n%s", want, script)
@@ -564,9 +565,10 @@ func TestResidentUninstallUsesRecordedLayoutAfterCredentialSwitch(t *testing.T) 
 	}
 	script := next()
 	for _, want := range []string{
-		"runuser -u 'alice' -- env XDG_RUNTIME_DIR='/run/user/1000' systemctl --user disable --now 'talus-agent-install1.service'",
-		"rm -f '/home/alice/.config/systemd/user/talus-agent-install1.service'",
-		"rm -rf '/home/alice/.local/share/talus-agent/install1'",
+		"runuser -u 'alice' -- env XDG_RUNTIME_DIR='/run/user/1000' sh -c ",
+		"systemctl --user disable --now ",
+		"/home/alice/.config/systemd/user/talus-agent-install1.service",
+		"/home/alice/.local/share/talus-agent/install1",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("uninstall script missing %q:\n%s", want, script)
@@ -624,7 +626,7 @@ func TestResidentUninstallScriptCrossAccountExecutesWithQuotedPaths(t *testing.T
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"runuser -u alice -- env XDG_RUNTIME_DIR=/run/user/1000 systemctl --user disable --now talus-agent-install1.service",
+		"runuser -u alice -- env XDG_RUNTIME_DIR=/run/user/1000 sh -c ",
 		"systemctl --user daemon-reload",
 	} {
 		if !strings.Contains(string(calls), want) {

@@ -252,10 +252,9 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 			return err
 		}
 	}
-	for _, old := range previous {
-		if old.UID != layout.UID && old.Base == layout.Base && old.UnitDir == layout.UnitDir {
-			return errors.New("different agent accounts share the same installation directory")
-		}
+	retirements, err := residentInstallRetirements(ctx, lease, layout, previous)
+	if err != nil {
+		return err
 	}
 	// Persist every location before touching the remote filesystem. A failed
 	// activation, retirement, or final database write must leave enough evidence
@@ -350,10 +349,7 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 	// the layout the previous account still runs so two agents cannot report
 	// for one server, then record where this install landed: deletion must clean
 	// this account's unit and state even after a later credential switch.
-	for _, old := range previous {
-		if sameInstallLayout(old, layout) {
-			continue
-		}
+	for _, old := range retirements {
 		retireCtx, cancelRetire := context.WithTimeout(ctx, 30*time.Second)
 		err := m.uninstallLayout(retireCtx, n.InstallID, old, lease, true)
 		cancelRetire()
@@ -376,7 +372,7 @@ func residentActivationScript(binary, config, unit, unitName, next, ctl string, 
 		"finish() { rc=$?; set +e; trap - EXIT; if test \"$rc\" != 0 && test \"$activated\" = 1; then " + ctl + " stop " + q(unitName) + " || true; if test \"$had_previous\" = 1; then mv -f " + q(binary+".previous") + " " + q(binary) + "; mv -f " + q(config+".previous") + " " + q(config) + "; if test -f " + q(unit+".previous") + "; then mv -f " + q(unit+".previous") + " " + q(unit) + "; fi; " + ctl + " daemon-reload || true; " + ctl + " restart " + q(unitName) + " || true; fi; fi; rm -f " + q(next) + " " + q(next+".config") + " " + q(next+".unit") + "; exit \"$rc\"; }; trap finish EXIT; trap 'exit 1' HUP INT TERM\n" +
 		// Keep the same lock through EXIT rollback. The unit directory survives
 		// removal of the installation, so later commands cannot lock a new inode.
-		"exec 9> " + q(unit+".lock") + "\nflock -w 10 9\n" +
+		residentLockScript(unit, false) +
 		"if test -f " + q(binary) + " && test -f " + q(config) + "; then cp -p " + q(binary) + " " + q(binary+".previous") + "; cp -p " + q(config) + " " + q(config+".previous") + "; if test -f " + q(unit) + "; then cp -p " + q(unit) + " " + q(unit+".previous") + "; fi; had_previous=1; fi\n" +
 		"chmod 0700 " + q(next) + "\nactivated=1\nmv -f " + q(next) + " " + q(binary) + "\nmv -f " + q(next+".config") + " " + q(config) + "\nmv -f " + q(next+".unit") + " " + q(unit) + "\nrm -f " + q(filepath.Join(filepath.Dir(binary), "outbox", "health.json")) + "\n" +
 		ctl + " daemon-reload\n" + ctl + " enable " + q(unitName) + "\n" + ctl + " restart " + q(unitName) + "\n" +
@@ -607,6 +603,44 @@ func sameInstallLayout(a, b agentLayout) bool {
 	return a.UID == b.UID && a.Base == b.Base && a.UnitDir == b.UnitDir
 }
 
+// residentInstallRetirements separates another account's service from an alias
+// of the current installation. A UID has one user manager and one unit with
+// this name: stopping an old HOME after activation would also stop the new unit.
+// Resolve directory identity before any remote writes, including symlink and
+// bind-mount aliases that lexical path cleaning cannot recognize.
+func residentInstallRetirements(ctx context.Context, lease *sshLease, current agentLayout, previous []agentLayout) ([]agentLayout, error) {
+	var retirements []agentLayout
+	for _, old := range previous {
+		if sameInstallLayout(old, current) {
+			continue
+		}
+		if old.UID != 0 && current.UID != 0 {
+			sameHome := old.Home == current.Home
+			if !sameHome {
+				result, err := lease.Exec(ctx, "test "+shellQuote(old.Home)+" -ef "+shellQuote(current.Home), 5*time.Second)
+				if err != nil {
+					return nil, err
+				}
+				if result == nil || result.ExitCode > 1 {
+					return nil, errors.New("cannot compare resident installation directories")
+				}
+				sameHome = result.ExitCode == 0
+			}
+			if sameHome {
+				if old.UID != current.UID {
+					return nil, errors.New("different agent accounts share the same installation directory")
+				}
+				continue
+			}
+			if old.UID == current.UID {
+				return nil, errors.New("cannot move a resident agent to a different home for the same account")
+			}
+		}
+		retirements = append(retirements, old)
+	}
+	return retirements, nil
+}
+
 // knownInstallLayouts includes unfinished migrations, including a new service
 // activated before retirement or the final metadata write failed.
 func knownInstallLayouts(n model.AgentNode) []agentLayout {
@@ -689,6 +723,9 @@ func (m *ResidentMonitor) uninstallLayout(ctx context.Context, installID string,
 	if strict && !manage {
 		return errors.New("cannot stop previous agent account's service")
 	}
+	if layout.UID != 0 && (currentUID < 0 || currentUID == 0 && owner == "") {
+		return errors.New("cannot safely clean resident installation without its account")
+	}
 	unitName := "talus-agent-" + installID + ".service"
 	result, err := lease.Exec(ctx, residentRemovalScript(layout, unitName, runAs, manage, strict), 30*time.Second)
 	if err != nil {
@@ -712,30 +749,32 @@ func (m *ResidentMonitor) uninstallLayout(ctx context.Context, installID string,
 // serialize. A lock that is present but held still fails the uninstall instead
 // of racing a remote activation/rollback.
 //
-// runAs names the account that owns a user unit when the caller logged in as a
-// different account (root switching to the installer's account). manage=false
-// skips service-manager calls when that account cannot be reached; the unit and
-// state files are still removed.
+// runAs switches the entire cleanup to the account that owns a user unit,
+// including locking and file removal. Root must not perform filesystem writes
+// through paths controlled by the previous, unprivileged installation owner.
+// manage=false skips service-manager calls for a different unprivileged login.
 func residentUninstallScript(l agentLayout, unitName, runAs string, manage bool) string {
 	return residentRemovalScript(l, unitName, runAs, manage, false)
 }
 
 func residentRemovalScript(l agentLayout, unitName, runAs string, manage, strict bool) string {
+	script := residentRemovalAccountScript(l, unitName, manage, strict)
+	if runAs == "" {
+		return script
+	}
+	return "set -eu\nrunuser -u " + shellQuote(runAs) + " -- env XDG_RUNTIME_DIR=" +
+		shellQuote("/run/user/"+strconv.Itoa(l.UID)) + " sh -c " + shellQuote(script) + "\n"
+}
+
+func residentRemovalAccountScript(l agentLayout, unitName string, manage, strict bool) string {
 	q := shellQuote
 	unit := l.UnitDir + "/" + unitName
-	lock := q(unit + ".lock")
-	script := "set -eu\n" +
-		"if command -v flock >/dev/null 2>&1 && test -d " + q(l.UnitDir) + "; then\n" +
-		"  if : > " + lock + " 2>/dev/null; then exec 9> " + lock + "; flock -w 10 9; fi\n" +
-		"fi\n"
+	script := "set -eu\n" + residentLockScript(unit, true)
 	removeUnit := "rm -f " + q(unit) + " " + q(unit+".previous") + "\n"
 	if !manage {
 		return script + removeUnit + "rm -rf " + q(l.Base) + "\n"
 	}
 	ctl := l.Control()
-	if runAs != "" {
-		ctl = "runuser -u " + q(runAs) + " -- env XDG_RUNTIME_DIR=" + q("/run/user/"+strconv.Itoa(l.UID)) + " " + ctl
-	}
 	stop := ctl + " disable --now " + q(unitName) + " >/dev/null 2>&1 || true\n"
 	ignoreFailure := " || true"
 	if strict {
@@ -751,4 +790,21 @@ func residentRemovalScript(l agentLayout, unitName, runAs string, manage, strict
 		removeUnit +
 		ctl + " daemon-reload >/dev/null 2>&1" + ignoreFailure + "\n" +
 		"rm -rf " + q(l.Base) + "\n"
+}
+
+// residentLockScript never truncates or writes the lock's contents. A root
+// cleanup can encounter a lock in another user's writable directory: rejecting
+// links before and after opening avoids using a known unsafe lock, while the
+// non-truncating open also preserves a target substituted between those checks.
+// Keep the lock inode after removal so an activation's rollback stays serialized.
+func residentLockScript(unit string, optional bool) string {
+	lock := shellQuote(unit + ".lock")
+	script := "if test -L " + lock + " || { test -e " + lock + " && ! test -f " + lock + "; }; then exit 1; fi\n" +
+		"exec 9<> " + lock + "\n" +
+		"if test -L " + lock + " || ! test -f " + lock + "; then exit 1; fi\n" +
+		"flock -w 10 9\n"
+	if optional {
+		return "if command -v flock >/dev/null 2>&1 && test -d " + shellQuote(path.Dir(unit)) + "; then\n" + script + "fi\n"
+	}
+	return script
 }
