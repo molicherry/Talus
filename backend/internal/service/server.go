@@ -35,6 +35,10 @@ type ServerService struct {
 	monitoring interface {
 		Statuses(context.Context, []uint) map[uint]*model.MonitoringStatus
 	}
+	// deletion phase budgets; zero uses the package defaults.
+	deletePrepareBudget time.Duration
+	deleteCommitBudget  time.Duration
+	deleteCleanupBudget time.Duration
 }
 
 // NewServerService creates a ServerService with the given repositories.
@@ -399,6 +403,22 @@ func (s *ServerService) SetFreshnessThreshold(d time.Duration) {
 // topologyNotifier is implemented by the monitor scheduler.
 type topologyNotifier interface{ NotifyTopologyChange() }
 
+// preparedAgentRemoval holds the installation fence and a pinned SSH lease.
+// Remove may only run after the server deletion commits; Close also handles
+// the rejected-delete path without changing the remote agent or its credential.
+type preparedAgentRemoval interface {
+	Remove(context.Context) error
+	Close()
+	// Owned reports whether this attempt owns the fence and the pinned
+	// connection. A request that only joined an in-flight deletion must not
+	// invalidate the pool beneath that deletion's uninstall.
+	Owned() bool
+}
+
+type agentRemover interface {
+	PrepareAgentRemoval(context.Context, uint) preparedAgentRemoval
+}
+
 // SetTopologyNotifier wires the monitor so node create/delete is observed
 // immediately. It is optional: without it the monitor still converges on its
 // next interval.
@@ -447,13 +467,96 @@ func resolveCredentialBinding(current, input *uint, clear bool) *uint {
 	return current
 }
 
-// Delete soft-deletes a server by id.
+// Budgets for the three phases of a deletion that may touch the remote agent.
+// They add up to ServerDeleteWriteBudget in the middleware; each phase gets its
+// own budget so a slow SSH prepare cannot starve the uninstall that follows it.
+const (
+	agentRemovalPrepareBudget = 20 * time.Second
+	serverDeleteBudget        = 10 * time.Second
+	agentRemovalCleanupBudget = 20 * time.Second
+)
+
+// SetDeletionBudgets overrides the three deletion phase budgets. Zero keeps the
+// package default; tests shorten them to exercise concurrent deletions without
+// waiting out the production budgets.
+func (s *ServerService) SetDeletionBudgets(prepare, commit, cleanup time.Duration) {
+	if prepare > 0 {
+		s.deletePrepareBudget = prepare
+	}
+	if commit > 0 {
+		s.deleteCommitBudget = commit
+	}
+	if cleanup > 0 {
+		s.deleteCleanupBudget = cleanup
+	}
+}
+
+func deletionPhaseBudget(value, fallback time.Duration) time.Duration {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+// Delete commits the server deletion before best-effort agent cleanup. Prepare
+// pins the live route first; pool invalidation waits until that cleanup ends.
+//
+// A concurrent deletion must not commit without owning the removal fence. If
+// the owner already committed, the repeated deletion is an idempotent success;
+// otherwise it returns a conflict so a failed owner cannot leave a server
+// deleted without anyone responsible for uninstalling its agent.
 func (s *ServerService) Delete(ctx context.Context, id uint) error {
-	if err := s.deleteServer(ctx, id); err != nil {
+	prepareCtx, cancel := context.WithTimeout(ctx, deletionPhaseBudget(s.deletePrepareBudget, agentRemovalPrepareBudget))
+	defer cancel()
+	var removal preparedAgentRemoval
+	// ownsCleanup starts true for the no-monitor path; a prepared removal
+	// reports whether this request actually owns the remote cleanup.
+	ownsCleanup := true
+	deleted := false
+	defer func() {
+		if removal != nil {
+			removal.Close()
+		}
+		if deleted && ownsCleanup {
+			s.invalidate(id)
+		}
+	}()
+	if remover, ok := s.monitoring.(agentRemover); ok {
+		removal = remover.PrepareAgentRemoval(prepareCtx, id)
+		if removal != nil {
+			ownsCleanup = removal.Owned()
+		}
+	}
+	deleteCtx, cancelDelete := context.WithTimeout(ctx, deletionPhaseBudget(s.deleteCommitBudget, serverDeleteBudget))
+	if !ownsCleanup {
+		_, err := s.repo.FindByID(deleteCtx, id)
+		cancelDelete()
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return server.ErrConflict
+	}
+	err := s.deleteServer(deleteCtx, id)
+	cancelDelete()
+	if err != nil {
 		return err
 	}
+	deleted = true
 	if p, ok := s.monitoring.(interface{ Disconnect(uint) }); ok {
 		p.Disconnect(id)
+	}
+	if removal != nil && ownsCleanup {
+		// A committed deletion must finish cleanup even if the browser leaves.
+		// Cleanup gets its own budget: prepare may have consumed all of its own.
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), deletionPhaseBudget(s.deleteCleanupBudget, agentRemovalCleanupBudget))
+		if err := removal.Remove(cleanupCtx); err != nil {
+			// SSH error strings can carry credential material; log only the class.
+			slog.Warn("resident agent removal failed", "server_id", id, "reason", deployFailureReason(err))
+		}
+		cancelCleanup()
 	}
 	s.notifyTopology()
 	return nil

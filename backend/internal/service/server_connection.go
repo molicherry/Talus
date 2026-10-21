@@ -491,9 +491,6 @@ func (s *ServerService) deleteServer(ctx context.Context, id uint) error {
 		}
 		return tx.Delete(ctx, id)
 	})
-	if err == nil {
-		s.invalidate(id)
-	}
 	return err
 }
 

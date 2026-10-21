@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
 	"time"
 
 	"github.com/vpsmanager/backend/internal/agentwire"
@@ -39,6 +40,13 @@ func AgentTarget(s model.Server) string {
 func (r *AgentNodeRepo) Ensure(ctx context.Context, s model.Server) (model.AgentNode, error) {
 	var n model.AgentNode
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// FindAll may have been read before a deletion. Lock and reread the live
+		// server so an old scheduler snapshot cannot recreate its credential.
+		var current model.Server
+		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).First(&current, s.ID).Error; err != nil {
+			return err
+		}
+		s = current
 		if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", int64(s.ID)+7300000000).Error; err != nil {
 			return err
 		}
@@ -147,6 +155,86 @@ func (r *AgentNodeRepo) Ingest(ctx context.Context, node model.AgentNode, sample
 		return nil, err
 	}
 	return ack, nil
+}
+
+// TrackInstallLayout durably records every account an installation may touch
+// before remote files change. It leaves the last completed installation intact
+// so an interrupted migration can retire both the old and attempted layouts.
+func (r *AgentNodeRepo) TrackInstallLayout(ctx context.Context, n model.AgentNode, uid int, home string) error {
+	return r.TrackInstallLayouts(ctx, n, []model.AgentInstallLayout{{UID: uid, Home: home}})
+}
+
+// TrackInstallLayouts records a discovered set together: a failed write must
+// not publish a partial discovery that hides the remaining legacy locations.
+func (r *AgentNodeRepo) TrackInstallLayouts(ctx context.Context, n model.AgentNode, targets []model.AgentInstallLayout) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.AgentNode
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("server_id = ? AND token_hash = ?", n.ServerID, n.TokenHash).
+			Take(&current).Error; err != nil {
+			return err
+		}
+		layouts := make([]model.AgentInstallLayout, 0, len(current.PendingInstallLayouts)+len(targets)+1)
+		seen := make(map[model.AgentInstallLayout]bool, cap(layouts))
+		add := func(layout model.AgentInstallLayout) {
+			layout.Home = path.Clean(layout.Home)
+			if !seen[layout] {
+				layouts = append(layouts, layout)
+				seen[layout] = true
+			}
+		}
+		if current.InstallUID != nil && current.InstallHome != nil {
+			add(model.AgentInstallLayout{UID: *current.InstallUID, Home: *current.InstallHome})
+		}
+		for _, layout := range current.PendingInstallLayouts {
+			add(layout)
+		}
+		for _, layout := range targets {
+			add(layout)
+		}
+		result := tx.Model(&model.AgentNode{}).
+			Where("server_id = ? AND token_hash = ?", n.ServerID, n.TokenHash).
+			Select("PendingInstallLayouts").
+			Updates(&model.AgentNode{PendingInstallLayouts: layouts})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+}
+
+// SetInstallLayout finalizes a successful installation and retirement together.
+// A stale installation cannot overwrite a replacement credential's layout.
+func (r *AgentNodeRepo) SetInstallLayout(ctx context.Context, n model.AgentNode, uid int, home string) error {
+	home = path.Clean(home)
+	result := r.db.WithContext(ctx).Model(&model.AgentNode{}).
+		Where("server_id = ? AND token_hash = ?", n.ServerID, n.TokenHash).
+		Select("InstallUID", "InstallHome", "PendingInstallLayouts").
+		Updates(&model.AgentNode{InstallUID: &uid, InstallHome: &home})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// Get returns the resident credential record for a server.
+func (r *AgentNodeRepo) Get(ctx context.Context, serverID uint) (model.AgentNode, error) {
+	var n model.AgentNode
+	err := r.db.WithContext(ctx).Where("server_id = ?", serverID).Take(&n).Error
+	return n, err
+}
+
+// Delete drops the resident credential record for a server. It is used once the
+// server is deleted so a stale node cannot outlive the server or be picked up
+// again by a later topology reconciliation.
+func (r *AgentNodeRepo) Delete(ctx context.Context, serverID uint) error {
+	return r.db.WithContext(ctx).Where("server_id = ?", serverID).Delete(&model.AgentNode{}).Error
 }
 
 func (r *AgentNodeRepo) Cleanup(ctx context.Context) error {

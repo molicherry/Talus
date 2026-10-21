@@ -32,7 +32,7 @@
 ```
 
 - **Management and monitoring**: The Hub uses SSH for management and agent installation. Resident agents call back to `AGENT_HUB_URL` over WSS/HTTPS for monitoring.
-- **Resident agent**: The verified binary runs as a systemd system/user service, with a private persistent outbox (24h / 64 MiB). Samples are removed only after transactional, deduplicated storage acknowledges them. A running systemd manager is required; user services require lingering for the SSH account. Talus does not run sudo.
+- **Resident agent**: The verified binary runs as a systemd system/user service, with a private persistent outbox (24h / 64 MiB). Samples are removed only after transactional, deduplicated storage acknowledges them. A running systemd manager and `flock` are required; user services require lingering for the SSH account. Talus does not run sudo.
 - **Credentials**: Encrypted at rest with a master key you control. Secret values are omitted from list responses; authenticated administrators can reveal them through dedicated, audited endpoints.
 
 ## Quick Start
@@ -428,6 +428,10 @@ Resident contact expires after 45 seconds; data becomes stale after three sampli
 Resident monitoring does not schedule per-sample SSH commands. Installation/repair uses a separate three-minute budget, at most four concurrent deployments, and one job per server. Failed deployments retry after at least one minute. Missing `AGENT_HUB_URL` is shown as setup required. Existing metric history is retained.
 
 Artifacts and configuration are verified before activation. Compatible resident agents keep reporting while an update is staged. The new service must contact the Hub after restart; failed activation restores the previous executable, configuration and service unit where available.
+
+Deleting a server uninstalls its resident agent and removes its recorded installation locations, even after `AGENT_HUB_URL` is cleared or the SSH credential changes to another account. Installation locations are saved before remote files change and retained until the new service is healthy and previous installations are retired. Cleanup or metadata failures leave deployment failed and eligible for retry. Root can stop a previous owner's user unit; a downgraded login that cannot stop it cannot complete the migration. Legacy installations without account records are discovered on the host; root checks account home directories rather than assuming the current login owns the service. A concurrent delete that cannot acquire cleanup ownership succeeds only if the server was already deleted; otherwise it returns a conflict for retry.
+
+Cross-account user cleanup runs entirely as the installation owner and requires `runuser`; if that account cannot be resolved or switched to, its files remain and cleanup reports a failure. Lock files are never truncated, and symbolic links or non-regular locks are rejected. HOME aliases pointing to the same directory keep the active installation and its outbox. Moving the same account to a different physical HOME is rejected before remote files change; migrate that account's installation manually first.
 
 ### Docker upgrades and encrypted data
 

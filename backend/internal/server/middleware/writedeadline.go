@@ -13,6 +13,10 @@ import (
 const (
 	// DefaultWriteBudget protects ordinary requests, matching the historical 15s.
 	DefaultWriteBudget = 15 * time.Second
+	// ServerDeleteWriteBudget covers the deletion's three bounded phases --
+	// 20s to prepare/pin the route, 10s to commit, 20s to uninstall the agent --
+	// plus 5s of credential cleanup and response margin.
+	ServerDeleteWriteBudget = 60 * time.Second
 	// ExecWriteBudget covers the 300s Exec cap plus result-return margin.
 	ExecWriteBudget = 310 * time.Second
 	// RelayWriteBudget covers a 300s bounded_stream plus margin.
@@ -25,6 +29,11 @@ func writeBudgetFor(r *http.Request) time.Duration {
 	p := r.URL.Path
 	if r.Method == http.MethodGet && p == "/api/v1/agent/connect" {
 		return 0
+	}
+	if r.Method == http.MethodDelete {
+		if id, ok := strings.CutPrefix(strings.TrimSuffix(p, "/"), "/api/v1/servers/"); ok && id != "" && !strings.Contains(id, "/") {
+			return ServerDeleteWriteBudget
+		}
 	}
 	if strings.HasPrefix(p, "/api/v1/servers/") && strings.Contains(p, "/sftp/") {
 		if strings.Contains(p, "/sftp/uploads/") {

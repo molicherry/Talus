@@ -2,6 +2,12 @@ package model
 
 import "time"
 
+// AgentInstallLayout identifies an account's resident installation paths.
+type AgentInstallLayout struct {
+	UID  int
+	Home string
+}
+
 // AgentNode credentials are distinct from administrator/API credentials. Secret
 // fields are never serialized and are encrypted with a purpose-scoped key.
 type AgentNode struct {
@@ -20,6 +26,15 @@ type AgentNode struct {
 	LastSample    *time.Time `json:"-"`
 	LastPersisted *time.Time `json:"-"`
 	Version       string     `json:"-"`
+	// InstallUID/InstallHome record the account that installed the agent. A
+	// later deletion must clean that layout even when the server's credential
+	// now logs in as a different account. Nil means "installed before this was
+	// recorded"; callers discover existing installations on the target host.
+	InstallUID  *int    `json:"-"`
+	InstallHome *string `json:"-"`
+	// PendingInstallLayouts retains every layout an unfinished installation may
+	// have touched, including the last completed layout, until retirement succeeds.
+	PendingInstallLayouts []AgentInstallLayout `gorm:"serializer:json" json:"-"`
 }
 
 type AgentReceipt struct {

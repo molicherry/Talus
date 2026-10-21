@@ -37,6 +37,7 @@ const (
 	ReasonAgentProtocolMismatch    = "agent_protocol_mismatch"
 	ReasonAgentLegacyProtocol      = "agent_legacy_protocol"
 	ReasonAgentActivationUnknown   = "agent_activation_unknown"
+	ReasonAgentHealthCheckFailed   = "agent_health_check_failed"
 )
 
 // AgentDeployError carries a stable reason class with the underlying cause.
