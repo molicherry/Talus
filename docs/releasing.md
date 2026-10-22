@@ -21,7 +21,8 @@ the promotion workflow advances the same image digest to `latest`.
   increments for 1.0 and later.
 - RC/test counters start at 1 for each base version and kind and are never reused.
   Maintainers allocate them; CI validates format, not historical ordering.
-- Every new tag must be annotated and point to a commit already on `main`. Its
+- Every new stable, RC or test tag must be annotated and point to a commit
+  already on `main`. CI applies the same main-ancestry check to test tags. The
   first message line is `<full tag> — theme`, followed by change bullets matching
   the Release highlights.
 - Never delete, move, rename or force-push a published tag, even after failed CI.
@@ -66,7 +67,7 @@ the promotion workflow advances the same image digest to `latest`.
    gate. `release-image.json` records the tag object, commit, digest and CI run ID;
    stable/RC drafts attach it automatically. Test releases are complete here.
 
-2. Review the generated draft using the [release notes guide](release-notes.md).
+2. Review the generated draft using the [release notes guide](#release-notes).
    Complete both languages, review the changelog and remove every
    `<!-- release:todo -->`. Explain migration, configuration, compatibility and
    rollback costs in both languages when applicable. Keep language markers and
@@ -90,6 +91,78 @@ the promotion workflow advances the same image digest to `latest`.
 
 Final publication must emit `release.published`. Do not use Actions'
 `GITHUB_TOKEN` for that step: its events do not start the subsequent workflow.
+
+## Release notes
+
+New Releases include English and Simplified Chinese descriptions with equivalent
+feature, fix, security and upgrade information. CI creates a bilingual draft;
+maintainers complete and review it. Translation is not automatic.
+
+### Write and review
+
+- Include user-visible features, fixes, security and compatibility changes.
+  Exclude pure tests, CI, coverage and internal refactoring.
+- Explain required migration/configuration actions, rollback support and its cost
+  in both languages when applicable. Remove both upgrade sections when unnecessary.
+- Keep language markers, remove every `<!-- release:todo -->` and preserve the
+  `release-image.json` asset unchanged.
+- Review generated notes even though [`.github/release.yml`](../.github/release.yml)
+  filters labels. Stable/RC releases compare against the highest lower stable tag
+  reachable from the release commit; a stable release never compares only with
+  its last RC. Without a previous stable tag, GitHub generates the initial history.
+
+### Bilingual template
+
+Write one summary per language. Keep a single shared `What's Changed` and
+`Full Changelog` after both blocks; commit subjects do not need translation.
+
+```markdown
+<!-- release-notes:en -->
+## English
+
+### Highlights
+- **Feature.** Describe user-visible behavior.
+
+### Upgrade notes
+Required steps, compatibility and rollback consequences. Omit when unnecessary.
+<!-- /release-notes:en -->
+
+<!-- release-notes:zh-CN -->
+## 简体中文
+
+### 更新亮点
+- **功能。** 描述与英文版对应的用户可见行为。
+
+### 升级说明
+必要的升级操作、兼容性和回滚代价。无需操作时删除本节。
+<!-- /release-notes:zh-CN -->
+
+## What's Changed
+* <commit subject> by @<author> in https://github.com/molicherry/Talus/pull/<N>
+
+**Full Changelog**: https://github.com/molicherry/Talus/compare/<previous-stable>...<tag>
+```
+
+### Loading bilingual release notes
+
+Use the exact markers from the template on separate lines, at most one block per
+language, without nesting. Examples inside code fences are not boundaries, and
+Markdown headings do not determine the language.
+
+| Situation | Dialog content |
+| --- | --- |
+| Simplified Chinese UI | Prefer `zh-CN`, then append shared text |
+| English UI | Prefer `en`, then append shared text |
+| Preferred language missing or empty | Fall back to the other language, then append shared text |
+| Historical notes without markers | Complete original text |
+| Unclosed, duplicate, nested or mismatched markers | Complete original text, preserving upgrade/security information |
+| Both languages and shared text empty | Localized no-notes message |
+
+The Hub caches the entire GitHub Release body; the frontend selects its language.
+Switching languages applies immediately without another GitHub request. Notes are
+shown as text: HTML is not executed and translation is not automatic.
+**View on GitHub** opens the original Release with both languages. Check/cache
+intervals are described in [update notifications](../README.md#update-notifications).
 
 ## Repository configuration
 

@@ -490,7 +490,7 @@ Release on GitHub. This also works in the mobile navigation drawer.
 New Release descriptions include English and Simplified Chinese. The dialog
 selects the UI language, falls back to the other language when needed, and appends
 the shared changelog. Historical single-language notes remain readable; see the
-[release-note loading rules](docs/release-notes.md#loading-bilingual-release-notes).
+[release-note loading rules](docs/releasing.md#loading-bilingual-release-notes).
 
 The Hub checks on startup and every six hours, uses GitHub ETags, and serves cached
 results through the signed-in `GET /api/v1/updates` endpoint. The page refreshes
