@@ -492,14 +492,19 @@ selects the UI language, falls back to the other language when needed, and appen
 the shared changelog. Historical single-language notes remain readable; see the
 [release-note loading rules](docs/releasing.md#loading-bilingual-release-notes).
 
-The Hub checks on startup and every six hours, uses GitHub ETags, and serves cached
-results through the signed-in `GET /api/v1/updates` endpoint. The page refreshes
-that cache view every five minutes while visible. Failed checks retain the last
-successful result and do not affect normal use. GitHub API access is required
+The Hub checks on startup and every six hours after success. Failures retain the
+last successful result and retry after 5, 15, 30, then 60 minutes, respecting any
+longer GitHub rate-limit wait. The first failure or a changed error is logged at
+Warn; recovery is logged once. The signed-in `GET /api/v1/updates` endpoint serves
+cached results with private ETag revalidation. Pages check every five minutes while
+visible; unchanged results use HTTP 304, and release notes are omitted when no
+update is available. GitHub API access is required
 from the Hub; no token is needed. Drafts, RCs and test releases are ignored.
 Source builds must set `VERSION` to a release tag; `dev` and commit hashes skip
 upstream checks. The separate **A new version has been deployed** banner still
 prompts an old browser tab to reload after a deployment.
+Release notes render Markdown with raw HTML and images disabled. Use **All releases
+and upgrade notes** to check intervening upgrade requirements when skipping versions.
 
 ## Releasing
 

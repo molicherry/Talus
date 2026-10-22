@@ -140,7 +140,8 @@ Required steps, compatibility and rollback consequences. Omit when unnecessary.
 | 两种语言和共享内容均为空 | 当前界面语言的“此版本未提供发布说明” |
 
 Hub 缓存 GitHub Release 完整正文，前端按界面语言选择内容；切换语言立即生效，
-无需额外请求 GitHub。正文作为文本展示，不执行 HTML，不自动翻译。
+无需额外请求 GitHub。正文渲染标题、列表、粗体、代码和链接等 Markdown，
+禁用原始 HTML 和图片，仅允许 HTTPS 链接，不自动翻译。
 “前往 GitHub”打开含双语全文的原始 Release 页面。
 检查及缓存周期见[新版本提示](README.zh-CN.md#新版本提示)。
 

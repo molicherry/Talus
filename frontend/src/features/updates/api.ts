@@ -7,7 +7,7 @@ const ReleaseSchema = z.object({
   version: z.string(),
   published_at: z.string().datetime(),
   notes: z.string(),
-  url: z.string().url(),
+  url: z.string().regex(/^https:\/\/github\.com\/molicherry\/Talus\/releases\/tag\/v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$(?![\s\S])/),
 });
 
 const UpdateStatusSchema = z.object({
@@ -20,6 +20,6 @@ const UpdateStatusSchema = z.object({
 export type Release = z.infer<typeof ReleaseSchema>;
 
 export async function getUpdateStatus({ signal }: QueryContext) {
-  const data = await apiClient.get("/api/v1/updates", { signal, cache: "no-store" });
+  const data = await apiClient.get("/api/v1/updates", { signal, cache: "default" });
   return UpdateStatusSchema.parse(data);
 }

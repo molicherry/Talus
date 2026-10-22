@@ -160,7 +160,8 @@ Markdown headings do not determine the language.
 
 The Hub caches the entire GitHub Release body; the frontend selects its language.
 Switching languages applies immediately without another GitHub request. Notes are
-shown as text: HTML is not executed and translation is not automatic.
+rendered as Markdown headings, lists, emphasis, code and links. Raw HTML and images
+are disabled, links require HTTPS, and translation is not automatic.
 **View on GitHub** opens the original Release with both languages. Check/cache
 intervals are described in [update notifications](../README.md#update-notifications).
 

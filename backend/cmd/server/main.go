@@ -441,10 +441,7 @@ func main() {
 		FilterUsageLogOptionsHandler: usageFilterOptionsHandler.List,
 		RevealLimiter:                mw.NewRateLimiter(1*time.Minute, 5),
 		LoginLimiter:                 mw.NewIPRateLimiter(1*time.Minute, cfg.LoginRateLimit, cfg.TrustProxy),
-		CheckUpdatesHandler: func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Cache-Control", "no-store")
-			server.WriteJSON(w, http.StatusOK, updateChecker.Snapshot())
-		},
+		CheckUpdatesHandler:          handler.NewUpdateHandler(updateChecker),
 		// Auth
 		LoginHandler:          authHandler.Login,
 		SetupHandler:          authHandler.Setup,

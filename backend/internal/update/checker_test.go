@@ -1,13 +1,17 @@
 package update
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -19,6 +23,145 @@ const releaseJSON = `{"tag_name":"v0.13.0","draft":false,"prerelease":false,"pub
 
 func response(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
+}
+
+func TestRunBackoffAndRecovery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var logs bytes.Buffer
+		previous := slog.Default()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+		defer slog.SetDefault(previous)
+		c := NewChecker("v0.12.0")
+		var calls atomic.Int32
+		c.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			if calls.Add(1) == 6 {
+				return response(http.StatusOK, releaseJSON), nil
+			}
+			return response(http.StatusServiceUnavailable, ""), nil
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go c.Run(ctx)
+		synctest.Wait()
+		if calls.Load() != 1 {
+			t.Fatal("expected immediate startup check")
+		}
+		for index, delay := range []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour, time.Hour, checkInterval, 5 * time.Minute} {
+			time.Sleep(delay - time.Nanosecond)
+			synctest.Wait()
+			if calls.Load() != int32(index+1) {
+				t.Fatalf("check retried too early at step %d: calls=%d", index, calls.Load())
+			}
+			time.Sleep(time.Nanosecond)
+			synctest.Wait()
+			if calls.Load() != int32(index+2) {
+				t.Fatalf("check missed retry at step %d: calls=%d", index, calls.Load())
+			}
+		}
+		if !c.Snapshot().UpdateAvailable {
+			t.Fatal("later failures discarded the successful cached release")
+		}
+		if strings.Count(logs.String(), `"level":"WARN"`) != 2 || strings.Count(logs.String(), "release update checks recovered") != 1 {
+			t.Fatalf("expected one warning per failure episode and one recovery: %s", logs.String())
+		}
+		cancel()
+		synctest.Wait()
+	})
+}
+
+func TestRunHonorsRateLimitWait(t *testing.T) {
+	for _, kind := range []string{"seconds", "date", "reset", "both"} {
+		t.Run(kind, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				c := NewChecker("v0.12.0")
+				var calls atomic.Int32
+				wait := 2 * time.Hour
+				c.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+					if calls.Add(1) > 1 {
+						return response(http.StatusOK, releaseJSON), nil
+					}
+					res := response(http.StatusTooManyRequests, "")
+					switch kind {
+					case "seconds":
+						res.Header.Set("Retry-After", "7200")
+					case "date":
+						res.Header.Set("Retry-After", time.Now().Add(wait).Format(http.TimeFormat))
+					case "reset", "both":
+						res.StatusCode = http.StatusForbidden
+						res.Header.Set("X-RateLimit-Remaining", "0")
+						res.Header.Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(wait).Unix(), 10))
+						if kind == "both" {
+							res.Header.Set("Retry-After", "3600")
+						}
+					}
+					return res, nil
+				})
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				go c.Run(ctx)
+				synctest.Wait()
+				time.Sleep(wait - time.Nanosecond)
+				synctest.Wait()
+				if calls.Load() != 1 {
+					t.Fatal("retried before GitHub rate limit expired")
+				}
+				time.Sleep(time.Nanosecond)
+				synctest.Wait()
+				if calls.Load() != 2 || !c.Snapshot().UpdateAvailable {
+					t.Fatal("did not recover after rate-limit wait")
+				}
+				cancel()
+				synctest.Wait()
+			})
+		})
+	}
+}
+
+func TestNoUpdateOmitsNotesWithoutMutatingCache(t *testing.T) {
+	c := NewChecker("v0.13.0")
+	c.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, releaseJSON), nil
+	})
+	if err := c.check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status := c.Snapshot()
+	if status.UpdateAvailable || status.LatestRelease.Notes != "" || c.status.LatestRelease.Notes == "" {
+		t.Fatal("no-update response must omit notes while retaining the internal cache")
+	}
+}
+
+func TestMissingReleaseClearsCacheAndETag(t *testing.T) {
+	c := NewChecker("v0.12.0")
+	calls := 0
+	c.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 2 {
+			if r.Header.Get("If-None-Match") != `"release-13"` {
+				t.Fatal("expected cached ETag")
+			}
+			return response(http.StatusNotFound, ""), nil
+		}
+		if r.Header.Get("If-None-Match") != "" {
+			t.Fatal("stale ETag must be cleared after 404")
+		}
+		res := response(http.StatusOK, releaseJSON)
+		res.Header.Set("ETag", `"release-13"`)
+		return res, nil
+	})
+	for attempt := 1; attempt <= 3; attempt++ {
+		if err := c.check(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		status := c.Snapshot()
+		if attempt == 2 {
+			if status.UpdateAvailable || status.LatestRelease != nil || status.CheckedAt == nil {
+				t.Fatal("404 must clear the release and mark the successful check")
+			}
+		} else if !status.UpdateAvailable {
+			t.Fatal("release was not cached after a successful response")
+		}
+	}
 }
 
 func TestNewerStable(t *testing.T) {

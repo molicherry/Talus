@@ -677,7 +677,8 @@
     "publishedAt": "发布时间",
     "releaseNotes": "发布说明",
     "noNotes": "此版本未提供发布说明。",
-    "openRelease": "前往 GitHub"
+    "openRelease": "前往 GitHub",
+    "allReleases": "所有版本与升级说明"
   },
   "update": {
     "available": "新版本已部署。",

@@ -19,6 +19,7 @@ bash tests/run.sh
 | `query-flags.test.mjs` | The **actual** `computeQueryFlags` render-flag logic extracted from `useQuery` | Guards the isLoading first-render-flash bug: a fresh enabled query must report `isLoading=true` on first render (react-query parity), a disabled one `false` |
 | `credential-rows.test.mjs` | Credential draft validation and serialization | Guards duplicate-key overwrites, blank-row collisions, stable identities and literal object keys |
 | `release-notes.test.mjs` | The actual compiled Release-body language selector | Covers bilingual selection, shared changelog, missing/empty translations, legacy notes, code examples and malformed block fallback |
+| `release-update-api.test.mjs` | The actual Release API decoder and request options | Covers nanosecond UTC timestamps, nullable results, browser cache revalidation and canonical GitHub HTTPS links |
 
 The `query-layer.test.mjs` suite compiles `src/lib/query.ts` to a gitignored
 temp module first (the file is TypeScript with React imports, so it can't be

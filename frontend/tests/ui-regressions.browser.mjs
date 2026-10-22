@@ -302,7 +302,7 @@ try {
           current_version: "v0.12.0", update_available: true, checked_at: timestamp,
           latest_release: {
             version: "v0.13.0", published_at: timestamp,
-            notes: "## Highlights\n- Improved SSH routes\n<script>window.releaseInjected = true</script>",
+            notes: "## Highlights\n- **Improved** SSH routes\n\n`ssh server`\n\n[Pull request](https://github.com/molicherry/Talus/pull/1)\n\n[Unsafe](javascript:alert%281%29)\n\n![Remote image](https://example.test/image.png)\n\n<script>window.releaseInjected = true</script>",
             url: "https://github.com/molicherry/Talus/releases/tag/v0.13.0",
           },
         });
@@ -312,6 +312,7 @@ try {
       if (mobile) await page.getByRole("button", { name: "Open navigation", exact: true }).click();
       const badge = page.getByRole("button", { name: "View new version v0.13.0", exact: true });
       await badge.waitFor();
+      assert.equal(await page.locator('p[title="v0.12.0"]').textContent(), "v0.12.0", "sidebar uses the same deployed version as the dialog");
       const badgeBox = await badge.boundingBox();
       assert.ok(badgeBox.y + badgeBox.height <= page.viewportSize().height, "badge stays in the sidebar footer");
       await badge.click();
@@ -319,7 +320,14 @@ try {
       await dialog.waitFor();
       assert.ok((await dialog.textContent()).includes("v0.12.0"));
       assert.ok((await dialog.textContent()).includes("Improved SSH routes"));
-      assert.equal(await page.evaluate(() => window.releaseInjected), undefined, "release notes must render as text");
+      assert.equal(await dialog.getByRole("heading", { name: "Highlights", exact: true }).count(), 1);
+      assert.equal(await dialog.locator("li strong").textContent(), "Improved");
+      assert.equal(await dialog.locator("code").textContent(), "ssh server");
+      assert.equal(await dialog.locator("script, img").count(), 0);
+      assert.equal(await dialog.locator('a[href^="javascript:"], a[href^="data:"]').count(), 0);
+      assert.equal(await dialog.getByRole("link", { name: "Unsafe", exact: true }).count(), 0);
+      assert.equal(await page.evaluate(() => window.releaseInjected), undefined, "raw HTML must never execute");
+      assert.equal(await dialog.getByRole("link", { name: "All releases and upgrade notes" }).getAttribute("href"), "https://github.com/molicherry/Talus/releases");
       const link = dialog.getByRole("link", { name: "View on GitHub" });
       assert.equal(await link.getAttribute("href"), "https://github.com/molicherry/Talus/releases/tag/v0.13.0");
       assert.equal(await link.getAttribute("target"), "_blank");
@@ -360,8 +368,13 @@ try {
       assert.ok(!englishText.includes("改进 SSH 路线"));
       assert.equal(englishText.split("Shared PR list").length, 2);
       assert.ok(!englishText.includes("<!-- release-notes:"));
+      assert.equal(await englishDialog.getByRole("heading", { name: "English", exact: true }).count(), 0, "redundant language heading is hidden");
       await page.keyboard.press("Escape");
-      if (mobile) await page.keyboard.press("Escape");
+      await englishDialog.waitFor({ state: "detached" });
+      if (mobile) {
+        await page.keyboard.press("Escape");
+        await page.locator("#mobile-navigation").waitFor({ state: "detached" });
+      }
       await page.getByRole("button", { name: "中文", exact: true }).click();
       if (mobile) await page.locator('[aria-controls="mobile-navigation"]').click();
       await page.getByRole("button", { name: "查看新版本 v0.13.0", exact: true }).click();
@@ -388,6 +401,47 @@ try {
       assert.equal(await page.getByRole("button", { name: /^View new version/ }).count(), 0);
       assert.equal(await page.getByRole("dialog").count(), 0);
     });
+  }
+  for (const mobile of [false, true]) {
+    await test(`upstream release refresh clears stale dialogs and upgrade badges (${mobile ? "mobile" : "desktop"})`, async ({ page, state, goto }) => {
+      await page.clock.install();
+      let available = true;
+      let version = "v0.13.0";
+      state.custom = async ({ path, reply }) => {
+        if (path !== "/api/v1/updates") return false;
+        await reply({
+          current_version: available ? "v0.12.0" : version,
+          update_available: available, checked_at: timestamp,
+          latest_release: available ? { version, published_at: timestamp, notes: "## Highlights\n- Improved routes", url: `https://github.com/molicherry/Talus/releases/tag/${version}` } : null,
+        });
+        return true;
+      };
+      await goto("/servers");
+      if (mobile) await page.locator('[aria-controls="mobile-navigation"]').click();
+      await page.getByRole("button", { name: "View new version v0.13.0", exact: true }).click();
+      const first = page.getByRole("dialog", { name: "New version v0.13.0 available" });
+      await first.waitFor();
+      const refresh = async count => {
+        await page.clock.fastForward(5 * 60 * 1000 + 1);
+        await until(() => (state.counts.get("GET /api/v1/updates") ?? 0) >= count, "update status refresh");
+      };
+      available = false;
+      await refresh(2);
+      await first.waitFor({ state: "detached" });
+      assert.equal(await page.getByRole("button", { name: /^View new version/ }).count(), 0, "badge disappears after upgrading");
+      available = true;
+      await refresh(3);
+      const badge = page.getByRole("button", { name: "View new version v0.13.0", exact: true });
+      await badge.waitFor();
+      assert.equal(await first.count(), 0, "returning release must not reopen its dialog automatically");
+      await badge.click();
+      await first.waitFor();
+      version = "v0.14.0";
+      await refresh(4);
+      await first.waitFor({ state: "detached" });
+      await page.getByRole("button", { name: "View new version v0.14.0", exact: true }).waitFor();
+      assert.equal(await page.getByRole("dialog", { name: "New version v0.14.0 available" }).count(), 0, "new release needs an explicit click");
+    }, mobile);
   }
   for (const mobile of [false, true]) {
     await test(`resident monitoring separates live contact, partial collection and backfill (${mobile ? "mobile" : "desktop"})`, async ({ page, state, goto }) => {

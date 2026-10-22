@@ -28,9 +28,16 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const { t } = useTranslation();
   const { canViewUsageLogs } = useAuth();
   const { data: updateStatus } = useReleaseUpdate();
-  const [releaseOpen, setReleaseOpen] = useState(false);
+  const [openedVersion, setOpenedVersion] = useState<string | null>(null);
   const updateButton = useRef<HTMLButtonElement>(null);
   const release = updateStatus?.update_available ? updateStatus.latest_release : null;
+  const releaseVersion = release?.version ?? null;
+  const releaseOpen = releaseVersion !== null && openedVersion === releaseVersion;
+  const currentVersion = updateStatus?.current_version ?? VERSION;
+
+  useEffect(() => {
+    setOpenedVersion(null);
+  }, [releaseVersion]);
 
   const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
   useEffect(() => {
@@ -77,7 +84,10 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
       <div className="flex items-center justify-between gap-3 border-t border-sidebar-border px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
-          <p className="truncate text-xs font-medium text-muted-foreground">{VERSION}</p>
+          <p className="truncate text-xs font-medium text-muted-foreground" title={currentVersion}>{currentVersion}</p>
+          <span aria-live="polite" aria-atomic="true" className="sr-only">
+            {release ? t("releaseUpdate.viewVersion", { version: release.version }) : ""}
+          </span>
           {release && (
             <button
               ref={updateButton}
@@ -87,7 +97,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               aria-expanded={releaseOpen}
               aria-controls="release-update-dialog"
               title={t("releaseUpdate.viewVersion", { version: release.version })}
-              onClick={() => setReleaseOpen(true)}
+              onClick={() => setOpenedVersion(release.version)}
               className="touch-target inline-flex shrink-0 items-center rounded-lg bg-primary-subtle px-2 py-1 text-xs font-medium text-link transition-colors hover:text-link-hover"
             >
               {t("releaseUpdate.badge")}
@@ -137,8 +147,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       {release && (
         <ReleaseUpdateDialog
           open={releaseOpen}
-          onClose={() => setReleaseOpen(false)}
-          currentVersion={updateStatus!.current_version}
+          onClose={() => setOpenedVersion(null)}
+          currentVersion={currentVersion}
           release={release}
           returnFocusRef={updateButton}
         />

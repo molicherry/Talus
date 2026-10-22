@@ -677,7 +677,8 @@
     "publishedAt": "Published",
     "releaseNotes": "Release notes",
     "noNotes": "No release notes were provided for this version.",
-    "openRelease": "View on GitHub"
+    "openRelease": "View on GitHub",
+    "allReleases": "All releases and upgrade notes"
   },
   "update": {
     "available": "A new version has been deployed.",

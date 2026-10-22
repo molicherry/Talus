@@ -4,11 +4,13 @@ package update
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +59,9 @@ func (c *Checker) Snapshot() Status {
 	snapshot := c.status
 	if snapshot.LatestRelease != nil {
 		release := *snapshot.LatestRelease
+		if !snapshot.UpdateAvailable {
+			release.Notes = ""
+		}
 		snapshot.LatestRelease = &release
 	}
 	if snapshot.CheckedAt != nil {
@@ -72,19 +77,43 @@ func (c *Checker) Run(ctx context.Context) {
 	if tagPattern.FindStringSubmatch(c.status.CurrentVersion) == nil {
 		return
 	}
-	ticker := time.NewTicker(checkInterval)
-	defer ticker.Stop()
+	failures := 0
+	lastError := ""
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := c.check(ctx); err != nil && ctx.Err() == nil {
-			slog.Debug("release update check failed", "error", err)
+		err := c.check(ctx)
+		if ctx.Err() != nil {
+			return
 		}
+		delay := checkInterval
+		if err != nil {
+			failures++
+			delay = retryDelay(failures)
+			var limited *rateLimitError
+			if errors.As(err, &limited) && limited.retryAfter > delay {
+				delay = limited.retryAfter
+			}
+			if lastError != err.Error() {
+				slog.Warn("release update check failed; retrying", "error", err, "retry_in", delay)
+			} else {
+				slog.Debug("release update check still failing", "error", err, "retry_in", delay)
+			}
+			lastError = err.Error()
+		} else {
+			if failures > 0 {
+				slog.Info("release update checks recovered", "failed_attempts", failures)
+			}
+			failures = 0
+			lastError = ""
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }
@@ -108,6 +137,9 @@ func (c *Checker) check(ctx context.Context) error {
 	checked := time.Now().UTC()
 	switch response.StatusCode {
 	case http.StatusNotModified:
+		if c.etag == "" {
+			return fmt.Errorf("GitHub returned 304 without a cached release")
+		}
 		c.mu.Lock()
 		c.status.CheckedAt = &checked
 		c.mu.Unlock()
@@ -123,6 +155,9 @@ func (c *Checker) check(ctx context.Context) error {
 		return nil
 	case http.StatusOK:
 	default:
+		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusForbidden {
+			return &rateLimitError{status: response.StatusCode, retryAfter: rateLimitDelay(response.Header, checked)}
+		}
 		return fmt.Errorf("GitHub release check returned HTTP %d", response.StatusCode)
 	}
 	const maxBody = 1 << 20
@@ -157,6 +192,45 @@ func (c *Checker) check(ctx context.Context) error {
 	c.mu.Unlock()
 	c.etag = response.Header.Get("ETag")
 	return nil
+}
+
+func retryDelay(failures int) time.Duration {
+	switch failures {
+	case 1:
+		return 5 * time.Minute
+	case 2:
+		return 15 * time.Minute
+	case 3:
+		return 30 * time.Minute
+	default:
+		return time.Hour
+	}
+}
+
+type rateLimitError struct {
+	status     int
+	retryAfter time.Duration
+}
+
+func (e *rateLimitError) Error() string {
+	return fmt.Sprintf("GitHub release check returned HTTP %d", e.status)
+}
+
+func rateLimitDelay(header http.Header, now time.Time) time.Duration {
+	var delay time.Duration
+	if seconds, err := strconv.ParseInt(header.Get("Retry-After"), 10, 32); err == nil && seconds > 0 {
+		delay = time.Duration(seconds) * time.Second
+	} else if date, err := http.ParseTime(header.Get("Retry-After")); err == nil && date.After(now) {
+		delay = date.Sub(now)
+	}
+	if header.Get("X-RateLimit-Remaining") == "0" {
+		if reset, err := strconv.ParseInt(header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+			if until := time.Unix(reset, 0).Sub(now); until > delay {
+				delay = until
+			}
+		}
+	}
+	return delay
 }
 
 func newerStable(latest, current string) bool {
