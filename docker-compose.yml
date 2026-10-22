@@ -32,10 +32,9 @@ services:
       dockerfile: Dockerfile
       args:
         # Baked into both the binary and the UI bundle, and surfaced at
-        # /api/v1/version. The UI compares the two to offer a "new version"
-        # prompt, so a source build only gets that prompt if this changes per
-        # release — e.g. VERSION=$(git rev-parse --short HEAD). Left at the
-        # default, both sides report an identical "dev" and the check is off.
+        # /api/v1/version. Set a release tag (e.g. v0.12.0) to enable GitHub
+        # update checks and the stale-page reload prompt. A changing commit
+        # hash enables only the reload prompt; "dev" disables both checks.
         VERSION: ${VERSION:-dev}
     ports:
       - "${PORT:-8080}:8080"

@@ -2,37 +2,31 @@
 
 [English](releasing.md)
 
-发版顺序：合并到 `main` → 推送 annotated Tag → 全部门禁通过 → 发布版本镜像 →
-审核自动生成的 Release 草稿 → 发布 Release → 将同一个镜像 digest 推进到 `latest`。
+维护者从已合并到 `main` 的提交创建 Tag。CI 发布版本镜像并生成 Release 草稿，
+人工审核并发布 Release 后，工作流将同一镜像 digest 推进到 `latest`。
 
 ## 版本与标签
 
-| 用途 | Tag | GitHub Release | 更新 `latest` |
+| 类型 | Tag 示例 | CI 成功后的产物 | 更新 `latest` |
 | --- | --- | --- | --- |
-| 正式版 | `v0.12.0` | CI 成功后必须发布，先自动生成草稿 | 仅带证据附件的最高已发布正式版 |
-| 候选版 | `v0.13.0-rc.1` | 自动生成标为 pre-release 的草稿 | 不更新 |
-| 内部测试 | `v0.13.0-test.1` | 不创建 | 不更新 |
+| 正式版 | `v0.12.0` | 版本镜像、待审核的 Release 草稿；维护者须发布 Release | 仅带证据附件的最高已发布正式版 |
+| 候选版 | `v0.13.0-rc.1` | 版本镜像、标为 pre-release 的草稿 | 否 |
+| 内部测试 | `v0.13.0-test.1` | 仅版本镜像 | 否 |
 
-必须带 `v`，只接受上述三种形式，不接受前导零、构建元数据或其他后缀。
-同一基础版本、同一类型的 RC/test 序号从 1 开始递增，不复用；维护者在推送前分配序号，
-CI 校验格式，不推断历史创建顺序。
+- 必须带 `v`，仅接受上述三种形式，不接受前导零、构建元数据或其他后缀。
+- 0.x 阶段，patch 只修 bug、不改契约；minor 增加功能，允许不兼容变更，但必须写升级说明。
+  major 递增留到 1.0 及以后。
+- RC/test 序号按基础版本和类型分别从 1 递增，不复用。维护者分配序号，CI 只校验格式。
+- 正式版、RC 和 test 的所有新 Tag 都必须是 annotated Tag，指向已进入 `main` 的提交。
+  test 同样受 CI 的主干祖先关系校验约束。消息首行为
+  `<完整 Tag> — 一句话主题`，正文列出与发布亮点对应的变更。
+- Tag 推送后不得删除、移动、改名或强推，CI 失败也一样。版本镜像标签也不可覆盖。
+  同一源码可以重跑 CI；修改源码必须使用新版本号或新序号。
 
-0.x 阶段，patch 只修 bug，不改契约；minor 增加功能，可引入不兼容变更，但必须在
-Upgrade notes 写清影响和操作。major 递增留到 1.0 及以后。
+## 准备发布
 
-所有新 Tag，包括 RC/test，必须是 **annotated**，指向已经进入 `main` 的提交。
-消息首行为 `vX.Y.Z — 一句话主题`，正文包含与 Release Highlights 对应的变更条目。
-历史 lightweight Tag、旧 Release 保持原样，不补齐缺失的古早 Release。
-
-Tag 一经推送就不得删除、移动、改名或强推，CI 失败也一样。同一份源码可重跑 CI，
-源码需要修改则使用新版本号或新序号。版本镜像标签也不可覆盖；重试时校验并复用已经
-发布的镜像，不用新构建替换它。
-
-## 一次完整发版
-
-1. 合并变更并同步 `main`，确定版本号。RC/test 推送前检查序号未占用。
-   仅纯 CI、测试、内部重构或文档 PR 使用 `ci`、`tests`、`internal`、
-   `documentation`、`skip-changelog` 排除标签；混有用户可见变更的 PR 不能因此被排除。
+1. 合并变更，选择版本号，并检查目标 Tag 和 RC/test 序号尚未使用。
+2. 同步 `main`，确认工作区干净：
 
    ```bash
    git switch main
@@ -41,7 +35,7 @@ Tag 一经推送就不得删除、移动、改名或强推，CI 失败也一样�
    git status --short
    ```
 
-2. 创建并检查 annotated Tag。以下以正式版为例，候选版和测试版全程换用相应名称。
+3. 创建、检查并推送 annotated Tag。以下为正式版示例，RC/test 使用对应名称：
 
    ```bash
    git tag -a v0.12.0 -m "v0.12.0 — <主题>" -m "- <用户可见的变更>"
@@ -51,7 +45,9 @@ Tag 一经推送就不得删除、移动、改名或强推，CI 失败也一样�
    git push origin v0.12.0
    ```
 
-3. 打开该 Tag 的 **CI**，或找到对应运行 ID 后等待成功退出：
+## 审核与发布
+
+1. 打开该 Tag 的 **CI** 运行，等待全部检查通过。也可通过 CLI 查看：
 
    ```bash
    gh run list --workflow ci.yml --branch v0.12.0 --event push --limit 5
@@ -59,101 +55,139 @@ Tag 一经推送就不得删除、移动、改名或强推，CI 失败也一样�
    ```
 
    Tag 校验、发布策略回归、前后端、M1–M4、Docker 验收和 CodeQL 全部通过后，
-   才能发布版本镜像。Docker 构建先导出 OCI 归档，不写镜像仓库；发布任务将归档的
-   原始多架构 digest 复制为 `ghcr.io/molicherry/talus:v0.12.0`，生成包含 Tag 对象、
-   提交、digest、CI 运行 ID 的 `release-image.json`。正式版和 RC 自动生成草稿并附上
-   这份证据；测试版只发布镜像。`gh run list` 能查到运行不代表 CI 成功。
+   CI 才会发布 `ghcr.io/molicherry/talus:v0.12.0`。镜像包含 Linux amd64/arm64，
+   来自 Docker 门禁导出的 OCI 归档。`release-image.json` 记录 Tag 对象、提交、
+   镜像 digest 和 CI 运行 ID；正式版和 RC 的草稿自动附上此文件。test 到此完成。
 
-4. 在 GitHub 编辑已经生成的草稿。标题默认等于 Tag，也可附加主题，例如
-   `v0.12.0 — SSH routes`。流程通过 `tag_name` 识别 Release，重试时保留人工修改的标题。
-   补齐 Highlights，审核自动变更列表，
-   清除所有 `<!-- release:todo -->` 标记。不涉及升级风险就删除 Upgrade notes；
-   涉及迁移、配置或兼容性变化时，写清用户需要做什么、能否回滚，以及回滚代价。
-   保留 `release-image.json` 附件原样。
-
-   Release 正文使用英文，模板为：
-
-   ```markdown
-   ## Highlights
-   - **Feature.** Describe user-visible behavior.
-
-   ## Upgrade notes
-   Required steps, compatibility and rollback consequences. Omit when unnecessary.
-
-   ## What's Changed
-   * <commit subject> by @<author> in https://github.com/molicherry/Talus/pull/<N>
-
-   **Full Changelog**: https://github.com/molicherry/Talus/compare/<previous-stable>...<tag>
-   ```
-
-   保留功能、用户可见的修复、安全和兼容性变化；排除纯测试、CI、覆盖率及内部重构。
-   自动变更列表使用 [`.github/release.yml`](../.github/release.yml) 的标签过滤，仍需人工复核。
-   正式版和 RC 的比较基线，均为当前提交可达、版本号小于本次版本的最高正式 Tag；
-   正式版不会只对比最后一个 RC。不存在前序正式版时使用 GitHub 生成的首次发布历史。
-
-5. 发布审核后的草稿。RC 必须保留 pre-release 标记。补发低于当前最高正式版的旧分支修复时，
-   不勾选 “Set as latest release”。也可使用：
+2. 审核自动生成的草稿，按[发布说明规范](#发布说明)补齐中英文内容，
+   复核变更列表，清除所有 `<!-- release:todo -->`。涉及升级操作时，两种语言均说明
+   迁移、配置、兼容性及回滚代价。保留语言标记和 `release-image.json` 附件。
+   标题默认等于 Tag，可附加主题；自动化按 `tag_name` 识别 Release，重试保留人工修改。
+3. 使用 GitHub 页面或维护者自己的 `gh` 身份发布审核后的草稿。RC 保留 pre-release 标记，
+   补发较低版本的修复时不勾选 “Set as latest release”。CLI 示例：
 
    ```bash
    gh release edit v0.12.0 --draft=false --latest=false
    ```
 
-6. 等待 **Promote published Release** 成功。它会再次核验 annotated Tag、main 祖先关系、
-   成功的 Tag CI、证据和两种镜像架构，再将带证据附件的最高已发布正式版的**现有 digest** 复制到
-   `latest`，不重新构建。全局串行与数值 SemVer 判断共同防止旧版本、乱序事件造成倒退，
-   并将相应 Release 标为 GitHub 最新版。成功后再宣布 `latest` 可用。
-   RC/test 不推进镜像或 GitHub 的 latest。
+4. 正式版等待 **Promote published Release** 成功。工作流复核 Tag、`main` 祖先关系、
+   成功的 Tag CI、证据和镜像架构，再将最高已发布且带证据的正式版现有 digest 复制到
+   `latest`，并设为 GitHub 最新版。它不重新构建，RC/test 不推进 latest。
+5. 确认版本镜像、Release 和晋升结果后，再宣布 `latest` 可用。审核草稿期间，版本镜像已可用。
 
-发布 Release 只触发镜像晋升，不触发构建。等待草稿审核期间，版本镜像已经可用。
-通过 GitHub 页面或维护者自己的 `gh` 身份发布，才能触发后续 `release.published` 工作流；
-不要使用 Actions 的 `GITHUB_TOKEN` 自动完成最后发布，它产生的事件不会启动其他工作流。
+最后发布 Release 必须产生 `release.published` 事件。不要用 Actions 的 `GITHUB_TOKEN`
+自动完成这一步，它产生的事件不会启动后续工作流。
 
-## 失败与恢复
+## 发布说明
 
-- 门禁失败，不发布版本镜像、不生成 Release。临时故障重跑原 CI；修改源码则用新 Tag，
-  不移动失败的 Tag。
-- 镜像发布后、草稿创建前失败，可能留下没有草稿的版本镜像。重跑失败任务会验证并复用镜像，
-  不覆盖它。草稿重试保留人工修改的正文及已有证据，已发布 Release 也不会被重写。
-- OCI 归档保留 7 天，过期后重跑全部 CI。已经存在的版本镜像仍然只复用、不覆盖。
-- 没有 `release-image.json` 附件的历史 Release 会被跳过。若尚无纳入本流程的正式发布，
-  恢复会输出 `No stable release is enrolled in this workflow yet; skipping promotion.`
-  （尚无纳入本流程的稳定发布，跳过），正常退出，不修改镜像或 Release。
-- 已发布正式版若证据内容错误或不匹配、CI 失败、Tag 或镜像被修改、正文仍有占位标记，晋升失败并保留
-  原来的 `latest`。调查差异，不删除校验、不修改证据来强行通过；代码或产物出错发新版本。
-- 修复临时 API/镜像仓库故障，或纠正 Release 说明后，重跑 **Promote published Release**，
-  也可以执行：
+新 Release 同时提供英文和简体中文，功能、修复、安全及升级信息应一致。
+CI 生成双语草稿，维护者补齐并审核内容；不自动翻译。
 
-  ```bash
-  gh workflow run release.yml --ref main
-  ```
+### 编写与审核
 
-  恢复始终处理带证据附件的最高已发布正式版，不能指定旧版本降级。多个发布事件排队时，最后执行的任务
-  仍会处理已纳入流程的最高版本。现有 `latest` 版本更高、没有版本标签，或同版本 digest 不一致时，
-  不会静默覆盖。已有证据附件但内容无效或读取失败时会报错，不会退回较旧版本；
-  只有附件不存在才表示该 Release 尚未纳入本流程。
+- 更新亮点保留用户可见的功能、修复、安全和兼容性变化，排除纯测试、CI、覆盖率及内部重构。
+- 涉及迁移、配置或兼容性变化时，两种语言均说明必要操作、能否回滚及回滚代价；
+  无需操作时删除两边的升级说明。
+- 保留语言标记，清除所有 `<!-- release:todo -->`。`release-image.json` 附件保持原样。
+- 自动变更列表使用 [`.github/release.yml`](../.github/release.yml) 过滤标签，仍须人工复核。
+  正式版和 RC 的比较基线均为当前提交可达、且小于本次版本的最高正式 Tag，
+  正式版不会只对比最后一个 RC。没有前序正式版时使用 GitHub 生成的首次发布历史。
 
-已发布 Release 不删除。笔误和错误的升级/安全说明可原地纠正，实质性文档纠正须附修订说明；
-代码和产物变化必须发布新版本。证据附件不是可编辑的版本说明。失败 Tag 保留，也不计入
-“成功版本漏发 Release”。
+### 双语模板
 
-## 仓库配置与首次启用
+两个语言区块各写一份概要，`What's Changed` 和 `Full Changelog` 共享一份，
+放在语言区块之后。提交标题无需逐条翻译。
 
-[`.github/release.yml`](../.github/release.yml) 引用的标签必须先在仓库中存在，维护者才能使用。
-在仓库根目录，用具备 issues write 权限且已登录 `gh` 的维护者身份初始化一次：
+```markdown
+<!-- release-notes:en -->
+## English
 
-```bash
-GH_TOKEN="$(gh auth token)" GITHUB_REPOSITORY=molicherry/Talus node .github/scripts/release-labels.mjs
+### Highlights
+- **Feature.** Describe user-visible behavior.
+
+### Upgrade notes
+Required steps, compatibility and rollback consequences. Omit when unnecessary.
+<!-- /release-notes:en -->
+
+<!-- release-notes:zh-CN -->
+## 简体中文
+
+### 更新亮点
+- **功能。** 描述与英文版对应的用户可见行为。
+
+### 升级说明
+必要的升级操作、兼容性和回滚代价。无需操作时删除本节。
+<!-- /release-notes:zh-CN -->
+
+## What's Changed
+* <commit subject> by @<author> in https://github.com/molicherry/Talus/pull/<N>
+
+**Full Changelog**: https://github.com/molicherry/Talus/compare/<previous-stable>...<tag>
 ```
 
-初始化脚本只创建缺失的 `skip-changelog`、`ci`、`tests`、`internal`、`documentation`，
-保留已有标签及其描述和颜色，重复执行不产生变更。这是维护者的一次性配置，
-发版任务不因此获得额外的标签管理权限。
+### 双语说明的加载规则
 
-仓库 Actions 需要有权写入对应 GHCR 包。工作流使用 `GITHUB_TOKEN`，仅镜像发布/晋升任务
-拥有 package write，仅草稿/晋升任务拥有 contents write，并保留 CodeQL 的扫描权限。
-不需要新增 PAT 或手动环境审批。
+标记使用模板中的固定写法，各占一行，每种语言最多一个区块，不允许嵌套。
+代码围栏中的示例不会被当作边界，Markdown 标题不用于判断语言。
 
-建议使用 Tag ruleset 限制 `v*` 的创建者并禁止修改、删除；CI 无法阻止拥有绕过权限的管理员。
-先合并本次工作流改造，再创建第一个新规范版本。不要重跑历史 Tag 的旧工作流，它仍包含
-旧的 `latest` 发布逻辑。没有证据附件的历史 Release 不参与新流程的自动晋升；
-在首个新流程正式版发布之前执行恢复，会正常跳过。
+| 情况 | 弹窗显示 |
+| --- | --- |
+| 界面为简体中文 | 优先 `zh-CN` 区块，再附上共享正文 |
+| 界面为英文 | 优先 `en` 区块，再附上共享正文 |
+| 所选语言缺失或为空 | 回退另一语言，再附上共享正文 |
+| 历史说明没有语言标记 | 完整原文 |
+| 标记未闭合、重复、嵌套或不匹配 | 完整原文，保留升级和安全信息 |
+| 两种语言和共享内容均为空 | 当前界面语言的“此版本未提供发布说明” |
+
+Hub 缓存 GitHub Release 完整正文，前端按界面语言选择内容；切换语言立即生效，
+无需额外请求 GitHub。正文渲染标题、列表、粗体、代码和链接等 Markdown，
+禁用原始 HTML 和图片，仅允许 HTTPS 链接，不自动翻译。
+“前往 GitHub”打开含双语全文的原始 Release 页面。
+检查及缓存周期见[新版本提示](README.zh-CN.md#新版本提示)。
+
+## 仓库配置
+
+- Actions 需有权写入对应 GHCR 包。工作流使用 `GITHUB_TOKEN`：仅镜像发布/晋升任务拥有
+  packages write，仅草稿/晋升任务拥有 contents write，并保留 CodeQL 扫描权限。
+  当前流程无需新增 PAT 或手动环境审批。
+- [`.github/release.yml`](../.github/release.yml) 中的标签须预先存在。用具备 issues write
+  权限且已登录 `gh` 的维护者身份，在仓库根目录初始化一次：
+
+  ```bash
+  GH_TOKEN="$(gh auth token)" GITHUB_REPOSITORY=molicherry/Talus node .github/scripts/release-labels.mjs
+  ```
+
+  脚本只创建缺失的 `skip-changelog`、`ci`、`tests`、`internal`、`documentation`，
+  保留已有标签的描述和颜色。仅纯 CI、测试、内部重构或文档 PR 可使用对应排除标签；
+  含用户可见变更的混合 PR 必须保留在变更列表中。
+- 建议配置 Tag ruleset，限制 `v*` 的创建者并禁止修改、删除。CI 无法阻止管理员绕过规则。
+  首次启用时先合并工作流，再创建新 Tag。历史 Tag/Release 保持原样，不补发古早 Release，
+  不重跑仍含旧 latest 发布逻辑的历史 Tag 工作流。
+
+## 失败恢复
+
+| 失败阶段 | 处理方式 |
+| --- | --- |
+| CI 门禁失败 | 临时故障重跑原 CI；源码修复使用新 Tag。失败 Tag 保留，不发布镜像或 Release。 |
+| 镜像已发布，草稿未生成 | 重跑失败任务；已有版本镜像经验证后复用，不覆盖。草稿重试保留人工修改和已有证据。 |
+| OCI 归档已过期 | 归档保留 7 天；过期后重跑全部 CI。已有版本镜像仍只复用。 |
+| Release 已发布，晋升失败 | 修复临时 API/镜像仓库故障或说明错误，再重跑晋升任务。代码或产物出错则发新版本。 |
+| Tag、证据、CI 或镜像不匹配 | 保留原 latest，调查差异；不得删除校验或修改证据来强行通过。 |
+| 尚无带证据的正式发布 | 恢复正常跳过，不修改镜像或 Release。没有证据附件的历史 Release 不参与晋升。 |
+
+也可从 `main` 手动触发恢复：
+
+```bash
+gh workflow run release.yml --ref main
+```
+
+恢复始终处理带证据附件的最高已发布正式版。全局串行与数值版本比较防止乱序事件造成降级；
+不能指定旧版本覆盖 latest。附件存在但无效或读取失败会报错，不回退到旧版。
+现有 latest 版本更高、缺少版本标签，或同版本 digest 不一致时，不会静默覆盖。
+
+已发布 Release 不删除。笔误、升级或安全说明可原地纠正，实质性文档纠正须附修订说明；
+代码或产物变化必须发新版本。证据附件不作为可编辑的版本说明。
+
+文档结构参考 [Vite 的发布指南](https://github.com/vitejs/vite/blob/main/CONTRIBUTING.md#release)。
+Talus 的自动化实现见 [CI](../.github/workflows/ci.yml)、[晋升工作流](../.github/workflows/release.yml)
+和[发布脚本](../.github/scripts/release.mjs)。

@@ -2,43 +2,37 @@
 
 [简体中文](releasing.zh-CN.md)
 
-The release path is: merge to `main` → push an annotated tag → pass all release
-gates → publish the version image → review the generated Release draft → publish
-the Release → promote the same image digest to `latest`.
+Maintainers tag a commit already merged into `main`. CI publishes a versioned
+image and creates a Release draft. After a maintainer reviews and publishes it,
+the promotion workflow advances the same image digest to `latest`.
 
-## Versions
+## Versions and tags
 
-| Purpose | Tag | GitHub Release | Updates `latest` |
+| Type | Example tag | Output after successful CI | Updates `latest` |
 | --- | --- | --- | --- |
-| Stable | `v0.12.0` | Required after successful CI; initially a draft | Only the highest published stable with image evidence |
-| Release candidate | `v0.13.0-rc.1` | Draft marked pre-release | Never |
-| Internal test | `v0.13.0-test.1` | None | Never |
+| Stable | `v0.12.0` | Version image and Release draft; maintainer must publish the Release | Only the highest published stable with image evidence |
+| Candidate | `v0.13.0-rc.1` | Version image and draft marked pre-release | No |
+| Internal test | `v0.13.0-test.1` | Version image only | No |
 
-The `v` prefix is mandatory. Only these three forms are accepted; leading zeros,
-build metadata and other suffixes are rejected. RC/test counters start at 1,
-increase for each base version and kind, and must never be reused. Maintainers
-allocate counters before pushing; CI validates their format, not creation order.
+- The `v` prefix is required. Only these three forms are accepted; leading zeros,
+  build metadata and other suffixes are rejected.
+- During 0.x development, patches fix bugs without changing contracts. Minors add
+  features and may break compatibility with explicit upgrade notes. Reserve major
+  increments for 1.0 and later.
+- RC/test counters start at 1 for each base version and kind and are never reused.
+  Maintainers allocate them; CI validates format, not historical ordering.
+- Every new stable, RC or test tag must be annotated and point to a commit
+  already on `main`. CI applies the same main-ancestry check to test tags. The
+  first message line is `<full tag> — theme`, followed by change bullets matching
+  the Release highlights.
+- Never delete, move, rename or force-push a published tag, even after failed CI.
+  Version image tags are also immutable. Retry CI for the same source; source
+  changes require a new version or counter.
 
-During 0.x development, a patch fixes bugs without changing contracts; a minor
-adds functionality and may break compatibility, with explicit upgrade notes.
-Reserve major version increments for 1.0 and later.
+## Prepare a release
 
-All new tags, including RC/test tags, must be **annotated** and point to a commit
-already on `main`. The message starts with `vX.Y.Z — theme` and includes change
-bullets corresponding to the Release Highlights. Historical tags and Releases
-are left as they are; missing old Releases are not backfilled.
-
-Once pushed, never delete, move, rename or force-push a tag, even if CI fails.
-Retry CI for the same source; use a new version/counter for source changes. Version
-image tags are also immutable. On retry, CI verifies and reuses an existing
-version image instead of replacing it with a new build.
-
-## Publish a version
-
-1. Merge the changes and synchronize `main`. Decide the version and allocate an
-   unused RC/test counter when applicable. Apply `ci`, `tests`, `internal`,
-   `documentation`, or `skip-changelog` labels only to PRs consisting entirely of
-   those changes. Mixed PRs with user-visible changes must remain in the notes.
+1. Merge the changes, select a version and confirm the tag/counter is unused.
+2. Synchronize `main` and check that the working tree is clean:
 
    ```bash
    git switch main
@@ -47,8 +41,8 @@ version image instead of replacing it with a new build.
    git status --short
    ```
 
-2. Create and check an annotated tag. The example uses a stable version; use the
-   appropriate RC/test name throughout when applicable.
+3. Create, inspect and push an annotated tag. Use the corresponding RC/test name
+   throughout when applicable:
 
    ```bash
    git tag -a v0.12.0 -m "v0.12.0 — <theme>" -m "- <user-visible change>"
@@ -58,7 +52,9 @@ version image instead of replacing it with a new build.
    git push origin v0.12.0
    ```
 
-3. Open the tag's **CI** run, or find its ID and wait for a successful exit:
+## Review and publish
+
+1. Open the tag's **CI** run and wait for every check to pass. With the CLI:
 
    ```bash
    gh run list --workflow ci.yml --branch v0.12.0 --event push --limit 5
@@ -66,127 +62,162 @@ version image instead of replacing it with a new build.
    ```
 
    Tag validation, release-policy regressions, backend, frontend, M1–M4, Docker
-   acceptance and CodeQL must all pass. Docker exports an OCI archive without
-   pushing. After those gates, the publisher copies its exact multi-platform
-   digest to `ghcr.io/molicherry/talus:v0.12.0`. It then records the tag object,
-   commit, digest and CI run in `release-image.json`. Stable/RC builds create a
-   Release draft and attach this evidence. Test builds stop after image publication.
-   The CI run listing alone does not prove success.
+   acceptance and CodeQL must pass before publishing `ghcr.io/molicherry/talus:v0.12.0`.
+   The Linux amd64/arm64 image comes from the OCI archive exported by the Docker
+   gate. `release-image.json` records the tag object, commit, digest and CI run ID;
+   stable/RC drafts attach it automatically. Test releases are complete here.
 
-4. Edit the existing draft in GitHub. The title defaults to the tag; an optional
-   theme such as `v0.12.0 — SSH routes` is allowed. Automation identifies the
-   Release by `tag_name` and preserves edited titles on retries. Complete
-   Highlights, review the generated changes and remove every
-   `<!-- release:todo -->` marker. Remove Upgrade notes if unnecessary; otherwise
-   explain the migration/configuration changes, required actions, rollback
-   support and its cost. Keep the `release-image.json` asset unchanged.
-
-   Release text is English and follows this template:
-
-   ```markdown
-   ## Highlights
-   - **Feature.** Describe user-visible behavior.
-
-   ## Upgrade notes
-   Required steps, compatibility and rollback consequences. Omit when unnecessary.
-
-   ## What's Changed
-   * <commit subject> by @<author> in https://github.com/molicherry/Talus/pull/<N>
-
-   **Full Changelog**: https://github.com/molicherry/Talus/compare/<previous-stable>...<tag>
-   ```
-
-   Include features, user-visible fixes, security and compatibility changes.
-   Exclude pure tests, CI, coverage and internal refactoring. Generated notes use
-   the exclusions in [`.github/release.yml`](../.github/release.yml); review them
-   manually too. The comparison starts at the greatest lower stable tag reachable
-   from this release, including for RCs; a preceding RC is never the stable
-   release's baseline. With no previous stable tag, GitHub generates the initial
-   history.
-
-5. Publish the reviewed draft. RCs must remain marked pre-release. For a stable
-   backport below the highest published version, leave “Set as latest release”
-   unchecked.
+2. Review the generated draft using the [release notes guide](#release-notes).
+   Complete both languages, review the changelog and remove every
+   `<!-- release:todo -->`. Explain migration, configuration, compatibility and
+   rollback costs in both languages when applicable. Keep language markers and
+   the `release-image.json` asset. The title defaults to the tag and may include
+   a theme; automation identifies Releases by `tag_name` and preserves human edits.
+3. Publish the reviewed draft using the GitHub UI or a maintainer's own `gh`
+   identity. Keep RCs marked pre-release. For an older stable backport, leave
+   “Set as latest release” unchecked. CLI example:
 
    ```bash
    gh release edit v0.12.0 --draft=false --latest=false
    ```
 
-6. Watch **Promote published Release**. It revalidates the annotated tag, main
-   ancestry, successful tag CI, evidence and both image architectures, then
-   copies the highest published stable with image evidence **by digest** to
-   `latest`, without rebuilding. A global concurrency group and numeric SemVer comparison prevent
-   old or out-of-order events from lowering the current version. The job also
-   marks that stable Release as GitHub's latest. Verify its success before
-   announcing `latest` availability. RC/test tags never advance either latest.
+4. For stable releases, wait for **Promote published Release**. It rechecks the
+   tag, `main` ancestry, successful tag CI, evidence and image architectures, then
+   copies the highest published stable with evidence to `latest` by its existing
+   digest and marks it latest on GitHub. It does not rebuild. RC/test releases
+   never advance either latest.
+5. Verify the version image, Release and promotion before announcing `latest`.
+   Version images are already available while drafts await review.
 
-Publishing a Release triggers promotion, not an image build. Images remain
-accessible by their version tag while a draft awaits review. Publishing through
-the GitHub UI or a maintainer's `gh` token emits the `release.published` event;
-do not automate final publication using `GITHUB_TOKEN`, whose events do not start
-other workflows.
+Final publication must emit `release.published`. Do not use Actions'
+`GITHUB_TOKEN` for that step: its events do not start the subsequent workflow.
 
-## Failure and recovery
+## Release notes
 
-- Failed gates publish no version image and create no Release. Fix the source in
-  a new tag, or rerun the original CI for a transient failure. Never repoint it.
-- A failure after image publication may leave the version image without a draft.
-  Rerun the failed jobs; the existing image is verified and reused. Draft retries
-  preserve reviewed notes and existing evidence, including after publication.
-- The OCI archive is retained for 7 days. If it has expired, rerun all CI jobs.
-  Existing version tags are still reused; they are never overwritten.
-- Historical Releases with no `release-image.json` asset are skipped. If none
-  have been enrolled in this workflow, recovery prints
-  `No stable release is enrolled in this workflow yet; skipping promotion.`
-  and exits successfully without changing any image or Release.
-- If a published stable Release has incomplete notes, invalid/mismatched evidence,
-  failed CI or a modified tag/image, promotion fails and preserves `latest`.
-  Investigate the mismatch. Do not remove the check or rewrite evidence to force
-  acceptance. Code/artifact mistakes require a new version.
-- After correcting a transient API/registry error or Release documentation,
-  rerun **Promote published Release**, or invoke recovery:
+New Releases include English and Simplified Chinese descriptions with equivalent
+feature, fix, security and upgrade information. CI creates a bilingual draft;
+maintainers complete and review it. Translation is not automatic.
 
-  ```bash
-  gh workflow run release.yml --ref main
-  ```
+### Write and review
 
-  Recovery always reconciles the highest published stable with an evidence asset;
-  no caller-supplied tag can override this selection. If multiple published events queue up, the last job still
-  reconciles that highest version. An existing newer `latest`, an unlabelled
-  image or a same-version digest mismatch is never silently replaced. An existing
-  but invalid or unreadable evidence asset fails the job; it never causes fallback
-  to an older release. Absence of the asset alone means a release is unenrolled.
+- Include user-visible features, fixes, security and compatibility changes.
+  Exclude pure tests, CI, coverage and internal refactoring.
+- Explain required migration/configuration actions, rollback support and its cost
+  in both languages when applicable. Remove both upgrade sections when unnecessary.
+- Keep language markers, remove every `<!-- release:todo -->` and preserve the
+  `release-image.json` asset unchanged.
+- Review generated notes even though [`.github/release.yml`](../.github/release.yml)
+  filters labels. Stable/RC releases compare against the highest lower stable tag
+  reachable from the release commit; a stable release never compares only with
+  its last RC. Without a previous stable tag, GitHub generates the initial history.
 
-Published Releases are not deleted. Correct spelling or erroneous upgrade/security
-instructions in place, adding a correction note for substantive documentation
-fixes; changed code or artifacts need a new version. The evidence asset is not an
-editable release note. Failed tags are retained and are not missing-Release debt.
+### Bilingual template
 
-## Repository setup and rollout
+Write one summary per language. Keep a single shared `What's Changed` and
+`Full Changelog` after both blocks; commit subjects do not need translation.
 
-The label names in [`.github/release.yml`](../.github/release.yml) must exist in
-the repository before maintainers can use them. Initialize missing labels once,
-from the repository root, using an authenticated `gh` account with issues write
-access:
+```markdown
+<!-- release-notes:en -->
+## English
 
-```bash
-GH_TOKEN="$(gh auth token)" GITHUB_REPOSITORY=molicherry/Talus node .github/scripts/release-labels.mjs
+### Highlights
+- **Feature.** Describe user-visible behavior.
+
+### Upgrade notes
+Required steps, compatibility and rollback consequences. Omit when unnecessary.
+<!-- /release-notes:en -->
+
+<!-- release-notes:zh-CN -->
+## 简体中文
+
+### 更新亮点
+- **功能。** 描述与英文版对应的用户可见行为。
+
+### 升级说明
+必要的升级操作、兼容性和回滚代价。无需操作时删除本节。
+<!-- /release-notes:zh-CN -->
+
+## What's Changed
+* <commit subject> by @<author> in https://github.com/molicherry/Talus/pull/<N>
+
+**Full Changelog**: https://github.com/molicherry/Talus/compare/<previous-stable>...<tag>
 ```
 
-The initializer creates missing `skip-changelog`, `ci`, `tests`, `internal` and
-`documentation` labels. It preserves existing labels and their descriptions/colors;
-rerunning after initialization makes no changes. This is maintainer setup, so
-release jobs do not need additional label-management permissions.
+### Loading bilingual release notes
 
-Actions must be allowed to publish to the repository's GHCR package. The workflows
-use `GITHUB_TOKEN`: package write only for image publication/promotion, contents
-write only for drafts/promotion, and CodeQL's existing scan permissions. No new
-personal access token or manual environment approval is required.
+Use the exact markers from the template on separate lines, at most one block per
+language, without nesting. Examples inside code fences are not boundaries, and
+Markdown headings do not determine the language.
 
-Configure tag rulesets restricting creation to release maintainers and blocking
-updates/deletion of `v*` tags; CI cannot prevent a privileged owner from bypassing
-policy. Merge these workflows before creating the first new-policy tag. Do not
-rerun historical tag workflows: those tags retain the old publisher capable of
-writing `latest`. Historical Releases without evidence are not eligible for this
-automated promotion; running recovery before the first enrolled release is a
-successful no-op.
+| Situation | Dialog content |
+| --- | --- |
+| Simplified Chinese UI | Prefer `zh-CN`, then append shared text |
+| English UI | Prefer `en`, then append shared text |
+| Preferred language missing or empty | Fall back to the other language, then append shared text |
+| Historical notes without markers | Complete original text |
+| Unclosed, duplicate, nested or mismatched markers | Complete original text, preserving upgrade/security information |
+| Both languages and shared text empty | Localized no-notes message |
+
+The Hub caches the entire GitHub Release body; the frontend selects its language.
+Switching languages applies immediately without another GitHub request. Notes are
+rendered as Markdown headings, lists, emphasis, code and links. Raw HTML and images
+are disabled, links require HTTPS, and translation is not automatic.
+**View on GitHub** opens the original Release with both languages. Check/cache
+intervals are described in [update notifications](../README.md#update-notifications).
+
+## Repository configuration
+
+- Actions must be allowed to write the repository's GHCR package. Workflows use
+  `GITHUB_TOKEN`: packages write only for image publication/promotion, contents
+  write only for drafts/promotion, plus CodeQL's scanning permissions. This flow
+  requires no new PAT or manual environment approval.
+- Labels referenced by [`.github/release.yml`](../.github/release.yml) must exist.
+  Initialize them once from the repository root using an authenticated maintainer
+  `gh` identity with issues write permission:
+
+  ```bash
+  GH_TOKEN="$(gh auth token)" GITHUB_REPOSITORY=molicherry/Talus node .github/scripts/release-labels.mjs
+  ```
+
+  The script creates missing `skip-changelog`, `ci`, `tests`, `internal` and
+  `documentation` labels, preserving existing descriptions/colors. Apply exclusions
+  only to PRs consisting entirely of those changes; mixed PRs with user-visible
+  behavior must remain in the changelog.
+- Configure a tag ruleset restricting creation of `v*` tags and blocking updates
+  and deletion. CI cannot prevent an administrator bypass. For initial rollout,
+  merge workflows before creating tags. Preserve historical tags/Releases, do not
+  backfill old Releases, and do not rerun historical tag workflows that still
+  contain the old latest publisher.
+
+## Recovery
+
+| Failure stage | Action |
+| --- | --- |
+| CI gate fails | Retry transient failures; source fixes need a new tag. Keep the failed tag; publish no image or Release. |
+| Image exists but draft creation fails | Rerun failed jobs; verify and reuse the existing image. Draft retries preserve human edits and evidence. |
+| OCI archive expires | Archives last 7 days; rerun all CI after expiry. Existing version images remain immutable. |
+| Published Release fails promotion | Correct transient API/registry failures or notes, then retry promotion. Code/artifact mistakes need a new version. |
+| Tag, evidence, CI or image mismatch | Preserve latest and investigate. Do not remove checks or rewrite evidence to force acceptance. |
+| No stable release has evidence yet | Recovery skips without changing images or Releases. Historical Releases without evidence are excluded. |
+
+To trigger recovery manually from `main`:
+
+```bash
+gh workflow run release.yml --ref main
+```
+
+Recovery always selects the highest published stable with evidence. Global
+serialization and numeric version comparison prevent out-of-order events from
+downgrading latest; callers cannot select an older version. An existing invalid
+or unreadable evidence asset fails instead of falling back to an older release.
+A newer latest, missing version label or same-version digest mismatch is never
+silently overwritten.
+
+Do not delete published Releases. Correct spelling or upgrade/security instructions
+in place, with a correction note for substantive edits. Code/artifact changes need
+a new version. The evidence asset is not an editable release note.
+
+Structure follows [Vite's release guide](https://github.com/vitejs/vite/blob/main/CONTRIBUTING.md#release).
+Talus automation is defined in [CI](../.github/workflows/ci.yml),
+[the promotion workflow](../.github/workflows/release.yml) and
+[the release script](../.github/scripts/release.mjs).

@@ -143,7 +143,7 @@ export async function draftRelease({ api, receipt, baseline }) {
     release = await api.request("POST", "releases", {
       tag_name: receipt.tag, target_commitish: receipt.commit, name: receipt.tag,
       draft: true, prerelease: kind === "rc", make_latest: "false",
-      body: `## Highlights\n- <!-- release:todo --> Describe the user-visible changes.\n\n## Upgrade notes\n<!-- release:todo --> Document migration, configuration and rollback steps, or remove this section.\n\n${generated.body}`,
+      body: `<!-- release-notes:en -->\n## English\n\n### Highlights\n- <!-- release:todo --> Describe the user-visible changes.\n\n### Upgrade notes\n<!-- release:todo --> Document migration, configuration and rollback steps, or remove this section.\n<!-- /release-notes:en -->\n\n<!-- release-notes:zh-CN -->\n## 简体中文\n\n### 更新亮点\n- <!-- release:todo --> 描述与英文版对应的用户可见变更。\n\n### 升级说明\n<!-- release:todo --> 说明迁移、配置、兼容性及回滚步骤；无需操作时删除本节。\n<!-- /release-notes:zh-CN -->\n\n${generated.body}`,
     });
   }
   if (release.tag_name !== receipt.tag || release.prerelease !== (kind === "rc")) throw new Error("Existing Release does not match tag policy");

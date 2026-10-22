@@ -133,6 +133,9 @@ async function fixture(browser, mobile = false) {
         })
         .catch(() => {});
     if (state.custom && (await state.custom({ path, method, body, reply, url }))) return;
+    if (path === "/api/v1/updates") return reply({
+      current_version: "v0.12.0", latest_release: null, update_available: false, checked_at: null,
+    });
     if (method === "GET" && state.failReads.has(path))
       return reply({ error: { reason: "internal_error", code: 503 } }, 503);
     if (path === "/api/v1/servers/summary" || path === "/api/v1/servers")
@@ -291,6 +294,166 @@ try {
       .then((r) => r.ok)
       .catch(() => false);
   }, "preview server");
+  for (const mobile of [false, true]) {
+    await test(`upstream release badge opens notes and restores focus (${mobile ? "mobile" : "desktop"})`, async ({ page, state, goto }) => {
+      state.custom = async ({ path, reply }) => {
+        if (path !== "/api/v1/updates") return false;
+        await reply({
+          current_version: "v0.12.0", update_available: true, checked_at: timestamp,
+          latest_release: {
+            version: "v0.13.0", published_at: timestamp,
+            notes: "## Highlights\n- **Improved** SSH routes\n\n`ssh server`\n\n[Pull request](https://github.com/molicherry/Talus/pull/1)\n\n[Unsafe](javascript:alert%281%29)\n\n![Remote image](https://example.test/image.png)\n\n<script>window.releaseInjected = true</script>",
+            url: "https://github.com/molicherry/Talus/releases/tag/v0.13.0",
+          },
+        });
+        return true;
+      };
+      await goto("/servers");
+      if (mobile) await page.getByRole("button", { name: "Open navigation", exact: true }).click();
+      const badge = page.getByRole("button", { name: "View new version v0.13.0", exact: true });
+      await badge.waitFor();
+      assert.equal(await page.locator('p[title="v0.12.0"]').textContent(), "v0.12.0", "sidebar uses the same deployed version as the dialog");
+      const badgeBox = await badge.boundingBox();
+      assert.ok(badgeBox.y + badgeBox.height <= page.viewportSize().height, "badge stays in the sidebar footer");
+      await badge.click();
+      const dialog = page.getByRole("dialog", { name: "New version v0.13.0 available" });
+      await dialog.waitFor();
+      assert.ok((await dialog.textContent()).includes("v0.12.0"));
+      assert.ok((await dialog.textContent()).includes("Improved SSH routes"));
+      assert.equal(await dialog.getByRole("heading", { name: "Highlights", exact: true }).count(), 1);
+      assert.equal(await dialog.locator("li strong").textContent(), "Improved");
+      assert.equal(await dialog.locator("code").textContent(), "ssh server");
+      assert.equal(await dialog.locator("script, img").count(), 0);
+      assert.equal(await dialog.locator('a[href^="javascript:"], a[href^="data:"]').count(), 0);
+      assert.equal(await dialog.getByRole("link", { name: "Unsafe", exact: true }).count(), 0);
+      assert.equal(await page.evaluate(() => window.releaseInjected), undefined, "raw HTML must never execute");
+      assert.equal(await dialog.getByRole("link", { name: "All releases and upgrade notes" }).getAttribute("href"), "https://github.com/molicherry/Talus/releases");
+      const link = dialog.getByRole("link", { name: "View on GitHub" });
+      assert.equal(await link.getAttribute("href"), "https://github.com/molicherry/Talus/releases/tag/v0.13.0");
+      assert.equal(await link.getAttribute("target"), "_blank");
+      const box = await dialog.boundingBox();
+      assert.ok(box.x >= 0 && box.x + box.width <= page.viewportSize().width, "dialog fits the viewport");
+      await capture(page, `release-update-${mobile ? "mobile" : "desktop"}`);
+      await page.keyboard.press("Escape");
+      await until(async () => !(await dialog.count()), "release dialog closes");
+      assert.equal(await badge.evaluate(element => element === document.activeElement), true);
+      if (mobile) {
+        assert.equal(await page.getByRole("dialog", { name: "Talus", exact: true }).count(), 1, "drawer remains open behind the release dialog");
+        await page.keyboard.press("Escape");
+        await until(async () => !(await page.getByRole("dialog").count()), "drawer closes separately");
+      }
+    }, mobile);
+  }
+  for (const mobile of [false, true]) {
+    await test(`upstream release notes follow the UI language without refetching (${mobile ? "mobile" : "desktop"})`, async ({ page, state, goto }) => {
+      state.custom = async ({ path, reply }) => {
+        if (path !== "/api/v1/updates") return false;
+        await reply({
+          current_version: "v0.12.0", update_available: true, checked_at: timestamp,
+          latest_release: {
+            version: "v0.13.0", published_at: timestamp,
+            notes: "<!-- release-notes:en -->\n## English\nImproved SSH routes\n<!-- /release-notes:en -->\n\n<!-- release-notes:zh-CN -->\n## 简体中文\n改进 SSH 路线\n<!-- /release-notes:zh-CN -->\n\n## What's Changed\n* Shared PR list",
+            url: "https://github.com/molicherry/Talus/releases/tag/v0.13.0",
+          },
+        });
+        return true;
+      };
+      await goto("/servers");
+      if (mobile) await page.locator('[aria-controls="mobile-navigation"]').click();
+      await page.getByRole("button", { name: "View new version v0.13.0", exact: true }).click();
+      const englishDialog = page.getByRole("dialog", { name: "New version v0.13.0 available" });
+      await englishDialog.waitFor();
+      const englishText = await englishDialog.textContent();
+      assert.ok(englishText.includes("Improved SSH routes"));
+      assert.ok(!englishText.includes("改进 SSH 路线"));
+      assert.equal(englishText.split("Shared PR list").length, 2);
+      assert.ok(!englishText.includes("<!-- release-notes:"));
+      assert.equal(await englishDialog.getByRole("heading", { name: "English", exact: true }).count(), 0, "redundant language heading is hidden");
+      await page.keyboard.press("Escape");
+      await englishDialog.waitFor({ state: "detached" });
+      if (mobile) {
+        await page.keyboard.press("Escape");
+        await page.locator("#mobile-navigation").waitFor({ state: "detached" });
+      }
+      await page.getByRole("button", { name: "中文", exact: true }).click();
+      if (mobile) await page.locator('[aria-controls="mobile-navigation"]').click();
+      await page.getByRole("button", { name: "查看新版本 v0.13.0", exact: true }).click();
+      const chineseDialog = page.getByRole("dialog", { name: "发现新版本 v0.13.0" });
+      await chineseDialog.waitFor();
+      const chineseText = await chineseDialog.textContent();
+      assert.ok(chineseText.includes("改进 SSH 路线"));
+      assert.ok(!chineseText.includes("Improved SSH routes"));
+      assert.equal(chineseText.split("Shared PR list").length, 2);
+      assert.equal(state.counts.get("GET /api/v1/updates"), 1, "switching languages reuses the cached Release body");
+    }, mobile);
+  }
+  for (const scenario of ["current", "unavailable"]) {
+    await test(`upstream release check stays quiet when ${scenario}`, async ({ page, state, goto }) => {
+      state.custom = async ({ path, reply }) => {
+        if (path !== "/api/v1/updates") return false;
+        if (scenario === "unavailable") await reply({ error: { reason: "internal_error", code: 503 } }, 503);
+        else await reply({
+          current_version: "v0.13.0", update_available: false, checked_at: timestamp,
+          latest_release: {
+            version: "v0.13.0", published_at: timestamp, notes: "",
+            url: "https://github.com/molicherry/Talus/releases/tag/v0.13.0",
+          },
+        });
+        return true;
+      };
+      await goto("/servers");
+      await page.getByRole("button", { name: "Alpha", exact: true }).waitFor();
+      await until(() => (state.counts.get("GET /api/v1/updates") ?? 0) === 1, "single cached update request");
+      if (scenario === "current") await page.locator('p[title="v0.13.0"]').waitFor();
+      assert.equal(await page.getByRole("button", { name: /^View new version/ }).count(), 0);
+      assert.equal(await page.getByRole("dialog").count(), 0);
+    });
+  }
+  for (const mobile of [false, true]) {
+    await test(`upstream release refresh clears stale dialogs and upgrade badges (${mobile ? "mobile" : "desktop"})`, async ({ page, state, goto }) => {
+      await page.clock.install();
+      let available = true;
+      let version = "v0.13.0";
+      state.custom = async ({ path, reply }) => {
+        if (path !== "/api/v1/updates") return false;
+        await reply({
+          current_version: available ? "v0.12.0" : version,
+          update_available: available, checked_at: timestamp,
+          latest_release: {
+            version, published_at: timestamp,
+            notes: available ? "## Highlights\n- Improved routes" : "",
+            url: `https://github.com/molicherry/Talus/releases/tag/${version}`,
+          },
+        });
+        return true;
+      };
+      await goto("/servers");
+      if (mobile) await page.locator('[aria-controls="mobile-navigation"]').click();
+      await page.getByRole("button", { name: "View new version v0.13.0", exact: true }).click();
+      const first = page.getByRole("dialog", { name: "New version v0.13.0 available" });
+      await first.waitFor();
+      const refresh = async count => {
+        await page.clock.fastForward(5 * 60 * 1000 + 1);
+        await until(() => (state.counts.get("GET /api/v1/updates") ?? 0) >= count, "update status refresh");
+      };
+      available = false;
+      await refresh(2);
+      await first.waitFor({ state: "detached" });
+      assert.equal(await page.getByRole("button", { name: /^View new version/ }).count(), 0, "badge disappears after upgrading");
+      available = true;
+      await refresh(3);
+      const badge = page.getByRole("button", { name: "View new version v0.13.0", exact: true });
+      await badge.waitFor();
+      assert.equal(await first.count(), 0, "returning release must not reopen its dialog automatically");
+      await badge.click();
+      await first.waitFor();
+      version = "v0.14.0";
+      await refresh(4);
+      await first.waitFor({ state: "detached" });
+      await page.getByRole("button", { name: "View new version v0.14.0", exact: true }).waitFor();
+      assert.equal(await page.getByRole("dialog", { name: "New version v0.14.0 available" }).count(), 0, "new release needs an explicit click");
+    }, mobile);
+  }
   for (const mobile of [false, true]) {
     await test(`resident monitoring separates live contact, partial collection and backfill (${mobile ? "mobile" : "desktop"})`, async ({ page, state, goto }) => {
       state.servers[0].monitoring = {
@@ -1014,7 +1177,10 @@ try {
     // The data view pages at 50 rows and names what it contains.
     await page.getByRole("button", { name: "7d", exact: true }).click();
     await page.getByRole("button", { name: "Show data table", exact: true }).click();
-    const table = page.locator("#monitoring-data-table table");
+    // Scope paging controls and announcements to this card; the sidebar also
+    // has a polite live region for release notifications.
+    const dataCard = page.locator("#monitoring-data-table").locator("..");
+    const table = dataCard.getByRole("table");
     await table.waitFor();
     const caption = await table.locator("caption").textContent();
     for (const needle of ["granularity", "statistic", "unit"]) {
@@ -1028,11 +1194,11 @@ try {
     const firstCell = await table.locator("tbody tr").first().locator("td").last().innerText();
     assert.match(firstCell, /%|sampled|no sample/, `coverage cell = ${firstCell}`);
 
-    const pager = page.getByRole("button", { name: "Next page", exact: true });
+    const pager = dataCard.getByRole("button", { name: "Next page", exact: true });
     await pager.click();
-    await page.waitForTimeout(100);
+    const pageAnnouncement = dataCard.locator('span[aria-live="polite"]');
+    await until(async () => /^Page 2 of \d+$/.test(await pageAnnouncement.innerText()), "second page announcement");
     assert.equal(await table.locator("tbody tr").count(), 50);
-    assert.match(await page.locator('span[aria-live="polite"]').first().innerText(), /Page 2 of \d+/);
 
     // Paging to the end keeps the remainder and disables Next.
     let guard = 0;
@@ -1044,7 +1210,7 @@ try {
     assert.ok(lastPageRows > 0 && lastPageRows <= 50, `last page rows = ${lastPageRows}`);
     assert.equal(await pager.isDisabled(), true, "Next must be disabled on the last page");
     assert.equal(
-      await page.getByRole("button", { name: "Previous page", exact: true }).isEnabled(),
+      await dataCard.getByRole("button", { name: "Previous page", exact: true }).isEnabled(),
       true,
     );
   });

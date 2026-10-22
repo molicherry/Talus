@@ -235,6 +235,16 @@ for (const kind of ["stable", "rc"]) test(`${kind} creates a draft and evidence 
   assert.equal(create.make_latest, "false");
   assert.equal(create.name, candidate.tag);
   assert.match(create.body, /release:todo/);
+  for (const locale of ["en", "zh-CN"]) {
+    const start = `<!-- release-notes:${locale} -->`;
+    const end = `<!-- /release-notes:${locale} -->`;
+    assert.equal(create.body.split(start).length, 2);
+    assert.equal(create.body.split(end).length, 2);
+    assert.ok(create.body.indexOf(start) < create.body.indexOf(end));
+    assert.match(create.body.slice(create.body.indexOf(start), create.body.indexOf(end)), /release:todo/);
+  }
+  assert.ok(create.body.indexOf("<!-- /release-notes:zh-CN -->") < create.body.indexOf("## What's Changed"));
+  assert.equal(create.body.split("## What's Changed").length, 2, "shared changelog appears once");
   assert.equal(api.writes[0][2].previous_tag_name, "v0.11.0");
   assert.deepEqual(api.evidence, candidate);
 });

@@ -1,11 +1,13 @@
 import { FileClock, Fingerprint, Key, LayoutDashboard, Link2, Server } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Dialog } from "../ui/dialog";
 import { NavLink } from "react-router-dom";
 
 import { useTranslation } from "../../i18n";
 import { Logo } from "../ui/logo";
 import { useAuth } from "../../hooks/use-auth";
+import { useReleaseUpdate } from "../../features/updates/hooks/use-release-update";
+import { ReleaseUpdateDialog } from "../../features/updates/components/release-update-dialog";
 
 const VERSION = import.meta.env.VITE_APP_VERSION || "dev";
 
@@ -25,6 +27,17 @@ interface SidebarProps {
 export function Sidebar({ open, onClose }: SidebarProps) {
   const { t } = useTranslation();
   const { canViewUsageLogs } = useAuth();
+  const { data: updateStatus } = useReleaseUpdate();
+  const [openedVersion, setOpenedVersion] = useState<string | null>(null);
+  const updateButton = useRef<HTMLButtonElement>(null);
+  const release = updateStatus?.update_available ? updateStatus.latest_release : null;
+  const releaseVersion = release?.version ?? null;
+  const releaseOpen = releaseVersion !== null && openedVersion === releaseVersion;
+  const currentVersion = updateStatus?.current_version ?? VERSION;
+
+  useEffect(() => {
+    setOpenedVersion(null);
+  }, [releaseVersion]);
 
   const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
   useEffect(() => {
@@ -70,7 +83,27 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       </nav>
 
       <div className="flex items-center justify-between gap-3 border-t border-sidebar-border px-4 py-3">
-        <p className="truncate text-xs font-medium text-muted-foreground">{VERSION}</p>
+        <div className="flex min-w-0 items-center gap-2">
+          <p className="truncate text-xs font-medium text-muted-foreground" title={currentVersion}>{currentVersion}</p>
+          <span aria-live="polite" aria-atomic="true" className="sr-only">
+            {release ? t("releaseUpdate.viewVersion", { version: release.version }) : ""}
+          </span>
+          {release && (
+            <button
+              ref={updateButton}
+              type="button"
+              aria-label={t("releaseUpdate.viewVersion", { version: release.version })}
+              aria-haspopup="dialog"
+              aria-expanded={releaseOpen}
+              aria-controls="release-update-dialog"
+              title={t("releaseUpdate.viewVersion", { version: release.version })}
+              onClick={() => setOpenedVersion(release.version)}
+              className="touch-target inline-flex shrink-0 items-center rounded-lg bg-primary-subtle px-2 py-1 text-xs font-medium text-link transition-colors hover:text-link-hover"
+            >
+              {t("releaseUpdate.badge")}
+            </button>
+          )}
+        </div>
         <a
           href="https://github.com/molicherry/Talus"
           target="_blank"
@@ -87,30 +120,39 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     </>
   );
 
-  if (!desktop) {
-    return (
-      <Dialog
-        id="mobile-navigation"
-        open={open}
-        onClose={onClose}
-        title={t("app.name")}
-        className="m-0 mr-auto h-dvh max-h-none w-60 max-w-[calc(100vw-3rem)] rounded-none border-y-0 border-l-0 bg-sidebar"
-        contentClassName="flex h-full flex-col p-4 [&_nav]:p-0"
-      >
-        {content}
-      </Dialog>
-    );
-  }
-
   return (
-    <aside className="sticky top-0 flex h-dvh w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
-      <div className="flex h-16 items-center border-b border-sidebar-border px-6">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white shadow-sm">
-          <Logo className="h-4.5 w-4.5" />
-        </div>
-        <span className="ml-3 text-sm font-semibold text-sidebar-foreground">{t("app.name")}</span>
-      </div>
-      {content}
-    </aside>
+    <>
+      {!desktop ? (
+        <Dialog
+          id="mobile-navigation"
+          open={open}
+          onClose={onClose}
+          title={t("app.name")}
+          className="m-0 mr-auto h-dvh max-h-none w-60 max-w-[calc(100vw-3rem)] rounded-none border-y-0 border-l-0 bg-sidebar"
+          contentClassName="flex h-full flex-col p-4 [&_nav]:p-0"
+        >
+          {content}
+        </Dialog>
+      ) : (
+        <aside className="sticky top-0 flex h-dvh w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
+          <div className="flex h-16 items-center border-b border-sidebar-border px-6">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white shadow-sm">
+              <Logo className="h-4.5 w-4.5" />
+            </div>
+            <span className="ml-3 text-sm font-semibold text-sidebar-foreground">{t("app.name")}</span>
+          </div>
+          {content}
+        </aside>
+      )}
+      {release && (
+        <ReleaseUpdateDialog
+          open={releaseOpen}
+          onClose={() => setOpenedVersion(null)}
+          currentVersion={currentVersion}
+          release={release}
+          returnFocusRef={updateButton}
+        />
+      )}
+    </>
   );
 }

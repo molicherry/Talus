@@ -20,6 +20,8 @@ const POLL_INTERVAL_MS = 10 * 60 * 1000;
  * Set VERSION to something that changes per release — e.g.
  * `VERSION=$(git rev-parse --short HEAD)` — and both images get the same
  * identifier, which is what this comparison needs.
+ * Upstream GitHub update checks additionally require a release tag; a commit
+ * hash is only sufficient for this deployed-page comparison.
  */
 function canDetect(): boolean {
   return !import.meta.env.DEV && !!BUILD_VERSION && BUILD_VERSION !== "dev";
