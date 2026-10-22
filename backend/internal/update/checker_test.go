@@ -85,7 +85,7 @@ func TestRunHonorsRateLimitWait(t *testing.T) {
 					case "seconds":
 						res.Header.Set("Retry-After", "7200")
 					case "date":
-						res.Header.Set("Retry-After", time.Now().Add(wait).Format(http.TimeFormat))
+						res.Header.Set("Retry-After", time.Now().UTC().Add(wait).Format(http.TimeFormat))
 					case "reset", "both":
 						res.StatusCode = http.StatusForbidden
 						res.Header.Set("X-RateLimit-Remaining", "0")

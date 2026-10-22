@@ -392,12 +392,19 @@ try {
       state.custom = async ({ path, reply }) => {
         if (path !== "/api/v1/updates") return false;
         if (scenario === "unavailable") await reply({ error: { reason: "internal_error", code: 503 } }, 503);
-        else await reply({ current_version: "v0.13.0", latest_release: null, update_available: false, checked_at: timestamp });
+        else await reply({
+          current_version: "v0.13.0", update_available: false, checked_at: timestamp,
+          latest_release: {
+            version: "v0.13.0", published_at: timestamp, notes: "",
+            url: "https://github.com/molicherry/Talus/releases/tag/v0.13.0",
+          },
+        });
         return true;
       };
       await goto("/servers");
       await page.getByRole("button", { name: "Alpha", exact: true }).waitFor();
       await until(() => (state.counts.get("GET /api/v1/updates") ?? 0) === 1, "single cached update request");
+      if (scenario === "current") await page.locator('p[title="v0.13.0"]').waitFor();
       assert.equal(await page.getByRole("button", { name: /^View new version/ }).count(), 0);
       assert.equal(await page.getByRole("dialog").count(), 0);
     });
@@ -412,7 +419,11 @@ try {
         await reply({
           current_version: available ? "v0.12.0" : version,
           update_available: available, checked_at: timestamp,
-          latest_release: available ? { version, published_at: timestamp, notes: "## Highlights\n- Improved routes", url: `https://github.com/molicherry/Talus/releases/tag/${version}` } : null,
+          latest_release: {
+            version, published_at: timestamp,
+            notes: available ? "## Highlights\n- Improved routes" : "",
+            url: `https://github.com/molicherry/Talus/releases/tag/${version}`,
+          },
         });
         return true;
       };
@@ -1166,7 +1177,10 @@ try {
     // The data view pages at 50 rows and names what it contains.
     await page.getByRole("button", { name: "7d", exact: true }).click();
     await page.getByRole("button", { name: "Show data table", exact: true }).click();
-    const table = page.locator("#monitoring-data-table table");
+    // Scope paging controls and announcements to this card; the sidebar also
+    // has a polite live region for release notifications.
+    const dataCard = page.locator("#monitoring-data-table").locator("..");
+    const table = dataCard.getByRole("table");
     await table.waitFor();
     const caption = await table.locator("caption").textContent();
     for (const needle of ["granularity", "statistic", "unit"]) {
@@ -1180,11 +1194,11 @@ try {
     const firstCell = await table.locator("tbody tr").first().locator("td").last().innerText();
     assert.match(firstCell, /%|sampled|no sample/, `coverage cell = ${firstCell}`);
 
-    const pager = page.getByRole("button", { name: "Next page", exact: true });
+    const pager = dataCard.getByRole("button", { name: "Next page", exact: true });
     await pager.click();
-    await page.waitForTimeout(100);
+    const pageAnnouncement = dataCard.locator('span[aria-live="polite"]');
+    await until(async () => /^Page 2 of \d+$/.test(await pageAnnouncement.innerText()), "second page announcement");
     assert.equal(await table.locator("tbody tr").count(), 50);
-    assert.match(await page.locator('span[aria-live="polite"]').first().innerText(), /Page 2 of \d+/);
 
     // Paging to the end keeps the remainder and disables Next.
     let guard = 0;
@@ -1196,7 +1210,7 @@ try {
     assert.ok(lastPageRows > 0 && lastPageRows <= 50, `last page rows = ${lastPageRows}`);
     assert.equal(await pager.isDisabled(), true, "Next must be disabled on the last page");
     assert.equal(
-      await page.getByRole("button", { name: "Previous page", exact: true }).isEnabled(),
+      await dataCard.getByRole("button", { name: "Previous page", exact: true }).isEnabled(),
       true,
     );
   });
