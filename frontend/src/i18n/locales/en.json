@@ -668,6 +668,17 @@
     "15m": "15m",
     "30d": "30d"
   },
+  "releaseUpdate": {
+    "badge": "New version",
+    "viewVersion": "View new version {{version}}",
+    "title": "New version {{version}} available",
+    "currentVersion": "Current version",
+    "latestVersion": "Latest version",
+    "publishedAt": "Published",
+    "releaseNotes": "Release notes",
+    "noNotes": "No release notes were provided for this version.",
+    "openRelease": "View on GitHub"
+  },
   "update": {
     "available": "A new version has been deployed.",
     "reload": "Reload"

@@ -23,6 +23,7 @@ import (
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
 	"github.com/vpsmanager/backend/internal/telemetry"
+	"github.com/vpsmanager/backend/internal/update"
 	"github.com/vpsmanager/backend/internal/usage"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -391,6 +392,12 @@ func main() {
 
 	appCtx, stopApp := context.WithCancel(context.Background())
 	defer stopApp()
+	updateChecker := update.NewChecker(server.Version)
+	updateDone := make(chan struct{})
+	go func() {
+		defer close(updateDone)
+		updateChecker.Run(appCtx)
+	}()
 	monitorDone := make(chan struct{})
 	go func() {
 		defer close(monitorDone)
@@ -434,6 +441,10 @@ func main() {
 		FilterUsageLogOptionsHandler: usageFilterOptionsHandler.List,
 		RevealLimiter:                mw.NewRateLimiter(1*time.Minute, 5),
 		LoginLimiter:                 mw.NewIPRateLimiter(1*time.Minute, cfg.LoginRateLimit, cfg.TrustProxy),
+		CheckUpdatesHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			server.WriteJSON(w, http.StatusOK, updateChecker.Snapshot())
+		},
 		// Auth
 		LoginHandler:          authHandler.Login,
 		SetupHandler:          authHandler.Setup,
@@ -524,6 +535,7 @@ func main() {
 	stopApp()
 	<-monitorDone
 	<-maintenanceDone
+	<-updateDone
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

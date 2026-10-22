@@ -315,6 +315,7 @@ func TestEveryAuthedRouteIsRegistered(t *testing.T) {
 		ListUsageLogsHandler:         noop,
 		GetUsageLogHandler:           noop,
 		FilterUsageLogOptionsHandler: noop,
+		CheckUpdatesHandler:          noop,
 	})
 
 	var unregistered []string
@@ -331,5 +332,36 @@ func TestEveryAuthedRouteIsRegistered(t *testing.T) {
 	}
 	if len(unregistered) > 0 {
 		t.Fatalf("routes reachable by any API key without a scope: %v", unregistered)
+	}
+}
+
+func TestUpdateCheckRequiresJWT(t *testing.T) {
+	jwtSvc := token.NewJWTService("update-test", time.Hour)
+	tok, err := jwtSvc.GenerateToken(1, "admin", "admin", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(RouteConfig{
+		JWTService: jwtSvc,
+		APIKeyAuth: stubKeyValidator{},
+		CheckUpdatesHandler: func(w http.ResponseWriter, r *http.Request) {
+			WriteJSON(w, http.StatusOK, map[string]bool{"update_available": true})
+		},
+	})
+	for _, tc := range []struct {
+		header, value string
+		want          int
+	}{
+		{"Authorization", "", http.StatusUnauthorized},
+		{"X-API-Key", "test-key", http.StatusForbidden},
+		{"Authorization", "Bearer " + tok, http.StatusOK},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/updates", nil)
+		req.Header.Set(tc.header, tc.value)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != tc.want {
+			t.Fatalf("update endpoint returned %d; want %d", rec.Code, tc.want)
+		}
 	}
 }

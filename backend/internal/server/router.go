@@ -29,6 +29,7 @@ type RouteConfig struct {
 	FilterUsageLogOptionsHandler http.HandlerFunc
 	RevealLimiter                *middleware.RateLimiter
 	LoginLimiter                 *middleware.IPRateLimiter
+	CheckUpdatesHandler          http.HandlerFunc
 
 	// Auth
 	LoginHandler          http.HandlerFunc
@@ -144,6 +145,9 @@ func NewRouter(cfg RouteConfig) chi.Router {
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.UsageCapture(cfg.UsageRecorder))
 		r.Use(middleware.Auth(cfg.JWTService, cfg.APIKeyAuth, cfg.UserGate))
+		if cfg.CheckUpdatesHandler != nil {
+			r.Get("/api/v1/updates", cfg.CheckUpdatesHandler)
+		}
 
 		if cfg.ListUsageLogsHandler != nil {
 			r.Get("/api/v1/usage-logs", cfg.ListUsageLogsHandler)

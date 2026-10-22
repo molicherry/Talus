@@ -482,6 +482,25 @@ A missing database or a skipped required test blocks the gate.
 bash tests/run.sh --gate M1
 ```
 
+## Update notifications
+
+The sidebar shows **New version** next to the current version when a newer stable
+GitHub Release is available. Open it to read the release notes and visit the
+Release on GitHub. This also works in the mobile navigation drawer.
+New Release descriptions include English and Simplified Chinese. The dialog
+selects the UI language, falls back to the other language when needed, and appends
+the shared changelog. Historical single-language notes remain readable; see the
+[release-note loading rules](docs/release-notes.md#loading-bilingual-release-notes).
+
+The Hub checks on startup and every six hours, uses GitHub ETags, and serves cached
+results through the signed-in `GET /api/v1/updates` endpoint. The page refreshes
+that cache view every five minutes while visible. Failed checks retain the last
+successful result and do not affect normal use. GitHub API access is required
+from the Hub; no token is needed. Drafts, RCs and test releases are ignored.
+Source builds must set `VERSION` to a release tag; `dev` and commit hashes skip
+upstream checks. The separate **A new version has been deployed** banner still
+prompts an old browser tab to reload after a deployment.
+
 ## Releasing
 
 Maintainers: follow the [release and tag workflow](docs/releasing.md) for version

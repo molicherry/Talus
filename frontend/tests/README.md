@@ -18,6 +18,7 @@ bash tests/run.sh
 | `i18n-locale.test.mjs` | The **actual** `src/i18n/locales/*.json` (en↔zh-CN key parity, no plural forms, simple `{{name}}` placeholders, no empty strings) | Guards locale drift: a zh-only key silently falls back to English (or worse, renders the raw key) — caught the real `terminal.disconnected` missing-in-en bug |
 | `query-flags.test.mjs` | The **actual** `computeQueryFlags` render-flag logic extracted from `useQuery` | Guards the isLoading first-render-flash bug: a fresh enabled query must report `isLoading=true` on first render (react-query parity), a disabled one `false` |
 | `credential-rows.test.mjs` | Credential draft validation and serialization | Guards duplicate-key overwrites, blank-row collisions, stable identities and literal object keys |
+| `release-notes.test.mjs` | The actual compiled Release-body language selector | Covers bilingual selection, shared changelog, missing/empty translations, legacy notes, code examples and malformed block fallback |
 
 The `query-layer.test.mjs` suite compiles `src/lib/query.ts` to a gitignored
 temp module first (the file is TypeScript with React imports, so it can't be

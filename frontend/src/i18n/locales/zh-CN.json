@@ -668,6 +668,17 @@
     "15m": "15 分钟",
     "30d": "30 天"
   },
+  "releaseUpdate": {
+    "badge": "发现新版",
+    "viewVersion": "查看新版本 {{version}}",
+    "title": "发现新版本 {{version}}",
+    "currentVersion": "当前版本",
+    "latestVersion": "最新版本",
+    "publishedAt": "发布时间",
+    "releaseNotes": "发布说明",
+    "noNotes": "此版本未提供发布说明。",
+    "openRelease": "前往 GitHub"
+  },
   "update": {
     "available": "新版本已部署。",
     "reload": "刷新页面"
