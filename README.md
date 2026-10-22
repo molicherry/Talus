@@ -65,7 +65,9 @@ JWT_SECRET=<openssl rand -hex 32>
 ```
 
 For monitoring, replace the example `AGENT_HUB_URL` in `.env` with the Hub's real
-HTTPS address reachable from the managed nodes. Agent installation needs running
+HTTPS address reachable from the managed nodes. For a deployment without monitoring,
+set `AGENT_HUB_URL=`. Do not keep the example domain: a non-empty value enables
+automatic agent installation attempts. Agent installation needs running
 systemd, `flock`, and SFTP; non-root SSH accounts also need user lingering.
 
 ### 3. Start (build from source)
@@ -205,10 +207,15 @@ volumes:
   pgdata:
 ```
 
-Deploy:
+Before deploying, copy `.env.example` to `.env` and configure the secrets below.
+Set `AGENT_HUB_URL` to the node-reachable Hub HTTPS address for monitoring, or
+leave it empty (`AGENT_HUB_URL=`) if monitoring is not needed. Do not retain the
+example domain, which enables automatic agent installation attempts.
 
 ```bash
-cp .env.example .env   # then fill in DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET
+cp .env.example .env
+# Edit .env: set DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET;
+# set AGENT_HUB_URL to the real Hub URL or leave it empty.
 docker compose -f docker-compose.prod.yml up -d
 ```
 

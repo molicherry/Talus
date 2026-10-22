@@ -55,7 +55,9 @@ time range rather than copying fixed dates from an example.
 ```
 
 - Read measurements from `data.points`. `points:[]` means no points were returned.
-- `source` is `raw`, `rollup`, or `mixed`. `coarsen_reason` can explain an explicit
+- The current query implementation returns `source` as `raw` or `rollup`.
+  `rollup` can include raw samples used at range edges or to fill missing buckets;
+  it does not imply that every point came from a rollup. `coarsen_reason` can explain an explicit
   interval's coarsening. It can be empty for `auto`; always use `actual_interval`
   to determine the result's resolution.
 - `coverage` is the fraction of requested time buckets containing an observation

@@ -112,7 +112,9 @@ GET /api/v1/credentials      → available credential metadata; no secret values
 ```
 
 Use returned IDs instead of guessing. `status` is a compatibility summary
-(`online`, `offline`, or `unknown`). Read `monitoring.connection`,
+(`online`, `offline`, `checking`, or `unknown`). When resident monitoring is
+available, an agent's `reconnecting` state maps to `checking` in server lists,
+summaries, and detail responses. Read `monitoring.connection`,
 `monitoring.collection`, and `monitoring.data` separately before reporting health.
 Missing metrics are not zero; a connected agent may have stale data or collection
 errors. See the [monitoring status reference](references/metrics.md#monitoring-status).
@@ -128,7 +130,11 @@ curl --silent --show-error --fail-with-body \
   --data '{"command":"whoami","timeout":60}'
 ```
 
-Response: `{"data":{"stdout":"deploy\n","stderr":"","exit_code":0}}`.
+Response (abridged): `{"data":{"stdout":"deploy\n","stderr":"","exit_code":0}}`.
+The full response also includes `duration_ms`, `output_truncated`,
+`stdout_truncated`, `stderr_truncated`, and per-stream retained/discarded byte
+counts (`stdout_retained_bytes`, `stderr_retained_bytes`, `stdout_discarded_bytes`,
+`stderr_discarded_bytes`). Check truncation flags before treating output as complete.
 The account is the SSH credential's user, not necessarily root. Check `exit_code`
 even after HTTP 200. The default timeout is 30 seconds and the maximum is 300;
 the Hub can configure lower values. A timeout or lost response does not establish
@@ -262,7 +268,8 @@ cannot be revealed. Metadata/list endpoints do not return stored secret values.
 | 403 | Check Web UI/admin restrictions first, then the endpoint's scope, then `server_ids`. For Relay, distinguish a Talus refusal from an upstream 403. |
 | `ssh_host_key_unverified` / `ssh_host_key_mismatch` | Have an administrator verify and confirm the fingerprint in the Web UI. |
 | `connection_config_changed` | Reload server detail and reconcile the intended update with the current revision. |
-| `sftp_conflict`, `sftp_exists`, or `sftp_not_empty` | Preserve the draft/source and inspect remote state; do not automatically overwrite or recursively delete. |
+| `sftp_conflict` or `sftp_exists` | Preserve the draft/source and inspect remote state; do not automatically overwrite. |
+| `sftp_failed` when deleting a directory | Check whether the directory is non-empty; do not automatically retry with recursive deletion. |
 | 429 | Reduce concurrency and back off; serialize file operations for `sftp_busy`. |
 | `metrics_query_budget_exceeded` (422) | Use the recommended interval or opt into coarsening; see the monitoring reference. |
 | `metrics_rollup_not_ready` / `metrics_query_timeout` (503) | Report unavailable data; retry with backoff or a smaller range, without inventing zero samples. |

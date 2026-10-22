@@ -170,9 +170,10 @@ endpoint, and no recursive-delete endpoint.
 | --- | --- |
 | `403 sftp_permission_denied` | Report the SSH account's permission failure; do not escalate privileges. |
 | `409 sftp_conflict` | Reload the version/status and reconcile; retain local work. |
-| `409 sftp_exists` / `sftp_not_empty` | Inspect the destination; do not automatically overwrite or delete a tree. |
+| `409 sftp_exists` | Inspect the destination; do not automatically overwrite. |
 | `410 sftp_upload_expired` | The token cannot resume; start a new transfer if still needed. |
 | `413 sftp_too_large` / `sftp_directory_too_large` / `sftp_text_too_large` | Respect the file/archive/text limit; choose a smaller authorized transfer. |
 | `429 sftp_busy` | Wait with backoff and serialize operations on that server. |
 | `502 sftp_unavailable` | Have the administrator enable/fix SFTP; do not fall back to Exec. |
+| `502 sftp_failed` | Inspect the failed operation and remote state. Deleting a non-empty directory can produce this generic failure; do not automatically retry with recursive deletion. |
 | `sftp_checksum_mismatch` / `sftp_size_mismatch` | Verify the local source, byte count, and transfer status before retrying. |

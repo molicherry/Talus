@@ -66,7 +66,9 @@ JWT_SECRET=<使用 openssl rand -hex 32 生成>
 ```
 
 需要监控时，将 `.env` 中示例 `AGENT_HUB_URL` 替换为受管节点能够访问的真实 Hub
-HTTPS 地址。Agent 安装需要运行中的 systemd、`flock` 和 SFTP；非 root SSH 账号还需启用用户 lingering。
+HTTPS 地址。不使用监控的新部署应设置 `AGENT_HUB_URL=`，不要保留示例域名：
+该值非空就会启用 Agent 自动安装尝试。Agent 安装需要运行中的 systemd、`flock`
+和 SFTP；非 root SSH 账号还需启用用户 lingering。
 
 ### 3. 启动（源码构建）
 
@@ -312,7 +314,7 @@ API 密钥无法确认首次或变更后的主机指纹，须先由管理员在 
 | `GET /archive?path=…` | 远程目录 | 流式 ZIP 附件 |
 | `GET /text?path=…` | 远程文本文件 | `path`、`content`、`version` |
 | `PUT /text` | `{"path":"…","content":"…","version":"sha256:…"}` | 新内容和版本；版本过期返回 `409` |
-| `POST /uploads/start` | `{"path":"…","size":123,"sha256":"64 位十六进制","overwrite":false}` | 签名 `token`、`path`、`size`、`offset`、`sha256`、`expires_at` |
+| `POST /uploads/start` | `{"path":"…","size":123,"sha256":"64 个十六进制字符","overwrite":false}` | 签名 `token`、`path`、`size`、`offset`、`sha256`、`expires_at` |
 | `POST /uploads/status` | `{"token":"…"}` | 实际偏移及元数据；`completed:true` 可恢复丢失的完成确认 |
 | `PUT /uploads/chunk?offset=…&size=…` | 最多 1 MiB 原始字节，`X-Upload-Token` 请求头 | 已确认的远端偏移；偏移过期返回 `409` |
 | `POST /uploads/complete` | `{"token":"…"}` | 校验总大小和校验和后发布；完成确认丢失时可重试 |
@@ -482,10 +484,14 @@ volumes:
   pgdata:
 ```
 
-部署：
+部署前，复制 `.env.example` 为 `.env` 并填写下列密钥。需要监控时，将 `AGENT_HUB_URL`
+设为节点可访问的真实 Hub HTTPS 地址；不需要监控时留空（`AGENT_HUB_URL=`）。
+不要保留示例域名，否则会启用 Agent 自动安装尝试。
 
 ```bash
-cp .env.example .env   # 填入 DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET
+cp .env.example .env
+# 编辑 .env：填写 DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET；
+# 将 AGENT_HUB_URL 设为真实 Hub 地址，或留空。
 docker compose -f docker-compose.prod.yml up -d
 ```
 
