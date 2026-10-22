@@ -55,11 +55,18 @@ cd Talus
 
 复制 `.env.example` 为 `.env` 并设置真实值——未设置时服务无法启动：
 
+```bash
+cp .env.example .env
+```
+
 ```env
 DB_PASSWORD=<你的数据库密码>
 VPSMANAGER_MASTER_KEY=<使用 openssl rand -hex 32 生成>
 JWT_SECRET=<使用 openssl rand -hex 32 生成>
 ```
+
+需要监控时，将 `.env` 中示例 `AGENT_HUB_URL` 替换为受管节点能够访问的真实 Hub
+HTTPS 地址。Agent 安装需要运行中的 systemd、`flock` 和 SFTP；非 root SSH 账号还需启用用户 lingering。
 
 ### 3. 启动（源码构建）
 
@@ -75,10 +82,10 @@ docker compose up -d --build
 
 ### 4. 添加服务器
 
-1. 进入 **Servers**（服务器）→ **Add Server**（添加服务器）
-2. 填写名称、主机（IP）、SSH 端口和描述
-3. 进入 **Credentials**（凭证）→ **Add Credential**（添加凭证），关联密码或私钥
-4. 服务器上线——可以执行命令、打开终端或查看监控指标。
+1. 进入 **Credentials**（凭证）→ **Add Credential**（添加凭证），保存 SSH 用户名及密码或私钥。
+2. 进入 **Servers**（服务器）→ **Add Server**（添加服务器），填写名称、主机、SSH 端口和描述，并选择该凭证。
+3. 测试已保存的连接，将显示的主机指纹与可信来源核对，然后在 Web UI 确认。跳板和目标主机须分别确认。
+4. 执行命令或打开终端验证 SSH 访问。需要监控时，等待 Agent 自动部署，并分别检查连接、采集及数据新鲜度。
 
 需要通过白名单出口访问时，在服务器表单选择“连接方式”：
 
@@ -140,42 +147,131 @@ SSH 工作区的文件面板、二进制传输、进度与取消、临时文件�
 
 ## AI 集成
 
-Talus 附带一个**可移植的** [agent skill](../skills/talus/SKILL.md)，任何 AI 编程助手
-（OpenCode、Claude Code、Cursor 等）都可以通过 Talus REST API 操作它：
-列出服务器、执行命令、查询指标、向已注册服务转发请求、通过 SFTP 管理文件、添加/更新服务器。
+Talus 附带一个可移植的 [agent skill](../skills/talus/SKILL.md)，通过 REST API 完成
+服务器管理、SSH 命令、监控查询、SFTP 和已注册服务调用。AI 运行环境需要能够读取
+skill，并使用终端中的 `curl` 或等效 HTTP 工具发送请求。MCP 为可选接入方式。
 
-### 准备
+### 1. 准备 Talus 实例
 
-- 一个运行中的 Talus 实例（见上文部署）
-- 一个 API 密钥——在 **Talus Web UI → API Keys** 创建（默认作用域覆盖读/执行/指标；
-  `servers:write`、`services:relay` 及文件作用域需主动勾选）
+按照[快速开始](#快速开始)或[生产部署](#生产部署ghcr-镜像)部署 Talus，并完成首次
+管理员登录；已有实例可直接使用。添加需要交给 AI 操作的服务器及凭据，并在 Web UI
+确认 SSH 主机指纹。需要调用外部服务时，在 **服务** 中登记服务、凭据和使用指南。
 
-### 安装
+选择 **AI 实际运行环境能够访问**的 Talus 地址。`localhost` 指向执行请求的环境；
+云端任务或容器中的 `localhost` 通常无法访问你电脑上的 Talus 实例。
 
-把 skill 复制到你所用 AI 工具的 skills 目录（skill 是可移植的，不要求放在本仓库内）：
+### 2. 创建 API 密钥
 
-```bash
-# OpenCode
-mkdir -p ~/.config/opencode/skills && cp -r skills/talus ~/.config/opencode/skills/
-# Claude Code
-mkdir -p ~/.claude/skills && cp -r skills/talus ~/.claude/skills/
+进入 **Talus Web UI → API Keys**，为 AI 创建密钥。按实际任务选择作用域，
+并根据需要限制可访问的服务器：
+
+| 任务 | 应选择的作用域 |
+| --- | --- |
+| 查看服务器与监控 | `servers:read`、`metrics:read` |
+| 查询服务目录及使用指南 | `services:read` |
+| 调用已注册服务 | `services:read`、`services:relay` |
+| 执行命令 | `servers:read`、`servers:exec` |
+| 管理文件 | `servers:read`，以及所需的 `files:read`、`files:write`、`files:delete` |
+| 添加/更新服务器 | `servers:read`、`servers:write`；查询已有凭据还需 `credentials:read` |
+
+默认选择包含 `servers:read`、`servers:exec`、`servers:terminal`、`metrics:read`、
+`credentials:read` 和 `services:read`，并非只读权限。`servers:write`、
+`services:relay` 及文件作用域需主动勾选。不限制服务器意味着可访问全部服务器。
+创建凭据或服务、确认主机指纹等操作仍需 Web UI，详见
+[skill 权限说明](../skills/talus/SKILL.md#authentication-and-permissions)。
+
+将此页面提供的 API 密钥原文用于 `TALUS_API_KEY`。它与管理员密码、SSH 凭据及
+Hub 的 `JWT_SECRET` 是不同的配置。
+
+### 3. 安装完整 skill
+
+从本仓库或下载的源码压缩包中取得 `skills/talus/`。按照所用 AI 工具的技能加载机制，
+导入整个 `talus` 目录，或放入其支持的 skills 目录。具体目录位置和重新加载方式
+以该工具自身的文档为准。安装后的结构应为：
+
+```text
+talus/
+├── SKILL.md
+└── references/
+    ├── files.md
+    └── metrics.md
 ```
 
-把助手指向你的实例：
+安装位置必须能被 AI 会话读取；只安装在 Talus 服务器上，不会自动提供给另一个环境中
+运行的 AI。保留 `SKILL.md` 同级的 `references/`，安装后不需要保留应用仓库的其余文件。
+安装完成后，按 AI 工具要求重新加载技能或开启新会话。更新时替换完整 `talus/` 目录并
+重新加载；实例配置保存在 AI 运行环境中，使更新 skill 时能够保留配置。
+
+### 4. 配置 AI 运行环境
+
+在 **AI 执行 HTTP 请求的环境**中设置：
+
+| 变量 | 填写内容 |
+| --- | --- |
+| `TALUS_URL` | 可访问的 Talus 基础地址，例如 `https://talus.example.com`，不含 `/api/v1`；默认 `http://localhost:8080` |
+| `TALUS_API_KEY` | 上一步创建的 API 密钥原文 |
+
+通过 Bash 终端启动 AI 时，可先替换示例地址，再通过隐藏输入提示填写密钥：
 
 ```bash
-export TALUS_URL=https://your-talus.example.com   # 默认 http://localhost:8080
-export TALUS_API_KEY=<你的 API 密钥>
+export TALUS_URL='https://talus.example.com'
+read -r -s -p 'Talus API key: ' TALUS_API_KEY
+printf '\n'
+export TALUS_API_KEY
 ```
 
-### 验证
+在这个终端中执行下方验证命令，然后从同一终端启动 AI，使其继承这些变量。
+`export` 只作用于当前终端和之后启动的子进程；已启动的桌面应用以及远程、云端会话
+不会自动继承。此类环境应通过其运行环境变量或密钥配置功能设置，再按要求重启或重新
+加载。需要持久配置时，也应使用运行环境提供的配置机制。
 
-在新的 AI 会话中问 *"通过 Talus 列出所有服务器"*——返回服务器列表（或空数组）即表示 skill 已生效。
+Hub 部署用的 `.env` 不会自动配置 AI。`AGENT_HUB_URL` 配置在 Hub 上，供受管节点
+访问；`TALUS_URL` 配置在 AI 环境中，供 AI 访问。不要将 API 密钥写入 skill 文件或贴到聊天中。
+
+### 5. 验证连接和 skill 加载
+
+先从 AI 的执行环境访问无需鉴权的版本接口，确认返回 HTTP 200 和 Talus 版本信息：
+
+```bash
+curl --silent --show-error --fail-with-body "${TALUS_URL%/}/api/v1/version"
+```
+
+再验证密钥和 `servers:read` 权限：
+
+```bash
+curl --silent --show-error --fail-with-body \
+  "${TALUS_URL%/}/api/v1/servers" -H "X-API-Key: $TALUS_API_KEY"
+```
+
+预期返回 HTTP 200 和 `{"data":[...]}`；`{"data":[]}` 也是有效的空结果。
+如果密钥仅用于服务、未授予 `servers:read`，可改用 `/api/v1/services` 验证
+`services:read`。这一步验证 API 可用，还不能证明 skill 已加载。
+
+确认 AI 会话已通过其技能机制加载 `talus`，再输入：
+
+> 使用 talus skill 和已配置的环境变量，通过真实 API 请求列出我的服务器，报告名称和状态，不要显示 API 密钥。
+
+服务专用密钥可改为要求列出已注册服务并读取所选服务的使用指南。确认 AI 读取了 skill
+并实际发出了请求；只回答调用方法或示例代码，不算验证完成。
+
+### 6. 常见问题
+
+| 现象 | 检查方法 |
+| --- | --- |
+| 找不到 skill 或参考文档 | 确认完整 `talus/` 目录在 AI 环境中可读，且当前会话已加载。 |
+| AI 读不到 URL 或密钥 | 检查实际执行进程的环境变量或密钥配置，并重启/重新加载；验证时不要打印密钥。 |
+| 连接被拒绝、域名解析失败或超时 | 从 AI 环境检查地址、端口和网络访问，确认 `localhost` 指向预期主机。 |
+| TLS 证书错误 | 修正证书或配置运行环境信任的 CA。 |
+| 401 | 检查实例地址、密钥原文以及密钥是否已撤销。 |
+| 403 | 检查作用域、服务器限制及是否属于 Web UI 专用操作；能列出服务不代表拥有 `services:relay`。 |
+| SSH 主机指纹未确认或发生变化 | 在 Web UI 核对并确认主机指纹。 |
+| 监控无数据或数据过期 | 检查节点可访问的 `AGENT_HUB_URL`、Agent 部署条件，以及连接、采集、数据状态。 |
 
 ### 服务：已注册服务优先走 Talus relay
 
-已注册服务（Dokploy、Portainer 或任意内部应用）由 Talus 代理——它们的 `base_url`
-是 AI 无法直接访问的内网地址，凭据在 relay 时由 Talus 注入。在服务器上操作某个服务时，
+已注册服务（Dokploy、Portainer 或任意内部应用）由 Talus 代理。它们的 `base_url`
+须能被 Hub 访问，可以保留为内网地址；AI 只需能够访问 Talus。凭据按服务使用指南
+指定的方式替换到请求中。在服务器上操作某个服务时，
 AI 应首先检查它是否已在 Talus 注册（`GET /api/v1/services?server_id=<id>`）；若已注册，
 通过 relay 使用它；若未注册，AI 可以直接在服务器上操作（并可考虑补注册）。已注册服务的
 工作流：
@@ -324,7 +420,7 @@ Hub 启动时会添加内部加密版本字段，自动升级 SSH 凭证、服�
 - SSH 私钥和密码、SOCKS5 密码、服务凭据及可恢复的 API 密钥原文使用 **AES-256-GCM** 静态加密。新记录通过 **HKDF-SHA256** 从 `VPSMANAGER_MASTER_KEY` 派生密钥，并按用途隔离。主密钥必须由密码学安全随机源生成（`openssl rand -hex 32`）。登录密码继续使用 bcrypt。旧版 Argon2id 加密记录会在 Hub 对外提供服务前自动升级。
 - 列表响应不返回凭证或 API 密钥原文。专用查看接口仅允许 JWT 认证，按用户限流（每分钟 5 次）并记录审计日志。
 - 目标服务器**无需开放额外端口**——监控数据通过现有的 SSH 通道传输。
-- 监控 Agent **按需运行**，采集指标后进程退出。Hub 复用前校验保留的二进制文件，必要时原子替换，目标服务器无需运行 Agent 守护进程。
+- 监控 Agent 作为 systemd 常驻服务运行，通过出站 WSS/HTTPS 上报；Hub 通过 SSH/SFTP 安装或更新程序，并在激活前校验文件。节点无需新增监控入站端口。
 - 修改密码会使已有 JWT 失效，并主动关闭该用户的终端会话。API 密钥使用独立的生命周期。
 - **SSH 主机指纹显式确认**：首次连接仅读取并展示 SHA256 指纹，在发送 SSH 认证信息前中止。管理员通过可信渠道核对并确认后才能连接；跳板机和目标主机分别确认。已有可信密钥继续有效，密钥变化时会阻止认证并要求重新确认。确认请求校验展示的指纹和连接版本，拒绝过期操作。
 
@@ -367,7 +463,9 @@ services:
       USAGE_LOG_RETENTION_DAYS: ${USAGE_LOG_RETENTION_DAYS:-30}
       USAGE_LOG_SENSITIVE_RETENTION_DAYS: ${USAGE_LOG_SENSITIVE_RETENTION_DAYS:-90}
       USAGE_LOG_LEGACY_WRITERS_DRAINED: ${USAGE_LOG_LEGACY_WRITERS_DRAINED:-false}
-      MONITOR_INTERVAL: ${MONITOR_INTERVAL:-60}
+      AGENT_HUB_URL: ${AGENT_HUB_URL:-}
+      AGENT_ALLOW_HTTP: ${AGENT_ALLOW_HTTP:-false}
+      MONITOR_INTERVAL: ${MONITOR_INTERVAL:-5}
       SSH_TIMEOUT: ${SSH_TIMEOUT:-10}
       EXEC_TIMEOUT: ${EXEC_TIMEOUT:-30}
       EXEC_TIMEOUT_MAX: ${EXEC_TIMEOUT_MAX:-300}

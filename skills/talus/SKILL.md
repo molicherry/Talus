@@ -1,234 +1,272 @@
 ---
 name: talus
 description: >-
-  Interact with a running Talus server management platform via REST API.
-  Capabilities: list servers, execute remote commands over SSH,
-  query live monitoring metrics, browse/upload/download files over SFTP,
-  resume file transfers, transfer directories, edit UTF-8 files with version checks,
-  list credentials (metadata only),
-  list/relay proxied services, create/update servers.
-  Registered services are reachable through Talus relay — list them, read
-  their usage guides, and proxy requests via relay. Prefer Talus for any
-  registered service; only operate directly on the server when a service is
-  not registered in Talus.
-  API key scoped — credential mutations, API key management,
-  service creation, and secret reveal require the Talus Web UI.
-  Use when user wants to manage servers, execute commands, check server metrics,
-  list credentials, list or use proxied services, relay service requests,
-  or add/update servers.
-triggers: ["Talus", "manage server", "execute command on server", "check server metrics", "list credentials", "relay request", "list servers", "Talus 管理", "通过Talus执行命令", "service", "services", "proxied service", "service list", "service usage", "服务", "服务列表", "使用服务", "代理服务", "dokploy", "portainer"]
+  Manage servers registered in a running Talus instance through its REST API:
+  list/add/update servers, execute SSH commands, query monitoring metrics,
+  transfer and edit files over SFTP, list credential metadata, and discover
+  and call registered services through relay. Use when the user asks to operate
+  Talus or its servers and services. Read each service's usage guide before
+  calling it. API keys are scoped; administrator-only operations use the Web UI.
+triggers: ["Talus", "manage server", "execute command on server", "check server metrics", "list credentials", "relay request", "list servers", "Talus 管理", "通过Talus执行命令", "proxied service", "代理服务"]
 ---
 
 # Talus Skill — Agent Operation Guide
 
-Talus is a self-hosted VPS management platform: Go backend, React frontend, PostgreSQL. Servers connect over SSH — no agent installed on targets.
+Talus is a self-hosted Linux server management platform. The Hub uses SSH/SFTP
+for commands, terminals, files, and installation of a resident monitoring agent.
+That agent runs under systemd and reports over outbound WSS, with HTTPS fallback;
+monitoring does not require an additional inbound port on the node.
+
+Keep this entire `talus/` directory when installing the skill. Detailed contracts
+are bundled in [File API](references/files.md) and [Monitoring API](references/metrics.md);
+they do not require a checkout of the application repository.
 
 ## Quick Start
 
-**Configuration is read from environment variables — no manual setup needed if already configured.**
+Use the configured environment automatically. If `TALUS_API_KEY` is missing,
+ask the user to configure it in the environment. Use `http://localhost:8080`
+when `TALUS_URL` is unset; if that is not their instance, obtain the correct URL.
+`TALUS_URL` is the instance base URL, without `/api/v1`.
 
 ```bash
-# Defaults — override via env vars or /etc/environment
 TALUS_URL="${TALUS_URL:-http://localhost:8080}"
-TALUS_API_KEY="${TALUS_API_KEY:-}"
+: "${TALUS_API_KEY:?Configure TALUS_API_KEY in the environment}"
+
+curl --silent --show-error --fail-with-body \
+  "${TALUS_URL%/}/api/v1/servers" \
+  -H "X-API-Key: $TALUS_API_KEY"
 ```
 
-If `TALUS_URL` is not set, default to `http://localhost:8080`.  
-If `TALUS_API_KEY` is set, use it automatically via `X-API-Key` header.  
-If neither is configured, **ask the user** for the URL and credentials.
+Normal JSON responses use `{"data": ...}`. Talus errors use
+`{"error":{"code":403,"reason":"forbidden","message":"..."}}`, with optional
+`params`, field `details`, and `request_id`. Use HTTP status and `error.reason`
+to diagnose errors; preserve `request_id` for troubleshooting. File/ZIP downloads
+are binary, and Relay forwards the upstream status and body without a Talus envelope.
+Do not print API keys or include them in URLs, generated reports, or debug traces.
 
-Response envelope: `{"data": <payload>}`. Errors: `{"error": {"code": <int>, "message": <string>}}`.
+## Authentication and permissions
 
-## Auth
-
-All requests use `X-API-Key` header. **Auto-auth**: If `TALUS_API_KEY` is set, use it. If not, ask the user.
-
-### What you can do
+Send `X-API-Key` on every management API request. Scopes and `server_ids` are
+independent checks: omitted/empty `server_ids` allows all servers; `[1,3]` allows
+only those servers. Services associated with a server also enforce that restriction.
 
 | Action | Scope needed |
-| -------- | -------------- |
-| List servers, get detail | `servers:read` |
+| --- | --- |
+| List servers, summaries, or server detail | `servers:read` |
+| Add/update servers (connection restrictions below) | `servers:write` |
 | Execute command | `servers:exec` |
-| Query metrics | `metrics:read` |
-| List credentials (no secrets) | `credentials:read` |
-| List/get services | any valid key (no specific scope required) |
-| Add/update server | `servers:write` |
 | Open WebSocket terminal | `servers:terminal` |
+| Query metrics | `metrics:read` |
+| List credentials (metadata only) | `credentials:read` |
+| List/get services and their usage guides | `services:read` |
+| Relay a service request | `services:relay` |
 | Browse/stat/download files, read text, download ZIP | `files:read` |
-| Upload/resume/discard own partial upload, mkdir, rename, save text | `files:write` |
-| Delete files or empty directories | `files:delete` |
+| Upload/resume/status/discard own upload, mkdir, rename, save text | `files:write` |
+| Delete files, links, or empty directories | `files:delete` |
 
-**Default scopes** (when creating a key with no selection): `servers:read`, `servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`. `servers:write` and `services:relay` are **opt-in**.
+**Defaults when `scopes` is omitted on key creation:** `servers:read`,
+`servers:exec`, `servers:terminal`, `metrics:read`, `credentials:read`, `services:read`.
+An explicitly empty scope list is rejected. `servers:write`, `services:relay`,
+and all three file scopes are opt-in. Existing keys do not automatically gain
+file permissions. Service discovery followed by Relay needs both service scopes.
 
-### jwtOnly — hard-rejected regardless of scopes
+### Operations requiring the Web UI
 
-Even a key with every scope does not help. These require the **Talus Web UI** (user JWT):
+These routes reject API keys regardless of scopes. Paths are relative to `/api/v1`.
+
 | Route | Operation |
-| ------- | ----------- |
-| `DELETE /servers/{id}` | Delete server |
-| `POST /credentials` | Create credential |
-| `PUT /credentials/{id}` | Update credential |
-| `DELETE /credentials/{id}` | Delete credential |
-| `GET /credentials/{id}/reveal` | Reveal credential secret |
-| `GET /api-keys` | List API keys |
-| `POST /api-keys` | Create API key |
-| `DELETE /api-keys/{id}` | Revoke API key |
-| `GET /api-keys/{id}/reveal` | Reveal API key raw value |
-| `POST /services` | Create service |
-| `PUT /services/{id}` | Update service |
-| `DELETE /services/{id}` | Delete service |
-| `GET /services/{id}/credentials` | Get service credentials |
-| `GET /auth/profile`, `PUT /auth/password` | Auth operations |
+| --- | --- |
+| `DELETE /servers/{id}` | Delete server and uninstall its resident agent |
+| `POST /servers/{id}/connection/test` | Test the SSH connection route |
+| `POST /credentials`, `PUT /credentials/{id}`, `DELETE /credentials/{id}` | Mutate credentials |
+| `GET /credentials/{id}/reveal` | Reveal a credential secret |
+| `GET /api-keys`, `POST /api-keys`, `DELETE /api-keys/{id}` | Manage API keys |
+| `GET /api-keys/{id}/reveal` | Reveal a stored API key |
+| `POST /services`, `PUT /services/{id}`, `DELETE /services/{id}` | Mutate services |
+| `GET /services/{id}/credentials` | Read service secrets |
+| `GET /usage-logs`, `GET /usage-logs/filter-options`, `GET /usage-logs/{id}` | Read operation history |
+| `GET /auth/profile`, `PUT /auth/password` | User account operations |
 
-Every operational endpoint requires authentication (`X-API-Key` header or user JWT) —
-only the public entry points `/auth/login`, `/auth/setup` and `/version` are unauthenticated.
-`GET /services` / `GET /services/{id}` work with any valid
-## Decision Trees
+Administrator JWT checks also protect `POST /servers/{id}/host-key/trust` and
+changes to the server's `connection` configuration (direct, SSH jump, or SOCKS5).
+`servers:write` alone cannot perform them. API keys can use an administrator's
+preconfigured route; omit `connection` when creating a server with the default
+direct route or updating unrelated fields.
 
-### "What servers do I have?" / "Show me server X"
+Changing `host`, `port`, or `credential_id` also requires an administrator when
+the server has a proxy route or is used as another server's SSH jump host.
 
-```
-GET /api/v1/servers           → list all with status + latest_metrics
-GET /api/v1/servers/summary   → lightweight list (id, name, description, host,
-                                 credential_id, status) — no metrics
-GET /api/v1/servers/{id}      → full detail with credential info
-```
+The public health/version/login/setup entry points do not authorize management
+operations. `/agent/report` and `/agent/connect` use separate node authentication
+and are not endpoints for this skill.
 
-Key fields: `status` ("online"|"offline"|"unknown"), `latest_metrics` {cpu_percent, memory_percent, disk_percent}, `os`, `cpu_model`, `uptime_seconds`.
+## Common tasks
 
-### "Run a command on server X"
+### Find a server
 
-```
-1. Know the server ID?
-   ├─ Yes → POST /api/v1/servers/{id}/exec  {"command": "...", "timeout": 60}
-   └─ No  → GET /api/v1/servers to find it, then exec
-2. Default timeout 30s, max 300s.
-3. Response: {"data": {"stdout": "...", "stderr": "...", "exit_code": 0}}
+```text
+GET /api/v1/servers           → permitted servers, status, monitoring, latest_metrics
+GET /api/v1/servers/summary   → lightweight list, connection/monitoring status; no metrics
+GET /api/v1/servers/{id}      → detail, credential metadata, route and host-key state
+GET /api/v1/credentials      → available credential metadata; no secret values
 ```
 
-### "Manage or transfer files on server X"
+Use returned IDs instead of guessing. `status` is a compatibility summary
+(`online`, `offline`, or `unknown`). Read `monitoring.connection`,
+`monitoring.collection`, and `monitoring.data` separately before reporting health.
+Missing metrics are not zero; a connected agent may have stale data or collection
+errors. See the [monitoring status reference](references/metrics.md#monitoring-status).
 
-Use the SFTP API under `/api/v1/servers/{id}/sftp`; see the repository README's **File API** section for the complete contract. File scopes are opt-in and existing keys do not gain them automatically. All operations also check `server_ids` and use the SSH account's filesystem permissions. An administrator must approve first-use/changed SSH host keys in the Web UI before file operations can connect.
+### Execute a command
 
-- Read: `GET /entries?path=…`, `GET /stat?path=…`, binary `GET /download?path=…`, ZIP `GET /archive?path=…`, `GET /text?path=…`.
-- Write: binary `POST /upload?path=…`; JSON `POST /mkdir {"path":"…","parents":false}`, `POST /rename {"from":"…","to":"…"}`.
-- Edit: read `/text` to obtain `{path,content,version}`; `PUT /text` sends those fields with the edited content. On `409 sftp_conflict`, keep the draft and reload/reconcile the latest remote content; do not retry with a guessed/new version or silently overwrite it.
-- Delete: `DELETE /entry?path=…` removes a file/link or empty directory; it does not recursively delete a tree.
-- Resume upload: compute the complete SHA256; `POST /uploads/start {path,size,sha256,overwrite:false}` returns a signed token. Send binary chunks (at most 1 MiB) using `PUT /uploads/chunk?offset=…&size=…` with `X-Upload-Token`. Query `POST /uploads/status {token}` after interruptions, then continue from the returned offset. `POST /uploads/complete {token}` verifies and commits. `DELETE /uploads` with that header discards the caller's temporary file. Tokens are bound to the caller and SSH route and expire in 24 hours.
-- Resume download: use `Range` plus the earlier `ETag` in `If-Range`. A full `200` response means start over with that body; do not append it to an earlier version. Verify the completed checksum.
+Resolve the target server first. For example, after selecting server ID 1:
 
-URL-encode query paths. Send file bytes as `application/octet-stream`, never base64/JSON. File/ZIP responses are binary attachments, unlike the normal JSON envelope. Per-file/directory limits are 64 MiB, text editing 1 MiB; SFTP must be enabled on the target. File routes never fall back to `exec` commands. Report original permissions/API errors instead of attempting privilege elevation.
-
-### "Check metrics on server X"
-
-```
-GET /api/v1/servers/{id}/metrics?from=2026-07-27T00:00:00Z&to=2026-07-27T06:00:00Z&interval=5m
-
-Parameters: from, to (ISO 8601), interval (1m|5m|15m|1h)
-Response: array of {time, cpu_percent, memory_percent, disk_percent,
-                    load_1, load_5, load_15, swap_percent,
-                    net_recv_rate, net_sent_rate, disk_read_rate, disk_write_rate}
+```bash
+curl --silent --show-error --fail-with-body \
+  "${TALUS_URL%/}/api/v1/servers/1/exec" \
+  -H "X-API-Key: $TALUS_API_KEY" -H 'Content-Type: application/json' \
+  --data '{"command":"whoami","timeout":60}'
 ```
 
-### "Proxy a request through service X"
+Response: `{"data":{"stdout":"deploy\n","stderr":"","exit_code":0}}`.
+The account is the SSH credential's user, not necessarily root. Check `exit_code`
+even after HTTP 200. The default timeout is 30 seconds and the maximum is 300;
+the Hub can configure lower values. A timeout or lost response does not establish
+whether a command changed remote state; inspect that state before retrying a mutation.
 
-```
-POST /api/v1/services/{id}/relay
-Body: {"method": "GET", "path": "/api/endpoint", "headers": {...}, "body": {...}}
+If `ssh_host_key_unverified` or `ssh_host_key_mismatch` is returned, an administrator
+must verify the fingerprint independently and confirm it in the Web UI before
+SSH commands, terminals, file operations, or agent installation can proceed.
 
-Credentials stored on the service are injected automatically.
-Placeholder substitution: {{key}} in headers/body → credential value.
-  e.g. {"headers": {"Authorization": "Bearer {{token}}"}}
-```
+For `GET /api/v1/servers/{id}/terminal`, a non-browser WebSocket client can send
+`X-API-Key` during the upgrade. Do not put the key in the URL.
 
-**Building the relay request correctly** (learned the hard way — these two
-mistakes silently break parameterized calls):
+### Manage or transfer files
 
-1. **`path` is forwarded verbatim** — query strings pass through as-is. Use the
-   target service's own parameter style, e.g. Dokploy accepts direct query
-   params (`/api/compose.one?composeId=xxx`), NOT the generic tRPC wrapper
-   (`?input={"json":{...}}`). Check the service's usage_guide for the exact
-   format before guessing.
-2. **`body` must be a JSON object/array, not a string.** Passing a pre-serialized
-   string (`"{\"composeId\":\"x\"}"`) forwards a quoted string to the target and
-   its fields come back `undefined`. Pass the object itself:
-   `{"method": "POST", "path": "/api/x", "body": {"composeId": "x"}}`.
+Use `/api/v1/servers/{id}/sftp` and read the bundled [File API](references/files.md)
+for endpoint bodies, binary transfers, directory transfer, and recovery examples.
 
-The relay never adapts to the target — it forwards whatever you give it. Read the
-service's usage_guide, then construct method/path/headers/body per the target API.
+- Read text with `GET /text`, then send its `path`, edited `content`, and original
+  `version` to `PUT /text`. On `409 sftp_conflict`, keep the draft and reconcile
+  with a fresh read; do not silently overwrite it.
+- Upload raw bytes, not base64 or JSON. After an interrupted resumable upload,
+  query its status before retrying chunks or completing it.
+- Resume downloads with both `Range` and the saved `ETag` in `If-Range`.
+  A full `200` body replaces the earlier partial file; it must not be appended.
+- File operations require the selected SSH account's permissions and an enabled
+  SFTP subsystem. Do not replace failed file operations with shell commands or
+  privilege elevation.
 
-### "How do I use a specific service?"
+### Query metrics
 
-Each registered service can carry its own usage guide (`usage_guide`, markdown) — the
-per-service "skill" written by whoever registered it. Always check it before calling:
-
-```
-1. List available services: GET /api/v1/services
-   → name, description, usage_guide_excerpt (first ~200 chars)
-2. Pick the target and read its guide: GET /api/v1/services/{id}
-   → usage_guide (full markdown)
-3. If usage_guide exists, follow it to build the relay request
-   (method/path/headers/body, {{key}} placeholder substitution).
-4. If absent, infer from description + credential_hints, or ask the user.
+```text
+GET /api/v1/servers/{id}/metrics?interval=auto&stat=avg
 ```
 
-The service directory (name + description + guide excerpt) is discovered
-through the API: always list services and read the target's usage_guide before
-calling one. The full usage_guide is fetched on demand and never embedded in the
-system prompt.
+By default this queries the last hour. `data` is an object containing `points`,
+`requested_interval`, `actual_interval`, `stat`, `coverage`, `source`,
+`coarsen_reason`, and `downsampled`, plus the server ID and time range.
+Read `data.points`, not an array directly under `data`.
 
+Use the [Monitoring API](references/metrics.md) for time parameters, average/peak
+field selection, null values, query budgets, and handling 422/503 responses.
 
-### "Something is returning 403"
+### Discover and use a registered service
 
-Two checks, in order:
+1. List services with `GET /api/v1/services` (`services:read`). Use
+   `?server_id=<id>` to narrow the directory to a server. Entries include
+   `name`, `description`, and `usage_guide_excerpt`.
+2. Read `GET /api/v1/services/{id}` for the full `usage_guide` and credential hints.
+3. Construct the request according to that guide, then call
+   `POST /api/v1/services/{id}/relay` (`services:relay`). If the guide is missing,
+   obtain the target API contract before guessing endpoint or authentication details.
 
-1. **jwtOnly route?** → The table above. Solution: use Talus Web UI.
-2. **Right scope?** `servers:read|write|exec|terminal`, `metrics:read`, `credentials:read`, `services:relay` — match endpoint to scope. Solution: re-create key with correct scopes.
-3. **Right server?** `server_ids=[]` = all; `[1,3]` = only 1 and 3. Solution: re-create key.
+Example Relay body for a service whose guide specifies bearer authentication:
 
-## Multi-Step Workflows
-
-### Full server setup
-
-```
-1. Create credential (Web UI) — credential mutations are jwtOnly:
-   Talus Web UI → Credentials → Add Credential
-2. Register server (requires servers:write):
-   POST /api/v1/servers  {"name":"prod-db","host":"10.0.1.10","port":22,"credential_id":<id>}
-3. Verify (requires servers:exec):
-   POST /api/v1/servers/{id}/exec  {"command":"whoami"}
-   → Expect stdout: "root", exit_code: 0
-```
-
-### Register a proxied service
-
-```
-1. Create service (Web UI) — service creation is jwtOnly:
-   Talus Web UI → Services → Add Service (name, base_url, credentials)
-2. Relay via API (requires services:relay):
-   POST /api/v1/services/{id}/relay  {"method":"GET","path":"/api/dashboards/home"}
+```json
+{
+  "method": "GET",
+  "path": "/api/health",
+  "headers": {"Authorization": "Bearer {{token}}"},
+  "mode": "standard"
+}
 ```
 
-### Create an API key (Web UI only)
+Send that JSON with `Content-Type: application/json` and `X-API-Key` to Talus.
+The Hub calls the service's `base_url` directly; assigning a service to a server
+does not create an SSH tunnel. Stored credentials replace `{{key}}` placeholders
+in the target URL, header names/values, and body. Set authentication headers as
+the guide specifies; Talus does not infer the target's authentication scheme.
 
-Guide user to **Talus Web UI → API Keys**:
+- `path` is appended to the service base path, with dot segments normalized;
+  its supplied non-empty query string is preserved. Follow the service's own parameter format and
+  URL-encode values. Do not assume every service uses the same tRPC/query wrapper.
+- For a target expecting a JSON object/array, pass that value directly as `body`;
+  a pre-serialized JSON string is forwarded as a quoted string. Set the upstream
+  `Content-Type` inside `headers` when required. Omit `body` for bodyless requests.
+- Omitted/empty `mode` or `standard` has a 30-second total budget.
+  `bounded_stream` explicitly allows up to 300 seconds. Upstream header wait
+  and no-progress idle limits are 30 seconds; they do not extend the total budget.
+  `mode` is not forwarded upstream.
+- Upstream status, permitted response headers, and body are passed through,
+  including upstream errors. Do not expect `data` around the result. Redirects
+  are not followed; WebSocket/protocol upgrades are unsupported.
+- A stream failure after headers aborts the response; it cannot append a Talus
+  JSON error. Treat an interrupted body as incomplete. Check the upstream state
+  before retrying a request that may have changed it.
 
-- **Defaults**: `servers:read`, `exec`, `terminal`, `metrics:read`, `credentials:read`
-- **Opt-in**: `servers:write`, `services:relay`
-- **Server restriction**: optional server_ids, omit for full access
+Prefer Relay for registered services. A failed directory lookup is not evidence
+that a service is unregistered: resolve missing scopes or connectivity first.
+If the directory confirms it is absent, use direct server operations within
+the user's requested scope. Never guess a registered service's URL or credentials.
 
-## Critical Rules
+## Server setup and updates
 
-1. **Prefer Talus for registered services.** Before operating any service on a
-   server, check whether it is registered in Talus: `GET /api/v1/services?server_id=<id>`
-   to see the directory (name, description, usage_guide_excerpt). If it is
-   registered: (a) `GET /api/v1/services/{id}` to read its `usage_guide`; (b) build
-   the relay request per the guide: `POST /api/v1/services/{id}/relay` — Talus
-   injects the credentials. If it is NOT registered, operate it directly on the
-   server (and consider registering it so future calls can use relay). Never
-   guess a registered service's URL or credentials — ask the API.
-2. **Credentials NEVER appear in API responses** — list endpoints return metadata only. Secrets require the Talus Web UI (all reveal endpoints are jwtOnly).
-3. **API key raw value shown ONCE** at creation via Web UI. No API-based retrieval.
-4. **scopes and server_ids are orthogonal** — both must match. server_ids=[] means all servers.
-5. **`services:relay` and `servers:write` are opt-in** — not in default scopes.
-6. **Terminal** — pass API key via `X-API-Key` header during WebSocket upgrade.
+1. Have an administrator create the SSH credential in **Web UI → Credentials**.
+   Find its ID with `GET /api/v1/credentials` if the key has `credentials:read`.
+2. Register the server with `servers:write`:
+   `POST /api/v1/servers` with
+   `{"name":"prod-db","host":"10.0.1.10","port":22,"credential_id":1}`.
+   Replace the example credential ID with the actual one. Configure a jump host
+   or SOCKS5 route in the Web UI if needed.
+3. Have an administrator test the connection, verify the presented host fingerprint,
+   and confirm it in the Web UI. If the key is server-restricted, it must also
+   permit the new server ID before subsequent calls.
+4. Execute `whoami` with `servers:exec`; expect the configured SSH username and
+   exit code 0. Do not assume root access.
+5. For monitoring, the administrator must configure a node-reachable HTTPS
+   `AGENT_HUB_URL` on the Hub. Installation needs SFTP, running systemd and `flock`;
+   a non-root account needs user lingering. Talus does not automatically sudo.
+   Check `monitoring.deployment` and data freshness after automatic deployment.
+
+To update a server, read its current detail and send only intended fields via
+`PUT /api/v1/servers/{id}`. Preserve omitted credentials; `credential_id:null`
+explicitly clears the credential. Include the current `expected_connection_revision`
+when an administrator changes `connection` through the Web UI/API; this revision
+check applies to connection configuration mutations, not ordinary metadata updates.
+Changing `host` or `port` clears the trusted host key, so the administrator must
+verify the new fingerprint before SSH operations resume. If `connection_config_changed`
+is returned, reload and reconcile before retrying.
+
+Create services and API keys through the Web UI. Select the needed scopes from
+the permission table and the intended server restrictions. API key values can
+be revealed again in the Web UI when a recoverable value is stored; API keys
+themselves cannot call reveal endpoints. Legacy keys without a stored value
+cannot be revealed. Metadata/list endpoints do not return stored secret values.
+
+## Troubleshooting
+
+| Result | Next step |
+| --- | --- |
+| 401 | Check the configured key, instance URL, and whether the key was revoked; do not print the key. |
+| 403 | Check Web UI/admin restrictions first, then the endpoint's scope, then `server_ids`. For Relay, distinguish a Talus refusal from an upstream 403. |
+| `ssh_host_key_unverified` / `ssh_host_key_mismatch` | Have an administrator verify and confirm the fingerprint in the Web UI. |
+| `connection_config_changed` | Reload server detail and reconcile the intended update with the current revision. |
+| `sftp_conflict`, `sftp_exists`, or `sftp_not_empty` | Preserve the draft/source and inspect remote state; do not automatically overwrite or recursively delete. |
+| 429 | Reduce concurrency and back off; serialize file operations for `sftp_busy`. |
+| `metrics_query_budget_exceeded` (422) | Use the recommended interval or opt into coarsening; see the monitoring reference. |
+| `metrics_rollup_not_ready` / `metrics_query_timeout` (503) | Report unavailable data; retry with backoff or a smaller range, without inventing zero samples. |
+| Exec/Relay timeout or interrupted response | Check the operation's resulting state before replaying a mutation. |
+
+If a key lacks a required scope or server ID, the administrator must create an
+appropriately scoped replacement in the Web UI and configure it for the caller.
