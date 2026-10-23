@@ -241,13 +241,14 @@
       "command": [
         "go",
         "test",
+        "./internal/gate",
         "./internal/repository",
         "./internal/service",
         "./internal/handler",
         "./internal/usage",
         "./cmd/server",
         "-run",
-        "APIKeyPermission|APIKeyRotation",
+        "APIKeyPermission|APIKeyRotation|UpdateWithBudget",
         "-count=1"
       ],
       "timeout_seconds": 600,
@@ -4299,6 +4300,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-review-5-tc-02-04",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/repository/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsMigrationSignalsFreshInstall"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -4449,6 +4460,56 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-review-15-tc-05-06",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsErrorsRenderParameters"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-16-tc-05-06",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsSlowTransactionAndCancellation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-17-tc-05-06",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/gate/gate_test.go",
+            "symbol": "TestUpdateWithBudgetKeepsAdmissionBoundAndLock"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-18-tc-05-06",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/gate/gate_test.go",
+            "symbol": "TestUpdateWithBudgetHonorsWriteAndCallerCancellation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-19-tc-05-06",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/gate/gate_test.go",
+            "symbol": "TestUpdateWithBudgetDoesNotExtendVersionLookup"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -4546,6 +4607,36 @@
           "implementation": {
             "path": "frontend/tests/ui-regressions.browser.mjs",
             "symbol": "API key rotation requires reload after 503"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-10-tc-09-10",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key rotation preserves and advances an open edit draft (desktop)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-11-tc-09-10",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key rotation preserves and advances an open edit draft (mobile)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-12-tc-09-10",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key rotation does not advance a draft past another administrator's edit"
           },
           "automation_status": "implemented",
           "required": true

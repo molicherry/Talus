@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
@@ -110,6 +112,71 @@ func TestAPIKeyPermissionsValidationAndServerScope(t *testing.T) {
 	db.First(&stored, key.ID)
 	if len(stored.ServerIDs) != 0 {
 		t.Fatal("GORM skipped explicit empty server array")
+	}
+}
+
+func TestAPIKeyPermissionsErrorsRenderParameters(t *testing.T) {
+	svc, db, ctx, key, _ := apiKeyPermissionsFixture(t)
+	existing := model.Server{Name: "existing", Host: "127.0.0.1", OwnerID: 1}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatal(err)
+	}
+	scopes := []string{"servers:read", "unknown:scope"}
+	ids := []uint{key.ServerIDs[0], existing.ID, 9998, 9998}
+	for _, tc := range []struct {
+		name, reason, message, param string
+		input                        UpdateAPIKeyPermissionsInput
+		want                         any
+	}{
+		{"scopes", server.ReasonInvalidScopes, "invalid scopes: [unknown:scope]", "scopes", UpdateAPIKeyPermissionsInput{ExpectedRevision: 1, Scopes: &scopes}, []any{"unknown:scope"}},
+		{"servers", server.ReasonServersNotFound, "unknown server ids: [9998]", "servers", UpdateAPIKeyPermissionsInput{ExpectedRevision: 1, ServerIDs: &ids}, []any{float64(9998)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.UpdatePermissions(ctx, key.ID, tc.input)
+			recorder := httptest.NewRecorder()
+			server.WriteError(recorder, httptest.NewRequest("PATCH", "/", nil).WithContext(ctx), err)
+			var body struct {
+				Error struct {
+					Reason  string         `json:"reason"`
+					Message string         `json:"message"`
+					Params  map[string]any `json:"params"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != http.StatusBadRequest || body.Error.Reason != tc.reason || body.Error.Message != tc.message || !reflect.DeepEqual(body.Error.Params[tc.param], tc.want) {
+				t.Fatalf("unexpected error envelope: %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestAPIKeyPermissionsSlowTransactionAndCancellation(t *testing.T) {
+	svc, db, ctx, key, raw := apiKeyPermissionsFixture(t)
+	if err := db.Exec(`CREATE FUNCTION slow_permission_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN PERFORM pg_sleep(2.2); RETURN NEW; END $$`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TRIGGER slow_permission_audit BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION slow_permission_audit()`).Error; err != nil {
+		t.Fatal(err)
+	}
+	scopes := []string{"servers:read"}
+	updated, err := svc.UpdatePermissions(ctx, key.ID, UpdateAPIKeyPermissionsInput{ExpectedRevision: 1, Scopes: &scopes})
+	if err != nil || updated.PermissionsRevision != 2 {
+		t.Fatalf("write exceeding admission budget failed: %v", err)
+	}
+	short, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	_, err = svc.UpdatePermissions(short, key.ID, UpdateAPIKeyPermissionsInput{ExpectedRevision: 2, Scopes: &key.Scopes})
+	requireAPIKeyError(t, err, http.StatusServiceUnavailable)
+	current, err := svc.Validate(ctx, raw)
+	if err != nil || current.PermissionsRevision != 2 || !reflect.DeepEqual(current.Scopes, scopes) {
+		t.Fatal("cancelled transaction changed policy")
+	}
+	var count int64
+	if err := db.Model(&model.AuditEvent{}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatal("cancelled transaction committed audit")
 	}
 }
 

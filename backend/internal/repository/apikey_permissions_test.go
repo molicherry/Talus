@@ -31,7 +31,7 @@ func TestAPIKeyPermissionsMigrationPreservesExplicitPolicies(t *testing.T) {
 			}
 			before := ownerBackfillSnapshots(t, db, "SELECT to_jsonb(api_keys)::text AS snapshot FROM api_keys ORDER BY id")
 			for range 2 {
-				if err := PrepareAPIKeyPermissionsSchema(context.Background(), db); err != nil {
+				if prepared, err := PrepareAPIKeyPermissionsSchema(context.Background(), db); err != nil || !prepared {
 					t.Fatal(err)
 				}
 			}
@@ -51,7 +51,7 @@ func TestAPIKeyPermissionsMigrationPreservesExplicitPolicies(t *testing.T) {
 			if err := db.Exec("DELETE FROM " + table).Error; err != nil {
 				t.Fatal(err)
 			}
-			if err := PrepareAPIKeyPermissionsSchema(context.Background(), db); err != nil {
+			if prepared, err := PrepareAPIKeyPermissionsSchema(context.Background(), db); err != nil || !prepared {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(before, ownerBackfillSnapshots(t, db, "SELECT to_jsonb(api_keys)::text AS snapshot FROM api_keys ORDER BY id")) {
@@ -70,7 +70,7 @@ func TestAPIKeyPermissionsMigrationFromPreScopeSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if err := PrepareAPIKeyPermissionsSchema(context.Background(), db); err != nil {
+		if prepared, err := PrepareAPIKeyPermissionsSchema(context.Background(), db); err != nil || !prepared {
 			t.Fatal(err)
 		}
 		if err := db.AutoMigrate(&model.APIKey{}); err != nil {
@@ -101,8 +101,8 @@ func TestAPIKeyPermissionsMigrationRejectsMalformedDataAtomically(t *testing.T) 
 			if err := db.Exec("ALTER TABLE api_keys DROP COLUMN permissions_revision, DROP COLUMN permissions_updated_at").Error; err != nil {
 				t.Fatal(err)
 			}
-			err := PrepareAPIKeyPermissionsSchema(context.Background(), db)
-			if err == nil || !strings.Contains(err.Error(), "record 1") || strings.Contains(err.Error(), "do-not-log") {
+			prepared, err := PrepareAPIKeyPermissionsSchema(context.Background(), db)
+			if prepared || err == nil || !strings.Contains(err.Error(), "record 1") || strings.Contains(err.Error(), "do-not-log") {
 				t.Fatalf("unsafe/missing error: %v", err)
 			}
 			if db.Migrator().HasColumn(&model.APIKey{}, "permissions_revision") {
@@ -111,9 +111,35 @@ func TestAPIKeyPermissionsMigrationRejectsMalformedDataAtomically(t *testing.T) 
 			if err := db.Exec(`UPDATE api_keys SET scopes='["servers:read"]', server_ids='[9999]'`).Error; err != nil {
 				t.Fatal(err)
 			}
-			if err := PrepareAPIKeyPermissionsSchema(context.Background(), db); err != nil {
+			if prepared, err := PrepareAPIKeyPermissionsSchema(context.Background(), db); err != nil || !prepared {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestAPIKeyPermissionsMigrationSignalsFreshInstall(t *testing.T) {
+	db := newTestDB(t)
+	prepared, err := PrepareAPIKeyPermissionsSchema(context.Background(), db)
+	if err != nil || prepared {
+		t.Fatalf("empty database reported prepared=%v, err=%v", prepared, err)
+	}
+	if db.Migrator().HasTable(&model.APIKey{}) {
+		t.Fatal("preparation created a partial API key table")
+	}
+	if err := db.AutoMigrate(&model.APIKey{}); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err = PrepareAPIKeyPermissionsSchema(context.Background(), db)
+	if err != nil || !prepared {
+		t.Fatalf("fresh schema reported prepared=%v, err=%v", prepared, err)
+	}
+	var count int64
+	table, err := migrationTable(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Table(table).Where("id = ?", "2026-09-24-services-read-scope").Count(&count).Error; err != nil || count != 1 {
+		t.Fatal("fresh install did not retire historical automatic grant")
 	}
 }

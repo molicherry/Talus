@@ -256,7 +256,13 @@ export function ApiKeysPage() {
   const handleRotate = () => {
     if (!rotateTarget?.permissions_revision || rotateMutation.isPending) return;
     rotateMutation.mutate({ id: rotateTarget.id, expected_revision: rotateTarget.permissions_revision }, {
-      onSuccess: ({ key }) => {
+      onSuccess: ({ key, api_key }) => {
+        // Only advance a draft based on exactly the version we just rotated.
+        // A fresher list row may already include someone else's permission edit;
+        // adopting its revision would silently bypass the draft's conflict check.
+        setEditTarget((current) => current?.id === api_key.id && current.permissions_revision === rotateTarget.permissions_revision
+          ? { ...current, key_prefix: api_key.key_prefix, permissions_revision: api_key.permissions_revision }
+          : current);
         setRotateTarget(null);
         setRotatedKey(key);
         // A previously displayed creation secret may now be invalid.

@@ -47,9 +47,9 @@ export async function revealAPIKey(id: number): Promise<string> {
   return apiClient.get<string>(`/api/v1/api-keys/${id}/reveal`);
 }
 
-export async function rotateAPIKey({ id, expected_revision }: { id: number; expected_revision: string }): Promise<{ key: string }> {
+export async function rotateAPIKey({ id, expected_revision }: { id: number; expected_revision: string }): Promise<{ key: string; api_key: APIKey }> {
   const result = CreateAPIKeyResultSchema.parse(await apiClient.post<unknown>(`/api/v1/api-keys/${id}/rotate`, { expected_revision }));
-  return { key: result.key };
+  return result;
 }
 
 export interface UpdateAPIKeyPermissionsInput {

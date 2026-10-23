@@ -34,7 +34,7 @@ func (s *APIKeyService) Rotate(ctx context.Context, id uint, expectedRevision in
 		operationID = usage.NewOperation("api_key.rotate", "", "", "POST", "").OperationID()
 	}
 	var revoked []*gate.Session
-	err = s.permissionsGate.Update(ctx, id, func(updateCtx context.Context, _ int64) (bool, error) {
+	err = s.permissionsGate.UpdateWithBudget(ctx, id, apiKeyMutationBudget, func(updateCtx context.Context, _ int64) (bool, error) {
 		key, err := s.repo.Rotate(updateCtx, id, result.APIKey, func(key *model.APIKey) (*model.AuditEvent, error) {
 			if key.PermissionsRevision != expectedRevision || key.PermissionsRevision == math.MaxInt64 {
 				return nil, server.NewAppError(http.StatusConflict, server.ReasonAPIKeyRevisionConflict)

@@ -18,13 +18,14 @@ import (
 var ErrAPIKeyCommitUnknown = errors.New("api key transaction outcome unknown")
 
 // PrepareAPIKeyPermissionsSchema runs before AutoMigrate (to recognize an
-// absent scopes column) and afterwards (for fresh installs). It never derives
-// existing permissions from today's defaults or from a missing migration marker.
-func PrepareAPIKeyPermissionsSchema(ctx context.Context, db *gorm.DB) error {
+// absent scopes column). prepared=false with no error means the table does not
+// exist yet: only then must startup call it again after AutoMigrate. It never
+// derives existing permissions from today's defaults or a missing migration marker.
+func PrepareAPIKeyPermissionsSchema(ctx context.Context, db *gorm.DB) (prepared bool, err error) {
 	db = db.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)})
 	var reviewCount int64
 	var reviewIDs []uint
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec("SET LOCAL lock_timeout = '5s'").Error; err != nil {
 			return err
 		}
@@ -38,6 +39,7 @@ func PrepareAPIKeyPermissionsSchema(ctx context.Context, db *gorm.DB) error {
 		if !exists {
 			return nil
 		}
+		prepared = true
 		var hadScopes bool
 		if err := tx.Raw(`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'api_keys' AND column_name = 'scopes')`).Scan(&hadScopes).Error; err != nil {
 			return err
@@ -99,7 +101,7 @@ func PrepareAPIKeyPermissionsSchema(ctx context.Context, db *gorm.DB) error {
 	if err == nil && reviewCount > 0 {
 		slog.Warn("legacy service-read permissions retained without granting access; review in API Keys", "count", reviewCount, "sample_api_key_ids", reviewIDs)
 	}
-	return err
+	return prepared && err == nil, err
 }
 
 // Missing keys have revision zero so a deleted key can still be fenced and its

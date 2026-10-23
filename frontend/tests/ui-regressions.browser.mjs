@@ -343,6 +343,81 @@ try {
       assert.equal(state.writes.length, 1, "rotation must not retry");
     }, mobile);
   }
+  for (const mobile of [false, true]) {
+    await test(`API key rotation preserves and advances an open edit draft (${mobile ? "mobile" : "desktop"})`, async ({ page, state, goto }) => {
+      let key = { id: 7, name: "Draft key", key_prefix: "abcdef01", scopes: ["servers:read"], server_ids: [1], created_at: timestamp, permissions_revision: "1" };
+      state.custom = async ({ path, method, body, reply }) => {
+        if (path === "/api/v1/api-keys" && method === "GET") { await reply([key]); return true; }
+        if (path.endsWith("/rotate")) {
+          assert.equal(body.expected_revision, key.permissions_revision);
+          key = { ...key, key_prefix: "12345678", permissions_revision: "2" };
+          await reply({ key: "synthetic-rotated-draft-key", api_key: key }); return true;
+        }
+        if (path === "/api/v1/api-keys/7" && method === "PATCH") {
+          if (body.expected_revision !== key.permissions_revision) await reply({ error: { code: 409, reason: "api_key_revision_conflict" } }, 409);
+          else { key = { ...key, ...body, permissions_revision: "3" }; await reply(key); }
+          return true;
+        }
+        return false;
+      };
+      await goto("/api-keys");
+      await page.getByRole("button", { name: "Edit permissions", exact: true }).click();
+      await page.getByLabel("Read metrics", { exact: true }).check();
+      await page.getByLabel("Beta", { exact: true }).check();
+      await page.getByRole("button", { name: "Rotate key", exact: true }).click();
+      await page.getByRole("button", { name: "Replace key", exact: true }).click();
+      await page.getByRole("dialog", { name: "API key replaced", exact: true }).getByRole("button", { name: "Close", exact: true }).click();
+      assert.equal(await page.getByLabel("Read metrics", { exact: true }).isChecked(), true);
+      assert.equal(await page.getByLabel("Beta", { exact: true }).isChecked(), true);
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await until(() => state.writes.some((w) => w.method === "PATCH"));
+      assert.deepEqual(state.writes.find((w) => w.method === "PATCH").body, { expected_revision: "2", scopes: ["servers:read", "metrics:read"], server_ids: [1, 2] });
+      await until(async () => await page.getByRole("heading", { name: "Edit permissions: Draft key" }).count() === 0);
+      assert.equal(key.permissions_revision, "3");
+    }, mobile);
+  }
+
+  await test("API key rotation does not advance a draft past another administrator's edit", async ({ page, state, goto }) => {
+    let keys = [7, 8].map((id) => ({ id, name: `Key ${id}`, key_prefix: `abcdef0${id}`, scopes: ["servers:read"], created_at: timestamp, permissions_revision: "1" }));
+    state.custom = async ({ path, method, body, reply }) => {
+      if (path === "/api/v1/api-keys" && method === "GET") { await reply(keys); return true; }
+      if (path.endsWith("/rotate")) {
+        const id = Number(path.split("/").at(-2));
+        const current = keys.find((key) => key.id === id);
+        assert.equal(body.expected_revision, current.permissions_revision);
+        const updated = { ...current, key_prefix: `rotated${id}`, permissions_revision: String(Number(current.permissions_revision) + 1) };
+        keys = keys.map((key) => key.id === id ? updated : key);
+        await reply({ key: `synthetic-rotated-${id}`, api_key: updated }); return true;
+      }
+      if (path === "/api/v1/api-keys/7" && method === "PATCH") {
+        if (body.expected_revision !== keys[0].permissions_revision) await reply({ error: { code: 409, reason: "api_key_revision_conflict" } }, 409);
+        else { keys[0] = { ...keys[0], ...body }; await reply(keys[0]); }
+        return true;
+      }
+      return false;
+    };
+    await goto("/api-keys");
+    const firstRow = page.locator("tbody tr").filter({ hasText: "Key 7" });
+    await firstRow.getByRole("button", { name: "Edit permissions", exact: true }).click();
+    await page.getByLabel("Read metrics", { exact: true }).check();
+    // Another administrator changes Key 7. Rotating Key 8 refreshes the list,
+    // while Key 7's open draft must retain its original baseline.
+    keys[0] = { ...keys[0], scopes: ["services:read"], permissions_revision: "2" };
+    await page.locator("tbody tr").filter({ hasText: "Key 8" }).getByRole("button", { name: "Rotate key", exact: true }).click();
+    await page.getByRole("button", { name: "Replace key", exact: true }).click();
+    await page.getByRole("dialog", { name: "API key replaced", exact: true }).getByRole("button", { name: "Close", exact: true }).click();
+    await firstRow.getByText("Read services", { exact: true }).waitFor();
+    await firstRow.getByRole("button", { name: "Rotate key", exact: true }).click();
+    await page.getByRole("button", { name: "Replace key", exact: true }).click();
+    await page.getByRole("dialog", { name: "API key replaced", exact: true }).getByRole("button", { name: "Close", exact: true }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByText(/These permissions were changed elsewhere/).waitFor();
+    assert.equal(state.writes.find((w) => w.method === "PATCH").body.expected_revision, "1");
+    assert.deepEqual(keys[0].scopes, ["services:read"], "rotation must not authorize overwriting another admin's policy");
+    assert.equal(await page.getByLabel("Read metrics", { exact: true }).isChecked(), true);
+    assert.equal(await page.getByRole("button", { name: "Save", exact: true }).isDisabled(), true);
+  });
+
   for (const status of [409, 503]) {
     await test(`API key rotation requires reload after ${status}`, async ({ page, state, goto }) => {
       let key = { id: 7, name: "Shared", key_prefix: "abcdef01", scopes: ["servers:read"], created_at: timestamp, permissions_revision: "1" };

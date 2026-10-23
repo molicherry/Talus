@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/vpsmanager/backend/internal/gate"
 	"github.com/vpsmanager/backend/internal/model"
@@ -18,6 +19,10 @@ import (
 	"github.com/vpsmanager/backend/internal/usage"
 	"gorm.io/gorm"
 )
+
+// Admission/lookup retains gate.DefaultBudget; only an admitted key mutation
+// gets this separate bounded transaction budget. HTTP cancellation still wins.
+const apiKeyMutationBudget = 10 * time.Second
 
 func requireAPIKeyAdmin(ctx context.Context) error {
 	p := mw.GetPrincipal(ctx)
@@ -77,7 +82,7 @@ func (s *APIKeyService) UpdatePermissions(ctx context.Context, id uint, input Up
 			return nil, server.NewAppError(http.StatusBadRequest, server.ReasonScopesRequired)
 		}
 		if invalid := mw.ValidateScopes(*input.Scopes); len(invalid) > 0 {
-			return nil, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidScopes)
+			return nil, server.NewAppErrorParams(http.StatusBadRequest, server.ReasonInvalidScopes, map[string]any{"scopes": invalid})
 		}
 	}
 	p := mw.GetPrincipal(ctx)
@@ -87,7 +92,7 @@ func (s *APIKeyService) UpdatePermissions(ctx context.Context, id uint, input Up
 	}
 	var updated *model.APIKey
 	var revoked []*gate.Session
-	err := s.permissionsGate.Update(ctx, id, func(updateCtx context.Context, _ int64) (bool, error) {
+	err := s.permissionsGate.UpdateWithBudget(ctx, id, apiKeyMutationBudget, func(updateCtx context.Context, _ int64) (bool, error) {
 		var changed bool
 		var err error
 		updated, changed, err = s.repo.UpdatePermissions(updateCtx, id, func(tx *gorm.DB, key *model.APIKey) (*model.AuditEvent, error) {
@@ -124,12 +129,22 @@ func (s *APIKeyService) UpdatePermissions(ctx context.Context, id uint, input Up
 					}
 				}
 				if len(added) > 0 {
-					servers, err := repository.NewServerRepo(tx).FindByIDs(updateCtx, added)
+					existing, err := repository.NewServerRepo(tx).FindExistingIDs(updateCtx, added)
 					if err != nil {
 						return nil, err
 					}
-					if len(servers) != len(added) {
-						return nil, server.NewAppError(http.StatusBadRequest, server.ReasonServersNotFound)
+					if len(existing) != len(added) {
+						found := make(map[uint]bool, len(existing))
+						for _, id := range existing {
+							found[id] = true
+						}
+						var missing []uint
+						for _, id := range added {
+							if !found[id] {
+								missing = append(missing, id)
+							}
+						}
+						return nil, server.NewAppErrorParams(http.StatusBadRequest, server.ReasonServersNotFound, map[string]any{"servers": missing})
 					}
 				}
 				key.ServerIDs = ids

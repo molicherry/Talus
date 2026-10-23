@@ -170,3 +170,79 @@ func TestGateBudgetIncludesLockWaitAndLookup(t *testing.T) {
 	}
 	<-first
 }
+
+func TestUpdateWithBudgetKeepsAdmissionBoundAndLock(t *testing.T) {
+	var admissionCtx context.Context
+	g := New(func(ctx context.Context, _ uint) (int64, error) {
+		admissionCtx = ctx
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) > DefaultBudget {
+			t.Error("write budget leaked into the version lookup")
+		}
+		return 1, nil
+	})
+	err := g.UpdateWithBudget(context.Background(), 1, 4*time.Second, func(writeCtx context.Context, _ int64) (bool, error) {
+		// Pass the original admission deadline while the write is still live.
+		<-admissionCtx.Done()
+		if err := writeCtx.Err(); err != nil {
+			t.Fatalf("admission timeout cancelled the write: %v", err)
+		}
+		short, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+		defer cancel()
+		if err := g.Admit(short, 1, func(int64) error { t.Error("gate unlocked before write finished"); return nil }); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("contending admission = %v", err)
+		}
+		return false, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdateWithBudgetHonorsWriteAndCallerCancellation(t *testing.T) {
+	for _, callerDeadline := range []bool{false, true} {
+		t.Run(map[bool]string{false: "write budget", true: "caller deadline"}[callerDeadline], func(t *testing.T) {
+			g := New(func(context.Context, uint) (int64, error) { return 1, nil })
+			ctx := context.Background()
+			budget := 30 * time.Millisecond
+			if callerDeadline {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 30*time.Millisecond)
+				defer cancel()
+				budget = 10 * time.Second
+			}
+			started := time.Now()
+			err := g.UpdateWithBudget(ctx, 1, budget, func(writeCtx context.Context, _ int64) (bool, error) {
+				<-writeCtx.Done()
+				return true, writeCtx.Err()
+			})
+			if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
+				t.Fatalf("write did not respect its deadline: %v", err)
+			}
+			if !g.stateFor(1).pending {
+				t.Fatal("timed out uncertain write lost its fence")
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	g := New(func(context.Context, uint) (int64, error) { t.Error("cancelled caller reached lookup"); return 1, nil })
+	if err := g.UpdateWithBudget(ctx, 1, time.Second, func(context.Context, int64) (bool, error) { t.Error("cancelled write started"); return false, nil }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation = %v", err)
+	}
+}
+
+func TestUpdateWithBudgetDoesNotExtendVersionLookup(t *testing.T) {
+	g := New(func(ctx context.Context, _ uint) (int64, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) > DefaultBudget {
+			t.Error("lookup deadline enlarged")
+		}
+		<-ctx.Done()
+		return 0, ctx.Err()
+	})
+	err := g.UpdateWithBudget(context.Background(), 1, 10*time.Second, func(context.Context, int64) (bool, error) { t.Error("expired lookup reached write"); return false, nil })
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("lookup error = %v", err)
+	}
+}

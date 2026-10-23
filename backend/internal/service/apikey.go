@@ -151,7 +151,7 @@ func (s *APIKeyService) Delete(ctx context.Context, id uint) error {
 		return err
 	}
 	var revoked []*gate.Session
-	err := s.permissionsGate.Update(ctx, id, func(updateCtx context.Context, _ int64) (bool, error) {
+	err := s.permissionsGate.UpdateWithBudget(ctx, id, apiKeyMutationBudget, func(updateCtx context.Context, _ int64) (bool, error) {
 		err := s.repo.Delete(updateCtx, id)
 		unknown := errors.Is(err, repository.ErrAPIKeyCommitUnknown)
 		if err == nil || unknown {

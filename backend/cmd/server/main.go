@@ -118,8 +118,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Recognize pre-scope schemas before AutoMigrate can fill in today's defaults.
 	permissionSchemaCtx, cancelPermissionSchema := context.WithTimeout(context.Background(), 30*time.Second)
-	permissionSchemaErr := repository.PrepareAPIKeyPermissionsSchema(permissionSchemaCtx, db)
+	permissionSchemaPrepared, permissionSchemaErr := repository.PrepareAPIKeyPermissionsSchema(permissionSchemaCtx, db)
 	cancelPermissionSchema()
 	if permissionSchemaErr != nil {
 		slog.Error("failed to prepare API key permissions", "error", permissionSchemaErr)
@@ -188,12 +189,16 @@ func main() {
 		debug.FreeOSMemory()
 	}
 
-	permissionCtx, cancelPermissionMigration := context.WithTimeout(context.Background(), 30*time.Second)
-	permissionErr := repository.PrepareAPIKeyPermissionsSchema(permissionCtx, db)
-	cancelPermissionMigration()
-	if permissionErr != nil {
-		slog.Error("API key permission migration failed; startup stopped", "error", permissionErr)
-		os.Exit(1)
+	// A fresh installation had no api_keys table during preparation. Only that
+	// path needs to settle the migration markers now; existing schemas are done.
+	if !permissionSchemaPrepared {
+		permissionCtx, cancelPermissionMigration := context.WithTimeout(context.Background(), 30*time.Second)
+		_, permissionErr := repository.PrepareAPIKeyPermissionsSchema(permissionCtx, db)
+		cancelPermissionMigration()
+		if permissionErr != nil {
+			slog.Error("API key permission migration failed; startup stopped", "error", permissionErr)
+			os.Exit(1)
+		}
 	}
 
 	// 4. Create TimescaleDB hypertable for metrics
