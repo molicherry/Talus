@@ -44,16 +44,22 @@ $admin=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
+// A PowerShell 7 SSH shell can pass its incompatible module directories to
+// powershell.exe. Deployment only needs the executing edition's system modules.
+const systemModules = "$env:PSModulePath=$PSHOME+'/Modules';\n"
+
 // Command works with both cmd.exe and PowerShell as the OpenSSH default shell.
 // Long scripts are compressed to stay below cmd.exe's 8191-character limit.
 func Command(script string) string {
+	script = strings.ReplaceAll(script, "\r\n", "\n")
 	if len(utf16.Encode([]rune(script))) > 2400 {
 		var b bytes.Buffer
-		w := gzip.NewWriter(&b)
+		w, _ := gzip.NewWriterLevel(&b, gzip.BestCompression)
 		_, _ = w.Write([]byte(script))
 		_ = w.Close()
-		script = "$m=New-Object IO.MemoryStream(,[Convert]::FromBase64String(" + Quote(base64.StdEncoding.EncodeToString(b.Bytes())) + ")); $z=New-Object IO.Compression.GzipStream($m,[IO.Compression.CompressionMode]::Decompress); $r=New-Object IO.StreamReader($z); & ([ScriptBlock]::Create($r.ReadToEnd()))"
+		script = "$m=New-Object IO.MemoryStream(,[Convert]::FromBase64String(" + Quote(base64.StdEncoding.EncodeToString(b.Bytes())) + ")); $z=New-Object IO.Compression.GzipStream($m,[IO.Compression.CompressionMode]::Decompress); & ([ScriptBlock]::Create((New-Object IO.StreamReader($z)).ReadToEnd()))"
 	}
+	script = systemModules + script
 	u := utf16.Encode([]rune(script))
 	b := make([]byte, len(u)*2)
 	for i, c := range u {
@@ -84,7 +90,7 @@ func (l Layout) Base() string  { return l.Root() + "/" + l.InstallID }
 func (l Layout) Stage() string { return l.Base() + "/staging/" + l.Attempt }
 func (l Layout) Name() string  { return "Talus-Agent-" + l.InstallID }
 func (l Layout) vars() string {
-	return "$ErrorActionPreference='Stop'\n$ProgressPreference='SilentlyContinue'\n" +
+	return systemModules + "$ErrorActionPreference='Stop'\n$ProgressPreference='SilentlyContinue'\n" +
 		"$root=" + Quote(l.Root()) + "\n$base=" + Quote(l.Base()) + "\n$stage=" + Quote(l.Stage()) + "\n$name=" + Quote(l.Name()) + "\n$task=" + Quote(l.Name()+"-Deploy-"+l.Attempt) + "\n"
 }
 func (l Layout) Prepare() string { return l.vars() + common + prepare }
@@ -106,14 +112,16 @@ func (l Layout) Remove() string { return l.vars() + common + remove }
 // activation still holds the lock or the SSH/request cleanup budget expires.
 // No server credential is needed once the local SYSTEM task has been scheduled.
 func (l Layout) RemoveDetached() string {
-	cleanup := l.vars() + common + "try {\n" + remove + "\n} finally { Unregister-ScheduledTask -TaskName ($name+'-Remove') -Confirm:$false -ErrorAction SilentlyContinue; Remove-Item -LiteralPath (Join-Path $root ($name+'.remove.ps1')) -Force -ErrorAction SilentlyContinue }\n"
-	return l.vars() + common + `Assert-Admin
+	cleanup := "try {\n" + remove + "\n} finally { Unregister-ScheduledTask -TaskName ($name+'-Remove') -Confirm:$false -ErrorAction SilentlyContinue; Remove-Item -LiteralPath (Join-Path $root ($name+'.remove.ps1')) -Force -ErrorAction SilentlyContinue }\n"
+	// Share the helper source with the detached script instead of transmitting
+	// it twice, leaving room for long ProgramData paths under cmd.exe's limit.
+	return l.vars() + "$support=" + Quote(common) + "\n. ([ScriptBlock]::Create($support))\n" + `Assert-Admin
 Assert-Path $root
 if (!(Test-Path -LiteralPath $root) -and !(Get-Service -Name $name -ErrorAction SilentlyContinue)) { exit 0 }
 Protect-Directory $root
 $script=Join-Path $root ($name+'.remove.ps1')
 Assert-Path $script
-` + "[IO.File]::WriteAllText($script," + Quote(cleanup) + ",(New-Object Text.UTF8Encoding($true)))\n" + `$task=$name+'-Remove'
+` + "[IO.File]::WriteAllText($script,(" + Quote(l.vars()) + "+$support+" + Quote(cleanup) + "),(New-Object Text.UTF8Encoding($true)))\n" + `$task=$name+'-Remove'
 $exe=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
 $action=New-ScheduledTaskAction -Execute $exe -Argument ('-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$script+'"')
 $principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
@@ -128,6 +136,7 @@ func (l Layout) Wait(attempts int) string {
   if (Test-Path -LiteralPath $result) {
     $r=Get-Content -LiteralPath $result -Raw | ConvertFrom-Json
     if ($r.ok) { [Console]::WriteLine('TALUS_READY'); exit 0 }
+    [Console]::Error.WriteLine($r.error)
     exit 1
   }
   Start-Sleep -Seconds 1

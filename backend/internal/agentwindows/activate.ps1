@@ -2,6 +2,7 @@ $lock=$null
 $changed=$false
 $previous=$false
 $ok=$false
+$failure=''
 $binary=Join-Path $base 'agent.exe'
 $config=Join-Path $base 'config.json'
 $nextBinary=Join-Path $stage 'agent.exe'
@@ -52,6 +53,7 @@ try {
   }
   if (!$ok) { throw 'New service did not authenticate with Hub' }
 } catch {
+  $failure=$_.Exception.Message
   if ($changed) {
     try {
       Stop-Agent
@@ -65,7 +67,7 @@ try {
         Remove-AgentService
         foreach ($p in @($binary,$config)) { if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force } }
       }
-    } catch { $ok=$false }
+    } catch { $ok=$false; $failure+='; rollback: '+$_.Exception.Message }
   }
 } finally {
   if ($lock) {
@@ -73,7 +75,7 @@ try {
       if (Test-Path -LiteralPath $stage) {
         foreach ($p in @($nextBinary,$nextConfig)) { if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue } }
         $result=Join-Path $stage 'result.json'
-        [IO.File]::WriteAllText(($result+'.tmp'),(@{ok=$ok}|ConvertTo-Json -Compress))
+        [IO.File]::WriteAllText(($result+'.tmp'),(@{ok=$ok;error=$failure}|ConvertTo-Json -Compress))
         Move-Item -LiteralPath ($result+'.tmp') -Destination $result -Force
       }
     } finally { $lock.Dispose() }

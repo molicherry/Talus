@@ -26,11 +26,14 @@ func decodeCommand(t *testing.T, command string) string {
 func TestWindowsCommandQuotingAndLength(t *testing.T) {
 	text := "C:/部署 ' data/$literal; & file"
 	script := "[Console]::WriteLine(" + Quote(text) + ")"
-	if got := decodeCommand(t, Command(script)); got != script {
+	if got := decodeCommand(t, Command(script)); got != systemModules+script {
 		t.Fatalf("UTF-16 roundtrip = %q", got)
 	}
 	l := Layout{Home: "C:/Program Data/部署 ' data", InstallID: strings.Repeat("a", 32), Attempt: strings.Repeat("b", 32)}
 	for _, script := range []string{Probe, Context, l.Prepare(), l.Launch(strings.Repeat("c", 64)), l.Wait(70), l.RemoveDetached()} {
+		if Command(script) != Command(strings.ReplaceAll(strings.ReplaceAll(script, "\r\n", "\n"), "\n", "\r\n")) {
+			t.Fatal("Windows checkout changed command transport")
+		}
 		if n := len(Command(script)); n > 8000 {
 			t.Fatalf("command exceeds cmd.exe limit: %d", n)
 		}
