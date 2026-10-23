@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -10,8 +11,10 @@ import (
 	"github.com/vpsmanager/backend/internal/agentwire"
 )
 
-// Config holds all application configuration loaded from environment variables.
+// Config holds application configuration, including effective settings overrides.
 type Config struct {
+	// Environment records provenance without retaining raw deployment values.
+	Environment map[string]bool
 	// Database
 	DatabaseURL string
 
@@ -39,7 +42,8 @@ type Config struct {
 	MetricsRetentionDryRun  bool
 	// MetricsRetentionParseError records an unparsable rollout switch so Validate
 	// rejects startup instead of silently changing the deletion behaviour.
-	MetricsRetentionParseError error
+	MetricsRetentionParseError  error
+	metricsRetentionParseErrors map[string]error
 
 	// Monitoring
 	MonitorInterval int
@@ -128,6 +132,15 @@ func Load() *Config {
 	cfg.Port = getEnvOrDefault("PORT", "8080")
 	cfg.LogFormat = getEnvOrDefault("LOG_FORMAT", "json")
 	cfg.LogLevel = getEnvOrDefault("LOG_LEVEL", "info")
+	// Report the same normalized values that the logger actually uses.
+	if cfg.LogFormat != "json" {
+		cfg.LogFormat = "text"
+	}
+	switch cfg.LogLevel {
+	case "debug", "warn", "error":
+	default:
+		cfg.LogLevel = "info"
+	}
 	cfg.AgentArtifactsDir = getEnvOrDefault("AGENT_ARTIFACTS_DIR", "/usr/local/bin")
 	cfg.AgentHubURL = os.Getenv("AGENT_HUB_URL")
 	cfg.AgentAllowHTTP = getEnvBool("AGENT_ALLOW_HTTP")
@@ -138,16 +151,19 @@ func Load() *Config {
 	// dryRun=false) in place — dryRun=false is the deleting configuration.
 	cfg.MetricsRetentionEnabled = false
 	cfg.MetricsRetentionDryRun = true
+	cfg.metricsRetentionParseErrors = make(map[string]error)
 	// Only an explicitly set switch may override a default: a missing or empty
 	// variable reports "unset", which keeps the safe value installed above rather
 	// than reading it as an explicit false (N01).
 	if enabled, err := getEnvBoolStrict("METRICS_RETENTION_ENABLED"); err != nil {
-		cfg.MetricsRetentionParseError = err
+		cfg.metricsRetentionParseErrors["METRICS_RETENTION_ENABLED"] = err
+		cfg.MetricsRetentionParseError = errors.Join(cfg.MetricsRetentionParseError, err)
 	} else if enabled != nil {
 		cfg.MetricsRetentionEnabled = *enabled
 	}
 	if dryRun, err := getEnvBoolStrict("METRICS_RETENTION_DRY_RUN"); err != nil {
-		cfg.MetricsRetentionParseError = err
+		cfg.metricsRetentionParseErrors["METRICS_RETENTION_DRY_RUN"] = err
+		cfg.MetricsRetentionParseError = errors.Join(cfg.MetricsRetentionParseError, err)
 	} else if dryRun != nil {
 		cfg.MetricsRetentionDryRun = *dryRun
 	}
@@ -170,7 +186,25 @@ func Load() *Config {
 	cfg.UsageActiveLimit = getEnvIntOrDefault("USAGE_LOG_ACTIVE_LIMIT", 4096)
 	cfg.UsageRetentionDays = getEnvIntOrDefault("USAGE_LOG_RETENTION_DAYS", 30)
 	cfg.UsageSensitiveRetentionDays = getEnvIntOrDefault("USAGE_LOG_SENSITIVE_RETENTION_DAYS", 90)
+	// Preserve the recorder/retention compatibility defaults, and show those
+	// effective defaults in the settings page instead of misleading zeroes.
+	if cfg.UsageWriteConcurrency <= 0 {
+		cfg.UsageWriteConcurrency = 4
+	}
+	if cfg.UsageActiveLimit <= 0 {
+		cfg.UsageActiveLimit = 4096
+	}
+	if cfg.UsageRetentionDays <= 0 {
+		cfg.UsageRetentionDays = 30
+	}
+	if cfg.UsageSensitiveRetentionDays <= 0 {
+		cfg.UsageSensitiveRetentionDays = 90
+	}
 	cfg.UsageLegacyWritersDrained = getEnvBool("USAGE_LOG_LEGACY_WRITERS_DRAINED")
+	cfg.Environment = make(map[string]bool)
+	for _, setting := range Settings {
+		cfg.Environment[setting.Key] = os.Getenv(setting.Key) != ""
+	}
 
 	return cfg
 }

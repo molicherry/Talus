@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/vpsmanager/backend/internal/agentproto"
 	"io"
 	"net"
 	"net/http"
@@ -23,6 +22,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/vpsmanager/backend/internal/agentproto"
 )
 
 // TestServerProcessHelper runs the actual entrypoint in an isolated process, so
@@ -165,7 +165,7 @@ func startupServerEnv(dsn, port string, extra map[string]string) map[string]stri
 	return env
 }
 
-func startTestServer(t *testing.T, dsn string) *startupServer {
+func startTestServer(t *testing.T, dsn string, overrides ...map[string]string) *startupServer {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -185,9 +185,13 @@ func startTestServer(t *testing.T, dsn string) *startupServer {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(executable, "-test.run=^TestServerProcessHelper$", "-test.count=1", "-test.timeout=2m")
-	cmd.Env = startupTestEnv(startupServerEnv(dsn, port, map[string]string{
-		"AGENT_ARTIFACTS_DIR": agentArtifactsDir(t),
-	}))
+	extra := map[string]string{"AGENT_ARTIFACTS_DIR": agentArtifactsDir(t)}
+	for _, values := range overrides {
+		for k, v := range values {
+			extra[k] = v
+		}
+	}
+	cmd.Env = startupTestEnv(startupServerEnv(dsn, port, extra))
 	cmd.Stdout, cmd.Stderr = logFile, logFile
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()

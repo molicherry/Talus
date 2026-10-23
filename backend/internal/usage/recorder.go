@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/config"
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/repository"
 )
@@ -192,6 +193,7 @@ type Stats struct {
 }
 
 type Recorder struct {
+	runtimeConfig                                                                  *config.Runtime
 	store                                                                          Store
 	audit                                                                          AuditStore
 	opts                                                                           Options
@@ -501,7 +503,7 @@ func (r *Recorder) snapshotExpired(row model.UsageLog, now time.Time) bool {
 	if row.RetentionAt == nil {
 		return false
 	}
-	retention := (model.UsagePolicy{OrdinaryRetention: r.opts.OrdinaryRetention, SensitiveRetention: r.opts.SensitiveRetention}).Retention(row.Action)
+	retention := r.retentionPolicy().Retention(row.Action)
 	return now.Sub(*row.RetentionAt) >= retention
 }
 func retryDelay(attempt int) time.Duration {
@@ -936,4 +938,15 @@ func (r *Recorder) trackedOperations() []string {
 		tracked = append(tracked, id)
 	}
 	return tracked
+}
+
+// SetRuntimeConfig is wired before serving requests.
+func (s *Recorder) SetRuntimeConfig(r *config.Runtime) { s.runtimeConfig = r }
+
+func (r *Recorder) retentionPolicy() model.UsagePolicy {
+	if r.runtimeConfig != nil {
+		c := r.runtimeConfig.Current()
+		return (model.UsagePolicy{OrdinaryRetention: time.Duration(c.UsageRetentionDays) * 24 * time.Hour, SensitiveRetention: time.Duration(c.UsageSensitiveRetentionDays) * 24 * time.Hour}).WithDefaults()
+	}
+	return (model.UsagePolicy{OrdinaryRetention: r.opts.OrdinaryRetention, SensitiveRetention: r.opts.SensitiveRetention}).WithDefaults()
 }

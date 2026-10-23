@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/vpsmanager/backend/internal/agentwire"
+	"github.com/vpsmanager/backend/internal/config"
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/telemetry"
@@ -42,21 +43,22 @@ type residentRuntime struct {
 // ResidentMonitor owns authenticated presence independently of metric writes.
 // Its bounded writer pool prevents a reconnect/backfill burst exhausting SQL.
 type ResidentMonitor struct {
-	store      residentStore
-	repo       *repository.AgentNodeRepo
-	servers    *repository.ServerRepo
-	deployer   *AgentDeploymentService
-	hubURL     string
-	allowHTTP  bool
-	interval   int
-	mu         sync.Mutex
-	nodes      map[uint]*residentRuntime
-	writeSlots chan struct{}
-	wake       chan struct{}
-	now        func() time.Time
-	telemetry  *monitorTelemetry
-	closed     bool
-	revoked    map[uint]time.Time
+	runtimeConfig *config.Runtime
+	store         residentStore
+	repo          *repository.AgentNodeRepo
+	servers       *repository.ServerRepo
+	deployer      *AgentDeploymentService
+	hubURL        string
+	allowHTTP     bool
+	interval      int
+	mu            sync.Mutex
+	nodes         map[uint]*residentRuntime
+	writeSlots    chan struct{}
+	wake          chan struct{}
+	now           func() time.Time
+	telemetry     *monitorTelemetry
+	closed        bool
+	revoked       map[uint]time.Time
 	// installJobs tracks in-flight resident installations so deletion can
 	// cancel a job before it races an uninstall.
 	installJobs   map[uint]residentJob
@@ -291,6 +293,7 @@ func (m *ResidentMonitor) receive(ctx context.Context, n model.AgentNode, req ag
 }
 
 func (m *ResidentMonitor) Statuses(ctx context.Context, ids []uint) map[uint]*model.MonitoringStatus {
+	desired := m.settings()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now()
@@ -298,7 +301,7 @@ func (m *ResidentMonitor) Statuses(ctx context.Context, ids []uint) map[uint]*mo
 	for _, id := range ids {
 		s := &model.MonitoringStatus{Connection: "unknown", Collection: "unknown", Data: "stale", Deployment: "pending"}
 		out[id] = s
-		if m.hubURL == "" {
+		if desired.URL == "" {
 			s.Deployment = "setup_required"
 			s.DeploymentError = "hub_url_required"
 		}
@@ -306,9 +309,12 @@ func (m *ResidentMonitor) Statuses(ctx context.Context, ids []uint) map[uint]*mo
 		if v == nil {
 			continue
 		}
-		if m.hubURL != "" {
+		if desired.URL != "" {
 			s.Deployment = v.node.Deployment
 			s.DeploymentError = v.node.DeployError
+			if s.Deployment == "ready" && v.node.ConfigHash != desired.hash(v.node.TokenHash) {
+				s.Deployment = "pending"
+			}
 		}
 		s.Version = v.version
 		s.Pending = v.pending
@@ -342,7 +348,7 @@ func (m *ResidentMonitor) Statuses(ctx context.Context, ids []uint) map[uint]*mo
 			if v.latest.CPU == nil && v.latest.MemoryUsed == nil && v.latest.DiskUsed == nil && v.latest.NetRecv == nil && v.latest.Load1 == nil {
 				s.Collection = "failed"
 			}
-			freshFor := time.Duration(max(3*m.interval, 15)) * time.Second
+			freshFor := time.Duration(max(3*desired.Interval, 15)) * time.Second
 			if v.latest.Validate(now) == nil && v.storedSample != nil && now.Sub(*v.storedSample) <= freshFor && !v.writeFailed {
 				s.Data = "fresh"
 			}

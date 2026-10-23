@@ -35,10 +35,7 @@ func main() {
 
 	setupLogger(cfg.LogFormat, cfg.LogLevel)
 
-	if err := cfg.Validate(); err != nil {
-		slog.Error("invalid configuration", "error", err)
-		os.Exit(1)
-	}
+	// Validate the effective configuration after loading persisted overrides.
 
 	// Initialize JWT service
 	jwtSvc := token.NewJWTService(cfg.JWTSecret, 24*time.Hour)
@@ -159,6 +156,7 @@ func main() {
 			&model.UsageLogInstance{},
 			&model.UsageLog{},
 			&model.UsageLogBackfillState{},
+			&model.SystemSettings{},
 		)
 		if autoMigrateErr == nil {
 			break
@@ -171,6 +169,20 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("auto-migrate complete")
+	settingsCtx, cancelSettings := context.WithTimeout(context.Background(), 15*time.Second)
+	settingsSvc, settingsErr := service.NewSystemSettingsService(settingsCtx, repository.NewSystemSettingsRepo(db), *cfg)
+	cancelSettings()
+	if settingsErr != nil {
+		slog.Error("cannot load system settings", "error", settingsErr)
+		os.Exit(1)
+	}
+	runtimeConfig := settingsSvc.Runtime()
+	effectiveConfig := runtimeConfig.Current()
+	cfg = &effectiveConfig
+	sqlDB.SetMaxOpenConns(cfg.DBMaxOpenConnections)
+	sqlDB.SetMaxIdleConns(cfg.DBMaxOpenConnections / 2)
+	slog.SetDefault(slog.New(config.RuntimeLogHandler{Runtime: runtimeConfig,
+		JSON: slog.NewJSONHandler(os.Stdout, nil), Text: slog.NewTextHandler(os.Stdout, nil)}))
 
 	// Upgrade encrypted records before starting HTTP, connection pools or any
 	// background writer. Keep the original master key and database volume when
@@ -226,10 +238,12 @@ func main() {
 		time.Duration(cfg.SSHTimeout)*time.Second,
 	)
 	defer sshPool.Close()
+	sshPool.SetRuntimeConfig(runtimeConfig)
 
 	// Dependency chain — Servers (needed before API Keys for server ID validation)
 	serverRepo := repository.NewServerRepo(db)
 	metricRepo := repository.NewMetricRepo(db)
+	metricRepo.SetRuntimeConfig(runtimeConfig)
 	// One shared telemetry registry for the background paths: the frozen
 	// vocabulary is validated at the call site, so an unknown label value fails
 	// closed instead of reaching the metrics.
@@ -252,6 +266,7 @@ func main() {
 		SensitiveRetention: time.Duration(cfg.UsageSensitiveRetentionDays) * 24 * time.Hour,
 	}).WithDefaults()
 	usageRepo := repository.NewUsageLogRepo(db, repository.UsageLogRepoConfig{LeaseDuration: usagePolicy.LeaseDuration, OrdinaryRetention: usagePolicy.OrdinaryRetention, SensitiveRetention: usagePolicy.SensitiveRetention})
+	usageRepo.SetRuntimeConfig(runtimeConfig)
 	usageRecorder := usage.NewRecorder(usageRepo, auditRepo, usage.Options{
 		DBMaxOpenConnections: cfg.DBMaxOpenConnections,
 		WriteConcurrency:     cfg.UsageWriteConcurrency,
@@ -260,6 +275,7 @@ func main() {
 		OrdinaryRetention:    usagePolicy.OrdinaryRetention,
 		SensitiveRetention:   usagePolicy.SensitiveRetention,
 	})
+	usageRecorder.SetRuntimeConfig(runtimeConfig)
 	usageCtx, stopUsage := context.WithCancel(context.Background())
 	defer stopUsage()
 	usageRecorder.Start(usageCtx)
@@ -356,6 +372,7 @@ func main() {
 			map[string]string{"consumer": string(consumer)}, delta)
 	})
 	sshSvc.SetOutputLimits(cfg.ExecOutputLimit, cfg.ExecOutputStreamLimit)
+	sshSvc.SetRuntimeConfig(runtimeConfig)
 	sftpH := handler.NewSFTPHandler(service.NewSFTPService(sshSvc, []byte(cfg.JWTSecret)))
 	terminalSvc := service.NewTerminalService(sshSvc)
 	terminalSvc.SetSessionRegistry(terminalRegistry)
@@ -365,6 +382,7 @@ func main() {
 		DefaultTimeoutSeconds: cfg.ExecTimeout,
 		MaxTimeoutSeconds:     cfg.ExecTimeoutMax,
 	})
+	execH.SetRuntimeConfig(runtimeConfig)
 	connectionH := handler.NewServerConnectionHandler(sshSvc)
 	terminalH := handler.NewTerminalHandler(terminalSvc, jwtSvc)
 	terminalH.SetUserGate(userGate)
@@ -389,6 +407,8 @@ func main() {
 	agentDeployer.SetTrustedArtifacts(agentArtifacts)
 	agentNodes := repository.NewAgentNodeRepo(db, masterKey)
 	monitorSvc := service.NewResidentMonitor(agentNodes, serverRepo, agentDeployer, cfg.AgentHubURL, cfg.AgentAllowHTTP, cfg.MonitorInterval)
+	monitorSvc.SetRuntimeConfig(runtimeConfig)
+	settingsSvc.SetOnChange(monitorSvc.NotifyTopologyChange)
 	monitorSvc.SetTelemetry(telemetryRegistry)
 	serverSvc.SetMonitoringProvider(monitorSvc)
 	metricsH := handler.NewMetricsHandler(metricRepo)
@@ -402,6 +422,7 @@ func main() {
 
 	appCtx, stopApp := context.WithCancel(context.Background())
 	defer stopApp()
+	go settingsSvc.Poll(appCtx)
 	updateChecker := update.NewChecker(server.Version)
 	updateDone := make(chan struct{})
 	go func() {
@@ -420,6 +441,7 @@ func main() {
 	// Retention follows the documented rollout: disabled by default, a dry run
 	// reports the plan, and only enabled && !dry-run deletes.
 	maintenance.SetRetention(cfg.MetricsRetentionEnabled, cfg.MetricsRetentionDryRun)
+	maintenance.SetRuntimeConfig(runtimeConfig)
 	maintenance.SetTelemetry(telemetryRegistry, nil)
 	maintenanceDone := make(chan struct{})
 	go func() {
@@ -439,7 +461,12 @@ func main() {
 		return p, nil
 	})
 
+	settingsHandler := handler.NewSystemSettingsHandler(settingsSvc, usageRepo)
+	loginLimiter := mw.NewIPRateLimiter(time.Minute, cfg.LoginRateLimit, cfg.TrustProxy)
+	loginLimiter.SetRuntimeConfig(runtimeConfig)
 	router := server.NewRouter(server.RouteConfig{
+		GetSettingsHandler:           settingsHandler.Get,
+		UpdateSettingsHandler:        settingsHandler.Update,
 		AgentHTTPHandler:             monitorSvc.AgentHTTP,
 		AgentWebSocketHandler:        monitorSvc.AgentWebSocket,
 		JWTService:                   jwtSvc,
@@ -450,7 +477,7 @@ func main() {
 		GetUsageLogHandler:           usageHandler.Get,
 		FilterUsageLogOptionsHandler: usageFilterOptionsHandler.List,
 		RevealLimiter:                mw.NewRateLimiter(1*time.Minute, 5),
-		LoginLimiter:                 mw.NewIPRateLimiter(1*time.Minute, cfg.LoginRateLimit, cfg.TrustProxy),
+		LoginLimiter:                 loginLimiter,
 		CheckUpdatesHandler:          handler.NewUpdateHandler(updateChecker),
 		// Auth
 		LoginHandler:          authHandler.Login,

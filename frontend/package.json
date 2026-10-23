@@ -10,8 +10,9 @@
     "preview": "vite preview",
     "test": "bash tests/run.sh",
     "test:ui": "npm run build && npm run test:ui:built",
-    "test:ui:built": "node tests/ui-regressions.browser.mjs && node tests/usage-logs.browser.mjs && node tests/terminal.browser.mjs && node tests/files.browser.mjs",
-    "test:usage-ui": "npm run build && node tests/usage-logs.browser.mjs"
+    "test:ui:built": "node tests/ui-regressions.browser.mjs && node tests/usage-logs.browser.mjs && node tests/terminal.browser.mjs && node tests/files.browser.mjs && node tests/settings.browser.mjs",
+    "test:usage-ui": "npm run build && node tests/usage-logs.browser.mjs",
+    "test:settings-ui": "npm run build && node tests/settings.browser.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",

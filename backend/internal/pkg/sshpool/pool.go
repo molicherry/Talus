@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/config"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -21,6 +22,7 @@ var ErrStaleLease = errors.New("sshpool: connection configuration changed")
 var ErrStaleGeneration = ErrStaleLease
 
 type Pool struct {
+	runtimeConfig  *config.Runtime
 	mu             sync.Mutex
 	conns          map[uint]*connEntry
 	maxIdle        time.Duration
@@ -107,11 +109,15 @@ func (p *Pool) acquireContext(ctx context.Context, serverID uint, fingerprint st
 	}
 	generation := entry.generation
 	entry.waiters++
+	slotTimeout := p.slotTimeout
+	if p.runtimeConfig != nil {
+		slotTimeout = time.Duration(p.runtimeConfig.Current().SSHTimeout) * time.Second
+	}
 	p.mu.Unlock()
 	if stale != nil {
 		_ = stale.Close()
 	}
-	timer := time.NewTimer(p.slotTimeout)
+	timer := time.NewTimer(slotTimeout)
 	defer timer.Stop()
 	var err error
 	select {
@@ -546,7 +552,7 @@ func (p *Pool) evict() {
 	p.mu.Lock()
 	var clients []*ssh.Client
 	for id, entry := range p.conns {
-		if entry.client != nil && time.Since(entry.lastUsed) > p.maxIdle {
+		if entry.client != nil && time.Since(entry.lastUsed) > p.idleLimit() {
 			clients = append(clients, entry.client)
 			entry.client = nil
 		}
@@ -620,4 +626,18 @@ func WithQuotaConsumer(ctx context.Context, consumer string) context.Context {
 func quotaConsumer(ctx context.Context) string {
 	consumer, _ := ctx.Value(quotaConsumerKey{}).(string)
 	return consumer
+}
+
+// SetRuntimeConfig is wired before serving requests.
+func (s *Pool) SetRuntimeConfig(r *config.Runtime) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runtimeConfig = r
+}
+
+func (p *Pool) idleLimit() time.Duration {
+	if p.runtimeConfig != nil {
+		return time.Duration(p.runtimeConfig.Current().SSHMaxIdle) * time.Second
+	}
+	return p.maxIdle
 }

@@ -12,7 +12,7 @@ const (
 	UsageDeleteActionSuffix        = ".delete"
 )
 
-var usageSensitiveActions = [...]string{"credential.reveal", "api_key.rotate", "api_key.permissions.update", "api_key.reveal", "service.credentials", "server.host_key.trust"}
+var usageSensitiveActions = [...]string{"settings.update", "credential.reveal", "api_key.rotate", "api_key.permissions.update", "api_key.reveal", "service.credentials", "server.host_key.trust"}
 
 // UsagePolicy is shared by capture retries and database retention. Nonpositive
 // values select defaults, including RETENTION_DAYS=0; they never disable expiry.

@@ -65,10 +65,9 @@ VPSMANAGER_MASTER_KEY=<使用 openssl rand -hex 32 生成>
 JWT_SECRET=<使用 openssl rand -hex 32 生成>
 ```
 
-需要监控时，将 `.env` 中示例 `AGENT_HUB_URL` 替换为受管节点能够访问的真实 Hub
-HTTPS 地址。不使用监控的新部署应设置 `AGENT_HUB_URL=`，不要保留示例域名：
-该值非空就会启用 Agent 自动安装尝试。Agent 安装需要运行中的 systemd、`flock`
-和 SFTP；非 root SSH 账号还需启用用户 lingering。
+首次登录后，进入 **系统设置 → 监控**，填写受管节点能够访问的 Hub HTTPS 地址。
+也可以提前在部署环境中设置 `AGENT_HUB_URL`。留空时跳过自动安装 Agent。
+Agent 安装需要正在运行的 systemd、`flock` 和 SFTP；非 root SSH 账号还需要启用 user lingering。
 
 ### 3. 启动（源码构建）
 
@@ -362,15 +361,31 @@ curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin
 
 ## 配置项
 
-这些变量需配置到 Hub 进程或容器的环境中。使用 Compose 时，未列出的变量须补到 Hub 的 `environment` 中；仅写入 `.env` 不会自动传入容器。
+管理员可在 **系统设置**（`/settings`）修改 19 项参数，部署环境变量仍然支持。
+优先级为 **后台保存值 > 部署环境变量 > 程序默认值**；页面显示配置来源、部署回退值和待重启状态。
+“恢复部署配置”会删除后台覆盖值，保存空地址或 `false` 则会保留明确的覆盖。
+
+完整的参数清单、页面分组、取值范围、生效方式和部署专用项见
+[系统参数与配置位置](system-settings.zh-CN.md)。缩短日志保留期或启用指标实际删除需要二次确认。
+数据库连接数、日志写入并发和活动跟踪上限保存后需要重启 Hub；其余参数在新操作、清理周期或 Agent 同步时生效。
+系统设置仅允许管理员登录会话访问，API Key（包括通配权限）不能修改。
+
+修改 `.env` 后执行 `docker compose up -d hub` 重建容器；仅 `restart` 不会载入修改后的环境变量。
+重启不会清除已保存的后台覆盖值。自定义 Compose 中未映射的变量需补到 Hub 的 `environment`；
+仓库 Compose 和下方生产示例已映射全部 19 项系统设置。
 
 | 变量 | 默认值 | 描述 |
 |------|--------|------|
-| `DB_PASSWORD` | *(必填)* | PostgreSQL 数据库密码 |
+| `DB_PASSWORD` | *(必填)* | Compose PostgreSQL 密码，仅部署配置 |
+| `DATABASE_URL` | *(必填)* | Hub 数据库连接串，仓库 Compose 自动生成，仅部署配置 |
 | `VPSMANAGER_MASTER_KEY` | *(必填)* | 由密码学安全随机源生成的十六进制主密钥（至少 32 字节）；升级时须保持不变 |
 | `JWT_SECRET` | *(必填)* | JWT 签名密钥 |
 | `PORT` | `8080` | HTTP 服务端口 |
 | `LOG_LEVEL` | `info` | 日志级别：`debug`、`info`、`warn`、`error` |
+| `LOG_FORMAT` | `json` | 应用日志格式：`json` 或 `text` |
+| `LOGIN_RATE_LIMIT` | `10` | 每个客户端 IP 每分钟允许的登录请求数 |
+| `TRUST_PROXY` | `false` | 信任紧邻反向代理写入的 X-Forwarded-For，仅部署配置 |
+| `STATIC_DIR` | 未设置（镜像为 `/app/static`） | 前端静态文件目录，仅部署配置 |
 | `DB_MAX_OPEN_CONNECTIONS` | `32` | 数据库最大连接数，最小为 `12` |
 | `USAGE_LOG_WRITE_CONCURRENCY` | `4` | 使用日志写入并发上限 |
 | `USAGE_LOG_ACTIVE_LIMIT` | `4096` | 内存中同时跟踪的活动操作数量上限 |
@@ -380,12 +395,13 @@ curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin
 | `MONITOR_INTERVAL` | `5` | 常驻指标采样间隔，支持 1–60 秒 |
 | `AGENT_HUB_URL` | 未设置 | 节点能够访问的 Hub HTTPS 地址，自动部署常驻监控前必须配置 |
 | `AGENT_ALLOW_HTTP` | `false` | 显式允许可信测试或内网使用 HTTP |
-| `MONITOR_TOLERATED_ROUNDS` | `1` | 旧 SSH 采集设置；常驻模式使用 45 秒联系超时 |
-| `MONITOR_ALLOWED_LATENCY_SECONDS` | `0` | 旧 SSH 采集设置；常驻数据新鲜度为三个采样周期，最少 15 秒 |
+| `MONITOR_TOLERATED_ROUNDS` | `1` | 已弃用的兼容设置；常驻模式使用 45 秒联系超时 |
+| `MONITOR_ALLOWED_LATENCY_SECONDS` | `0` | 已弃用的兼容设置；常驻数据新鲜度为三个采样周期，最少 15 秒 |
 | `AGENT_ARTIFACTS_DIR` | `/usr/local/bin` | 包含 `agents-manifest.json` 及 Linux amd64/arm64 双架构 Agent 的目录，启动时校验 |
 | `METRICS_RETENTION_ENABLED` | `false` | 启用超过 35 天的合格原始指标及聚合指标清理，实际删除还须关闭演练模式 |
 | `METRICS_RETENTION_DRY_RUN` | `true` | 仅报告清理计划；只有 `METRICS_RETENTION_ENABLED=true` 且本值为 `false` 才会删除 |
 | `SSH_TIMEOUT` | `10` | SSH 连接超时（秒） |
+| `SSH_MAX_IDLE` | `300` | SSH 空闲连接回收时间（秒） |
 | `EXEC_TIMEOUT` | `30` | 默认命令总预算（秒），包含 SSH 建连和执行；请求可覆盖，但不超过配置上限（默认 300 秒） |
 | `EXEC_TIMEOUT_MAX` | `300` | 命令总预算上限（秒），须不小于 `EXEC_TIMEOUT` 且不超过 `300` |
 | `EXEC_OUTPUT_LIMIT` | `8388608` | 保留的 stdout 与 stderr 合计字节上限，须为正数且不超过 8 MiB |
@@ -395,7 +411,7 @@ curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin
 
 ### 监控 Agent 升级
 
-常驻监控不再按次调度 SSH 采集。安装和修复使用独立 SSH lease 与 3 分钟预算，全局最多 4 个并发部署，每个节点最多一个任务，失败至少等待一分钟后重试。未设置 `AGENT_HUB_URL` 时显示需要配置，已有指标历史保留。
+常驻监控不再按次调度 SSH 采集。安装和修复使用独立 SSH lease 与 3 分钟预算，全局最多 4 个并发部署，每个节点最多一个任务，失败至少等待一分钟后重试。未设置 `AGENT_HUB_URL` 时显示需要配置并提供系统设置入口，已有指标历史保留。保存地址或间隔后，Hub 会安排 Agent 配置同步；保存成功不代表全部节点已经采用新配置，需查看节点状态。
 
 程序、配置和服务文件上传后先进行 SHA256 校验，再激活。兼容旧 Agent 在新版本准备期间继续上报。新服务重启后必须通过与 Hub 的认证联系检查；激活失败时恢复已有的程序、配置和服务文件。
 
@@ -467,6 +483,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置 JWT_SECRET}
       PORT: 8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       DB_MAX_OPEN_CONNECTIONS: ${DB_MAX_OPEN_CONNECTIONS:-32}
       USAGE_LOG_WRITE_CONCURRENCY: ${USAGE_LOG_WRITE_CONCURRENCY:-4}
       USAGE_LOG_ACTIVE_LIMIT: ${USAGE_LOG_ACTIVE_LIMIT:-4096}
@@ -477,7 +495,14 @@ services:
       AGENT_ALLOW_HTTP: ${AGENT_ALLOW_HTTP:-false}
       MONITOR_INTERVAL: ${MONITOR_INTERVAL:-5}
       SSH_TIMEOUT: ${SSH_TIMEOUT:-10}
+      SSH_MAX_IDLE: ${SSH_MAX_IDLE:-300}
       EXEC_TIMEOUT: ${EXEC_TIMEOUT:-30}
+      EXEC_TIMEOUT_MAX: ${EXEC_TIMEOUT_MAX:-300}
+      EXEC_OUTPUT_LIMIT: ${EXEC_OUTPUT_LIMIT:-8388608}
+      EXEC_OUTPUT_STREAM_LIMIT: ${EXEC_OUTPUT_STREAM_LIMIT:-4194304}
+      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-10}
+      METRICS_RETENTION_ENABLED: ${METRICS_RETENTION_ENABLED:-false}
+      METRICS_RETENTION_DRY_RUN: ${METRICS_RETENTION_DRY_RUN:-true}
       EXEC_TIMEOUT_MAX: ${EXEC_TIMEOUT_MAX:-300}
       EXEC_OUTPUT_LIMIT: ${EXEC_OUTPUT_LIMIT:-8388608}
       EXEC_OUTPUT_STREAM_LIMIT: ${EXEC_OUTPUT_STREAM_LIMIT:-4194304}
@@ -492,14 +517,13 @@ volumes:
   pgdata:
 ```
 
-部署前，复制 `.env.example` 为 `.env` 并填写下列密钥。需要监控时，将 `AGENT_HUB_URL`
-设为节点可访问的真实 Hub HTTPS 地址；不需要监控时留空（`AGENT_HUB_URL=`）。
-不要保留示例域名，否则会启用 Agent 自动安装尝试。
+部署前，复制 `.env.example` 为 `.env` 并填写下列密钥。监控地址可以首次登录后在
+**系统设置 → 监控** 填写，也可提前配置 `AGENT_HUB_URL`。不需要监控时留空。
 
 ```bash
 cp .env.example .env
 # 编辑 .env：填写 DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET；
-# 将 AGENT_HUB_URL 设为真实 Hub 地址，或留空。
+# AGENT_HUB_URL 可提前填写，也可登录后在系统设置配置。
 docker compose -f docker-compose.prod.yml up -d
 ```
 

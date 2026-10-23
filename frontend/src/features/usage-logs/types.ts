@@ -1,7 +1,8 @@
 export const outcomes = ["running", "succeeded", "failed", "rejected", "cancelled", "unknown"] as const;
 export const authTypes = ["jwt", "api_key", "unauthenticated", "legacy_unknown"] as const;
-export const resourceTypes = ["server", "credential", "service", "api_key"] as const;
+export const resourceTypes = ["settings", "server", "credential", "service", "api_key"] as const;
 export const actions = [
+  "settings.update",
   "server.sftp.list",
   "server.sftp.stat",
   "server.sftp.upload",

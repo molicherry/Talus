@@ -5,6 +5,7 @@ import { LoginPage } from "../features/auth/components/login-form";
 import { SetupPage } from "../features/auth/components/setup-page";
 import { useAuth } from "../hooks/use-auth";
 
+const SettingsPage = lazy(() => import("../features/settings/settings-page").then(m => ({ default: m.SettingsPage })));
 const UsageLogsPage = lazy(() => import("../features/usage-logs/components/usage-logs-page").then(m => ({ default: m.UsageLogsPage })));
 const MainLayout = lazy(() => import("../components/layout/main-layout").then(m => ({ default: m.MainLayout })));
 const DashboardPage = lazy(() => import("../features/dashboard/components/dashboard-page").then(m => ({ default: m.DashboardPage })));
@@ -87,6 +88,7 @@ export function AppRouter() {
           <Route path="/services/new" element={<ServiceCreatePage />} />
           <Route path="/services/:id/edit" element={<ServiceEditPage />} />
           <Route path="/api-keys" element={<ApiKeysPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/usage-logs" element={<UsageLogsPage />} />
         </Route>
       </Route>

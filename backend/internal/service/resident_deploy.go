@@ -43,8 +43,21 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	var lastCleanup time.Time
+	lastSettings := m.settings()
 	for ctx.Err() == nil {
-		if m.hubURL != "" {
+		desiredSettings := m.settings()
+		if desiredSettings != lastSettings {
+			// Finish cancellation/rollback before replacing a job for that node.
+			// Each existing job keeps the snapshot with which it was scheduled.
+			m.installJobsMu.Lock()
+			m.installEpoch++
+			for _, j := range m.installJobs {
+				j.cancel()
+			}
+			m.installJobsMu.Unlock()
+			lastSettings = desiredSettings
+		}
+		if desiredSettings.URL != "" {
 			m.installJobsMu.Lock()
 			epoch := m.installEpoch
 			m.installJobsMu.Unlock()
@@ -103,7 +116,7 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 					}
 					manifestBytes, _ := json.Marshal(manifest)
 					desired := repository.TokenHash(string(manifestBytes))
-					config := repository.TokenHash(fmt.Sprintf("%s:%s:%d:%t", m.hubURL, n.TokenHash, m.interval, m.allowHTTP))
+					config := desiredSettings.hash(n.TokenHash)
 					if !residentInstallNeeded(n, desired, config, lastContact, m.now()) {
 						continue
 					}
@@ -114,6 +127,7 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 					_, busy := m.installJobs[s.ID]
 					if !busy && m.removing[s.ID] == nil && epoch == m.installEpoch && len(m.installJobs) < 4 {
 						jobCtx, stop := context.WithTimeout(ctx, 3*time.Minute)
+						jobCtx = context.WithValue(jobCtx, residentSettingsKey{}, desiredSettings)
 						done := make(chan struct{})
 						m.installJobs[s.ID] = residentJob{cancel: stop, hash: n.TokenHash, done: done}
 						wg.Add(1)
@@ -277,7 +291,8 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 	if err != nil {
 		return err
 	}
-	cfg := agentwire.Config{HubURL: m.hubURL, Token: token, StateDir: base + "/outbox", IntervalSeconds: m.interval, AllowHTTP: m.allowHTTP}
+	desiredSettings := m.installSettings(ctx)
+	cfg := agentwire.Config{HubURL: desiredSettings.URL, Token: token, StateDir: base + "/outbox", IntervalSeconds: desiredSettings.Interval, AllowHTTP: desiredSettings.AllowHTTP}
 	if err = cfg.Validate(); err != nil {
 		return err
 	}

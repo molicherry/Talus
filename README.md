@@ -64,11 +64,11 @@ VPSMANAGER_MASTER_KEY=<openssl rand -hex 32>
 JWT_SECRET=<openssl rand -hex 32>
 ```
 
-For monitoring, replace the example `AGENT_HUB_URL` in `.env` with the Hub's real
-HTTPS address reachable from the managed nodes. For a deployment without monitoring,
-set `AGENT_HUB_URL=`. Do not keep the example domain: a non-empty value enables
-automatic agent installation attempts. Agent installation needs running
-systemd, `flock`, and SFTP; non-root SSH accounts also need user lingering.
+After first login, open **System settings → Monitoring** and enter the Hub HTTPS
+address reachable from the managed nodes. You may also set `AGENT_HUB_URL` in
+`.env` before deployment. Leaving it empty skips automatic agent installation.
+Agent installation needs running systemd, `flock`, and SFTP; non-root SSH accounts
+also need user lingering.
 
 ### 3. Start (build from source)
 
@@ -182,6 +182,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       PORT: 8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       DB_MAX_OPEN_CONNECTIONS: ${DB_MAX_OPEN_CONNECTIONS:-32}
       USAGE_LOG_WRITE_CONCURRENCY: ${USAGE_LOG_WRITE_CONCURRENCY:-4}
       USAGE_LOG_ACTIVE_LIMIT: ${USAGE_LOG_ACTIVE_LIMIT:-4096}
@@ -192,7 +194,14 @@ services:
       AGENT_ALLOW_HTTP: ${AGENT_ALLOW_HTTP:-false}
       MONITOR_INTERVAL: ${MONITOR_INTERVAL:-5}
       SSH_TIMEOUT: ${SSH_TIMEOUT:-10}
+      SSH_MAX_IDLE: ${SSH_MAX_IDLE:-300}
       EXEC_TIMEOUT: ${EXEC_TIMEOUT:-30}
+      EXEC_TIMEOUT_MAX: ${EXEC_TIMEOUT_MAX:-300}
+      EXEC_OUTPUT_LIMIT: ${EXEC_OUTPUT_LIMIT:-8388608}
+      EXEC_OUTPUT_STREAM_LIMIT: ${EXEC_OUTPUT_STREAM_LIMIT:-4194304}
+      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-10}
+      METRICS_RETENTION_ENABLED: ${METRICS_RETENTION_ENABLED:-false}
+      METRICS_RETENTION_DRY_RUN: ${METRICS_RETENTION_DRY_RUN:-true}
       EXEC_TIMEOUT_MAX: ${EXEC_TIMEOUT_MAX:-300}
       EXEC_OUTPUT_LIMIT: ${EXEC_OUTPUT_LIMIT:-8388608}
       EXEC_OUTPUT_STREAM_LIMIT: ${EXEC_OUTPUT_STREAM_LIMIT:-4194304}
@@ -208,14 +217,14 @@ volumes:
 ```
 
 Before deploying, copy `.env.example` to `.env` and configure the secrets below.
-Set `AGENT_HUB_URL` to the node-reachable Hub HTTPS address for monitoring, or
-leave it empty (`AGENT_HUB_URL=`) if monitoring is not needed. Do not retain the
-example domain, which enables automatic agent installation attempts.
+For monitoring, enter the node-reachable Hub HTTPS address in **System settings →
+Monitoring** after login, or set `AGENT_HUB_URL` in `.env` before deployment.
+Leave it empty if monitoring is not needed.
 
 ```bash
 cp .env.example .env
 # Edit .env: set DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET;
-# set AGENT_HUB_URL to the real Hub URL or leave it empty.
+# optionally set AGENT_HUB_URL now, or configure it in System settings after login.
 docker compose -f docker-compose.prod.yml up -d
 ```
 
@@ -515,17 +524,48 @@ curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin
 
 ## Configuration
 
-Configure these values in the Hub process or container environment. When using
-Compose, add any variable not already listed to the Hub's `environment` section;
-setting it in `.env` alone does not pass it into the container.
+Administrators can edit 19 parameters at **System settings** (`/settings`).
+Deployment environment variables remain supported. Priority is **saved database
+override → deployment environment → application default**. Each field displays
+its source and deployment fallback. **Restore deployment configuration** removes
+the override; an explicitly saved empty URL or `false` remains an override.
+Changing `.env` requires recreating the Hub container (`docker compose up -d hub`);
+it does not replace saved overrides. `docker compose restart hub` applies saved
+capacity changes but does not reload a changed `.env`.
+
+| Settings area | Parameters | Takes effect |
+| --- | --- | --- |
+| Monitoring | `AGENT_HUB_URL`, `MONITOR_INTERVAL`, advanced `AGENT_ALLOW_HTTP` | Agent configuration sync; inspect each node's status |
+| SSH | `SSH_TIMEOUT`, advanced `SSH_MAX_IDLE` | New connections / next idle eviction |
+| Command execution | `EXEC_TIMEOUT`, advanced `EXEC_TIMEOUT_MAX`, `EXEC_OUTPUT_LIMIT`, `EXEC_OUTPUT_STREAM_LIMIT` | New operations; active leases keep their snapshot |
+| Data retention | `USAGE_LOG_RETENTION_DAYS`, `USAGE_LOG_SENSITIVE_RETENTION_DAYS`, advanced `METRICS_RETENTION_ENABLED`, `METRICS_RETENTION_DRY_RUN` | Next cleanup cycle; destructive changes require confirmation |
+| Login protection | `LOGIN_RATE_LIMIT` | Next login attempt; existing window counts remain |
+| Application logs | `LOG_LEVEL`, advanced `LOG_FORMAT` | Live |
+| Capacity (advanced) | `DB_MAX_OPEN_CONNECTIONS`, `USAGE_LOG_WRITE_CONCURRENCY`, `USAGE_LOG_ACTIVE_LIMIT` | Hub restart; the UI shows current and saved values |
+
+Only administrator JWT sessions may read or write settings; API keys are denied,
+including wildcard keys. Saves use revision checks and commit the audit record
+with the configuration in one transaction. The migration switch is read-only in
+the UI. Infrastructure, secrets and migration assertions remain deployment-only.
+The complete Chinese parameter/location reference is in
+[系统参数与配置位置](docs/system-settings.zh-CN.md).
+
+For custom containers, pass environment variables explicitly; `.env` alone does
+not inject variables absent from Compose's `environment` section. The bundled
+Compose and production examples pass all 19 settings.
 
 | Variable | Default | Description |
 | ---------- | --------- | ------------- |
-| `DB_PASSWORD` | *(required)* | PostgreSQL password |
+| `DB_PASSWORD` | *(required)* | Compose PostgreSQL password; deployment only |
+| `DATABASE_URL` | *(required)* | Hub database connection string; generated by bundled Compose; deployment only |
 | `VPSMANAGER_MASTER_KEY` | *(required)* | Cryptographically random hex master key (32+ bytes); preserve across upgrades |
 | `JWT_SECRET` | *(required)* | JWT signing secret |
 | `PORT` | `8080` | HTTP server port |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `LOG_FORMAT` | `json` | Application log format: `json` or `text` |
+| `LOGIN_RATE_LIMIT` | `10` | Login attempts per client IP per minute |
+| `TRUST_PROXY` | `false` | Trust the immediate proxy’s X-Forwarded-For value; deployment only |
+| `STATIC_DIR` | unset (image: `/app/static`) | Frontend files to serve; deployment only |
 | `DB_MAX_OPEN_CONNECTIONS` | `32` | Maximum open database connections, with a minimum of `12` |
 | `USAGE_LOG_WRITE_CONCURRENCY` | `4` | Usage log write concurrency limit |
 | `USAGE_LOG_ACTIVE_LIMIT` | `4096` | Maximum number of active operations tracked in memory |
@@ -535,12 +575,13 @@ setting it in `.env` alone does not pass it into the container.
 | `MONITOR_INTERVAL` | `5` | Resident metrics collection interval (1–60 seconds) |
 | `AGENT_HUB_URL` | unset | Hub HTTPS address reachable from nodes; required for automatic resident monitoring |
 | `AGENT_ALLOW_HTTP` | `false` | Explicit opt-in to HTTP for trusted test/private networks |
-| `MONITOR_TOLERATED_ROUNDS` | `1` | Legacy SSH monitoring setting; resident contact uses a 45-second timeout |
-| `MONITOR_ALLOWED_LATENCY_SECONDS` | `0` | Legacy SSH monitoring setting; resident data freshness uses three sampling intervals (minimum 15 seconds) |
+| `MONITOR_TOLERATED_ROUNDS` | `1` | Deprecated compatibility setting; resident contact uses a 45-second timeout |
+| `MONITOR_ALLOWED_LATENCY_SECONDS` | `0` | Deprecated compatibility setting; resident data freshness uses three sampling intervals (minimum 15 seconds) |
 | `AGENT_ARTIFACTS_DIR` | `/usr/local/bin` | Directory containing `agents-manifest.json` and both Linux amd64/arm64 agent binaries; validated at startup |
 | `METRICS_RETENTION_ENABLED` | `false` | Enable cleanup of eligible raw and rollup metrics older than 35 days; deletion also requires dry-run mode to be disabled |
 | `METRICS_RETENTION_DRY_RUN` | `true` | Report the cleanup plan without deleting; deletion requires `METRICS_RETENTION_ENABLED=true` and this value `false` |
 | `SSH_TIMEOUT` | `10` | SSH connection timeout (seconds) |
+| `SSH_MAX_IDLE` | `300` | Idle SSH connection lifetime (seconds) |
 | `EXEC_TIMEOUT` | `30` | Default command budget (seconds), including SSH setup and execution; requests may override it up to the configured cap (300s by default) |
 | `EXEC_TIMEOUT_MAX` | `300` | Maximum command budget (seconds); must be at least `EXEC_TIMEOUT` and at most `300` |
 | `EXEC_OUTPUT_LIMIT` | `8388608` | Retained stdout + stderr limit (bytes); positive and at most 8 MiB |
@@ -550,7 +591,7 @@ Resident contact expires after 45 seconds; data becomes stale after three sampli
 
 ### Monitoring agent upgrades
 
-Resident monitoring does not schedule per-sample SSH commands. Installation/repair uses a separate three-minute budget, at most four concurrent deployments, and one job per server. Failed deployments retry after at least one minute. Missing `AGENT_HUB_URL` is shown as setup required. Existing metric history is retained.
+Resident monitoring does not schedule per-sample SSH commands. Installation/repair uses a separate three-minute budget, at most four concurrent deployments, and one job per server. Failed deployments retry after at least one minute. Missing `AGENT_HUB_URL` is shown as setup required, with a link to System settings. Saving a new URL or interval queues node configuration updates; saving alone does not mean every node has adopted them. Existing metric history is retained.
 
 Artifacts and configuration are verified before activation. Compatible resident agents keep reporting while an update is staged. The new service must contact the Hub after restart; failed activation restores the previous executable, configuration and service unit where available.
 

@@ -45,7 +45,7 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-`npm run test:ui` builds once and runs both browser suites. CI runs
+`npm run test:ui` builds once and runs all browser suites. CI runs
 `npm run test:ui:built` after its production build and Chromium installation.
 
 The suite covers draft-key collisions and visibility state, delayed and failed
@@ -89,3 +89,13 @@ keyboard retry, late-search cancellation, account-switch cleanup and a pending
 label lookup superseded by a same-ID selection.
 
 `files.browser.mjs` covers SFTP path handling, CRUD confirmation, binary transfer, cancellation, mobile layout, upload recovery after reload, discard, text-edit conflicts, recursive folder upload/ZIP download, and Range/If-Range download recovery. It is included in `test:ui:built`. Backend acceptance uses real local SSH/SFTP peers in `internal/testutil`, with tests for route/host-key validation, exact bytes, timeouts, partial writes, permissions, signed recovery tokens and archive bounds.
+
+## System settings
+
+`npm run test:settings-ui` builds and runs `settings.browser.mjs`. It checks
+explicit empty/false overrides, deployment reset, restart indicators,
+retention confirmation, fields frozen during save, version conflicts,
+non-admin access, and Chinese mobile layout. The suite uses mock APIs;
+`backend/cmd/server/settings_startup_test.go` separately starts the real Hub
+against an isolated database to verify authentication, audit, persistence,
+restart and reset. Settings cases are indexed as `TC-10-*` in the M4 gate.

@@ -40,7 +40,7 @@
       "clock": "节点时钟"
     },
     "reasons": {
-      "hub_url_required": "请设置 AGENT_HUB_URL，填写节点能够访问的 Hub HTTPS 地址。",
+      "hub_url_required": "请在系统设置中填写节点能够访问的 Hub HTTPS 地址。",
       "deployment_failed": "Agent 部署失败。请检查 SSH 连接、凭据和服务管理权限；系统会自动重试。",
       "ssh_host_key_unverified": "节点主机密钥尚未信任。请先核对指纹并确认信任后再部署。",
       "ssh_host_key_mismatch": "节点主机密钥已变化。请核对新指纹后再重试。",
@@ -324,7 +324,9 @@
     "sftp_not_text": "此文件不是 UTF-8 文本",
     "sftp_not_directory": "此操作仅支持目录",
     "sftp_invalid_range": "下载的字节范围无效",
-    "api_key_revision_conflict": "权限已被其他管理员修改。草稿已保留，请重新加载最新配置后再保存。"
+    "api_key_revision_conflict": "权限已被其他管理员修改。草稿已保留，请重新加载最新配置后再保存。",
+    "settings_invalid": "配置无效，请检查地址、数值范围及相互约束。",
+    "settings_retention_confirmation": "需要确认数据保留策略变更。"
   },
   "exec": {
     "execute": "执行",
@@ -335,7 +337,9 @@
     "exitCode": "退出码：",
     "duration": "耗时：",
     "noOutput": "（无输出）",
-    "server": "服务器："
+    "server": "服务器：",
+    "timeoutLabel": "本次超时（秒，可选）",
+    "timeoutPlaceholder": "使用系统默认值"
   },
   "fields": {
     "auth_type": "认证方式",
@@ -448,7 +452,8 @@
     "credentials": "凭证管理",
     "services": "服务",
     "apiKeys": "API 密钥",
-    "usageLogs": "使用日志"
+    "usageLogs": "使用日志",
+    "settings": "系统设置"
   },
   "notFound": {
     "title": "404",
@@ -861,13 +866,15 @@
       "server_sftp_upload_complete": "完成上传",
       "server_sftp_upload_cancel": "放弃未完成上传",
       "api_key_permissions_update": "修改 API Key 权限",
-      "api_key_rotate": "更换 API Key"
+      "api_key_rotate": "更换 API Key",
+      "settings_update": "修改系统设置"
     },
     "resourceTypes": {
       "server": "服务器",
       "credential": "凭据",
       "service": "服务",
-      "api_key": "API Key"
+      "api_key": "API Key",
+      "settings": "系统设置"
     },
     "identity": {
       "labels": {
@@ -964,5 +971,141 @@
     "conflict": "远程文件已变化，本地草稿已保留。请重新加载远程版本后再保存。",
     "folderPartial": "部分文件可能已上传成功。目录上传不会自动覆盖已有文件。",
     "forgottenUpload": "恢复信息已清除。原服务器上的临时文件可能仍需手动清理。"
+  },
+  "settings": {
+    "description": "已保存的后台设置优先于部署环境变量；未覆盖的项目沿用部署配置或程序默认值。",
+    "denied": "只有管理员可以查看和修改系统设置。",
+    "invalidField": "请检查“{{field}}”的值和允许范围。",
+    "invalidLimits": "默认命令超时不能超过上限，单流输出上限不能超过总输出上限。",
+    "conflict": "设置已被其他操作更新。请重新加载后再修改，当前输入尚未保存。",
+    "enabled": "开启",
+    "disabled": "关闭",
+    "empty": "未设置",
+    "unsaved": "有未保存的修改",
+    "upToDate": "已保存",
+    "fallback": "部署／默认值：{{value}}",
+    "restore": "恢复部署配置",
+    "useOrigin": "填入当前访问地址",
+    "pendingRestart": "等待重启 Hub，当前实际值：{{value}}",
+    "saved": "设置已保存。监控配置会同步到节点，请查看下方状态。",
+    "savedRestart": "设置已保存，其中容量参数需重启 Hub 后生效。",
+    "advanced": "高级选项",
+    "save": "保存设置",
+    "saving": "正在保存…",
+    "reload": "重新加载／放弃修改",
+    "nodeStatus": "节点监控状态",
+    "nodeHelp": "每 5 秒刷新。配置变更可能需要安装或重启 Agent；失败原因会显示在对应节点下。",
+    "nodeError": "暂时无法刷新节点状态，显示的内容可能已过期。",
+    "noNodes": "尚未添加服务器。",
+    "migrationTitle": "历史日志迁移",
+    "migrationHelp": "迁移沿用部署参数 USAGE_LOG_LEGACY_WRITERS_DRAINED；仅在旧 Hub 及其事务全部停止后启用。全新安装无需处理。",
+    "retentionTitle": "确认数据保留策略变更",
+    "retentionWarning": "此修改会缩短日志保留时间或启用指标实际删除。后续清理可能永久删除符合条件的历史数据，增加保留天数不能恢复已删除数据。",
+    "configure": "去配置监控",
+    "fields": {
+      "AGENT_HUB_URL": {
+        "label": "Hub 回连地址",
+        "help": "填写受管节点能够访问的完整 HTTPS 地址。可留空稍后配置；当前浏览器地址不保证节点可达。"
+      },
+      "MONITOR_INTERVAL": {
+        "label": "采样间隔（秒）",
+        "help": "范围 1–60 秒，保存后同步到节点 Agent。"
+      },
+      "AGENT_ALLOW_HTTP": {
+        "label": "允许 HTTP",
+        "help": "默认关闭。仅用于明确允许明文连接的测试或可信内网。"
+      },
+      "SSH_TIMEOUT": {
+        "label": "SSH 建连超时（秒）",
+        "help": "新连接使用此超时，正在执行的操作继续使用原配置。"
+      },
+      "SSH_MAX_IDLE": {
+        "label": "SSH 空闲回收时间（秒）",
+        "help": "空闲连接超过此时间后在后续回收任务中关闭。"
+      },
+      "EXEC_TIMEOUT": {
+        "label": "默认命令超时（秒）",
+        "help": "包含建连和命令执行。本次执行可以覆盖，但不能超过上限。"
+      },
+      "EXEC_TIMEOUT_MAX": {
+        "label": "命令超时上限（秒）",
+        "help": "不小于默认超时，最大 300 秒。"
+      },
+      "EXEC_OUTPUT_LIMIT": {
+        "label": "总输出保留上限（字节）",
+        "help": "stdout 与 stderr 合计，最大 8388608 字节（8 MiB）。"
+      },
+      "EXEC_OUTPUT_STREAM_LIMIT": {
+        "label": "单流输出保留上限（字节）",
+        "help": "不大于总输出上限，最大 4194304 字节（4 MiB）。"
+      },
+      "USAGE_LOG_RETENTION_DAYS": {
+        "label": "普通使用日志保留天数",
+        "help": "须为正整数。缩短时间可能在后续清理中删除旧日志；0 不表示永久保留。"
+      },
+      "USAGE_LOG_SENSITIVE_RETENTION_DAYS": {
+        "label": "敏感操作日志保留天数",
+        "help": "适用于敏感操作和删除操作。缩短时间需要确认。"
+      },
+      "METRICS_RETENTION_ENABLED": {
+        "label": "启用过期指标清理",
+        "help": "处理超过 35 天且满足清理条件的数据；实际删除还需关闭演练模式。"
+      },
+      "METRICS_RETENTION_DRY_RUN": {
+        "label": "指标清理演练模式",
+        "help": "开启时只报告清理计划。关闭并启用清理后才会实际删除。"
+      },
+      "LOGIN_RATE_LIMIT": {
+        "label": "每个 IP 每分钟认证请求上限",
+        "help": "用于登录和初始化查询接口。须为正整数；0 不能用于关闭限流。"
+      },
+      "LOG_LEVEL": {
+        "label": "运行日志级别",
+        "help": "控制 Hub 输出的运行日志详细程度。"
+      },
+      "LOG_FORMAT": {
+        "label": "运行日志格式",
+        "help": "JSON 适合日志采集；text 适合直接阅读。"
+      },
+      "DB_MAX_OPEN_CONNECTIONS": {
+        "label": "数据库最大连接数",
+        "help": "单个 Hub 的连接池上限，默认 32，最小 12。保存后需重启 Hub。"
+      },
+      "USAGE_LOG_WRITE_CONCURRENCY": {
+        "label": "使用日志写入并发",
+        "help": "实际并发受数据库连接预算限制。保存后需重启 Hub。"
+      },
+      "USAGE_LOG_ACTIVE_LIMIT": {
+        "label": "活动操作跟踪上限",
+        "help": "内存中同时跟踪的操作数量上限。保存后需重启 Hub。"
+      }
+    },
+    "groups": {
+      "monitoring": "监控",
+      "ssh": "SSH 连接",
+      "execution": "命令执行",
+      "retention": "数据保留",
+      "security": "登录安全",
+      "logging": "运行日志",
+      "capacity": "高级 · 容量"
+    },
+    "source": {
+      "default": "程序默认",
+      "environment": "部署配置",
+      "database": "后台设置"
+    },
+    "apply": {
+      "agent": "保存后同步 Agent",
+      "next_operation": "后续操作生效",
+      "maintenance": "后续清理生效",
+      "live": "保存后生效",
+      "restart": "重启 Hub 生效"
+    },
+    "migration": {
+      "waiting": "未启用历史回填",
+      "pending": "已启用，尚未完成",
+      "completed": "历史回填已完成",
+      "unavailable": "暂时无法获取迁移状态"
+    }
   }
 }

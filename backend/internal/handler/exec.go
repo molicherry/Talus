@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/config"
 	"github.com/vpsmanager/backend/internal/server"
 	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/service"
@@ -28,9 +29,10 @@ type ExecOptions struct {
 
 // ExecHandler exposes the command execution endpoint.
 type ExecHandler struct {
-	sshSvc      *service.SSHService
-	defaultSecs int
-	maxSecs     int
+	runtimeConfig *config.Runtime
+	sshSvc        *service.SSHService
+	defaultSecs   int
+	maxSecs       int
 }
 
 // NewExecHandler creates an ExecHandler with the given SSH service. Without
@@ -79,12 +81,17 @@ func (h *ExecHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	defaultSecs, maxSecs := h.defaultSecs, h.maxSecs
+	if h.runtimeConfig != nil {
+		c := h.runtimeConfig.Current()
+		defaultSecs, maxSecs = c.ExecTimeout, c.ExecTimeoutMax
+	}
 	timeout := req.Timeout
 	if timeout <= 0 {
-		timeout = h.defaultSecs
+		timeout = defaultSecs
 	}
-	if timeout > h.maxSecs {
-		timeout = h.maxSecs
+	if timeout > maxSecs {
+		timeout = maxSecs
 	}
 	op.SetMetadata("timeout_seconds", timeout)
 	op.Begin()
@@ -115,3 +122,6 @@ func (h *ExecHandler) Execute(w http.ResponseWriter, r *http.Request) {
 
 	server.WriteJSON(w, http.StatusOK, result)
 }
+
+// SetRuntimeConfig is wired before serving requests.
+func (s *ExecHandler) SetRuntimeConfig(r *config.Runtime) { s.runtimeConfig = r }

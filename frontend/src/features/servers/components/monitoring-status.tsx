@@ -1,9 +1,12 @@
+import { Link } from "react-router-dom";
+import { useAuth } from "../../../hooks/use-auth";
 import { useTranslation } from "../../../i18n";
 import { formatLocalTime } from "../../../lib/datetime";
 import type { MonitoringStatus } from "../../../types/models";
 
 export function AgentMonitoringStatus({ status, compact = false }: { status?: MonitoringStatus; compact?: boolean }) {
   const { t } = useTranslation();
+  const { isAdmin } = useAuth();
   if (!status) return null;
   const issue = status.deployment !== "ready" || status.collection === "partial" || status.collection === "failed" || status.data === "stale";
   return (
@@ -14,6 +17,7 @@ export function AgentMonitoringStatus({ status, compact = false }: { status?: Mo
         <span>{t("agentMonitor.dataLabel")}: {t(`agentMonitor.data.${status.data}`)}</span>
       </div>
       {status.deployment_error && <p className="mt-1">{t(`agentMonitor.reasons.${status.deployment_error}`, t("agentMonitor.reasons.deployment_failed"))}</p>}
+      {isAdmin && status.deployment_error === "hub_url_required" && <Link className="mt-2 inline-block text-link underline" to="/settings#monitoring">{t("settings.configure")}</Link>}
       {!compact && (
         <div className="mt-3 space-y-1 text-muted-foreground">
           <p>{t("agentMonitor.contact")}: {formatLocalTime(status.last_contact_at) || "—"}</p>

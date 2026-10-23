@@ -40,7 +40,7 @@
       "clock": "Node clock"
     },
     "reasons": {
-      "hub_url_required": "Configure AGENT_HUB_URL with the HTTPS address reachable from your servers.",
+      "hub_url_required": "Set the node-reachable Hub HTTPS address in system settings.",
       "deployment_failed": "Agent deployment failed. Check SSH connectivity, credentials and service permissions; deployment retries automatically.",
       "ssh_host_key_unverified": "The node host key is not trusted yet. Verify the fingerprint and trust it before deploying.",
       "ssh_host_key_mismatch": "The node host key changed. Verify the new fingerprint before retrying.",
@@ -324,7 +324,9 @@
     "sftp_not_text": "This file is not UTF-8 text",
     "sftp_not_directory": "This operation requires a directory",
     "sftp_invalid_range": "The requested download range is invalid",
-    "api_key_revision_conflict": "These permissions were changed elsewhere. Your draft is kept; reload the latest settings before saving."
+    "api_key_revision_conflict": "These permissions were changed elsewhere. Your draft is kept; reload the latest settings before saving.",
+    "settings_invalid": "Invalid settings. Check the URL, value ranges and related limits.",
+    "settings_retention_confirmation": "Confirmation is required for this retention policy change."
   },
   "exec": {
     "execute": "Execute",
@@ -335,7 +337,9 @@
     "exitCode": "Exit:",
     "duration": "Duration:",
     "noOutput": "(no output)",
-    "server": "Server:"
+    "server": "Server:",
+    "timeoutLabel": "Timeout for this command (seconds, optional)",
+    "timeoutPlaceholder": "Use system default"
   },
   "fields": {
     "auth_type": "auth type",
@@ -448,7 +452,8 @@
     "credentials": "Credentials",
     "services": "Services",
     "apiKeys": "API Keys",
-    "usageLogs": "Usage logs"
+    "usageLogs": "Usage logs",
+    "settings": "System settings"
   },
   "notFound": {
     "title": "404",
@@ -861,13 +866,15 @@
       "server_sftp_upload_complete": "Complete upload",
       "server_sftp_upload_cancel": "Discard partial upload",
       "api_key_permissions_update": "Update API key permissions",
-      "api_key_rotate": "Rotate API key"
+      "api_key_rotate": "Rotate API key",
+      "settings_update": "Update system settings"
     },
     "resourceTypes": {
       "server": "Server",
       "credential": "Credential",
       "service": "Service",
-      "api_key": "API key"
+      "api_key": "API key",
+      "settings": "System settings"
     },
     "identity": {
       "labels": {
@@ -964,5 +971,141 @@
     "conflict": "The remote file changed. Your draft is kept. Reload the remote version before saving again.",
     "folderPartial": "Some files may already have uploaded. Existing files are never replaced automatically.",
     "forgottenUpload": "Recovery information cleared. The old temporary file may still need removal from its original server."
+  },
+  "settings": {
+    "description": "Saved settings override deployment environment variables. Unset overrides inherit deployment values or application defaults.",
+    "denied": "Only administrators can view and change system settings.",
+    "invalidField": "Check the value and allowed range for {{field}}.",
+    "invalidLimits": "Default timeout must not exceed the maximum, and the per-stream limit must not exceed the combined limit.",
+    "conflict": "Settings changed elsewhere. Reload before editing again; your current input has not been saved.",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "empty": "Not set",
+    "unsaved": "Unsaved changes",
+    "upToDate": "Saved",
+    "fallback": "Deployment/default: {{value}}",
+    "restore": "Use deployment configuration",
+    "useOrigin": "Use current browser address",
+    "pendingRestart": "Hub restart required. Currently active: {{value}}",
+    "saved": "Settings saved. Monitoring configuration will synchronize to nodes; check their status below.",
+    "savedRestart": "Settings saved. Capacity changes require a Hub restart.",
+    "advanced": "Advanced options",
+    "save": "Save settings",
+    "saving": "Saving…",
+    "reload": "Reload / discard changes",
+    "nodeStatus": "Node monitoring status",
+    "nodeHelp": "Refreshes every 5 seconds. Configuration changes may install or restart agents; failures are shown for each node.",
+    "nodeError": "Node status could not be refreshed and may be stale.",
+    "noNodes": "No servers have been added.",
+    "migrationTitle": "Historical log migration",
+    "migrationHelp": "Migration uses the deployment flag USAGE_LOG_LEGACY_WRITERS_DRAINED. Enable only after old Hubs and their transactions have stopped. New installations need no action.",
+    "retentionTitle": "Confirm retention policy change",
+    "retentionWarning": "This change reduces log retention or enables metric deletion. Later cleanup may permanently remove eligible historical data; increasing retention cannot restore deleted data.",
+    "configure": "Configure monitoring",
+    "fields": {
+      "AGENT_HUB_URL": {
+        "label": "Hub callback URL",
+        "help": "Enter the full HTTPS URL reachable from managed nodes. Leave empty to configure later. Browser access does not prove node reachability."
+      },
+      "MONITOR_INTERVAL": {
+        "label": "Sampling interval (seconds)",
+        "help": "Between 1 and 60 seconds. Changes are synchronized to node agents."
+      },
+      "AGENT_ALLOW_HTTP": {
+        "label": "Allow HTTP",
+        "help": "Off by default. Enable only for test or trusted private networks that allow unencrypted traffic."
+      },
+      "SSH_TIMEOUT": {
+        "label": "SSH connection timeout (seconds)",
+        "help": "Applies to new connections. Active operations keep their original configuration."
+      },
+      "SSH_MAX_IDLE": {
+        "label": "SSH idle timeout (seconds)",
+        "help": "Idle connections are closed by a subsequent cleanup pass after this period."
+      },
+      "EXEC_TIMEOUT": {
+        "label": "Default command timeout (seconds)",
+        "help": "Includes connection setup and execution. Individual requests can override it up to the maximum."
+      },
+      "EXEC_TIMEOUT_MAX": {
+        "label": "Maximum command timeout (seconds)",
+        "help": "At least the default timeout and at most 300 seconds."
+      },
+      "EXEC_OUTPUT_LIMIT": {
+        "label": "Combined output limit (bytes)",
+        "help": "Combined stdout and stderr, at most 8388608 bytes (8 MiB)."
+      },
+      "EXEC_OUTPUT_STREAM_LIMIT": {
+        "label": "Per-stream output limit (bytes)",
+        "help": "At most the combined limit and 4194304 bytes (4 MiB)."
+      },
+      "USAGE_LOG_RETENTION_DAYS": {
+        "label": "Ordinary usage log retention (days)",
+        "help": "Must be positive. Reducing this may delete older logs in later cleanup; zero does not mean unlimited retention."
+      },
+      "USAGE_LOG_SENSITIVE_RETENTION_DAYS": {
+        "label": "Sensitive operation retention (days)",
+        "help": "Applies to sensitive and deletion operations. Reducing retention requires confirmation."
+      },
+      "METRICS_RETENTION_ENABLED": {
+        "label": "Enable metric retention cleanup",
+        "help": "Processes eligible data older than 35 days. Actual deletion also requires dry-run mode to be disabled."
+      },
+      "METRICS_RETENTION_DRY_RUN": {
+        "label": "Metric cleanup dry run",
+        "help": "When enabled, only reports the cleanup plan. Deletion requires cleanup enabled and dry run disabled."
+      },
+      "LOGIN_RATE_LIMIT": {
+        "label": "Authentication requests per IP per minute",
+        "help": "Applies to login and setup checks. Must be positive; zero does not disable rate limiting."
+      },
+      "LOG_LEVEL": {
+        "label": "Log level",
+        "help": "Controls the detail level of Hub runtime logs."
+      },
+      "LOG_FORMAT": {
+        "label": "Log format",
+        "help": "JSON is suitable for log collection; text is easier to read directly."
+      },
+      "DB_MAX_OPEN_CONNECTIONS": {
+        "label": "Maximum database connections",
+        "help": "Connection pool limit for one Hub; default 32, minimum 12. Restart the Hub after saving."
+      },
+      "USAGE_LOG_WRITE_CONCURRENCY": {
+        "label": "Usage log write concurrency",
+        "help": "Actual concurrency is also constrained by the database connection budget. Requires a Hub restart."
+      },
+      "USAGE_LOG_ACTIVE_LIMIT": {
+        "label": "Active operation tracking limit",
+        "help": "Maximum number of operations tracked in memory. Requires a Hub restart."
+      }
+    },
+    "groups": {
+      "monitoring": "Monitoring",
+      "ssh": "SSH connections",
+      "execution": "Command execution",
+      "retention": "Data retention",
+      "security": "Login security",
+      "logging": "Runtime logs",
+      "capacity": "Advanced · Capacity"
+    },
+    "source": {
+      "default": "Application default",
+      "environment": "Deployment configuration",
+      "database": "Saved setting"
+    },
+    "apply": {
+      "agent": "Synchronizes to agents",
+      "next_operation": "Applies to subsequent operations",
+      "maintenance": "Applies to subsequent cleanup",
+      "live": "Applies after saving",
+      "restart": "Requires a Hub restart"
+    },
+    "migration": {
+      "waiting": "Historical backfill is not enabled",
+      "pending": "Enabled; not yet completed",
+      "completed": "Historical backfill completed",
+      "unavailable": "Migration status is temporarily unavailable"
+    }
   }
 }

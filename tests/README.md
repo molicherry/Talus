@@ -150,3 +150,12 @@ are generated in temporary directories; they are not repository exemptions.
 Any additional exemption must name an existing file and explain its purpose.
 Exemptions affect the content scan only;
 they never bypass the "adapter directory must not exist" assertion.
+
+## System settings coverage
+
+M4 also covers `REQ-10` / `TC-10-*`: the real Hub settings API and restart,
+atomic database/audit persistence, immutable runtime snapshots, retention
+confirmation, live login limits, and the settings browser flow. The native
+Go suite runs these backend tests; `ui-charts` includes the settings browser
+suite. See [系统参数与配置位置](../docs/system-settings.zh-CN.md) for the
+configuration contract.
