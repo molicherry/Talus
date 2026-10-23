@@ -156,7 +156,7 @@ func TestAPIKeyRotationRejectsLookupBeforeCommit(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	defer db.Callback().Query().Remove("test_pause_key_lookup")
+	defer func() { _ = db.Callback().Query().Remove("test_pause_key_lookup") }()
 	done := make(chan error, 1)
 	go func() { _, err := svc.Validate(context.WithValue(ctx, pauseLookup{}, true), raw); done <- err }()
 	select {
@@ -196,7 +196,7 @@ func TestAPIKeyRotationCommitOutcomes(t *testing.T) {
 			}
 			if mode == "unresolved" {
 				tx := <-pool.held
-				defer tx.Rollback()
+				defer func() { _ = tx.Rollback() }()
 				short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 				_, err := svc.Validate(short, oldRaw)
 				cancel()

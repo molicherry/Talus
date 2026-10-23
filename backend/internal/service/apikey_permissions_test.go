@@ -280,7 +280,7 @@ func TestAPIKeyPermissionsCommitOutcomes(t *testing.T) {
 			requireAPIKeyError(t, err, http.StatusServiceUnavailable)
 			if mode == "unresolved" {
 				tx := <-pool.held
-				defer tx.Rollback()
+				defer func() { _ = tx.Rollback() }()
 				short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 				err := svc.permissionsGate.Admit(short, key.ID, func(int64) error { t.Error("admitted while commit unresolved"); return nil })
 				cancel()
