@@ -54,11 +54,21 @@ cd Talus
 Copy `.env.example` to `.env` and set real secrets — the stack refuses to start
 without them:
 
+```bash
+cp .env.example .env
+```
+
 ```env
 DB_PASSWORD=<your-postgres-password>
 VPSMANAGER_MASTER_KEY=<openssl rand -hex 32>
 JWT_SECRET=<openssl rand -hex 32>
 ```
+
+For monitoring, replace the example `AGENT_HUB_URL` in `.env` with the Hub's real
+HTTPS address reachable from the managed nodes. For a deployment without monitoring,
+set `AGENT_HUB_URL=`. Do not keep the example domain: a non-empty value enables
+automatic agent installation attempts. Agent installation needs running
+systemd, `flock`, and SFTP; non-root SSH accounts also need user lingering.
 
 ### 3. Start (build from source)
 
@@ -74,10 +84,10 @@ On first login, enter any username and a password of at least 8 characters — t
 
 ### 4. Add a Server
 
-1. Go to **Servers** → **Add Server**
-2. Fill in name, host (IP), SSH port, and description
-3. Go to **Credentials** → **Add Credential** and attach a password or private key
-4. Your server is now live — execute commands, open a terminal, or view metrics.
+1. Go to **Credentials** → **Add Credential** and save the SSH username and password or private key.
+2. Go to **Servers** → **Add Server**, enter the name, host, SSH port, and description, and select that credential.
+3. Test the saved connection, verify the presented host fingerprint against a trusted source, and confirm it in the Web UI. Jump and target hosts need separate confirmation.
+4. Execute a command or open a terminal to verify SSH access. For monitoring, wait for automatic agent deployment and check connection, collection, and data freshness separately.
 
 For servers behind an IP allowlist, choose a **Connection mode** in the server
 form. **SSH jump host** selects an existing direct server with SSH credentials;
@@ -197,10 +207,15 @@ volumes:
   pgdata:
 ```
 
-Deploy:
+Before deploying, copy `.env.example` to `.env` and configure the secrets below.
+Set `AGENT_HUB_URL` to the node-reachable Hub HTTPS address for monitoring, or
+leave it empty (`AGENT_HUB_URL=`) if monitoring is not needed. Do not retain the
+example domain, which enables automatic agent installation attempts.
 
 ```bash
-cp .env.example .env   # then fill in DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET
+cp .env.example .env
+# Edit .env: set DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET;
+# set AGENT_HUB_URL to the real Hub URL or leave it empty.
 docker compose -f docker-compose.prod.yml up -d
 ```
 
@@ -267,16 +282,47 @@ The workflow is informed by [EdgeSSH](https://github.com/aozorae/EdgeSSH): a fil
 
 ## AI Integration
 
-Talus ships with a portable [agent skill](skills/talus/SKILL.md) so any AI
-coding assistant (OpenCode, Claude Code, Cursor, …) can operate Talus through
-its REST API: list servers, run commands, read metrics, relay requests to
-registered services, manage files over SFTP, and add/update servers.
+Talus ships with a portable [agent skill](skills/talus/SKILL.md) for server
+management, SSH commands, monitoring, SFTP, and registered service requests over
+REST. The AI environment must be able to read the skill and send HTTP requests,
+using a terminal with `curl` or an equivalent HTTP tool. MCP is optional.
 
-### Prerequisites
+### 1. Prepare the Talus instance
 
-- A running Talus instance (see Deployment above)
-- An API key — create one in **Talus Web UI → API Keys** (default scopes cover
-  read/exec/metrics; `servers:write`, `services:relay`, and file scopes are opt-in)
+Deploy Talus using [Quick Start](#quick-start) or
+[Production Deployment](#production-deployment-ghcr-images), then complete the
+first administrator login. If you already have an instance, use it directly.
+Add the servers/credentials you want the AI to use and confirm their SSH host
+fingerprints in the Web UI. For service access, register the service, its
+credentials, and a usage guide in **Services**.
+
+Choose a Talus URL reachable from the environment where the AI actually runs.
+`localhost` refers to that environment: a cloud worker or container does not
+reach your computer's Talus instance through its own `localhost`.
+
+### 2. Create an API key
+
+Open **Talus Web UI → API Keys** and create a key for the AI. Select scopes for
+the intended tasks and, if appropriate, restrict access to particular servers:
+
+| Task | Scopes to select |
+| --- | --- |
+| View servers and monitoring | `servers:read`, `metrics:read` |
+| Discover services and read their guides | `services:read` |
+| Call registered services | `services:read`, `services:relay` |
+| Execute commands | `servers:read`, `servers:exec` |
+| Manage files | `servers:read`, plus the needed `files:read`, `files:write`, `files:delete` |
+| Add/update servers | `servers:read`, `servers:write`; `credentials:read` to discover existing credentials |
+
+The default selection includes `servers:read`, `servers:exec`, `servers:terminal`,
+`metrics:read`, `credentials:read`, and `services:read`; it is not read-only.
+`servers:write`, `services:relay`, and file scopes require explicit selection.
+No server restriction means access to all servers. Some operations, including
+credential/service creation and host-key confirmation, still require the Web UI;
+see the [skill's permission rules](skills/talus/SKILL.md#authentication-and-permissions).
+
+Use the API key value from this page as `TALUS_API_KEY`. It is separate from the
+administrator password, SSH credentials, and the Hub's `JWT_SECRET`.
 
 Administrators can edit an existing key in **API Keys → Edit permissions**. The original key stays valid; scopes and server access are updated in place. Key management (including list, create, delete and reveal) now requires an administrator JWT. API keys cannot modify themselves.
 
@@ -286,35 +332,106 @@ Administrators can edit an existing key in **API Keys → Edit permissions**. Th
 
 Upgrades preserve explicit legacy policies and hash-only keys without reissuing secrets. A database with no scopes column receives a fixed read/exec/terminal/metrics/credential/service-read baseline. Existing null/empty scopes are not filled, and removed server IDs do not become unrestricted access. The historical automatic `services:read` grant is retired: keys lacking that scope keep their current policy, even when an old migration marker is missing. Startup reports IDs to review; grant the scope explicitly if needed. Stop the old Hub and retain the database/master key before upgrading. Do not roll back to a binary that regrants scopes or lacks terminal revocation.
 
-### Install
+### 3. Install the complete skill
 
-Copy the skill into your AI tool's skills directory (the skill is portable
-and does not need to live inside this repository):
+Obtain `skills/talus/` from this repository or its downloaded source archive.
+Import the whole `talus` directory using your AI tool's skill-loading mechanism,
+or place it in a supported skills directory. Follow that tool's documentation
+for its directory location and reload behavior. The installed structure is:
 
-```bash
-# OpenCode
-mkdir -p ~/.config/opencode/skills && cp -r skills/talus ~/.config/opencode/skills/
-# Claude Code
-mkdir -p ~/.claude/skills && cp -r skills/talus ~/.claude/skills/
+```text
+talus/
+├── SKILL.md
+└── references/
+    ├── files.md
+    └── metrics.md
 ```
 
-Point the assistant at your instance:
+Install it where the AI session can read it; installing only on the Talus server
+does not make it available to a separately running AI. Keep `references/` alongside
+`SKILL.md`. The installed skill does not need the rest of the repository.
+After installation, reload skills or start a new session as your tool requires.
+To update, replace the complete `talus/` directory with the new version and reload;
+keep instance configuration in the AI environment so updates preserve it.
+
+### 4. Configure the AI environment
+
+Set these variables in the environment that executes the AI's HTTP requests:
+
+| Variable | Value |
+| --- | --- |
+| `TALUS_URL` | Reachable Talus base URL, such as `https://talus.example.com`, without `/api/v1`; defaults to `http://localhost:8080` |
+| `TALUS_API_KEY` | The API key created above |
+
+For an AI launched from a Bash terminal, replace the example URL, then enter the
+key at the hidden prompt:
 
 ```bash
-export TALUS_URL=https://your-talus.example.com   # defaults to http://localhost:8080
-export TALUS_API_KEY=<your-api-key>
+export TALUS_URL='https://talus.example.com'
+read -r -s -p 'Talus API key: ' TALUS_API_KEY
+printf '\n'
+export TALUS_API_KEY
 ```
 
-### Verify
+Run the verification commands below in this terminal, then launch the AI from
+the same terminal so it inherits the variables. These exports last only for
+this shell and subsequently started child processes. Existing desktop processes
+and remote/cloud sessions do not inherit them automatically; configure those
+through their runtime environment/secret settings, then restart or reload as
+required. Use those settings for persistent configuration as well.
 
-In a new AI session, ask *"List all servers via Talus"* — a list of servers
-(or an empty array) means the skill is wired up.
+The Hub's deployment `.env` does not automatically configure the AI. `AGENT_HUB_URL`
+belongs to the Hub and must be reachable from monitored nodes; `TALUS_URL` belongs
+to the AI environment and must be reachable from there. Do not put the API key
+inside the skill files or paste it into chat.
+
+### 5. Verify the connection and skill loading
+
+From the AI's execution environment, first check the unauthenticated version
+endpoint. HTTP 200 with Talus version information confirms the address is reachable:
+
+```bash
+curl --silent --show-error --fail-with-body "${TALUS_URL%/}/api/v1/version"
+```
+
+Next, verify authentication and `servers:read`:
+
+```bash
+curl --silent --show-error --fail-with-body \
+  "${TALUS_URL%/}/api/v1/servers" -H "X-API-Key: $TALUS_API_KEY"
+```
+
+Expect HTTP 200 and `{"data":[...]}`; `{"data":[]}` is a valid empty result.
+If the key intentionally lacks `servers:read`, use `/api/v1/services` with
+`services:read` instead. This verifies API access; it does not establish skill loading.
+
+Confirm the AI session has loaded `talus` through its skill mechanism, then ask:
+
+> Use the talus skill and the configured environment to list my servers. Make a real API request, report their names and status, and do not display the API key.
+
+For a service-only key, ask it to list registered services and read the selected
+service's usage guide instead. Confirm the AI reads the skill and makes the
+request; an answer describing how to make a request is not a completed check.
+
+### 6. Troubleshoot
+
+| Symptom | Check |
+| --- | --- |
+| Skill not found or reference missing | The entire `talus/` directory must be readable in the AI environment and loaded by the current session. |
+| URL/key missing in the AI | Check the executing process's environment or secret settings; configure there and restart/reload. Do not print the key to verify it. |
+| Connection refused, DNS failure, or timeout | Test from the AI environment; check the URL, port, network access, and whether `localhost` points to the intended host. |
+| TLS certificate failure | Correct the certificate or configure the runtime's trusted CA. |
+| 401 | Check the instance, key value, and whether the key was revoked. |
+| 403 | Check required scopes, server restrictions, and Web UI-only operations. A successful service listing does not grant `services:relay`. |
+| SSH host key unverified/changed | Verify and confirm the fingerprint in the Web UI. |
+| Monitoring missing or stale | Check the node-reachable `AGENT_HUB_URL`, agent deployment prerequisites, and the separate connection/collection/data states. |
 
 ### Services: prefer Talus relay for registered services
 
 Registered services (Dokploy, Portainer, or any internal app) are proxied by
-Talus — their `base_url` is an internal address an AI cannot touch directly,
-and their credentials are injected by Talus at relay time. When operating a
+Talus. Their `base_url` must be reachable from the Hub and may remain private;
+the AI only needs access to Talus. Credentials are substituted into the request
+as specified by the service's usage guide. When operating a
 service on a server, the AI should first check whether it is registered in
 Talus (`GET /api/v1/services?server_id=<id>`); if it is, use it through relay.
 If it is not registered, the AI may operate it directly on the server (and
