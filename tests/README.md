@@ -15,7 +15,7 @@ source. It defines:
   `command` (argv array), `timeout_seconds`, `environment`.
 - `cases[]` — one entry per acceptance case (`TC-XX-YY`): requirement ids,
   `spec_ref`, English `scenario`, and one or more `implementations[]`.
-- `gates{}` — pre-registered run sets per phase (`M1`–`M4`).
+- `gates{}` — pre-registered run sets per phase (`M1`–`M5`).
 - `scan_exemptions[]` — exact paths exempt from the static content scan.
 
 Each `spec_ref` is a repository file path followed by an RFC 6901 JSON Pointer
@@ -159,3 +159,22 @@ confirmation, live login limits, and the settings browser flow. The native
 Go suite runs these backend tests; `ui-charts` includes the settings browser
 suite. See [系统参数与配置位置](../docs/system-settings.zh-CN.md) for the
 configuration contract.
+
+## Windows monitoring coverage
+
+M4 includes `REQ-11` / `TC-11-*` for PE artifact validation, Windows SSH probing,
+verified deployment and cleanup metadata, and Windows-specific metric labels.
+`M5` is the native Windows administrator gate (`REQ-12` / `TC-12-*`), run by
+`.github/workflows/windows-agent.yml` on Windows Server 2022 and 2025:
+
+```powershell
+$env:TALUS_WINDOWS_INTEGRATION='1'
+node tests/run-suites.mjs --gate M5
+```
+
+It starts real Windows services and scheduled tasks, collects metrics, exercises
+configuration upgrades and rollback, and verifies detached removal. The CI workflow
+requires this gate before publishing an image. Running M1–M4 on Linux or merely
+cross-compiling the Windows executable does not satisfy M5. Execution records are
+uploaded separately per Windows runner. Server 2019 needs deployment-specific
+acceptance; it is not covered by these hosted runners.

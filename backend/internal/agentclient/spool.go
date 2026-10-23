@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/vpsmanager/backend/internal/agentwire"
-	"golang.org/x/sys/unix"
 )
 
 type queueEntry struct {
@@ -46,7 +45,7 @@ func OpenSpool(dir string) (*Spool, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+	if err = lockStateFile(f); err != nil {
 		_ = f.Close()
 		return nil, errors.New("another agent owns this state directory")
 	}
@@ -129,19 +128,10 @@ func writeAtomic(path string, b []byte) error {
 	if err != nil {
 		return err
 	}
-	if err = os.Rename(tmp, path); err != nil {
+	if err = replaceStateFile(tmp, path); err != nil {
 		return err
 	}
 	return syncDirectory(filepath.Dir(path))
-}
-
-func syncDirectory(dir string) error {
-	f, e := os.Open(dir)
-	if e != nil {
-		return e
-	}
-	defer f.Close()
-	return f.Sync()
 }
 
 func (q *Spool) Add(s agentwire.Sample) error {

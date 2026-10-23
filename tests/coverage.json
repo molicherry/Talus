@@ -258,6 +258,27 @@
           "TEST_DATABASE_URL"
         ]
       }
+    },
+    {
+      "run_id": "windows-native",
+      "suite": "integration",
+      "runner": "go-test",
+      "cwd": "backend",
+      "command": [
+        "go",
+        "test",
+        "-count=1",
+        "./internal/agentclient",
+        "./internal/agentwire",
+        "./internal/agentwindows"
+      ],
+      "timeout_seconds": 720,
+      "environment": {
+        "profile": "windows-administrator",
+        "requires": [
+          "TALUS_WINDOWS_INTEGRATION"
+        ]
+      }
     }
   ],
   "gates": {
@@ -295,6 +316,9 @@
       "ui-charts",
       "terminal-e2e",
       "e2e-core"
+    ],
+    "M5": [
+      "windows-native"
     ]
   },
   "phases": {
@@ -313,7 +337,11 @@
     ],
     "M4": [
       "REQ-09",
-      "REQ-10"
+      "REQ-10",
+      "REQ-11"
+    ],
+    "M5": [
+      "REQ-12"
     ]
   },
   "cases": [
@@ -4918,6 +4946,166 @@
           "implementation": {
             "path": "frontend/tests/settings.browser.mjs",
             "symbol": "settings Chinese mobile layout stays within the viewport"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-11-01",
+      "requirement_ids": [
+        "REQ-11"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/61/scenario",
+      "scenario": "Require a verified Windows AMD64 PE artifact and reject missing or cross-platform binaries.",
+      "implementations": [
+        {
+          "implementation_id": "impl-11-01",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/agentproto/agentproto_test.go",
+            "symbol": "TestWindowsArtifactMustBeAMD64PE"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-11-02",
+      "requirement_ids": [
+        "REQ-11"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/62/scenario",
+      "scenario": "Detect Windows over OpenSSH and refuse unsupported Windows processor architectures before upload.",
+      "implementations": [
+        {
+          "implementation_id": "impl-11-02",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_windows_deploy_test.go",
+            "symbol": "TestWindowsAgentProbe"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-11-03",
+      "requirement_ids": [
+        "REQ-11"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/63/scenario",
+      "scenario": "Verify Windows uploads before activation and retain machine-wide cleanup metadata on deployment failure.",
+      "implementations": [
+        {
+          "implementation_id": "impl-11-03",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_windows_deploy_test.go",
+            "symbol": "TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-11-04",
+      "requirement_ids": [
+        "REQ-11"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/64/scenario",
+      "scenario": "Persist Windows installation metadata across retries without classifying it as a Linux account layout.",
+      "implementations": [
+        {
+          "implementation_id": "impl-11-04",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/repository/agent_node_layout_test.go",
+            "symbol": "TestWindowsInstallLayoutPersistsAcrossRestartAndFailure"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-11-05",
+      "requirement_ids": [
+        "REQ-11"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/65/scenario",
+      "scenario": "Display paging-file usage and mark Linux load averages as not applicable on Windows.",
+      "implementations": [
+        {
+          "implementation_id": "impl-11-05",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "Windows monitoring labels paging files and disables Linux load"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-12-01",
+      "requirement_ids": [
+        "REQ-12"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/66/scenario",
+      "scenario": "Keep Windows boot identity stable across agent starts and collect native system uptime.",
+      "implementations": [
+        {
+          "implementation_id": "impl-12-01",
+          "run_id": "windows-native",
+          "implementation": {
+            "path": "backend/internal/agentclient/platform_windows_test.go",
+            "symbol": "TestWindowsBootIdentityAndUptime"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-12-02",
+      "requirement_ids": [
+        "REQ-12"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/67/scenario",
+      "scenario": "Handle Windows SCM stop and shutdown without leaving the agent run loop active.",
+      "implementations": [
+        {
+          "implementation_id": "impl-12-02",
+          "run_id": "windows-native",
+          "implementation": {
+            "path": "backend/internal/agentclient/platform_windows_test.go",
+            "symbol": "TestWindowsServiceStopAndFailure"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-12-03",
+      "requirement_ids": [
+        "REQ-12"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/68/scenario",
+      "scenario": "Run real Windows services and scheduled tasks through collection, configuration upgrades, failed-contact rollback and detached removal.",
+      "implementations": [
+        {
+          "implementation_id": "impl-12-03",
+          "run_id": "windows-native",
+          "implementation": {
+            "path": "backend/internal/agentwindows/native_windows_test.go",
+            "symbol": "TestWindowsNativeDeploymentUpgradeRollbackAndRemoval"
           },
           "automation_status": "implemented",
           "required": true

@@ -443,7 +443,7 @@ test("workflow mutation boundaries require all CI gates, restricted tokens and g
   const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const promotion = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   const publishing = ci.slice(ci.indexOf("\n  publish-image:"), ci.indexOf("\n  release-draft:"));
-  assert.match(publishing, /needs: \[release-policy, security, backend, frontend, unified, docker\]/);
+  assert.match(publishing, /needs: \[release-policy, security, backend, frontend, unified, docker, windows-agent\]/);
   assert.equal((ci.match(/packages: write/g) || []).length, 1);
   assert.equal((ci.match(/contents: write/g) || []).length, 1);
   assert.doesNotMatch(ci, /value=latest|push: \$\{\{/);

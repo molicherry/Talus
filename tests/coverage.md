@@ -2,7 +2,7 @@
 
 > Generated from `tests/coverage.json` by `tests/render-coverage.mjs`. Do not edit by hand.
 
-Cases: 61 · Runs: 14 · Schema: 1
+Cases: 69 · Runs: 15 · Schema: 1
 
 ## Runs
 
@@ -22,6 +22,7 @@ Cases: 61 · Runs: 14 · Schema: 1
 | a11y-review | ui | manual | `.` | _(manual)_ | — |
 | image-agents | integration | shell | `.` | `bash tests/verify-agent-images.sh` | 1800s |
 | api-key-permissions | integration | go-test | `backend` | `go test ./internal/gate ./internal/repository ./internal/service ./internal/handler ./internal/usage ./cmd/server -run APIKeyPermission|APIKeyRotation|UpdateWithBudget -count=1` | 600s |
+| windows-native | integration | go-test | `backend` | `go test -count=1 ./internal/agentclient ./internal/agentwire ./internal/agentwindows` | 720s |
 
 ## Gates (pre-registered required runs)
 
@@ -29,13 +30,15 @@ Cases: 61 · Runs: 14 · Schema: 1
 - **M2**: `coverage-tools`, `static-adapters`, `go-unit`, `frontend-node`, `migrate-hardening`, `integration-agent`, `go-race`, `terminal-e2e`, `api-key-permissions`
 - **M3**: `go-unit`, `frontend-node`, `migrate-hardening`, `integration-agent`, `ui-charts`, `image-agents`
 - **M4**: `go-unit`, `frontend-node`, `ui-charts`, `terminal-e2e`, `e2e-core`
+- **M5**: `windows-native`
 
 ## Phases (requirement scope per gate)
 
 - **M1**: REQ-01, REQ-02
 - **M2**: REQ-05, REQ-06, REQ-07
 - **M3**: REQ-04, REQ-08
-- **M4**: REQ-09, REQ-10
+- **M4**: REQ-09, REQ-10, REQ-11
+- **M5**: REQ-12
 
 ## Cases
 
@@ -425,6 +428,14 @@ Cases: 61 · Runs: 14 · Schema: 1
 | TC-10-08 | REQ-10 | implemented | ui-charts | `frontend/tests/settings.browser.mjs:settings conflict retains the draft and cross-field limits reject invalid saves` | yes | Reject inconsistent execution limits and retain user input after a concurrent configuration conflict. | Reject inconsistent execution limits and retain user input after a concurrent configuration conflict. |
 | TC-10-09 | REQ-10 | implemented | ui-charts | `frontend/tests/settings.browser.mjs:settings deny viewers without fetching configuration` | yes | Deny viewer access to the settings page without requesting protected configuration or showing its navigation entry. | Deny viewer access to the settings page without requesting protected configuration or showing its navigation entry. |
 | TC-10-10 | REQ-10 | implemented | ui-charts | `frontend/tests/settings.browser.mjs:settings Chinese mobile layout stays within the viewport` | yes | Render all configuration fields in Chinese on a narrow mobile viewport without horizontal page overflow. | Render all configuration fields in Chinese on a narrow mobile viewport without horizontal page overflow. |
+| TC-11-01 | REQ-11 | implemented | go-unit | `backend/internal/agentproto/agentproto_test.go:TestWindowsArtifactMustBeAMD64PE` | yes | Require a verified Windows AMD64 PE artifact and reject missing or cross-platform binaries. | Require a verified Windows AMD64 PE artifact and reject missing or cross-platform binaries. |
+| TC-11-02 | REQ-11 | implemented | go-unit | `backend/internal/service/resident_windows_deploy_test.go:TestWindowsAgentProbe` | yes | Detect Windows over OpenSSH and refuse unsupported Windows processor architectures before upload. | Detect Windows over OpenSSH and refuse unsupported Windows processor architectures before upload. |
+| TC-11-03 | REQ-11 | implemented | go-unit | `backend/internal/service/resident_windows_deploy_test.go:TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation` | yes | Verify Windows uploads before activation and retain machine-wide cleanup metadata on deployment failure. | Verify Windows uploads before activation and retain machine-wide cleanup metadata on deployment failure. |
+| TC-11-04 | REQ-11 | implemented | go-unit | `backend/internal/repository/agent_node_layout_test.go:TestWindowsInstallLayoutPersistsAcrossRestartAndFailure` | yes | Persist Windows installation metadata across retries without classifying it as a Linux account layout. | Persist Windows installation metadata across retries without classifying it as a Linux account layout. |
+| TC-11-05 | REQ-11 | implemented | ui-charts | `frontend/tests/ui-regressions.browser.mjs:Windows monitoring labels paging files and disables Linux load` | yes | Display paging-file usage and mark Linux load averages as not applicable on Windows. | Display paging-file usage and mark Linux load averages as not applicable on Windows. |
+| TC-12-01 | REQ-12 | implemented | windows-native | `backend/internal/agentclient/platform_windows_test.go:TestWindowsBootIdentityAndUptime` | yes | Keep Windows boot identity stable across agent starts and collect native system uptime. | Keep Windows boot identity stable across agent starts and collect native system uptime. |
+| TC-12-02 | REQ-12 | implemented | windows-native | `backend/internal/agentclient/platform_windows_test.go:TestWindowsServiceStopAndFailure` | yes | Handle Windows SCM stop and shutdown without leaving the agent run loop active. | Handle Windows SCM stop and shutdown without leaving the agent run loop active. |
+| TC-12-03 | REQ-12 | implemented | windows-native | `backend/internal/agentwindows/native_windows_test.go:TestWindowsNativeDeploymentUpgradeRollbackAndRemoval` | yes | Run real Windows services and scheduled tasks through collection, configuration upgrades, failed-contact rollback and detached removal. | Run real Windows services and scheduled tasks through collection, configuration upgrades, failed-contact rollback and detached removal. |
 
 ## Scan exemptions
 

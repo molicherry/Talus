@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/vpsmanager/backend/internal/agentclient"
@@ -231,6 +232,9 @@ func collectCPUInfo() (CPUInfo, error) {
 		info.Percent = percentages[0]
 	}
 
+	if runtime.GOOS == "windows" {
+		return info, nil
+	}
 	loadAvg, err := load.Avg()
 	if err != nil {
 		return info, fmt.Errorf("load avg: %w", err)
@@ -257,7 +261,7 @@ func collectMemoryInfo() (MemoryInfo, error) {
 }
 
 func collectSwapInfo() (*SwapInfo, error) {
-	swap, err := mem.SwapMemory()
+	swap, err := agentclient.CollectSwapMemory()
 	if err != nil {
 		return nil, fmt.Errorf("swap memory: %w", err)
 	}

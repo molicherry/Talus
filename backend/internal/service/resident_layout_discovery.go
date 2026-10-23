@@ -27,6 +27,10 @@ func discoverInstallLayouts(ctx context.Context, n model.AgentNode, lease *sshLe
 		return nil, fmt.Errorf("discover resident installation layouts: %w", err)
 	}
 	if result == nil || result.ExitCode != 0 || result.StdoutTruncated || result.OutputTruncated {
+		// Windows has a single machine-wide layout, independent of SSH account.
+		if layout, winErr := discoverWindowsLayout(ctx, n.InstallID, lease); winErr == nil {
+			return []agentLayout{layout}, nil
+		}
 		return nil, errors.New("resident installation layout discovery did not complete")
 	}
 	return parseDiscoveredInstallLayouts(n, result.Stdout)

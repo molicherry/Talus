@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
+	stdnet "net"
 	"os"
 	"os/exec"
 	"runtime"
@@ -52,7 +52,7 @@ func CollectSection(name string) (sectionResult, error) {
 		}
 		s.MemoryUsed = i64(v.Used)
 		s.MemoryTotal = i64(v.Total)
-		w, e := mem.SwapMemory()
+		w, e := CollectSwapMemory()
 		if e == nil {
 			s.SwapUsed = i64(w.Used)
 			s.SwapTotal = i64(w.Total)
@@ -60,6 +60,11 @@ func CollectSection(name string) (sectionResult, error) {
 			s.Errors = map[string]string{"swap": "read_failed"}
 		}
 	case "load":
+		// Windows has no equivalent Linux load average. Do not publish the
+		// library's process-local approximation from a short-lived worker.
+		if runtime.GOOS == "windows" {
+			return r, nil
+		}
 		v, e := load.Avg()
 		if e != nil {
 			return r, e
@@ -76,7 +81,7 @@ func CollectSection(name string) (sectionResult, error) {
 		var used, total uint64
 		var failed bool
 		for _, p := range p {
-			if seen[p.Device] || (p.Mountpoint != "/" && !physicalFS(p.Fstype)) {
+			if seen[p.Device] || (p.Mountpoint != "/" && !physicalFS(strings.ToLower(p.Fstype))) {
 				continue
 			}
 			seen[p.Device] = true
@@ -99,8 +104,20 @@ func CollectSection(name string) (sectionResult, error) {
 			return r, e
 		}
 		var recv, sent uint64
+		loopback := map[string]bool{}
+		if runtime.GOOS == "windows" {
+			interfaces, err := stdnet.Interfaces()
+			if err != nil {
+				return r, err
+			}
+			for _, iface := range interfaces {
+				if iface.Flags&stdnet.FlagLoopback != 0 {
+					loopback[iface.Name] = true
+				}
+			}
+		}
 		for _, n := range v {
-			if n.Name == "lo" || strings.HasPrefix(n.Name, "veth") || strings.HasPrefix(n.Name, "docker") || strings.HasPrefix(n.Name, "br-") {
+			if loopback[n.Name] || n.Name == "lo" || strings.HasPrefix(n.Name, "veth") || strings.HasPrefix(n.Name, "docker") || strings.HasPrefix(n.Name, "br-") {
 				continue
 			}
 			recv += n.BytesRecv
@@ -145,7 +162,7 @@ func CollectSection(name string) (sectionResult, error) {
 func i64(v uint64) *int64 { n := int64(min(v, uint64(math.MaxInt64))); return &n }
 func physicalFS(fs string) bool {
 	switch fs {
-	case "ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "f2fs", "jfs", "reiserfs", "bcachefs", "simfs", "ntfs", "vfat", "exfat":
+	case "ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "f2fs", "jfs", "reiserfs", "bcachefs", "simfs", "ntfs", "refs", "fat", "fat32", "vfat", "exfat":
 		return true
 	}
 	return false
@@ -203,11 +220,11 @@ func NewCollector() (*Collector, error) {
 	if e != nil {
 		return nil, e
 	}
-	b, e := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	boot, e := bootID()
 	if e != nil {
 		return nil, e
 	}
-	return &Collector{Executable: exe, BootID: strings.TrimSpace(string(b))}, nil
+	return &Collector{Executable: exe, BootID: boot}, nil
 }
 
 func (c *Collector) run(ctx context.Context, name string) (sectionResult, error) {
@@ -325,12 +342,8 @@ func (c *Collector) Collect(ctx context.Context) (agentwire.Sample, error) {
 	s.OS = c.metadata.OS
 	s.Kernel = c.metadata.Kernel
 	s.CPUModel = c.metadata.CPUModel
-	// /proc/uptime does not touch filesystems or execute external commands.
-	if b, e := os.ReadFile("/proc/uptime"); e == nil {
-		var uptime float64
-		if _, e = fmt.Sscan(string(b), &uptime); e == nil && uptime >= 0 {
-			s.Uptime = i64(uint64(uptime))
-		}
+	if uptime, e := systemUptime(); e == nil {
+		s.Uptime = i64(uptime)
 	}
 	if len(s.Errors) == 0 {
 		s.Errors = nil

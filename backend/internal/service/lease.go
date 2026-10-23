@@ -199,6 +199,17 @@ func (l *sshLease) Exec(ctx context.Context, command string, budget time.Duratio
 }
 
 func (l *sshLease) Upload(ctx context.Context, localPath, remotePath string, budget time.Duration) error {
+	return l.upload(ctx, localPath, remotePath, budget, true)
+}
+
+// uploadPrivateDirectory is reserved for a Windows deployment directory whose
+// SYSTEM/Administrators-only ACL has already been applied. Windows OpenSSH
+// does not implement POSIX chmod; ordinary uploads still require chmod(0600).
+func (l *sshLease) uploadPrivateDirectory(ctx context.Context, localPath, remotePath string, budget time.Duration) error {
+	return l.upload(ctx, localPath, remotePath, budget, false)
+}
+
+func (l *sshLease) upload(ctx context.Context, localPath, remotePath string, budget time.Duration, chmod bool) error {
 	operation, err := l.begin(ctx)
 	if err != nil {
 		return err
@@ -209,7 +220,7 @@ func (l *sshLease) Upload(ctx context.Context, localPath, remotePath string, bud
 	if budget > maxExecTimeout {
 		budget = maxExecTimeout
 	}
-	err, transportClosed := l.svc.copyFileOnClient(operation, l.h.Client, localPath, remotePath, budget)
+	err, transportClosed := l.svc.copyFileWithPermissions(operation, l.h.Client, localPath, remotePath, budget, chmod)
 	l.end(transportClosed || isConnectionError(err), err)
 	return err
 }
@@ -217,6 +228,10 @@ func (l *sshLease) Upload(ctx context.Context, localPath, remotePath string, bud
 // copyFileOnClient uploads an artifact over the same supervised SFTP channel
 // as the file API, while retaining the deployment's existing SSH lease.
 func (s *SSHService) copyFileOnClient(parent context.Context, client *ssh.Client, localPath, remotePath string, budget time.Duration) (error, bool) {
+	return s.copyFileWithPermissions(parent, client, localPath, remotePath, budget, true)
+}
+
+func (s *SSHService) copyFileWithPermissions(parent context.Context, client *ssh.Client, localPath, remotePath string, budget time.Duration, chmod bool) (error, bool) {
 	ctx, cancel := context.WithTimeout(parent, budget)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
@@ -244,8 +259,10 @@ func (s *SSHService) copyFileOnClient(parent context.Context, client *ssh.Client
 		}
 		defer remote.Close()
 		// Agent artifacts stay private until hash verification and activation.
-		if err = remote.Chmod(0600); err != nil {
-			return err
+		if chmod {
+			if err = remote.Chmod(0600); err != nil {
+				return err
+			}
 		}
 		count, err := io.CopyBuffer(remote, source, make([]byte, 32<<10))
 		if err != nil {

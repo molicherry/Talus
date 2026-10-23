@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/agentwindows"
 	"github.com/vpsmanager/backend/internal/agentwire"
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/repository"
@@ -231,6 +232,9 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 	if err != nil {
 		return err
 	}
+	if platform.OS == "windows" {
+		return m.installWindows(ctx, n, lease, artifact)
+	}
 	result, err := lease.Exec(ctx, `id -u; printf '%s\n' "$HOME"; command -v systemctl; command -v flock >/dev/null`, 5*time.Second)
 	if err != nil {
 		return err
@@ -275,7 +279,7 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 	// for both a retry and deletion to clean all installations.
 	pending := make([]model.AgentInstallLayout, 0, len(previous)+1)
 	for _, old := range previous {
-		pending = append(pending, model.AgentInstallLayout{UID: old.UID, Home: old.Home})
+		pending = append(pending, model.AgentInstallLayout{OS: old.OS, UID: old.UID, Home: old.Home})
 	}
 	pending = append(pending, model.AgentInstallLayout{UID: layout.UID, Home: layout.Home})
 	if err := m.repo.TrackInstallLayouts(ctx, n, pending); err != nil {
@@ -554,6 +558,7 @@ func (r *residentRemoval) Close() {
 // agentLayout is one resident-agent installation layout: the account that owns
 // it, where its state lives, and the service-manager command that controls it.
 type agentLayout struct {
+	OS      string
 	UID     int
 	Home    string
 	Base    string
@@ -603,11 +608,17 @@ func validInstallHome(home string) bool {
 // nodeForLayout builds the minimal node a layout-directed uninstall needs.
 func nodeForLayout(installID string, l agentLayout) model.AgentNode {
 	uid, home := l.UID, l.Home
-	return model.AgentNode{InstallID: installID, InstallUID: &uid, InstallHome: &home}
+	return model.AgentNode{InstallID: installID, InstallOS: l.OS, InstallUID: &uid, InstallHome: &home}
 }
 
 // recordedLayout reports the layout of the last completed installation.
 func recordedLayout(n model.AgentNode) (agentLayout, bool) {
+	if n.InstallOS == "windows" && n.InstallHome != nil && agentwindows.ValidHome(*n.InstallHome) {
+		return windowsAgentLayout(n.InstallID, *n.InstallHome), true
+	}
+	if n.InstallOS != "" && n.InstallOS != "linux" {
+		return agentLayout{}, false
+	}
 	if n.InstallUID == nil || n.InstallHome == nil || *n.InstallUID < 0 || !validInstallHome(*n.InstallHome) {
 		return agentLayout{}, false
 	}
@@ -615,7 +626,7 @@ func recordedLayout(n model.AgentNode) (agentLayout, bool) {
 }
 
 func sameInstallLayout(a, b agentLayout) bool {
-	return a.UID == b.UID && a.Base == b.Base && a.UnitDir == b.UnitDir
+	return a.OS == b.OS && a.UID == b.UID && a.Base == b.Base && a.UnitDir == b.UnitDir
 }
 
 // residentInstallRetirements separates another account's service from an alias
@@ -664,10 +675,11 @@ func knownInstallLayouts(n model.AgentNode) []agentLayout {
 		layouts = append(layouts, current)
 	}
 	for _, pending := range n.PendingInstallLayouts {
-		if pending.UID < 0 || !validInstallHome(pending.Home) {
+		current := model.AgentNode{InstallID: n.InstallID, InstallOS: pending.OS, InstallUID: &pending.UID, InstallHome: &pending.Home}
+		layout, ok := recordedLayout(current)
+		if !ok {
 			continue
 		}
-		layout := agentLayoutFor(n.InstallID, pending.UID, pending.Home)
 		duplicate := false
 		for _, existing := range layouts {
 			if sameInstallLayout(existing, layout) {
@@ -705,6 +717,9 @@ func (m *ResidentMonitor) uninstall(ctx context.Context, n model.AgentNode, leas
 }
 
 func (m *ResidentMonitor) uninstallLayout(ctx context.Context, installID string, layout agentLayout, lease *sshLease, strict bool) error {
+	if layout.OS == "windows" {
+		return m.uninstallWindows(ctx, installID, layout, lease)
+	}
 	probe := `id -u; printf '%s\n' "$HOME"`
 	if layout.UID != 0 {
 		// Resolve the owner's name so a cross-account stop can reach that

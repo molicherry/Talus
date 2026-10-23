@@ -1,5 +1,5 @@
 // Command agentverify validates the agent artifacts a Hub image ships: the
-// manifest, both architectures, sizes, hashes, ELF machines and (optionally) the
+// manifest, all platforms, sizes, hashes, ELF/PE machines and (optionally) the
 // protocol output of the runnable architecture. It is used by CI against the
 // files extracted from the built images, and locally against build output.
 //

@@ -2,7 +2,7 @@
 
 > 你的服务器舰队的青铜守卫。在一个地方完成监控、命令执行和远程连接。
 
-**Talus** 是一个自托管的单用户 Linux 服务器管理平台。通过 SSH/SFTP 自动安装常驻监控 Agent，节点主动通过 WSS/HTTPS 上报，无需新增节点入站端口。
+**Talus** 是一个自托管的单用户服务器管理平台，支持 Linux 管理与 Windows Server 监控。通过 SSH/SFTP 自动安装常驻监控 Agent，节点主动通过 WSS/HTTPS 上报，无需新增节点入站端口。
 
 ## 功能
 
@@ -25,7 +25,7 @@
 ```
   浏览器                   Talus Hub                    目标服务器
 ┌──────────┐   HTTP/WS    ┌──────────────┐    SSH      ┌──────────┐
-│  React   │ ◄──────────► │  Go 后端     │ ◄─────────► │  Linux   │
+│  React   │ ◄──────────► │  Go 后端     │ ◄─────────► │ Linux/Win│
 │  SPA     │              │  (chi, GORM) │             │  服务器  │
 └──────────┘              │              │             └──────────┘
                           │  PostgreSQL  │
@@ -34,7 +34,7 @@
 ```
 
 - **管理与监控分离**：Hub 通过 SSH 执行管理和 Agent 安装；常驻 Agent 主动连接 `AGENT_HUB_URL` 上报监控。
-- **常驻 Agent**：校验后的程序作为 systemd 系统服务或用户服务运行。本地私有目录保存最多 24 小时 / 64 MiB 的待发送样本，只有收到事务落库确认后才删除。请先设置节点可访问的 Hub HTTPS 地址。安装要求运行中的 systemd 和 `flock`；非 root SSH 账号须启用用户 lingering，Talus 不会自动 sudo 提权。
+- **常驻 Agent**：校验后的程序在 Linux 上作为 systemd 系统服务或用户服务运行，在 Windows 上作为原生 Windows 服务运行。本地私有目录保存最多 24 小时 / 64 MiB 的待发送样本，只有收到事务落库确认后才删除。请先设置节点可访问的 Hub HTTPS 地址。安装要求运行中的 systemd 和 `flock`；非 root SSH 账号须启用用户 lingering，Talus 不会自动 sudo 提权。
 - **凭证加密**：使用你掌控的主密钥进行静态加密存储。列表响应不返回秘密值，已认证的管理员可通过专用接口查看，并记录审计日志。
 
 ## 快速开始
@@ -42,7 +42,7 @@
 ### 前置条件
 
 - Docker 和 Docker Compose
-- 可通过 SSH 访问的 Linux 服务器（推荐 Debian/Ubuntu）；文件传输及监控 Agent 首次部署或更新需要启用 SSH 的 `sftp` 子系统。
+- 可通过 SSH 访问的 Linux 服务器或 Windows Server x64；文件传输及监控 Agent 首次部署或更新需要启用 SSH 的 `sftp` 子系统。
 
 ### 1. 克隆仓库
 
@@ -67,7 +67,8 @@ JWT_SECRET=<使用 openssl rand -hex 32 生成>
 
 首次登录后，进入 **系统设置 → 监控**，填写受管节点能够访问的 Hub HTTPS 地址。
 也可以提前在部署环境中设置 `AGENT_HUB_URL`。留空时跳过自动安装 Agent。
-Agent 安装需要正在运行的 systemd、`flock` 和 SFTP；非 root SSH 账号还需要启用 user lingering。
+Linux Agent 安装需要正在运行的 systemd、`flock` 和 SFTP；非 root SSH 账号还需要启用 user lingering。
+Windows 需要管理员权限的 SSH 账号、Windows PowerShell 5.1+、SFTP 和运行中的任务计划程序，见 [Windows 监控配置指南](windows-monitoring.zh-CN.md)。
 
 ### 3. 启动（源码构建）
 
@@ -397,7 +398,7 @@ curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin
 | `AGENT_ALLOW_HTTP` | `false` | 显式允许可信测试或内网使用 HTTP |
 | `MONITOR_TOLERATED_ROUNDS` | `1` | 已弃用的兼容设置；常驻模式使用 45 秒联系超时 |
 | `MONITOR_ALLOWED_LATENCY_SECONDS` | `0` | 已弃用的兼容设置；常驻数据新鲜度为三个采样周期，最少 15 秒 |
-| `AGENT_ARTIFACTS_DIR` | `/usr/local/bin` | 包含 `agents-manifest.json` 及 Linux amd64/arm64 双架构 Agent 的目录，启动时校验 |
+| `AGENT_ARTIFACTS_DIR` | `/usr/local/bin` | 包含 `agents-manifest.json` 及 Linux amd64/arm64、Windows amd64 Agent 的目录，启动时校验 |
 | `METRICS_RETENTION_ENABLED` | `false` | 启用超过 35 天的合格原始指标及聚合指标清理，实际删除还须关闭演练模式 |
 | `METRICS_RETENTION_DRY_RUN` | `true` | 仅报告清理计划；只有 `METRICS_RETENTION_ENABLED=true` 且本值为 `false` 才会删除 |
 | `SSH_TIMEOUT` | `10` | SSH 连接超时（秒） |

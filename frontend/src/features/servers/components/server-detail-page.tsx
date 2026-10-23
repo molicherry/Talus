@@ -37,7 +37,7 @@ export function ServerDetailPage() {
       {isError && <RefreshError error={error} isFetching={isFetching} onRetry={() => refetch()} />}
       <HostKeyWarning server={server} />
       <ServerInfoBar server={server} />
-      <MonitoringDashboard serverId={serverId} />
+      <MonitoringDashboard serverId={serverId} os={server.os} />
     </div>
   );
 }

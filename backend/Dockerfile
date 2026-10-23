@@ -13,8 +13,8 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w
 # Hub refuses to start unless the manifest matches the bundled artifacts.
 RUN sh build/agents.sh "${VERSION}" /agents
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -o /agentverify ./cmd/agentverify
-# Verify the artifacts this image will ship (TC-08-05): manifest, both agent
-# architectures, ELF class/machine, size, hash and the stamped build version. The
+# Verify the artifacts this image will ship (TC-08-05): manifest, all agent
+# platforms, ELF/PE class/machine, size, hash and the stamped build version. The
 # architecture this builder can execute additionally runs the protocol smoke test,
 # so every image/platform combination fails closed on a mismatch.
 RUN go run ./cmd/agentverify -version-in-binary /agents && \

@@ -49,6 +49,7 @@
       "ssh_timeout": "Connecting to the node timed out. Check the network and retry.",
       "deployment_timeout": "Deployment timed out; it will be retried automatically.",
       "deployment_canceled": "Deployment was canceled; it will be retried automatically.",
+      "agent_windows_service_unavailable": "Windows requires an administrator SSH account, PowerShell, Task Scheduler, and a writable local ProgramData directory.",
       "service_manager_unavailable": "A running systemd service manager and flock are required. For user services, enable lingering for the SSH account.",
       "agent_health_check_failed": "The new agent could not contact the Hub. Check the Hub address and outbound access. A previous version is restored when available.",
       "agent_target_read_only": "The persistent installation directory is not writable.",
@@ -378,6 +379,7 @@
       "peak": "Peak"
     },
     "series": {
+      "pageFile": "Paging File",
       "cpu": "CPU",
       "memory": "Memory",
       "disk": "Disk",
@@ -431,6 +433,8 @@
     "usageTrend": "Usage Trend",
     "network": "Network Throughput",
     "diskIo": "Disk I/O",
+    "pageFileUsage": "Paging File Usage",
+    "windowsLoadNotApplicable": "Not applicable: Windows does not provide Linux load averages.",
     "swapUsage": "Swap Usage",
     "loadAverage": "Load Average",
     "lastCollected": "Last collected {{time}}",

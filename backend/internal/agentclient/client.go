@@ -12,11 +12,9 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -52,6 +50,7 @@ func Command(args []string, version string) (bool, error) {
 	daemon := f.Bool("daemon", false, "")
 	health := f.Bool("health", false, "")
 	configPath := f.String("config", "", "")
+	serviceName := f.String("service-name", "", "Windows SCM service name")
 	if e := f.Parse(args); e != nil {
 		return true, e
 	}
@@ -83,9 +82,7 @@ func Command(args []string, version string) (bool, error) {
 	if !*daemon {
 		return true, errors.New("daemon mode required")
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return true, Run(ctx, c, version)
+	return true, runDaemon(c, version, *serviceName)
 }
 
 type currentSample struct {

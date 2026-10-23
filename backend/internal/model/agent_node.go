@@ -4,6 +4,7 @@ import "time"
 
 // AgentInstallLayout identifies an account's resident installation paths.
 type AgentInstallLayout struct {
+	OS   string `json:",omitempty"`
 	UID  int
 	Home string
 }
@@ -30,6 +31,7 @@ type AgentNode struct {
 	// later deletion must clean that layout even when the server's credential
 	// now logs in as a different account. Nil means "installed before this was
 	// recorded"; callers discover existing installations on the target host.
+	InstallOS   string  `json:"-"` // Empty means legacy Linux; Windows uses machine-wide ProgramData.
 	InstallUID  *int    `json:"-"`
 	InstallHome *string `json:"-"`
 	// PendingInstallLayouts retains every layout an unfinished installation may

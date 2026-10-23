@@ -4,7 +4,7 @@
 
 > The bronze guardian of your server fleet. Monitor, command, and connect — all from one place.
 
-**Talus** is a self-hosted, single-user platform for managing Linux servers. SSH/SFTP installs a resident monitoring agent automatically; nodes report over outbound WSS/HTTPS without opening additional inbound ports.
+**Talus** is a self-hosted, single-user platform for managing Linux servers and monitoring Windows Server. SSH/SFTP installs a resident monitoring agent automatically; nodes report over outbound WSS/HTTPS without opening additional inbound ports.
 
 ## Features
 
@@ -13,6 +13,7 @@
 - **Credential Vault** — Store SSH passwords and private keys encrypted with AES-256-GCM at rest.
 - **Remote Shell** — Execute commands on any server and see stdout, stderr, and exit codes.
 - **Interactive Terminal** — Open a full PTY session in your browser (xterm.js, resize-aware, WebSocket-backed).
+- **Windows Monitoring** — Native x64 service, automatic OpenSSH deployment, verified upgrades with rollback, and machine-wide uninstall. Windows paging files are labeled separately; Linux load averages are not applicable. [Setup and support scope](docs/windows-monitoring.md).
 - **Live Monitoring** — CPU, memory, disk, load, swap, network, and disk I/O charts with 15m / 1h / 6h / 24h / 7d / 30d time ranges, average/peak views, and accessible data tables. A resident agent collects every five seconds by default, buffers samples across outages, and reports over WSS with HTTPS fallback. Connection, collection and storage states are displayed separately.
 - **API Keys** — Create scoped API keys with per-server access control. Two-dimensional permissions (what actions × which servers). Keys are encrypted at rest and can be copied on demand. Rate-limited reveal with audit logging.
 - **SFTP Files** — Browse files alongside SSH, upload/download with resume, transfer folders, and edit UTF-8 text with version conflict checks. Scoped file APIs share SSH credentials, verified host keys and proxy routes.
@@ -23,7 +24,7 @@
 ```
  Browser                  Talus Hub                    Target Servers
 ┌──────────┐    HTTP/WS    ┌──────────────┐    SSH     ┌──────────┐
-│  React   │ ◄──────────► │  Go backend  │ ◄────────► │  Linux   │
+│  React   │ ◄──────────► │  Go backend  │ ◄────────► │ Linux/Win│
 │  SPA     │              │  (chi, GORM) │            │  servers │
 └──────────┘              │              │            └──────────┘
                           │  PostgreSQL  │
@@ -40,7 +41,7 @@
 ### Prerequisites
 
 - Docker & Docker Compose
-- Linux servers with SSH access (Debian/Ubuntu recommended); the SSH `sftp` subsystem must be enabled for file transfers and initial monitoring-agent deployment or updates.
+- Linux or Windows Server x64 nodes with SSH access; the SSH `sftp` subsystem must be enabled for file transfers and initial monitoring-agent deployment or updates.
 
 ### 1. Clone
 
@@ -67,8 +68,9 @@ JWT_SECRET=<openssl rand -hex 32>
 After first login, open **System settings → Monitoring** and enter the Hub HTTPS
 address reachable from the managed nodes. You may also set `AGENT_HUB_URL` in
 `.env` before deployment. Leaving it empty skips automatic agent installation.
-Agent installation needs running systemd, `flock`, and SFTP; non-root SSH accounts
-also need user lingering.
+Linux installation needs running systemd, `flock`, and SFTP; non-root SSH accounts
+also need user lingering. Windows installation needs an administrator SSH account,
+Windows PowerShell 5.1+, SFTP, and Task Scheduler. See [Windows monitoring](docs/windows-monitoring.md).
 
 ### 3. Start (build from source)
 
@@ -577,7 +579,7 @@ Compose and production examples pass all 19 settings.
 | `AGENT_ALLOW_HTTP` | `false` | Explicit opt-in to HTTP for trusted test/private networks |
 | `MONITOR_TOLERATED_ROUNDS` | `1` | Deprecated compatibility setting; resident contact uses a 45-second timeout |
 | `MONITOR_ALLOWED_LATENCY_SECONDS` | `0` | Deprecated compatibility setting; resident data freshness uses three sampling intervals (minimum 15 seconds) |
-| `AGENT_ARTIFACTS_DIR` | `/usr/local/bin` | Directory containing `agents-manifest.json` and both Linux amd64/arm64 agent binaries; validated at startup |
+| `AGENT_ARTIFACTS_DIR` | `/usr/local/bin` | Directory containing `agents-manifest.json` and Linux amd64/arm64 plus Windows amd64 agent binaries; validated at startup |
 | `METRICS_RETENTION_ENABLED` | `false` | Enable cleanup of eligible raw and rollup metrics older than 35 days; deletion also requires dry-run mode to be disabled |
 | `METRICS_RETENTION_DRY_RUN` | `true` | Report the cleanup plan without deleting; deletion requires `METRICS_RETENTION_ENABLED=true` and this value `false` |
 | `SSH_TIMEOUT` | `10` | SSH connection timeout (seconds) |

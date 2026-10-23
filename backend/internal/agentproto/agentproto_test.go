@@ -48,6 +48,39 @@ func TestVerifyAcceptsMatchingArtifacts(t *testing.T) {
 	}
 }
 
+func TestWindowsArtifactMustBeAMD64PE(t *testing.T) {
+	dir := t.TempDir()
+	agentprototest.WriteArtifacts(t, dir, "windows-test")
+	m := loadManifest(t, dir)
+	var windowsIndex int
+	for i, a := range m.Agents {
+		if a.Platform == "windows/amd64" {
+			windowsIndex = i
+		}
+	}
+	// A correctly hashed Linux executable must still be refused for Windows.
+	b, err := os.ReadFile(filepath.Join(dir, m.Agents[0].File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &m.Agents[windowsIndex]
+	if err = os.WriteFile(filepath.Join(dir, a.File), b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	a.Size = int64(len(b))
+	h := sha256.Sum256(b)
+	a.SHA256 = hex.EncodeToString(h[:])
+	if err = m.Verify(dir); err == nil {
+		t.Fatal("Linux executable accepted for Windows")
+	}
+	// Omitting the Windows artifact cannot silently ship a Linux-only image.
+	m.Agents = append(m.Agents[:windowsIndex], m.Agents[windowsIndex+1:]...)
+	writeManifest(t, dir, *m)
+	if _, err = agentproto.LoadManifest(dir); err == nil {
+		t.Fatal("missing Windows artifact accepted")
+	}
+}
+
 // TestVerifyRejectsTamperedArtifacts pins TC-08-08: a missing, resized, modified
 // or cross-wired artifact must fail startup validation.
 func TestVerifyRejectsTamperedArtifacts(t *testing.T) {

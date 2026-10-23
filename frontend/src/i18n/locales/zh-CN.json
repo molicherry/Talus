@@ -49,6 +49,7 @@
       "ssh_timeout": "连接节点超时，请检查网络后重试。",
       "deployment_timeout": "部署超时，系统会在下一轮自动重试。",
       "deployment_canceled": "部署已取消，系统会在下一轮自动重试。",
+      "agent_windows_service_unavailable": "Windows 需要管理员权限的 SSH 账号、PowerShell、运行中的任务计划程序，以及可写的本地 ProgramData 目录。",
       "service_manager_unavailable": "需要运行中的 systemd 和 flock。使用用户服务时，须为 SSH 账号启用 lingering。",
       "agent_health_check_failed": "新 Agent 未能联系 Hub，请检查 Hub 地址和出站访问。已有版本可用时会恢复原版本。",
       "agent_target_read_only": "持久安装目录不可写。",
@@ -378,6 +379,7 @@
       "peak": "峰值"
     },
     "series": {
+      "pageFile": "分页文件",
       "cpu": "CPU",
       "memory": "内存",
       "disk": "磁盘",
@@ -431,6 +433,8 @@
     "usageTrend": "使用率趋势",
     "network": "网络吞吐",
     "diskIo": "磁盘 I/O",
+    "pageFileUsage": "分页文件使用率",
+    "windowsLoadNotApplicable": "不适用：Windows 不提供 Linux 的负载均值。",
     "swapUsage": "Swap 使用率",
     "loadAverage": "负载均值",
     "lastCollected": "最后采集 {{time}}",
