@@ -119,13 +119,13 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 				}
 				script := decodeWindowsCommand(t, command)
 				switch {
-				case script == agentwindows.Probe:
+				case command == agentwindows.Command(agentwindows.Probe):
 					fmt.Fprint(ch, "TALUS_WINDOWS_V1\r\nAMD64\r\n")
-				case script == agentwindows.Context:
+				case command == agentwindows.Command(agentwindows.Context):
 					fmt.Fprintf(ch, `{"home":"C:\\ProgramData","admin":%t}`, scenario != "no-admin")
 				case strings.Contains(script, "# Abort before uploads"):
 					prepared.Store(true)
-				case strings.HasPrefix(script, "$ErrorActionPreference='Stop'; (Get-FileHash"):
+				case strings.Contains(script, "$ErrorActionPreference='Stop'; (Get-FileHash"):
 					m := regexp.MustCompile(`-LiteralPath '([^']+)'`).FindStringSubmatch(script)
 					if len(m) != 2 {
 						t.Error("missing hash path")

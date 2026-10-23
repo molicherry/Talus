@@ -11,10 +11,13 @@ on:
       - 'backend/internal/agentclient/**'
       - 'backend/internal/agentwindows/**'
       - 'backend/internal/agentwire/**'
+      - 'backend/internal/service/*windows*.go'
       - 'backend/cmd/agent/**'
       - 'backend/go.mod'
       - 'backend/go.sum'
       - '.github/workflows/windows-agent.yml'
+      - 'tests/coverage.json'
+      - 'tests/run-suites.mjs'
 
 permissions:
   contents: read
