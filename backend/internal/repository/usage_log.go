@@ -477,7 +477,7 @@ var usageReportActions = []string{
 
 	"server.create", "server.update", "server.delete", "server.host_key.trust", "server.exec", "server.terminal",
 	"credential.create", "credential.update", "credential.delete", "credential.reveal",
-	"api_key.create", "api_key.delete", "api_key.reveal",
+	"api_key.create", "api_key.delete", "api_key.rotate", "api_key.permissions.update", "api_key.reveal",
 	"service.create", "service.update", "service.delete", "service.relay", "service.credentials",
 }
 

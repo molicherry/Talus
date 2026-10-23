@@ -82,10 +82,12 @@ type RouteConfig struct {
 	MetricsHandler http.HandlerFunc
 
 	// API Keys
-	CreateAPIKeyHandler http.HandlerFunc
-	ListAPIKeysHandler  http.HandlerFunc
-	DeleteAPIKeyHandler http.HandlerFunc
-	RevealAPIKeyHandler http.HandlerFunc
+	CreateAPIKeyHandler            http.HandlerFunc
+	UpdateAPIKeyPermissionsHandler http.HandlerFunc
+	RotateAPIKeyHandler            http.HandlerFunc
+	ListAPIKeysHandler             http.HandlerFunc
+	DeleteAPIKeyHandler            http.HandlerFunc
+	RevealAPIKeyHandler            http.HandlerFunc
 
 	// Services
 	CreateServiceHandler         http.HandlerFunc
@@ -224,9 +226,12 @@ func NewRouter(cfg RouteConfig) chi.Router {
 
 		// API Key management
 		r.Route("/api/v1/api-keys", func(r chi.Router) {
+			r.Use(middleware.RequireAdminJWT)
 			r.Get("/", cfg.ListAPIKeysHandler)
 			r.Post("/", cfg.CreateAPIKeyHandler)
 			r.Route("/{id}", func(r chi.Router) {
+				r.Patch("/", cfg.UpdateAPIKeyPermissionsHandler)
+				r.With(cfg.RevealLimiter.Limit).Post("/rotate", cfg.RotateAPIKeyHandler)
 				r.Delete("/", cfg.DeleteAPIKeyHandler)
 			})
 

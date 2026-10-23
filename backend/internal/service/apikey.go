@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
+	"github.com/vpsmanager/backend/internal/gate"
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/crypto"
 	"github.com/vpsmanager/backend/internal/repository"
@@ -19,13 +21,16 @@ import (
 )
 
 type APIKeyService struct {
-	repo       *repository.APIKeyRepo
-	serverRepo *repository.ServerRepo
-	masterKey  *crypto.MasterKey
+	repo            *repository.APIKeyRepo
+	serverRepo      *repository.ServerRepo
+	masterKey       *crypto.MasterKey
+	permissionsGate *gate.Gate
+	terminals       *gate.Registry
 }
 
 func NewAPIKeyService(repo *repository.APIKeyRepo, serverRepo *repository.ServerRepo, masterKey *crypto.MasterKey) *APIKeyService {
-	return &APIKeyService{repo: repo, serverRepo: serverRepo, masterKey: masterKey}
+	return &APIKeyService{repo: repo, serverRepo: serverRepo, masterKey: masterKey,
+		permissionsGate: gate.New(repo.PermissionsRevision, repo.LockedPermissionsRevision), terminals: gate.NewRegistry()}
 }
 
 type CreateAPIKeyResult struct {
@@ -48,6 +53,9 @@ func resolveScopes(scopes *[]string) ([]string, error) {
 }
 
 func (s *APIKeyService) Create(ctx context.Context, name string, scopes *[]string, serverIDs []uint) (*CreateAPIKeyResult, error) {
+	if err := requireAPIKeyAdmin(ctx); err != nil {
+		return nil, err
+	}
 	resolved, err := resolveScopes(scopes)
 	if err != nil {
 		return nil, err
@@ -77,6 +85,26 @@ func (s *APIKeyService) Create(ctx context.Context, name string, scopes *[]strin
 		}
 	}
 
+	result, err := s.generateKey()
+	if err != nil {
+		return nil, err
+	}
+	k := result.APIKey
+	now := time.Now().UTC()
+	k.Name, k.Scopes, k.ServerIDs = name, resolved, serverIDs
+	k.PermissionsUpdatedAt = &now
+	p := mw.GetPrincipal(ctx)
+	if p.AuthType == "jwt" && p.UserID != nil {
+		k.UserID = *p.UserID
+	}
+	if err := s.repo.Create(ctx, k); err != nil {
+		return nil, fmt.Errorf("save key: %w", err)
+	}
+	return result, nil
+}
+
+// Creation and rotation use the same cryptographic randomness and encryption.
+func (s *APIKeyService) generateKey() (*CreateAPIKeyResult, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return nil, fmt.Errorf("generate key: %w", err)
@@ -102,31 +130,37 @@ func (s *APIKeyService) Create(ctx context.Context, name string, scopes *[]strin
 
 	k := &model.APIKey{
 		CryptoVersion:   crypto.VersionCurrent,
-		Name:            name,
 		KeyHash:         hashStr,
 		KeyPrefix:       prefix,
-		Scopes:          resolved,
-		ServerIDs:       serverIDs,
 		EncryptedRawKey: encryptedRaw,
 		Salt:            salt,
-	}
-	p := mw.GetPrincipal(ctx)
-	if p.AuthType == "jwt" && p.UserID != nil {
-		k.UserID = *p.UserID
-	}
-	if err := s.repo.Create(ctx, k); err != nil {
-		return nil, fmt.Errorf("save key: %w", err)
 	}
 
 	return &CreateAPIKeyResult{Key: rawStr, APIKey: k}, nil
 }
 
 func (s *APIKeyService) List(ctx context.Context) ([]model.APIKey, error) {
+	if err := requireAPIKeyAdmin(ctx); err != nil {
+		return nil, err
+	}
 	return s.repo.FindAll(ctx)
 }
 
 func (s *APIKeyService) Delete(ctx context.Context, id uint) error {
-	return s.repo.Delete(ctx, id)
+	if err := requireAPIKeyAdmin(ctx); err != nil {
+		return err
+	}
+	var revoked []*gate.Session
+	err := s.permissionsGate.Update(ctx, id, func(updateCtx context.Context, _ int64) (bool, error) {
+		err := s.repo.Delete(updateCtx, id)
+		unknown := errors.Is(err, repository.ErrAPIKeyCommitUnknown)
+		if err == nil || unknown {
+			revoked = s.terminals.MarkRevoked(id)
+		}
+		return unknown, err
+	})
+	s.finishPermissionChange(ctx, id, revoked, err)
+	return apiKeyPolicyError(err)
 }
 
 // CaptureSnapshot copies only the resource's safe historical label.
@@ -141,6 +175,9 @@ func (s *APIKeyService) CaptureSnapshot(ctx context.Context, id uint) {
 
 // Reveal decrypts and returns the raw API key string.
 func (s *APIKeyService) Reveal(ctx context.Context, id uint) (string, error) {
+	if err := requireAPIKeyAdmin(ctx); err != nil {
+		return "", err
+	}
 	k, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -168,7 +205,33 @@ func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*model.API
 	hashStr := hex.EncodeToString(hash[:])
 	key, err := s.repo.FindByHash(ctx, hashStr)
 	if err != nil {
-		return nil, fmt.Errorf("validate api key: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		return nil, gate.ErrUnavailable
+	}
+	err = s.permissionsGate.Admit(ctx, key.ID, func(revision int64) error {
+		if revision == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if revision != key.PermissionsRevision {
+			key, err = s.repo.FindByID(ctx, key.ID)
+			if err != nil {
+				return err
+			}
+		}
+		// Rotation may finish between the initial hash lookup and admission.
+		// Reloading by ID alone must never admit the replaced credential.
+		if key.KeyHash != hashStr {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		return nil, gate.ErrUnavailable
 	}
 	return key, nil
 }

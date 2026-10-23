@@ -150,6 +150,14 @@ Talus 附带一个**可移植的** [agent skill](../skills/talus/SKILL.md)，任
 - 一个 API 密钥——在 **Talus Web UI → API Keys** 创建（默认作用域覆盖读/执行/指标；
   `servers:write`、`services:relay` 及文件作用域需主动勾选）
 
+管理员可以在 **API Keys → 编辑权限** 中修改现有密钥的操作权限和服务器范围，调用方继续使用原密钥。密钥管理（含列表、创建、删除和查看原文）统一要求管理员 JWT；API Key 不能自行修改权限。
+
+复制按钮旁的 **更换密钥** 可在确认后生成新的安全随机值。旧值立即失效，使用它的终端连接会断开；ID、名称、所有者、权限和服务器范围保持不变。请将新值更新到使用该 Key 的应用。旧版仅有哈希的 Key 也能更换，更换后支持正常复制。`POST /api/v1/api-keys/{id}/rotate` 要求管理员 JWT 和 `{ "expected_revision": "…" }`，在标准 `data` 包装内返回 `{ "key": "…", "api_key": { … } }`，并设置 `Cache-Control: no-store`。更换和审计原子提交，递增 `permissions_revision`，但不修改 `permissions_updated_at`。遇到冲突或结果不确定时，应先刷新列表、复制当前密钥确认，不能自动重试更换。
+
+`PATCH /api/v1/api-keys/{id}` 接受 `expected_revision`（列表返回的 `permissions_revision` 十进制字符串）以及 `scopes`、`server_ids` 中至少一项。省略字段表示保持原值，`server_ids: []` 明确表示全部服务器；null、空 scopes 和未知权限会被拒绝。版本冲突返回 409，需要重新加载后编辑。权限变更与审计原子提交，并关闭该密钥已连接及正在准备的终端。新请求使用新权限，已获准执行的请求允许结束。
+
+升级保留已有权限和只有哈希的旧密钥，无需重新签发。完全缺少 scopes 列的旧数据库使用固定兼容基线：服务器读取、执行、终端、指标读取、凭据读取和服务读取。已有 NULL/空 scopes 不会被填入默认权限；已删除服务器的 ID 不会变成全部服务器授权。旧的 `services:read` 自动补权已退役，即使缺少旧迁移标记，也保留现存权限；启动日志会提示需要检查的密钥 ID，按需手动勾选服务读取权限。升级前停止旧 Hub 并保留数据库与原 master key；不要直接回退到会自动补权或不支持终端撤权的旧程序。
+
 ### 安装
 
 把 skill 复制到你所用 AI 工具的 skills 目录（skill 是可移植的，不要求放在本仓库内）：

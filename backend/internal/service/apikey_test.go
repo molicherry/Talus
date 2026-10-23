@@ -7,6 +7,8 @@ import (
 
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/server"
+	mw "github.com/vpsmanager/backend/internal/server/middleware"
+	"github.com/vpsmanager/backend/internal/usage"
 )
 
 func TestResolveScopes(t *testing.T) {
@@ -57,7 +59,9 @@ func TestCreateRejectsExplicitEmptyScopes(t *testing.T) {
 	// No repos needed: resolveScopes rejects before any repository call.
 	svc := NewAPIKeyService(nil, nil, nil)
 	empty := []string{}
-	if _, err := svc.Create(context.Background(), "name", &empty, nil); err == nil {
+	uid := uint(1)
+	ctx := mw.WithPrincipal(context.Background(), usage.Principal{AuthType: "jwt", UserID: &uid, Role: "admin"})
+	if _, err := svc.Create(ctx, "name", &empty, nil); err == nil {
 		t.Fatal("expected Create to reject an explicit empty scope list")
 	}
 }

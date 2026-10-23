@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/vpsmanager/backend/internal/gate"
 	"github.com/vpsmanager/backend/internal/pkg/token"
 	"github.com/vpsmanager/backend/internal/usage"
 )
@@ -75,6 +76,10 @@ func Auth(jwtSvc *token.JWTService, keyValidator any, userGate UserGate) func(ht
 			if apiKey := r.Header.Get("X-API-Key"); apiKey != "" {
 				principal, err := validateAPIKeyIdentity(r.Context(), keyValidator, apiKey)
 				if err != nil {
+					if errors.Is(err, gate.ErrUnavailable) {
+						writeAuthError(w, r, http.StatusServiceUnavailable, "api key permissions unavailable")
+						return
+					}
 					writeAuthError(w, r, http.StatusUnauthorized, "invalid api key")
 					return
 				}
@@ -148,6 +153,18 @@ func Auth(jwtSvc *token.JWTService, keyValidator any, userGate UserGate) func(ht
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// RequireAdminJWT is independent of role-like fields on API key identities.
+func RequireAdminJWT(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := GetPrincipal(r.Context())
+		if p.AuthType != "jwt" || p.Role != "admin" || p.UserID == nil || *p.UserID == 0 {
+			writeAuthError(w, r, http.StatusForbidden, "administrator login required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func validateAPIKeyIdentity(ctx context.Context, validator any, raw string) (usage.Principal, error) {

@@ -116,7 +116,31 @@
     "deleteMessage": "确定删除「{{name}}」吗？使用该密钥的应用会立即失去访问权限。",
     "deleteFailed": "删除密钥失败",
     "serversNoneSelected": "请至少选择一台服务器",
-    "prefix": "前缀"
+    "prefix": "前缀",
+    "edit": "编辑权限",
+    "editTitle": "编辑权限：{{name}}",
+    "editHint": "密钥保持不变。保存权限变更会关闭使用此密钥的终端连接，已获准执行的请求允许结束。",
+    "updated": "权限已更新，密钥保持不变。",
+    "errorConflict": "权限已被其他管理员修改。草稿已保留，请重新加载最新配置后再保存。",
+    "errorNotFound": "此 API Key 已被删除。",
+    "errorValidation": "请检查所选权限和服务器后重试。",
+    "errorUncertain": "暂时无法确认修改结果，请重新加载最新配置以确认是否已保存。",
+    "reloadLatest": "加载最新配置并放弃草稿",
+    "deletedServer": "已不可用的服务器 #{{id}}",
+    "legacyScopesHint": "此密钥含旧版权限，可能包含通配符访问。仅修改服务器范围会保留它们；编辑操作权限时，请明确移除旧版项或选择预设。",
+    "removeLegacyScopes": "移除旧版权限项",
+    "editUnavailable": "请升级后端后编辑此密钥的权限。",
+    "rotate": "更换密钥",
+    "rotateMessage": "确定为“{{name}}”生成新的随机密钥吗？旧密钥将立即失效，使用它的终端连接会断开。名称、权限和服务器范围保持不变。",
+    "rotateConfirm": "确认更换",
+    "rotating": "正在更换…",
+    "rotated": "密钥已更换",
+    "rotatedHint": "请复制新密钥并更新使用它的应用，旧密钥已失效。之后也可以在列表中再次复制当前密钥。",
+    "rotateUncertain": "暂时无法确认更换结果。请刷新列表并复制当前密钥确认后，再决定是否更换。",
+    "rotateRefreshHint": "请先刷新列表再进行更换。如果上次结果未确认，请复制当前密钥核实其值。",
+    "reloadKeys": "刷新密钥列表",
+    "rotateConflict": "该密钥已被其他操作更新，请刷新密钥列表后再更换。",
+    "rotateUnavailable": "请升级后端后更换此密钥。"
   },
   "app": {
     "name": "Talus",
@@ -299,7 +323,8 @@
     "sftp_text_too_large": "文本编辑仅支持 1 MiB 以内的文件",
     "sftp_not_text": "此文件不是 UTF-8 文本",
     "sftp_not_directory": "此操作仅支持目录",
-    "sftp_invalid_range": "下载的字节范围无效"
+    "sftp_invalid_range": "下载的字节范围无效",
+    "api_key_revision_conflict": "权限已被其他管理员修改。草稿已保留，请重新加载最新配置后再保存。"
   },
   "exec": {
     "execute": "执行",
@@ -796,7 +821,9 @@
       "connection_revision": "连接配置版本",
       "jump_server_id": "跳板服务器 ID",
       "connection_stage": "连接阶段",
-      "connection_role": "连接角色"
+      "connection_role": "连接角色",
+      "permissions_revision_before": "修改前权限版本",
+      "permissions_revision_after": "修改后权限版本"
     },
     "actions": {
       "server_create": "创建服务器",
@@ -832,7 +859,9 @@
       "server_sftp_upload_status": "查询上传进度",
       "server_sftp_upload_chunk": "上传文件分块",
       "server_sftp_upload_complete": "完成上传",
-      "server_sftp_upload_cancel": "放弃未完成上传"
+      "server_sftp_upload_cancel": "放弃未完成上传",
+      "api_key_permissions_update": "修改 API Key 权限",
+      "api_key_rotate": "更换 API Key"
     },
     "resourceTypes": {
       "server": "服务器",

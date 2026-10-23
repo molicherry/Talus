@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/gate"
 	"github.com/vpsmanager/backend/internal/pkg/token"
 	"github.com/vpsmanager/backend/internal/server"
 	"github.com/vpsmanager/backend/internal/server/middleware"
@@ -32,6 +33,9 @@ func TestAuthMiddlewareReasons(t *testing.T) {
 	badKey := middleware.APIKeyValidatorFunc(func(context.Context, string) (uint, string, string, []string, []uint, error) {
 		return 0, "", "", nil, nil, errors.New("nope")
 	})
+	unavailableKey := middleware.APIKeyValidatorFunc(func(context.Context, string) (uint, string, string, []string, []uint, error) {
+		return 0, "", "", nil, nil, gate.ErrUnavailable
+	})
 
 	handler := func(next middleware.APIKeyValidator) http.Handler {
 		return middleware.Auth(jwtSvc, next, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -50,6 +54,7 @@ func TestAuthMiddlewareReasons(t *testing.T) {
 		{"no credentials", noScope, "", "", http.StatusUnauthorized, server.ReasonUnauthorized},
 		{"malformed bearer", noScope, "", "not-a-jwt", http.StatusUnauthorized, server.ReasonUnauthorized},
 		{"rejected api key", badKey, "tk_bad", "", http.StatusUnauthorized, server.ReasonUnauthorized},
+		{"key permissions unavailable", unavailableKey, "tk_ok", "", http.StatusServiceUnavailable, server.ReasonUnavailable},
 		// GET /api/v1/servers requires servers:read, which this key lacks.
 		{"api key without the scope", noScope, "tk_ok", "", http.StatusForbidden, server.ReasonForbidden},
 	}

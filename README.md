@@ -278,6 +278,14 @@ registered services, manage files over SFTP, and add/update servers.
 - An API key — create one in **Talus Web UI → API Keys** (default scopes cover
   read/exec/metrics; `servers:write`, `services:relay`, and file scopes are opt-in)
 
+Administrators can edit an existing key in **API Keys → Edit permissions**. The original key stays valid; scopes and server access are updated in place. Key management (including list, create, delete and reveal) now requires an administrator JWT. API keys cannot modify themselves.
+
+**Rotate key**, next to Copy, replaces the secret with a new cryptographically random value after confirmation. The old value immediately stops authenticating and its terminal sessions close; ID, name, ownership, permissions and server scope stay unchanged. Copy the replacement into applications that use the key. Legacy hash-only keys can also be rotated and then copied normally. `POST /api/v1/api-keys/{id}/rotate` requires an administrator JWT and `{ "expected_revision": "…" }`; it returns `{ "key": "…", "api_key": { … } }` inside the usual `data` envelope with `Cache-Control: no-store`. Rotation and its audit commit together, advancing `permissions_revision` without changing `permissions_updated_at`. A conflict or uncertain result requires reloading the list and checking the current key before another attempt.
+
+`PATCH /api/v1/api-keys/{id}` accepts `expected_revision` (the decimal string from `permissions_revision`) and one or both of `scopes` / `server_ids`. Omitted fields stay unchanged; `server_ids: []` explicitly allows all servers. Null fields, empty scopes and unknown scopes are rejected. A stale revision returns 409; reload before saving again. Successful changes are audited atomically and close that key's preparing/active terminals. New requests use the saved permissions; requests already admitted may finish.
+
+Upgrades preserve explicit legacy policies and hash-only keys without reissuing secrets. A database with no scopes column receives a fixed read/exec/terminal/metrics/credential/service-read baseline. Existing null/empty scopes are not filled, and removed server IDs do not become unrestricted access. The historical automatic `services:read` grant is retired: keys lacking that scope keep their current policy, even when an old migration marker is missing. Startup reports IDs to review; grant the scope explicitly if needed. Stop the old Hub and retain the database/master key before upgrading. Do not roll back to a binary that regrants scopes or lacks terminal revocation.
+
 ### Install
 
 Copy the skill into your AI tool's skills directory (the skill is portable

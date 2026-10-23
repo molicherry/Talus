@@ -1,5 +1,7 @@
 // Package gate serializes per-user admission, terminal registration and password
 // changes. Version reads use the primary database and never a positive cache.
+// API key permissions reuse separate Gate and Registry instances: IDs in those
+// instances identify keys, never their owners, so the namespaces cannot collide.
 package gate
 
 import (

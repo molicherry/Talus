@@ -38,9 +38,11 @@ check("5xx is a server error", () => {
   assert.equal(apiKeyErrorKind(withStatus(503)), "server");
 });
 
-check("other 4xx is unknown", () => {
-  assert.equal(apiKeyErrorKind(withStatus(400)), "unknown");
-  assert.equal(apiKeyErrorKind(withStatus(404)), "unknown");
+check("validation, deletion, and conflicts have actionable errors", () => {
+  assert.equal(apiKeyErrorKind(withStatus(400)), "validation");
+  assert.equal(apiKeyErrorKind(withStatus(404)), "notFound");
+  assert.equal(apiKeyErrorKind(withStatus(409)), "conflict");
+  assert.equal(apiKeyErrorKind({ reason: "api_key_revision_conflict" }), "conflict");
   assert.equal(apiKeyErrorKind(withStatus(422)), "unknown");
 });
 

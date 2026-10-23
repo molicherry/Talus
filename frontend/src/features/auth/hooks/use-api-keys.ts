@@ -1,8 +1,9 @@
 import { invalidateQueries, useMutation, useQuery } from "../../../lib/query";
-import { createAPIKey, deleteAPIKey, listAPIKeys, revealAPIKey } from "../api-keys";
+import { createAPIKey, deleteAPIKey, listAPIKeys, revealAPIKey, rotateAPIKey, updateAPIKeyPermissions } from "../api-keys";
 
-export function useAPIKeys() {
+export function useAPIKeys(enabled = true) {
   return useQuery({
+    enabled,
     queryKey: ["api-keys"],
     queryFn: listAPIKeys,
     staleTime: 30_000,
@@ -15,6 +16,20 @@ export function useCreateAPIKey() {
     onSuccess: () => {
       invalidateQueries(["api-keys"]);
     },
+  });
+}
+
+export function useUpdateAPIKeyPermissions() {
+  return useMutation({
+    mutationFn: updateAPIKeyPermissions,
+    onSuccess: () => { invalidateQueries(["api-keys"]); },
+  });
+}
+
+export function useRotateAPIKey() {
+  return useMutation({
+    mutationFn: rotateAPIKey,
+    onSuccess: () => { invalidateQueries(["api-keys"]); },
   });
 }
 

@@ -115,5 +115,19 @@ func (r *APIKeyRepo) FindByID(ctx context.Context, id uint) (*model.APIKey, erro
 }
 
 func (r *APIKeyRepo) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Delete(&model.APIKey{}, id).Error
+	tx := r.db.WithContext(ctx).Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)}).Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer tx.Rollback()
+	if err := tx.Delete(&model.APIKey{}, id).Error; err != nil {
+		return err
+	}
+	if err := tx.Commit().Error; err != nil {
+		if commitDefinitelyRolledBack(err) {
+			return err
+		}
+		return ErrAPIKeyCommitUnknown
+	}
+	return nil
 }

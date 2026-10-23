@@ -87,6 +87,8 @@ type TerminalService struct {
 	sshSvc            *SSHService
 	registry          *gate.Registry
 	userGate          mw.UserGate
+	apiKeyGate        mw.UserGate
+	apiKeyRegistry    *gate.Registry
 	keepaliveInterval time.Duration
 	keepaliveTimeout  time.Duration
 }
@@ -98,6 +100,11 @@ func NewTerminalService(sshSvc *SSHService) *TerminalService { return &TerminalS
 func (s *TerminalService) SetSessionRegistry(r *gate.Registry) { s.registry = r }
 
 func (s *TerminalService) SetUserGate(g mw.UserGate) { s.userGate = g }
+
+// SetAPIKeyPermissions uses a separate subject namespace from JWT users.
+func (s *TerminalService) SetAPIKeyPermissions(g mw.UserGate, r *gate.Registry) {
+	s.apiKeyGate, s.apiKeyRegistry = g, r
+}
 
 var errTerminalRevoked = errors.New("terminal session revoked")
 
@@ -207,27 +214,42 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 	writer := newTerminalWriter(wsConn)
 
 	claims := mw.GetUserClaims(ctx)
-	if claims != nil && claims.TokenVersion != nil {
-		if s.userGate == nil || s.registry == nil {
-			result.Outcome, result.Reason, result.CloseReason = "rejected", "terminal_auth_failed", "revoked"
+	principal := mw.GetPrincipal(ctx)
+	sessionRegistry, admissionGate := s.registry, s.userGate
+	var subjectID uint
+	var expectedVersion int64
+	managed := false
+	revokedReason, revokedCloseReason := "session_revoked", "revoked"
+	if principal.AuthType == "api_key" {
+		managed = true
+		sessionRegistry, admissionGate = s.apiKeyRegistry, s.apiKeyGate
+		if principal.APIKeyID != nil {
+			subjectID = *principal.APIKeyID
+		}
+		expectedVersion = principal.PermissionsRevision
+		revokedReason, revokedCloseReason = "api_key_permissions_changed", "api_key_permissions_changed"
+	} else if claims != nil && claims.TokenVersion != nil {
+		managed = true
+		subjectID, expectedVersion = claims.UserID, *claims.TokenVersion
+	}
+	if managed {
+		if admissionGate == nil || sessionRegistry == nil || subjectID == 0 || (principal.AuthType == "api_key" && expectedVersion <= 0) {
+			result.Outcome, result.Reason, result.CloseReason = "rejected", "terminal_auth_failed", revokedCloseReason
 			result.ClosedAt = time.Now().UTC()
-			refuseTerminal(writer, terminalRevokedCloseCode, "revoked", "session revoked")
+			refuseTerminal(writer, terminalRevokedCloseCode, revokedCloseReason, "session revoked")
 			return result, gate.ErrUnavailable
 		}
-		err = s.userGate.Admit(sessionCtx, claims.UserID, func(version int64) error {
-			if *claims.TokenVersion != version {
+		err = admissionGate.Admit(sessionCtx, subjectID, func(version int64) error {
+			if expectedVersion != version {
 				return errTerminalRevoked
 			}
-			reg = s.registry.Register(claims.UserID, version, cancel, force)
+			reg = sessionRegistry.Register(subjectID, version, cancel, force)
 			return nil
 		})
 		if err != nil {
-			// The token version is stale: the credentials are valid but revoked. Without
-			// an explicit refusal the browser only sees an abnormal close and retries
-			// with the same token forever (R03).
-			result.Outcome, result.Reason, result.CloseReason = "rejected", "terminal_auth_failed", "revoked"
+			result.Outcome, result.Reason, result.CloseReason = "rejected", "terminal_auth_failed", revokedCloseReason
 			result.ClosedAt = time.Now().UTC()
-			refuseTerminal(writer, terminalRevokedCloseCode, "revoked", "session revoked")
+			refuseTerminal(writer, terminalRevokedCloseCode, revokedCloseReason, "session revoked")
 			return result, err
 		}
 	}
@@ -249,7 +271,7 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 		case <-ended:
 		case <-sessionCtx.Done():
 			if reg != nil && reg.State() == gate.StateRevoked {
-				end("cancelled", "session_revoked", "revoked")
+				end("cancelled", revokedReason, revokedCloseReason)
 			} else {
 				end("cancelled", "client_cancelled", "client_cancelled")
 			}
@@ -292,9 +314,9 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 			const noticeBudget = 100 * time.Millisecond
 			notified := true
 			switch {
-			case event.Reason == "session_revoked":
-				notified = writer.tryWriteJSON(wsMessage{Type: "error", Reason: "revoked", Data: "session revoked"}, noticeBudget)
-				writer.closeWith(terminalRevokedCloseCode, "revoked", noticeBudget)
+			case event.Reason == "session_revoked" || event.Reason == "api_key_permissions_changed":
+				notified = writer.tryWriteJSON(wsMessage{Type: "error", Reason: event.CloseReason, Data: "session revoked"}, noticeBudget)
+				writer.closeWith(terminalRevokedCloseCode, event.CloseReason, noticeBudget)
 			case event.Reason == "client_cancelled":
 				notified = writer.tryWriteJSON(wsMessage{Type: "disconnected"}, noticeBudget)
 				writer.closeWith(websocket.CloseNormalClosure, "", noticeBudget)
@@ -369,12 +391,12 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 		}
 		result.ClosedAt = time.Now().UTC()
 		if reg != nil {
-			s.registry.Done(reg.ID)
+			sessionRegistry.Done(reg.ID)
 		}
 	}()
 	startFailed := func(reason string) {
 		if reg != nil && reg.State() == gate.StateRevoked {
-			end("cancelled", "session_revoked", "revoked")
+			end("cancelled", revokedReason, revokedCloseReason)
 		} else if ctx.Err() != nil {
 			end("cancelled", "client_cancelled", "client_cancelled")
 		} else {
@@ -428,14 +450,14 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 		return result, err
 	}
 	if reg != nil {
-		err := s.userGate.Admit(sessionCtx, claims.UserID, func(version int64) error {
-			if version != reg.Version || !s.registry.Admit(reg.ID) {
+		err := admissionGate.Admit(sessionCtx, subjectID, func(version int64) error {
+			if version != reg.Version || !sessionRegistry.Admit(reg.ID) {
 				return errTerminalRevoked
 			}
 			return nil
 		})
 		if err != nil {
-			end("cancelled", "session_revoked", "revoked")
+			end("cancelled", revokedReason, revokedCloseReason)
 			return result, err
 		}
 	}
@@ -512,14 +534,14 @@ func (s *TerminalService) runSession(ctx context.Context, serverID uint, wsConn 
 			if reg != nil {
 				// Permission is serialized with password COMMIT; the potentially
 				// blocked write is performed after releasing the user gate.
-				err := s.userGate.Admit(sessionCtx, claims.UserID, func(version int64) error {
-					if version != reg.Version || !s.registry.InputPermit(reg.ID) {
+				err := admissionGate.Admit(sessionCtx, subjectID, func(version int64) error {
+					if version != reg.Version || !sessionRegistry.InputPermit(reg.ID) {
 						return errTerminalRevoked
 					}
 					return nil
 				})
 				if err != nil {
-					end("cancelled", "session_revoked", "revoked")
+					end("cancelled", revokedReason, revokedCloseReason)
 					return
 				}
 			}

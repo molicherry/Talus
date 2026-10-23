@@ -17,18 +17,20 @@ var AllScopeGatedScopes = []string{
 }
 
 type APIKey struct {
-	CryptoVersion       int       `gorm:"type:smallint;not null;default:1" json:"-"`
-	ID                  uint      `gorm:"primaryKey;index:idx_api_key_legacy_owner,where:owner_binding_version = 0 AND (user_id = 0 OR user_id IS NULL)" json:"id"`
-	UserID              uint      `gorm:"default:0;index" json:"-"`
-	OwnerBindingVersion uint8     `gorm:"type:smallint;not null;default:1" json:"-"`
-	Name                string    `gorm:"size:128;not null" json:"name"`
-	KeyHash             string    `gorm:"uniqueIndex;not null" json:"-"`
-	KeyPrefix           string    `gorm:"size:16;not null" json:"key_prefix"`
-	Scopes              []string  `gorm:"type:jsonb;serializer:json;default:'[\"servers:read\",\"servers:exec\",\"servers:terminal\",\"metrics:read\",\"credentials:read\"]'" json:"scopes"`
-	ServerIDs           []uint    `gorm:"type:jsonb;serializer:json" json:"server_ids,omitempty"`
-	EncryptedRawKey     string    `gorm:"type:text" json:"-"`
-	Salt                []byte    `gorm:"type:bytea" json:"-"`
-	CreatedAt           time.Time `gorm:"not null" json:"created_at"`
+	CryptoVersion        int        `gorm:"type:smallint;not null;default:1" json:"-"`
+	ID                   uint       `gorm:"primaryKey;index:idx_api_key_legacy_owner,where:owner_binding_version = 0 AND (user_id = 0 OR user_id IS NULL)" json:"id"`
+	UserID               uint       `gorm:"default:0;index" json:"-"`
+	OwnerBindingVersion  uint8      `gorm:"type:smallint;not null;default:1" json:"-"`
+	Name                 string     `gorm:"size:128;not null" json:"name"`
+	KeyHash              string     `gorm:"uniqueIndex;not null" json:"-"`
+	KeyPrefix            string     `gorm:"size:16;not null" json:"key_prefix"`
+	Scopes               []string   `gorm:"type:jsonb;serializer:json;default:'[\"servers:read\",\"servers:exec\",\"servers:terminal\",\"metrics:read\",\"credentials:read\",\"services:read\"]'" json:"scopes"`
+	ServerIDs            []uint     `gorm:"type:jsonb;serializer:json" json:"server_ids,omitempty"`
+	EncryptedRawKey      string     `gorm:"type:text" json:"-"`
+	Salt                 []byte     `gorm:"type:bytea" json:"-"`
+	CreatedAt            time.Time  `gorm:"not null" json:"created_at"`
+	PermissionsRevision  int64      `gorm:"not null;default:1;check:api_key_permissions_revision_positive,permissions_revision > 0" json:"permissions_revision,string"`
+	PermissionsUpdatedAt *time.Time `json:"permissions_updated_at"`
 }
 
 func (APIKey) TableName() string { return "api_keys" }
