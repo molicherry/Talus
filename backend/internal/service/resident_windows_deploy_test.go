@@ -73,7 +73,7 @@ func decodeWindowsCommand(t *testing.T, command string) string {
 		u[i] = binary.LittleEndian.Uint16(b[2*i:])
 	}
 	s := string(utf16.Decode(u))
-	if strings.HasPrefix(s, "$m=New-Object") {
+	if strings.Contains(s, "$m=New-Object IO.MemoryStream") {
 		m := regexp.MustCompile(`FromBase64String\('([^']+)'\)`).FindStringSubmatch(s)
 		if len(m) != 2 {
 			t.Fatal("invalid compressed command")

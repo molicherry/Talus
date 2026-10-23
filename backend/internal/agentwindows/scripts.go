@@ -89,9 +89,12 @@ func (l Layout) Root() string  { return l.Home + "/Talus-Agent" }
 func (l Layout) Base() string  { return l.Root() + "/" + l.InstallID }
 func (l Layout) Stage() string { return l.Base() + "/staging/" + l.Attempt }
 func (l Layout) Name() string  { return "Talus-Agent-" + l.InstallID }
-func (l Layout) vars() string {
+func (l Layout) baseVars() string {
 	return systemModules + "$ErrorActionPreference='Stop'\n$ProgressPreference='SilentlyContinue'\n" +
-		"$root=" + Quote(l.Root()) + "\n$base=" + Quote(l.Base()) + "\n$stage=" + Quote(l.Stage()) + "\n$name=" + Quote(l.Name()) + "\n$task=" + Quote(l.Name()+"-Deploy-"+l.Attempt) + "\n"
+		"$root=" + Quote(l.Root()) + "\n$base=" + Quote(l.Base()) + "\n$name=" + Quote(l.Name()) + "\n"
+}
+func (l Layout) vars() string {
+	return l.baseVars() + "$stage=" + Quote(l.Stage()) + "\n$task=" + Quote(l.Name()+"-Deploy-"+l.Attempt) + "\n"
 }
 func (l Layout) Prepare() string { return l.vars() + common + prepare }
 func (l Layout) Activate(binaryHash, configHash string) string {
@@ -106,7 +109,7 @@ func (l Layout) ActivationFile(binaryHash, configHash string) []byte {
 func (l Layout) Launch(scriptHash string) string {
 	return l.vars() + "$scriptHash=" + Quote(scriptHash) + "\n" + launch
 }
-func (l Layout) Remove() string { return l.vars() + common + remove }
+func (l Layout) Remove() string { return l.baseVars() + common + remove }
 
 // RemoveDetached lets a committed Hub deletion finish cleanup even if an
 // activation still holds the lock or the SSH/request cleanup budget expires.
@@ -115,13 +118,13 @@ func (l Layout) RemoveDetached() string {
 	cleanup := "try {\n" + remove + "\n} finally { Unregister-ScheduledTask -TaskName ($name+'-Remove') -Confirm:$false -ErrorAction SilentlyContinue; Remove-Item -LiteralPath (Join-Path $root ($name+'.remove.ps1')) -Force -ErrorAction SilentlyContinue }\n"
 	// Share the helper source with the detached script instead of transmitting
 	// it twice, leaving room for long ProgramData paths under cmd.exe's limit.
-	return l.vars() + "$support=" + Quote(common) + "\n. ([ScriptBlock]::Create($support))\n" + `Assert-Admin
+	return l.baseVars() + "$support=" + Quote(common) + "\n. ([ScriptBlock]::Create($support))\n" + `Assert-Admin
 Assert-Path $root
 if (!(Test-Path -LiteralPath $root) -and !(Get-Service -Name $name -ErrorAction SilentlyContinue)) { exit 0 }
 Protect-Directory $root
 $script=Join-Path $root ($name+'.remove.ps1')
 Assert-Path $script
-` + "[IO.File]::WriteAllText($script,(" + Quote(l.vars()) + "+$support+" + Quote(cleanup) + "),(New-Object Text.UTF8Encoding($true)))\n" + `$task=$name+'-Remove'
+` + "[IO.File]::WriteAllText($script,(" + Quote(l.baseVars()) + "+$support+" + Quote(cleanup) + "),(New-Object Text.UTF8Encoding($true)))\n" + `$task=$name+'-Remove'
 $exe=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
 $action=New-ScheduledTaskAction -Execute $exe -Argument ('-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$script+'"')
 $principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest

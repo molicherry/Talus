@@ -27,7 +27,9 @@ func TestWindowsNativeDeploymentUpgradeRollbackAndRemoval(t *testing.T) {
 	run := func(script string) ([]byte, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 		defer cancel()
-		return exec.CommandContext(ctx, "powershell.exe", strings.Fields(Command(script))[1:]...).CombinedOutput()
+		// Exercise cmd.exe's real command-length and quoting rules, as used by
+		// the default Windows OpenSSH shell, before invoking PowerShell 5.1.
+		return exec.CommandContext(ctx, "cmd.exe", "/d", "/c", Command(script)).CombinedOutput()
 	}
 	mustRun := func(script string) {
 		t.Helper()
