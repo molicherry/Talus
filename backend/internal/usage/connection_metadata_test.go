@@ -21,3 +21,23 @@ func TestConnectionMetadataIsBoundedAndCannotCarrySecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestAPIKeyPermissionMetadataIsBounded(t *testing.T) {
+	for _, key := range []string{"permissions_revision_before", "permissions_revision_after"} {
+		for _, v := range []string{"1", "9223372036854775807"} {
+			if value, ok := normalizeMetadata(key, v); !ok || value != v {
+				t.Fatal("valid revision lost")
+			}
+		}
+		for _, v := range []any{"0", "-1", "01", "9223372036854775808", "private-material", 1} {
+			if _, ok := normalizeMetadata(key, v); ok {
+				t.Fatal("accepted invalid revision metadata")
+			}
+		}
+	}
+	for _, reason := range []string{"api_key_permissions_changed", "api_key_revision_conflict"} {
+		if safeReason(reason) != reason {
+			t.Fatal("permission reason lost")
+		}
+	}
+}

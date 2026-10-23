@@ -215,7 +215,7 @@ function UsageLogsSession({ authEpoch }: { authEpoch: number }) {
             {detailField(t("usage.exitCode"), detail.data.exit_code)}
             {detailField(t("usage.errorReason"), safeReason(detail.data.error_reason))}
             {detailField(t("usage.recoveryReason"), safeReason(detail.data.recovery_reason))}
-            {["timeout_seconds", "bytes_copied", "upstream_method", "close_reason", "handshake_at", "authenticated_at", "ready_at", "closed_at", "connection_mode", "connection_revision", "jump_server_id", "connection_stage", "connection_role"].map(key => {
+            {["permissions_revision_before", "permissions_revision_after", "timeout_seconds", "bytes_copied", "upstream_method", "close_reason", "handshake_at", "authenticated_at", "ready_at", "closed_at", "connection_mode", "connection_revision", "jump_server_id", "connection_stage", "connection_role"].map(key => {
               const value = detail.data!.metadata?.[key];
               if (value == null) return null;
               const translationKey = typeof value === "string" ? key === "connection_mode" ? `server.connection.${value}` : key === "connection_stage" ? `server.connection.stages.${value}` : key === "connection_role" ? `server.connection.roles.${value}` : undefined : undefined;

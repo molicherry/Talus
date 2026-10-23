@@ -1,10 +1,13 @@
-import { Copy, Key, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Copy, Key, Loader2, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { ConfirmDialog } from "../../../components/ui/confirm-dialog";
+import { Dialog } from "../../../components/ui/dialog";
 import { Field, Input } from "../../../components/ui/field";
 import { TBody, Table, TableCard, Td, Th, THead } from "../../../components/ui/table";
+import { useAuth } from "../../../hooks/use-auth";
+import { listAPIKeys, type APIKey } from "../api-keys";
 import { useTranslation } from "../../../i18n";
 import { toast } from "../../../lib/toast";
 import { cn } from "../../../lib/utils";
@@ -13,8 +16,10 @@ import { apiKeyErrorKind } from "../lib/api-key-error";
 import {
   useAPIKeys,
   useCreateAPIKey,
+  useUpdateAPIKeyPermissions,
   useDeleteAPIKey,
   useRevealAPIKey,
+  useRotateAPIKey,
 } from "../hooks/use-api-keys";
 
 const ALL_SCOPES = [
@@ -53,7 +58,7 @@ const PRESET_OPS: Scope[] = [
 
 type PresetID = "readonly" | "ops" | "custom";
 
-function sameSet(a: readonly string[], b: readonly string[]): boolean {
+function sameSet<T>(a: readonly T[], b: readonly T[]): boolean {
   if (a.length !== b.length) return false;
   const set = new Set(a);
   return b.every((item) => set.has(item));
@@ -68,27 +73,54 @@ function detectPreset(scopes: readonly string[]): PresetID {
 export function ApiKeysPage() {
   const { t } = useTranslation();
 
-  const keysQuery = useAPIKeys();
+  const { isAdmin } = useAuth();
+  const keysQuery = useAPIKeys(isAdmin);
   const serversQuery = useServers();
   const createMutation = useCreateAPIKey();
+  const updateMutation = useUpdateAPIKeyPermissions();
   const deleteMutation = useDeleteAPIKey();
   const revealMutation = useRevealAPIKey();
+  const rotateMutation = useRotateAPIKey();
 
   const keys = keysQuery.data;
 
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
-  const [newScopes, setNewScopes] = useState<Scope[]>([...PRESET_OPS]);
+  const [newScopes, setNewScopes] = useState<string[]>([...PRESET_OPS]);
   const [serverMode, setServerMode] = useState<"all" | "specific">("all");
   const [newServerIDs, setNewServerIDs] = useState<number[]>([]);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
+  const [rotateTarget, setRotateTarget] = useState<APIKey | null>(null);
+  const [rotatedKey, setRotatedKey] = useState<string | null>(null);
+  const [rotationNeedsRefresh, setRotationNeedsRefresh] = useState(false);
+  const [rotationRefreshing, setRotationRefreshing] = useState(false);
 
+  const [editTarget, setEditTarget] = useState<APIKey | null>(null);
+  const [refreshRequired, setRefreshRequired] = useState(false);
+  const [refreshingEdit, setRefreshingEdit] = useState(false);
+  const formPending = createMutation.isPending || updateMutation.isPending || refreshingEdit || rotateMutation.isPending;
   const servers = serversQuery.data ?? [];
+  const serverOptions = servers.map(({ id, name }) => ({ id, name }));
+  if (editTarget && !serversQuery.isLoading && !serversQuery.isError) {
+    for (const id of editTarget.server_ids ?? []) {
+      if (!serverOptions.some((server) => server.id === id)) serverOptions.push({ id, name: t("apiKeys.deletedServer", { id }) });
+    }
+  }
+  const scopesChanged = editTarget !== null && !sameSet(newScopes, editTarget.scopes);
+  const selectedServerIDs = serverMode === "all" ? [] : newServerIDs;
+  const serversChanged = editTarget !== null && !sameSet(selectedServerIDs, editTarget.server_ids ?? []);
+  const hasUnknownScopes = newScopes.some((scope) => !(ALL_SCOPES as readonly string[]).includes(scope));
 
   const errorText = (error: unknown): string => {
     switch (apiKeyErrorKind(error)) {
+      case "conflict":
+        return t("apiKeys.errorConflict");
+      case "notFound":
+        return t("apiKeys.errorNotFound");
+      case "validation":
+        return t("apiKeys.errorValidation");
       case "unauthorized":
         return t("apiKeys.errorUnauthorized");
       case "forbidden":
@@ -125,6 +157,7 @@ export function ApiKeysPage() {
     setServerMode("all");
     setNewServerIDs([]);
     setCreateError(null);
+    setRefreshRequired(false);
   };
 
   // "Specific servers" needs a usable selection: while the options are
@@ -134,7 +167,10 @@ export function ApiKeysPage() {
     serverMode === "all" ||
     (!serversQuery.isLoading && !serversQuery.isError && newServerIDs.length > 0);
   const canCreate =
-    newName.trim() !== "" && newScopes.length > 0 && !createMutation.isPending && serversReady;
+    newName.trim() !== "" && newScopes.length > 0 && !formPending && serversReady;
+  const canUpdate = editTarget?.permissions_revision && !formPending && !refreshRequired &&
+    (scopesChanged || serversChanged) && (!scopesChanged || (newScopes.length > 0 && !hasUnknownScopes)) &&
+    (!serversChanged || serversReady);
 
   const handleCreate = () => {
     setCreateError(null);
@@ -152,6 +188,55 @@ export function ApiKeysPage() {
     });
   };
 
+  const openEdit = (key: APIKey) => {
+    setEditTarget(key);
+    setNewName(key.name);
+    setNewScopes([...key.scopes]);
+    setServerMode(key.server_ids?.length ? "specific" : "all");
+    setNewServerIDs([...(key.server_ids ?? [])]);
+    setNewKey(null);
+    setCreateError(null);
+    setRefreshRequired(false);
+    setShowCreate(true);
+  };
+
+  const reloadEdit = async () => {
+    if (!editTarget) return;
+    setRefreshingEdit(true);
+    try {
+      const latest = (await listAPIKeys()).find((key) => key.id === editTarget.id);
+      if (latest) openEdit(latest);
+      else { setCreateError(t("apiKeys.errorNotFound")); setRefreshRequired(true); }
+      void keysQuery.refetch();
+    } catch (error) { setCreateError(errorText(error)); }
+    finally { setRefreshingEdit(false); }
+  };
+
+  const handleUpdate = () => {
+    if (!editTarget?.permissions_revision || !canUpdate) return;
+    setCreateError(null);
+    updateMutation.mutate({
+      id: editTarget.id,
+      expected_revision: editTarget.permissions_revision,
+      ...(scopesChanged ? { scopes: newScopes } : {}),
+      ...(serversChanged ? { server_ids: selectedServerIDs } : {}),
+    }, {
+      onSuccess: () => {
+        toast.success(t("apiKeys.updated"));
+        setShowCreate(false);
+        setEditTarget(null);
+        resetCreateForm();
+      },
+      onError: (error) => {
+        const kind = apiKeyErrorKind(error);
+        const uncertain = kind === "server" || kind === "network";
+        setCreateError(uncertain ? t("apiKeys.errorUncertain") : errorText(error));
+        setRefreshRequired(uncertain || kind === "conflict" || kind === "notFound");
+        if (kind === "notFound") void keysQuery.refetch();
+      },
+    });
+  };
+
   const handleDelete = () => {
     if (!deleteTarget) return;
     const { id } = deleteTarget;
@@ -166,6 +251,43 @@ export function ApiKeysPage() {
         setDeleteTarget(null);
       },
     });
+  };
+
+  const handleRotate = () => {
+    if (!rotateTarget?.permissions_revision || rotateMutation.isPending) return;
+    rotateMutation.mutate({ id: rotateTarget.id, expected_revision: rotateTarget.permissions_revision }, {
+      onSuccess: ({ key, api_key }) => {
+        // Only advance a draft based on exactly the version we just rotated.
+        // A fresher list row may already include someone else's permission edit;
+        // adopting its revision would silently bypass the draft's conflict check.
+        setEditTarget((current) => current?.id === api_key.id && current.permissions_revision === rotateTarget.permissions_revision
+          ? { ...current, key_prefix: api_key.key_prefix, permissions_revision: api_key.permissions_revision }
+          : current);
+        setRotateTarget(null);
+        setRotatedKey(key);
+        // A previously displayed creation secret may now be invalid.
+        setNewKey(null);
+        if (!editTarget) setShowCreate(false);
+      },
+      onError: (error) => {
+        setRotateTarget(null);
+        const kind = apiKeyErrorKind(error);
+        const uncertain = kind === "server" || kind === "network";
+        toast.error(uncertain ? t("apiKeys.rotateUncertain") : kind === "conflict" ? t("apiKeys.rotateConflict") : errorText(error));
+        setRotationNeedsRefresh(uncertain || kind === "conflict" || kind === "notFound");
+      },
+    });
+  };
+
+  const refreshAfterRotation = async () => {
+    setRotationRefreshing(true);
+    try {
+      // Use the rejecting API call; query.refetch itself reports errors in state.
+      await listAPIKeys();
+      await keysQuery.refetch();
+      setRotationNeedsRefresh(false);
+    } catch (error) { toast.error(errorText(error)); }
+    finally { setRotationRefreshing(false); }
   };
 
   const copyToClipboard = async (text: string) => {
@@ -201,6 +323,8 @@ export function ApiKeysPage() {
   const showRefreshError = keysQuery.isError && keys !== undefined;
   const showEmpty = keys !== undefined && keys.length === 0 && !keysQuery.isError;
 
+  if (!isAdmin) return <p role="alert" className="text-danger">{t("apiKeys.errorForbidden")}</p>;
+
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -210,7 +334,10 @@ export function ApiKeysPage() {
         </h1>
         <Button
           type="button"
+          disabled={formPending}
           onClick={() => {
+            setEditTarget(null);
+            resetCreateForm();
             setShowCreate(true);
             setNewKey(null);
             setCreateError(null);
@@ -220,6 +347,13 @@ export function ApiKeysPage() {
           {t("apiKeys.create")}
         </Button>
       </div>
+
+      {rotationNeedsRefresh && <div role="alert" className="mb-4 rounded-lg bg-warning-subtle p-3 text-sm text-warning">
+        <p>{t("apiKeys.rotateRefreshHint")}</p>
+        <Button type="button" variant="outline" className="mt-2" disabled={rotationRefreshing} onClick={refreshAfterRotation}>
+          {rotationRefreshing ? t("common.loading") : t("apiKeys.reloadKeys")}
+        </Button>
+      </div>}
 
       {showCreate && (
         <div className="mb-6 rounded-2xl border border-border bg-card p-6 shadow-card">
@@ -246,15 +380,21 @@ export function ApiKeysPage() {
               </button>
             </div>
           ) : (
-            <div className="space-y-5">
+            <fieldset disabled={formPending} className="space-y-5">
+              {editTarget && <div>
+                <h2 className="text-lg font-semibold">{t("apiKeys.editTitle", { name: editTarget.name || `#${editTarget.id}` })}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{t("apiKeys.editHint")}</p>
+              </div>}
               {createError && (
-                <div className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger">
+                <div role="alert" className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger">
                   {createError}
+                  {editTarget && refreshRequired && <Button type="button" variant="outline" className="mt-2" onClick={() => void reloadEdit()}>{t("apiKeys.reloadLatest")}</Button>}
                 </div>
               )}
 
               <Field label={t("apiKeys.name")} htmlFor="api-key-name">
                 <Input
+                  disabled={editTarget !== null}
                   id="api-key-name"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
@@ -303,6 +443,11 @@ export function ApiKeysPage() {
                 </p>
               </div>
 
+              {editTarget && hasUnknownScopes && <div className="rounded-lg bg-warning-subtle p-3 text-sm text-warning">
+                <p>{t("apiKeys.legacyScopesHint")}</p>
+                <p className="mt-1 break-all">{newScopes.filter((scope) => !(ALL_SCOPES as readonly string[]).includes(scope)).join(", ")}</p>
+                <Button type="button" variant="outline" className="mt-2" onClick={() => setNewScopes(newScopes.filter((scope) => (ALL_SCOPES as readonly string[]).includes(scope)))}>{t("apiKeys.removeLegacyScopes")}</Button>
+              </div>}
               <div>
                 <span className="mb-1 block text-sm font-medium text-foreground">
                   {t("apiKeys.scopesLabel")}
@@ -331,7 +476,7 @@ export function ApiKeysPage() {
                     );
                   })}
                 </div>
-                {newScopes.length === 0 && (
+                {newScopes.length === 0 && (!editTarget || scopesChanged) && (
                   <p role="alert" className="mt-1 text-xs text-danger">
                     {t("errors.scopes_required")}
                   </p>
@@ -379,12 +524,12 @@ export function ApiKeysPage() {
                       {t("common.retry")}
                     </button>
                   </div>
-                ) : servers.length === 0 ? (
+                ) : serverOptions.length === 0 ? (
                   <p className="mt-1 text-xs text-muted-foreground">{t("apiKeys.empty")}</p>
                 ) : (
                   <>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      {servers.map((srv) => {
+                      {serverOptions.map((srv) => {
                         const selected = newServerIDs.includes(srv.id);
                         return (
                           <label
@@ -447,21 +592,22 @@ export function ApiKeysPage() {
               </div>
 
               <div className="flex gap-3">
-                <Button type="button" onClick={handleCreate} disabled={!canCreate}>
-                  {createMutation.isPending ? t("common.creating") : t("apiKeys.generate")}
+                <Button type="button" onClick={editTarget ? handleUpdate : handleCreate} disabled={editTarget ? !canUpdate : !canCreate}>
+                  {editTarget ? (updateMutation.isPending ? t("common.saving") : t("common.save")) : (createMutation.isPending ? t("common.creating") : t("apiKeys.generate"))}
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   onClick={() => {
                     setShowCreate(false);
+                    setEditTarget(null);
                     setCreateError(null);
                   }}
                 >
                   {t("common.cancel")}
                 </Button>
               </div>
-            </div>
+            </fieldset>
           )}
         </div>
       )}
@@ -552,10 +698,15 @@ export function ApiKeysPage() {
                     </Td>
                     <Td>
                       <div className="flex items-center justify-end gap-1">
+                        <button type="button" onClick={() => openEdit(k)} disabled={formPending || !k.permissions_revision}
+                          title={!k.permissions_revision ? t("apiKeys.editUnavailable") : t("apiKeys.edit")}
+                          aria-label={t("apiKeys.edit")} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50">
+                          <Pencil className="h-4 w-4" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleReveal(k.id)}
-                          disabled={revealMutation.isPending}
+                          disabled={revealMutation.isPending || rotateMutation.isPending}
                           className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
                           aria-label={t("common.copy")}
                         >
@@ -563,7 +714,18 @@ export function ApiKeysPage() {
                         </button>
                         <button
                           type="button"
+                          onClick={() => setRotateTarget(k)}
+                          disabled={formPending || deleteMutation.isPending || revealMutation.isPending || rotationNeedsRefresh || !k.permissions_revision}
+                          title={!k.permissions_revision ? t("apiKeys.rotateUnavailable") : t("apiKeys.rotate")}
+                          aria-label={t("apiKeys.rotate")}
+                          className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => setDeleteTarget({ id: k.id, name: k.name })}
+                          disabled={formPending}
                           className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-danger-subtle hover:text-danger"
                           aria-label={t("common.delete")}
                         >
@@ -579,6 +741,24 @@ export function ApiKeysPage() {
         </>
       ) : null}
 
+      <ConfirmDialog
+        open={rotateTarget !== null}
+        title={t("apiKeys.rotate")}
+        message={t("apiKeys.rotateMessage", { name: rotateTarget?.name || `#${rotateTarget?.id}` })}
+        confirmLabel={t("apiKeys.rotateConfirm")}
+        pendingLabel={t("apiKeys.rotating")}
+        isPending={rotateMutation.isPending}
+        onConfirm={handleRotate}
+        onCancel={() => setRotateTarget(null)}
+      />
+      <Dialog open={rotatedKey !== null} title={t("apiKeys.rotated")} onClose={() => setRotatedKey(null)} className="max-w-lg">
+        <p className="mb-3 text-sm text-muted-foreground">{t("apiKeys.rotatedHint")}</p>
+        <code className="block break-all rounded-lg bg-muted px-3 py-2 font-mono text-sm">{rotatedKey}</code>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={() => setRotatedKey(null)}>{t("common.close")}</Button>
+          <Button type="button" onClick={() => rotatedKey && copyToClipboard(rotatedKey)}><Copy className="h-4 w-4" />{t("common.copy")}</Button>
+        </div>
+      </Dialog>
       <ConfirmDialog
         open={deleteTarget !== null}
         title={t("apiKeys.deleteTitle")}

@@ -174,7 +174,7 @@ func (h *UsageLogHandler) Get(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, 200, item)
 }
 
-var usageActions = strings.Fields("server.sftp.list server.sftp.stat server.sftp.upload server.sftp.download server.sftp.mkdir server.sftp.rename server.sftp.delete server.sftp.text.read server.sftp.text.write server.sftp.archive server.sftp.upload.start server.sftp.upload.status server.sftp.upload.chunk server.sftp.upload.complete server.sftp.upload.cancel credential.create credential.update credential.delete credential.reveal api_key.create api_key.delete api_key.reveal server.create server.update server.delete server.host_key.trust server.exec server.terminal service.create service.update service.delete service.credentials service.relay")
+var usageActions = strings.Fields("server.sftp.list server.sftp.stat server.sftp.upload server.sftp.download server.sftp.mkdir server.sftp.rename server.sftp.delete server.sftp.text.read server.sftp.text.write server.sftp.archive server.sftp.upload.start server.sftp.upload.status server.sftp.upload.chunk server.sftp.upload.complete server.sftp.upload.cancel credential.create credential.update credential.delete credential.reveal api_key.create api_key.delete api_key.rotate api_key.permissions.update api_key.reveal server.create server.update server.delete server.host_key.trust server.exec server.terminal service.create service.update service.delete service.credentials service.relay")
 
 func oneOf(v string, choices []string) bool {
 	if v == "" {

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,15 +19,16 @@ import (
 )
 
 type Principal struct {
-	AuthType     string
-	UserID       *uint
-	Username     string
-	APIKeyID     *uint
-	APIKeyName   string
-	APIKeyPrefix string
-	Role         string
-	ServerIDs    []uint
-	Scopes       []string
+	AuthType            string
+	UserID              *uint
+	Username            string
+	APIKeyID            *uint
+	APIKeyName          string
+	APIKeyPrefix        string
+	Role                string
+	ServerIDs           []uint
+	Scopes              []string
+	PermissionsRevision int64
 }
 
 type contextKey struct{}
@@ -417,6 +419,13 @@ func safeMethod(s string) string {
 }
 func normalizeMetadata(key string, value any) (any, bool) {
 	switch key {
+	case "permissions_revision_before", "permissions_revision_after":
+		v, ok := value.(string)
+		if !ok {
+			return nil, false
+		}
+		n, err := strconv.ParseInt(v, 10, 64)
+		return v, err == nil && n > 0 && strconv.FormatInt(n, 10) == v
 	case "response_write_failed", "cleanup_pending":
 		v, ok := value.(bool)
 		return v, ok
@@ -508,7 +517,7 @@ func safeReason(reason string) string {
 		return reason
 	case "sftp_invalid_path", "sftp_not_found", "sftp_permission_denied", "sftp_exists", "sftp_conflict", "sftp_not_empty", "sftp_busy", "sftp_too_large", "sftp_directory_too_large", "sftp_unavailable", "sftp_failed", "sftp_not_regular", "sftp_atomic_unsupported", "sftp_size_mismatch":
 		return reason
-	case "unauthorized", "invalid_credentials", "current_password_incorrect", "forbidden", "not_found", "conflict", "validation_failed", "internal_error", "rate_limited", "invalid_request", "invalid_server_id", "invalid_service_id", "invalid_credential_id", "invalid_key_id", "invalid_relay_request", "invalid_relay_path", "invalid_scopes", "scopes_required", "servers_not_found", "method_required", "command_required", "service_not_found", "credential_not_found", "api_key_not_found", "raw_key_unavailable", "credential_decrypt_failed", "api_key_server_denied", "api_key_service_denied", "relay_timeout", "relay_unreachable", "invalid_query", "ssh_connection_failed", "ssh_authentication_failed", "ssh_timeout", "ssh_host_key_mismatch", "no_host_key_mismatch", "host_key_changed", "request_rejected", "client_cancelled", "relay_copy_failed", "relay_upstream_failed", "terminal_auth_timeout", "terminal_auth_failed", "terminal_ssh_failed", "terminal_transport_failed", "terminal_closed", "terminal_cancelled", "websocket_upgrade_failed", "ssh_nonzero_exit", "client_closed", "remote_closed", "normal_close", "transport_error", "ssh_error", "server_shutdown":
+	case "api_key_revision_conflict", "api_key_permissions_changed", "unauthorized", "invalid_credentials", "current_password_incorrect", "forbidden", "not_found", "conflict", "validation_failed", "internal_error", "rate_limited", "invalid_request", "invalid_server_id", "invalid_service_id", "invalid_credential_id", "invalid_key_id", "invalid_relay_request", "invalid_relay_path", "invalid_scopes", "scopes_required", "servers_not_found", "method_required", "command_required", "service_not_found", "credential_not_found", "api_key_not_found", "raw_key_unavailable", "credential_decrypt_failed", "api_key_server_denied", "api_key_service_denied", "relay_timeout", "relay_unreachable", "invalid_query", "ssh_connection_failed", "ssh_authentication_failed", "ssh_timeout", "ssh_host_key_mismatch", "no_host_key_mismatch", "host_key_changed", "request_rejected", "client_cancelled", "relay_copy_failed", "relay_upstream_failed", "terminal_auth_timeout", "terminal_auth_failed", "terminal_ssh_failed", "terminal_transport_failed", "terminal_closed", "terminal_cancelled", "websocket_upgrade_failed", "ssh_nonzero_exit", "client_closed", "remote_closed", "normal_close", "transport_error", "ssh_error", "server_shutdown":
 		return reason
 	case "terminal_permission_denied", "terminal_input_failed", "terminal_output_failed", "terminal_resize_failed", "terminal_keepalive_failed", "terminal_keepalive_timeout", "terminal_transport_timeout", "ssh_host_key_unverified":
 		return reason

@@ -13,6 +13,9 @@ export type APIKeyErrorKind =
   | "rateLimited"
   | "server"
   | "network"
+  | "conflict"
+  | "notFound"
+  | "validation"
   | "unknown";
 
 export function apiKeyErrorKind(error: unknown): APIKeyErrorKind {
@@ -24,6 +27,8 @@ export function apiKeyErrorKind(error: unknown): APIKeyErrorKind {
   // wins whenever it is one we know. Unknown/missing reasons fall back to the
   // status heuristic below.
   switch (reason) {
+    case "api_key_revision_conflict":
+      return "conflict";
     case "invalid_credentials":
     case "unauthorized":
       return "unauthorized";
@@ -44,6 +49,9 @@ export function apiKeyErrorKind(error: unknown): APIKeyErrorKind {
   if (typeof status !== "number") return "network";
   if (status === 401) return "unauthorized";
   if (status === 403) return "forbidden";
+  if (status === 409) return "conflict";
+  if (status === 404) return "notFound";
+  if (status === 400) return "validation";
   if (status === 429) return "rateLimited";
   if (status >= 500) return "server";
   return "unknown";

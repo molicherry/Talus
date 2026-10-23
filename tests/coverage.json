@@ -232,6 +232,32 @@
           "docker"
         ]
       }
+    },
+    {
+      "run_id": "api-key-permissions",
+      "suite": "integration",
+      "runner": "go-test",
+      "cwd": "backend",
+      "command": [
+        "go",
+        "test",
+        "./internal/gate",
+        "./internal/repository",
+        "./internal/service",
+        "./internal/handler",
+        "./internal/usage",
+        "./cmd/server",
+        "-run",
+        "APIKeyPermission|APIKeyRotation|UpdateWithBudget",
+        "-count=1"
+      ],
+      "timeout_seconds": 600,
+      "environment": {
+        "profile": "isolated-db",
+        "requires": [
+          "TEST_DATABASE_URL"
+        ]
+      }
     }
   ],
   "gates": {
@@ -241,7 +267,8 @@
       "go-unit",
       "frontend-node",
       "migrate-hardening",
-      "deploy-verify"
+      "deploy-verify",
+      "api-key-permissions"
     ],
     "M2": [
       "coverage-tools",
@@ -251,7 +278,8 @@
       "migrate-hardening",
       "integration-agent",
       "go-race",
-      "terminal-e2e"
+      "terminal-e2e",
+      "api-key-permissions"
     ],
     "M3": [
       "go-unit",
@@ -4222,6 +4250,396 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Reject a connection test after recording a host-key warning, verify the detail shows the warning, and save from the editor using the refreshed revision rather than the stale one."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-02-04",
+      "requirement_ids": [
+        "REQ-02"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/48/scenario",
+      "scenario": "Preserve original API keys and explicit policies through migration, restart and edits; retire historical scope grants and reject malformed legacy data atomically.",
+      "implementations": [
+        {
+          "implementation_id": "tc-02-04-1",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/repository/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsMigrationPreservesExplicitPolicies"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-02-04-2",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/repository/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsMigrationFromPreScopeSchema"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-02-04-3",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/repository/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsMigrationRejectsMalformedDataAtomically"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-02-04-4",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/cmd/server/apikey_permissions_startup_test.go",
+            "symbol": "TestServerAPIKeyPermissionsUpgrade"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-5-tc-02-04",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/repository/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsMigrationSignalsFreshInstall"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-05-06",
+      "requirement_ids": [
+        "REQ-05"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/49/scenario",
+      "scenario": "Update API key permissions with administrator authorization, revision conflicts, atomic audit and bounded commit uncertainty fencing; revoke preparing and active terminals without affecting other identities. Rotate key values without changing legacy policies, reject stale authentication and concurrent replacements, and atomically audit or roll back replacements.",
+      "implementations": [
+        {
+          "implementation_id": "tc-05-06-1",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsPreserveKeyAndAudit"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-05-06-2",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsValidationAndServerScope"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-05-06-3",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsAdminAndConcurrentRevision"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-05-06-4",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsAuditFailureRollsBack"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-05-06-5",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsCommitOutcomes"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-05-06-6",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/handler/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionPatchPresence"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-05-06-7",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/handler/apikey_terminal_test.go",
+            "symbol": "TestAPIKeyPermissionsTerminalRevocation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-key-legacy",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsEditPreservesLegacyColumns"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-key-metadata",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/usage/connection_metadata_test.go",
+            "symbol": "TestAPIKeyPermissionMetadataIsBounded"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-testapikeyrotationpreserveslegacypolicy",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_rotation_test.go",
+            "symbol": "TestAPIKeyRotationPreservesLegacyPolicy"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-testapikeyrotationadminconcurrencyandrollback",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_rotation_test.go",
+            "symbol": "TestAPIKeyRotationAdminConcurrencyAndRollback"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-testapikeyrotationrejectslookupbeforecommit",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_rotation_test.go",
+            "symbol": "TestAPIKeyRotationRejectsLookupBeforeCommit"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-testapikeyrotationcommitoutcomes",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_rotation_test.go",
+            "symbol": "TestAPIKeyRotationCommitOutcomes"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-testapikeyrotationrequest",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/handler/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyRotationRequest"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-15-tc-05-06",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsErrorsRenderParameters"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-16-tc-05-06",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/service/apikey_permissions_test.go",
+            "symbol": "TestAPIKeyPermissionsSlowTransactionAndCancellation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-17-tc-05-06",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/gate/gate_test.go",
+            "symbol": "TestUpdateWithBudgetKeepsAdmissionBoundAndLock"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-18-tc-05-06",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/gate/gate_test.go",
+            "symbol": "TestUpdateWithBudgetHonorsWriteAndCallerCancellation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-19-tc-05-06",
+          "run_id": "api-key-permissions",
+          "implementation": {
+            "path": "backend/internal/gate/gate_test.go",
+            "symbol": "TestUpdateWithBudgetDoesNotExtendVersionLookup"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-10",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/50/scenario",
+      "scenario": "Edit existing API key permissions on desktop and mobile, preserve drafts on conflicts, keep unchanged restrictions through server loading failures, and handle wildcard keys and older backends explicitly. Confirm and copy rotated keys on desktop/mobile; require reload after conflicts or uncertain results.",
+      "implementations": [
+        {
+          "implementation_id": "tc-09-10-1",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key permissions preserve the key and omitted server scope (desktop)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-09-10-2",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key permissions preserve the key and omitted server scope (mobile)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-09-10-3",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key permissions conflict preserves draft and reloads latest"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-09-10-4",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key permissions keep server restrictions when server loading fails"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "tc-09-10-5",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key permissions preserve legacy wildcard and detect old backend"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-rotate-ui-1",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key rotation confirms, replaces and copies (desktop)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-rotate-ui-2",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key rotation confirms, replaces and copies (mobile)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-rotate-ui-3",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key rotation requires reload after 409"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-rotate-ui-4",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key rotation requires reload after 503"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-10-tc-09-10",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key rotation preserves and advances an open edit draft (desktop)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-11-tc-09-10",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key rotation preserves and advances an open edit draft (mobile)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-review-12-tc-09-10",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "API key rotation does not advance a draft past another administrator's edit"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     }

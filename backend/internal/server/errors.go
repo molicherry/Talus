@@ -56,6 +56,7 @@ const (
 	ReasonInvalidRelayRequest     = "invalid_relay_request"
 	ReasonInvalidRelayPath        = "invalid_relay_path"
 	ReasonInvalidScopes           = "invalid_scopes"
+	ReasonAPIKeyRevisionConflict  = "api_key_revision_conflict"
 	ReasonScopesRequired          = "scopes_required"
 	ReasonServersNotFound         = "servers_not_found"
 	ReasonMethodRequired          = "method_required"
@@ -146,6 +147,7 @@ var reasonMessages = map[string]string{
 	ReasonInvalidRelayRequest:     "invalid relay request",
 	ReasonInvalidRelayPath:        "invalid relay path",
 	ReasonInvalidScopes:           "invalid scopes: {{scopes}}",
+	ReasonAPIKeyRevisionConflict:  "API key permissions changed; reload before saving",
 	ReasonScopesRequired:          "at least one scope is required",
 	ReasonServersNotFound:         "unknown server ids: {{servers}}",
 	ReasonMethodRequired:          "method is required",

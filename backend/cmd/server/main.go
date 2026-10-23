@@ -118,6 +118,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Recognize pre-scope schemas before AutoMigrate can fill in today's defaults.
+	permissionSchemaCtx, cancelPermissionSchema := context.WithTimeout(context.Background(), 30*time.Second)
+	permissionSchemaPrepared, permissionSchemaErr := repository.PrepareAPIKeyPermissionsSchema(permissionSchemaCtx, db)
+	cancelPermissionSchema()
+	if permissionSchemaErr != nil {
+		slog.Error("failed to prepare API key permissions", "error", permissionSchemaErr)
+		os.Exit(1)
+	}
+
 	// JWT session versioning (REQ-05). Explicit, idempotent schema migration
 	// rather than relying on AutoMigrate for this security-relevant column.
 	if err := repository.PrepareUserTokenVersionSchema(db); err != nil {
@@ -180,16 +189,16 @@ func main() {
 		debug.FreeOSMemory()
 	}
 
-	// 4.5 One-time backfill: API keys created before services:read existed (the
-	// API used to be fail-open) get the scope once. Recorded in schema_migrations
-	// so it is not re-applied on every start to keys that deliberately omit it.
-	const servicesReadBackfill = `UPDATE api_keys SET scopes = scopes || '["services:read"]'::jsonb WHERE scopes IS NOT NULL AND NOT scopes @> '["services:read"]'::jsonb`
-	if applied, err := repository.ApplyOnce(db, "2026-09-24-services-read-scope", servicesReadBackfill); err != nil {
-		// Bookkeeping for a scope default must not take the whole service down.
-		// ApplyOnce returns before applying when it cannot check the marker.
-		slog.Error("services:read scope backfill skipped", "error", err)
-	} else if applied {
-		slog.Info("services:read scope backfill applied")
+	// A fresh installation had no api_keys table during preparation. Only that
+	// path needs to settle the migration markers now; existing schemas are done.
+	if !permissionSchemaPrepared {
+		permissionCtx, cancelPermissionMigration := context.WithTimeout(context.Background(), 30*time.Second)
+		_, permissionErr := repository.PrepareAPIKeyPermissionsSchema(permissionCtx, db)
+		cancelPermissionMigration()
+		if permissionErr != nil {
+			slog.Error("API key permission migration failed; startup stopped", "error", permissionErr)
+			os.Exit(1)
+		}
 	}
 
 	// 4. Create TimescaleDB hypertable for metrics
@@ -350,6 +359,7 @@ func main() {
 	sftpH := handler.NewSFTPHandler(service.NewSFTPService(sshSvc, []byte(cfg.JWTSecret)))
 	terminalSvc := service.NewTerminalService(sshSvc)
 	terminalSvc.SetSessionRegistry(terminalRegistry)
+	terminalSvc.SetAPIKeyPermissions(apiKeySvc.PermissionsGate(), apiKeySvc.TerminalRegistry())
 
 	execH := handler.NewExecHandler(sshSvc, handler.ExecOptions{
 		DefaultTimeoutSeconds: cfg.ExecTimeout,
@@ -422,7 +432,7 @@ func main() {
 		if err != nil {
 			return usage.Principal{}, err
 		}
-		p := usage.Principal{AuthType: "api_key", APIKeyID: &k.ID, APIKeyName: k.Name, APIKeyPrefix: k.KeyPrefix, Role: "admin", Scopes: k.Scopes, ServerIDs: k.ServerIDs}
+		p := usage.Principal{AuthType: "api_key", APIKeyID: &k.ID, APIKeyName: k.Name, APIKeyPrefix: k.KeyPrefix, Role: "admin", Scopes: k.Scopes, ServerIDs: k.ServerIDs, PermissionsRevision: k.PermissionsRevision}
 		if k.UserID != 0 {
 			p.UserID = &k.UserID
 		}
@@ -484,10 +494,12 @@ func main() {
 		// Metrics
 		MetricsHandler: metricsH.Get,
 		// API Keys
-		CreateAPIKeyHandler: apiKeyHandler.Create,
-		ListAPIKeysHandler:  apiKeyHandler.List,
-		DeleteAPIKeyHandler: apiKeyHandler.Delete,
-		RevealAPIKeyHandler: apiKeyHandler.Reveal,
+		CreateAPIKeyHandler:            apiKeyHandler.Create,
+		UpdateAPIKeyPermissionsHandler: apiKeyHandler.UpdatePermissions,
+		RotateAPIKeyHandler:            apiKeyHandler.Rotate,
+		ListAPIKeysHandler:             apiKeyHandler.List,
+		DeleteAPIKeyHandler:            apiKeyHandler.Delete,
+		RevealAPIKeyHandler:            apiKeyHandler.Reveal,
 		// Services
 		CreateServiceHandler:         serviceHandler.Create,
 		ListServicesHandler:          serviceHandler.List,

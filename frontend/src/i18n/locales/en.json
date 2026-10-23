@@ -116,7 +116,31 @@
     "deleteMessage": "Delete \"{{name}}\"? Applications using this key lose access immediately.",
     "deleteFailed": "Failed to delete API key",
     "serversNoneSelected": "Select at least one server",
-    "prefix": "Prefix"
+    "prefix": "Prefix",
+    "edit": "Edit permissions",
+    "editTitle": "Edit permissions: {{name}}",
+    "editHint": "The key stays the same. Saving permission changes closes terminals using this key. Requests already admitted may finish.",
+    "updated": "Permissions updated; the key is unchanged.",
+    "errorConflict": "These permissions were changed elsewhere. Your draft is kept; reload the latest settings before saving.",
+    "errorNotFound": "This API key has been deleted.",
+    "errorValidation": "Check the selected scopes and servers, then try again.",
+    "errorUncertain": "The update could not be confirmed. Reload the latest settings to check whether it was saved.",
+    "reloadLatest": "Load latest and discard draft",
+    "deletedServer": "Unavailable server #{{id}}",
+    "legacyScopesHint": "This key has legacy scopes, including possible wildcard access. Changing only servers preserves them. To edit scopes, explicitly remove legacy entries or choose a preset.",
+    "removeLegacyScopes": "Remove legacy scopes",
+    "editUnavailable": "Upgrade the backend to edit this key’s permissions.",
+    "rotate": "Rotate key",
+    "rotateMessage": "Replace the value of “{{name}}” with a new random key? The old key will stop working immediately and its terminal sessions will close. Its name, permissions and server scope will stay the same.",
+    "rotateConfirm": "Replace key",
+    "rotating": "Replacing…",
+    "rotated": "API key replaced",
+    "rotatedHint": "Copy the new key and update applications that use it. The old key no longer works. You can copy the current key again from the list.",
+    "rotateUncertain": "The replacement result could not be confirmed. Reload the list and copy the current key before trying again.",
+    "rotateRefreshHint": "Reload the list before another replacement. If the previous result was uncertain, copy the current key to confirm its value.",
+    "reloadKeys": "Reload key list",
+    "rotateConflict": "This key was changed elsewhere. Reload the key list before replacing it.",
+    "rotateUnavailable": "Upgrade the backend to rotate this key."
   },
   "app": {
     "name": "Talus",
@@ -299,7 +323,8 @@
     "sftp_text_too_large": "Text editing is limited to 1 MiB",
     "sftp_not_text": "This file is not UTF-8 text",
     "sftp_not_directory": "This operation requires a directory",
-    "sftp_invalid_range": "The requested download range is invalid"
+    "sftp_invalid_range": "The requested download range is invalid",
+    "api_key_revision_conflict": "These permissions were changed elsewhere. Your draft is kept; reload the latest settings before saving."
   },
   "exec": {
     "execute": "Execute",
@@ -796,7 +821,9 @@
       "connection_revision": "Connection revision",
       "jump_server_id": "Jump server ID",
       "connection_stage": "Connection stage",
-      "connection_role": "Connection role"
+      "connection_role": "Connection role",
+      "permissions_revision_before": "Previous permissions version",
+      "permissions_revision_after": "New permissions version"
     },
     "actions": {
       "server_create": "Create server",
@@ -832,7 +859,9 @@
       "server_sftp_upload_status": "Read upload progress",
       "server_sftp_upload_chunk": "Upload file chunk",
       "server_sftp_upload_complete": "Complete upload",
-      "server_sftp_upload_cancel": "Discard partial upload"
+      "server_sftp_upload_cancel": "Discard partial upload",
+      "api_key_permissions_update": "Update API key permissions",
+      "api_key_rotate": "Rotate API key"
     },
     "resourceTypes": {
       "server": "Server",

@@ -135,6 +135,13 @@ func (r *ServerRepo) TrustHostKey(ctx context.Context, id uint, seen []byte) (bo
 	return res.RowsAffected > 0, nil
 }
 
+// FindExistingIDs checks existence without loading server details or credentials.
+func (r *ServerRepo) FindExistingIDs(ctx context.Context, ids []uint) ([]uint, error) {
+	var existing []uint
+	err := r.db.WithContext(ctx).Model(&model.Server{}).Where("id IN ?", ids).Pluck("id", &existing).Error
+	return existing, err
+}
+
 // FindByIDs returns servers whose IDs are in the given slice, ordered by name.
 func (r *ServerRepo) FindByIDs(ctx context.Context, ids []uint) ([]model.Server, error) {
 	var servers []model.Server

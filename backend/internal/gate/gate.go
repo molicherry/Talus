@@ -1,5 +1,7 @@
 // Package gate serializes per-user admission, terminal registration and password
 // changes. Version reads use the primary database and never a positive cache.
+// API key permissions reuse separate Gate and Registry instances: IDs in those
+// instances identify keys, never their owners, so the namespaces cannot collide.
 package gate
 
 import (
@@ -103,6 +105,25 @@ func (g *Gate) Update(ctx context.Context, userID uint, fn func(context.Context,
 			state.pending = true
 		}
 		return err
+	})
+}
+
+// UpdateWithBudget keeps the normal short budget for acquiring the gate and
+// reading its version, then starts a separate bounded write budget. The caller's
+// deadline/cancellation still applies. The gate remains locked until the write
+// and any uncertainty fence/revocation are installed, even after the admission
+// context expires. Update retains its existing shared budget for JWT callers.
+func (g *Gate) UpdateWithBudget(ctx context.Context, userID uint, budget time.Duration, fn func(context.Context, int64) (bool, error)) error {
+	if budget <= 0 {
+		return ErrUnavailable
+	}
+	return g.Update(ctx, userID, func(_ context.Context, version int64) (bool, error) {
+		writeCtx, cancel := context.WithTimeout(ctx, budget)
+		defer cancel()
+		if err := writeCtx.Err(); err != nil {
+			return false, err
+		}
+		return fn(writeCtx, version)
 	})
 }
 

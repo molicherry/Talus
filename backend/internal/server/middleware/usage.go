@@ -44,6 +44,8 @@ var capturedRoutes = map[string]captureRoute{
 	"DELETE /api/v1/credentials/{id}":           {"credential.delete", "/api/v1/credentials/{id}", "credential"},
 	"GET /api/v1/credentials/{id}/reveal":       {"credential.reveal", "/api/v1/credentials/{id}/reveal", "credential"},
 	"POST /api/v1/api-keys":                     {"api_key.create", "/api/v1/api-keys", "api_key"},
+	"PATCH /api/v1/api-keys/{id}":               {"api_key.permissions.update", "/api/v1/api-keys/{id}", "api_key"},
+	"POST /api/v1/api-keys/{id}/rotate":         {"api_key.rotate", "/api/v1/api-keys/{id}/rotate", "api_key"},
 	"DELETE /api/v1/api-keys/{id}":              {"api_key.delete", "/api/v1/api-keys/{id}", "api_key"},
 	"GET /api/v1/api-keys/{id}/reveal":          {"api_key.reveal", "/api/v1/api-keys/{id}/reveal", "api_key"},
 	"POST /api/v1/services":                     {"service.create", "/api/v1/services", "service"},
