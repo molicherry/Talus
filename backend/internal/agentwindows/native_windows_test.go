@@ -25,7 +25,7 @@ func TestWindowsNativeDeploymentUpgradeRollbackAndRemoval(t *testing.T) {
 		t.Skip("set TALUS_WINDOWS_INTEGRATION=1 on an administrator Windows runner")
 	}
 	run := func(script string) ([]byte, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), (ActivationWaitSeconds+30)*time.Second)
 		defer cancel()
 		// Exercise cmd.exe's real command-length and quoting rules, as used by
 		// the default Windows OpenSSH shell, before invoking PowerShell 5.1.
@@ -112,7 +112,7 @@ func TestWindowsNativeDeploymentUpgradeRollbackAndRemoval(t *testing.T) {
 		return v, b
 	}
 	first, _ := stage(hub.URL, 1)
-	mustRun(first.Wait(70))
+	mustRun(first.Wait(ActivationWaitSeconds))
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		mu.Lock()
@@ -135,9 +135,9 @@ func TestWindowsNativeDeploymentUpgradeRollbackAndRemoval(t *testing.T) {
 	// A valid configuration update replaces the running service and authenticates
 	// with the new configuration hash before it is declared successful.
 	updated, good := stage(hub.URL, 2)
-	mustRun(updated.Wait(70))
+	mustRun(updated.Wait(ActivationWaitSeconds))
 	failed, _ := stage("http://127.0.0.1:1", 3)
-	if out, err := run(failed.Wait(70)); err == nil {
+	if out, err := run(failed.Wait(ActivationWaitSeconds)); err == nil {
 		t.Fatalf("unreachable Hub accepted: %s", out)
 	}
 	actual, err := os.ReadFile(filepath.Join(l.Base(), "config.json"))
@@ -147,17 +147,52 @@ func TestWindowsNativeDeploymentUpgradeRollbackAndRemoval(t *testing.T) {
 	mustRun("$ErrorActionPreference='Stop'; if ((Get-Service -Name " + Quote(l.Name()) + ").Status -ne 'Running') { exit 1 }")
 	// ACLs must protect the token and outbox from non-administrator users.
 	mustRun("$a=Get-Acl -LiteralPath " + Quote(l.Base()) + "; if (!$a.AreAccessRulesProtected) { exit 1 }; foreach($r in $a.Access){$s=$r.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value;if($s -ne 'S-1-5-18' -and $s -ne 'S-1-5-32-544'){exit 1}}")
-	mustRun(l.RemoveDetached())
-	deadline = time.Now().Add(40 * time.Second)
-	for {
-		if _, err := os.Stat(l.Base()); os.IsNotExist(err) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("detached removal did not finish")
-		}
-		time.Sleep(time.Second)
+	// A real open Windows file denies deletion. The first task must report
+	// failure and keep its retry entry even though the Hub record is gone.
+	blocked, err := os.OpenFile(filepath.Join(l.Base(), "blocked-cleanup"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer blocked.Close()
+	mustRun(l.PrepareRemoval())
+	if err = os.WriteFile(l.RemovalPath(), []byte("throw 'tampered cleanup'"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(l.RemoveDetached()); err == nil {
+		t.Fatalf("unverified cleanup launched: %s", out)
+	}
+	if err = os.WriteFile(l.RemovalPath(), l.RemovalFile(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(l.RemoveDetached())
+	waitReceipt := func(status string, timeout time.Duration) {
+		t.Helper()
+		deadline := time.Now().Add(timeout)
+		for {
+			b, _ := os.ReadFile(filepath.Join(l.Root(), l.Name()+".remove.json"))
+			var receipt struct{ Status string }
+			_ = json.Unmarshal([]byte(strings.TrimPrefix(string(b), "\xef\xbb\xbf")), &receipt)
+			if receipt.Status == status {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("removal receipt: want %s, got %s", status, b)
+			}
+			time.Sleep(time.Second)
+		}
+	}
+	waitReceipt("failed", 40*time.Second)
+	mustRun("$t=Get-ScheduledTask -TaskName " + Quote(l.Name()+"-Remove") + "; if($t.Settings.RestartCount -ne 3){exit 1}")
+	if _, err = os.Stat(l.RemovalPath()); err != nil {
+		t.Fatalf("retry script lost: %v", err)
+	}
+	if err = blocked.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Task Scheduler performs the retry itself after one minute, with no Hub
+	// request or manual Start-ScheduledTask to conceal a broken retry policy.
+	waitReceipt("succeeded", 100*time.Second)
+	mustRun(l.WaitRemoval(0))
 	mustRun(l.Remove()) // idempotent, including a missing service and directory
 	if _, err := os.Stat(l.Base()); !os.IsNotExist(err) {
 		t.Fatalf("installation remains: %v", err)

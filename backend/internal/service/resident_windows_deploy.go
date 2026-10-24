@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -142,7 +143,7 @@ func (m *ResidentMonitor) installWindows(ctx context.Context, n model.AgentNode,
 	if err = windowsExec(ctx, lease, l.Launch(repository.TokenHash(string(activation))), reasonWindowsService, 15*time.Second); err != nil {
 		return err
 	}
-	if err = windowsExec(ctx, lease, l.Wait(70), ReasonAgentHealthCheckFailed, 80*time.Second); err != nil {
+	if err = windowsExec(ctx, lease, l.Wait(agentwindows.ActivationWaitSeconds), ReasonAgentHealthCheckFailed, (agentwindows.ActivationWaitSeconds+10)*time.Second); err != nil {
 		return err
 	}
 	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
@@ -154,10 +155,57 @@ func (m *ResidentMonitor) installWindows(ctx context.Context, n model.AgentNode,
 	return lease.releaseAndWait()
 }
 
-func (m *ResidentMonitor) uninstallWindows(ctx context.Context, installID string, layout agentLayout, lease Lease) error {
+func (m *ResidentMonitor) uninstallWindows(ctx context.Context, installID string, layout agentLayout, lease *sshLease) error {
 	if !validDiscoveryInstallID(installID) || !agentwindows.ValidHome(layout.Home) {
 		return errors.New("invalid Windows installation layout")
 	}
 	l := agentwindows.Layout{Home: layout.Home, InstallID: installID}
-	return windowsExec(ctx, lease, l.RemoveDetached(), reasonWindowsService, 15*time.Second)
+	status := "not_scheduled"
+	defer func() {
+		if status != "succeeded" {
+			slog.WarnContext(ctx, "Windows agent removal not confirmed; inspect local task and receipt", "install_id", installID, "status", status, "task", l.Name()+"-Remove", "receipt", l.Root()+"/"+l.Name()+".remove.json")
+		}
+	}()
+	if err := windowsExec(ctx, lease, l.PrepareRemoval(), reasonWindowsService, 5*time.Second); err != nil {
+		return err
+	}
+	local, err := os.CreateTemp("", "talus-windows-remove-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(local.Name())
+	_, err = local.Write(l.RemovalFile())
+	if closeErr := local.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if err = lease.uploadPrivateDirectory(ctx, local.Name(), "/"+l.RemovalPath(), 5*time.Second); err != nil {
+		return err
+	}
+	if err := windowsExec(ctx, lease, l.RemoveDetached(), reasonWindowsService, 5*time.Second); err != nil {
+		return err
+	}
+	status = "receipt_unavailable"
+	r, err := lease.Exec(ctx, agentwindows.Command(l.WaitRemoval(2)), 4*time.Second)
+	if err != nil {
+		return err
+	}
+	if r == nil || r.ExitCode != 0 || r.OutputTruncated || r.StdoutTruncated {
+		return deployError(reasonWindowsService, errors.New("Windows removal receipt unavailable; inspect the retained removal task"))
+	}
+	switch strings.TrimSpace(r.Stdout) {
+	case "TALUS_REMOVE_OK":
+		status = "succeeded"
+		return nil
+	case "TALUS_REMOVE_PENDING":
+		status = "pending"
+		return nil
+	case "TALUS_REMOVE_FAILED":
+		status = "failed"
+		return deployError(reasonWindowsService, errors.New("Windows removal failed; inspect the retained removal task and receipt"))
+	default:
+		return deployError(reasonWindowsService, errors.New("invalid Windows removal receipt"))
+	}
 }

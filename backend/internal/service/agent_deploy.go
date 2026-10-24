@@ -147,16 +147,26 @@ func (s *AgentDeploymentService) Probe(ctx context.Context, lease Lease) (AgentP
 	if err != nil {
 		return AgentPlatform{}, fmt.Errorf("probe target: %w", err)
 	}
-	if result == nil || result.ExitCode != 0 || len(strings.Split(strings.TrimSpace(result.Stdout), "\n")) < 2 {
-		return s.probeWindows(ctx, lease)
+	probeErr := errors.New("uname returned no result")
+	if result != nil {
+		probeErr = fmt.Errorf("uname exit=%d, output_truncated=%t", result.ExitCode, result.OutputTruncated || result.StdoutTruncated)
+		lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+		if result.ExitCode == 0 && !result.OutputTruncated && !result.StdoutTruncated && len(lines) == 2 {
+			osName, arch := strings.ToLower(strings.TrimSpace(lines[0])), strings.TrimSpace(lines[1])
+			if osName == "linux" {
+				if name := archName(arch); name != "" {
+					return AgentPlatform{OS: "linux", Arch: name}, nil
+				}
+				return AgentPlatform{}, deployError(ReasonAgentPlatformUnsupported, fmt.Errorf("unsupported Linux architecture %q", arch))
+			}
+			probeErr = fmt.Errorf("uname identified unsupported target %s/%s", osName, arch)
+		}
 	}
-	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
-	osName := strings.ToLower(strings.TrimSpace(lines[0]))
-	arch := strings.TrimSpace(lines[1])
-	platform := AgentPlatform{OS: "linux", Arch: archName(arch)}
-	if osName != "linux" || platform.Arch == "" {
-		return AgentPlatform{}, deployError(ReasonAgentPlatformUnsupported,
-			fmt.Errorf("unsupported target %s/%s", osName, arch))
+	// Git for Windows, MSYS2 and Cygwin may provide a working uname. A
+	// non-Linux response does not rule out a supported native Windows host.
+	platform, winErr := s.probeWindows(ctx, lease)
+	if winErr != nil {
+		return AgentPlatform{}, fmt.Errorf("probe target (%v): %w", probeErr, winErr)
 	}
 	return platform, nil
 }

@@ -3,6 +3,8 @@ package agentclient
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"testing"
 	"time"
 
@@ -73,5 +75,56 @@ func TestWindowsServiceStopAndFailure(t *testing.T) {
 	serviceSpecific, code := h.Execute(nil, make(chan svc.ChangeRequest), make(chan svc.Status, 8))
 	if !serviceSpecific || code == 0 || h.err == nil {
 		t.Fatal("SCM was not informed of startup failure")
+	}
+}
+
+// Use real TCP loopback traffic and the same native counters used by the agent.
+// This catches accidental inclusion of the Windows software loopback adapter.
+func TestWindowsNetworkExcludesLoopbackTraffic(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	before, err := CollectSection("network")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	const traffic = 32 << 20
+	go func() {
+		conn, e := listener.Accept()
+		if e != nil {
+			done <- e
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+		_, e = io.CopyN(io.Discard, conn, traffic)
+		done <- e
+	}()
+	conn, err := net.DialTimeout("tcp4", listener.Addr().String(), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	block := make([]byte, 1<<20)
+	for i := 0; i < 32; i++ {
+		if _, err = conn.Write(block); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = <-done; err != nil {
+		t.Fatal(err)
+	}
+	after, err := CollectSection("network")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, delta := range []int64{*after.Sample.NetRecv - *before.Sample.NetRecv, *after.Sample.NetSent - *before.Sample.NetSent} {
+		if delta < 0 || delta >= traffic/2 {
+			t.Fatalf("loopback traffic leaked into host counters: %d bytes", delta)
+		}
 	}
 }

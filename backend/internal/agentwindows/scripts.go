@@ -5,6 +5,7 @@ package agentwindows
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/base64"
 	"encoding/binary"
@@ -28,6 +29,12 @@ var launch string
 
 //go:embed remove.ps1
 var remove string
+
+//go:embed removal_result.ps1
+var removalResult string
+
+const ActivationTaskSeconds = 180
+const ActivationWaitSeconds = ActivationTaskSeconds + 20
 
 const Probe = `$ErrorActionPreference='Stop'
 if ([Environment]::OSVersion.Platform -ne 'Win32NT') { exit 1 }
@@ -107,31 +114,59 @@ func (l Layout) ActivationFile(binaryHash, configHash string) []byte {
 	return []byte("\xef\xbb\xbf" + l.Activate(binaryHash, configHash))
 }
 func (l Layout) Launch(scriptHash string) string {
-	return l.vars() + "$scriptHash=" + Quote(scriptHash) + "\n" + launch
+	return l.vars() + "$scriptHash=" + Quote(scriptHash) + fmt.Sprintf("\n$activationSeconds=%d\n", ActivationTaskSeconds) + launch
 }
 func (l Layout) Remove() string { return l.baseVars() + common + remove }
+
+// RemovalFile is uploaded into the protected root before its hash is checked
+// by RemoveDetached. Keeping the payload out of the SSH command also bounds
+// command length when retry/receipt handling grows.
+func (l Layout) RemovalPath() string { return l.Root() + "/" + l.Name() + ".remove.ps1" }
+func (l Layout) RemovalFile() []byte {
+	return []byte("\xef\xbb\xbf" + l.baseVars() + common + "function Invoke-Removal {\n" + remove + "\n}\n" + removalResult)
+}
+func (l Layout) PrepareRemoval() string {
+	return l.baseVars() + common + `# Protect removal payload before upload.
+Assert-Admin
+Protect-Directory $root
+Assert-Path (Join-Path $root ($name+'.remove.ps1'))
+Assert-Path (Join-Path $root ($name+'.remove.json'))
+Assert-Path (Join-Path $root ($name+'.remove.json.tmp'))
+`
+}
 
 // RemoveDetached lets a committed Hub deletion finish cleanup even if an
 // activation still holds the lock or the SSH/request cleanup budget expires.
 // No server credential is needed once the local SYSTEM task has been scheduled.
 func (l Layout) RemoveDetached() string {
-	cleanup := "try {\n" + remove + "\n} finally { Unregister-ScheduledTask -TaskName ($name+'-Remove') -Confirm:$false -ErrorAction SilentlyContinue; Remove-Item -LiteralPath (Join-Path $root ($name+'.remove.ps1')) -Force -ErrorAction SilentlyContinue }\n"
-	// Share the helper source with the detached script instead of transmitting
-	// it twice, leaving room for long ProgramData paths under cmd.exe's limit.
-	return l.baseVars() + "$support=" + Quote(common) + "\n. ([ScriptBlock]::Create($support))\n" + `Assert-Admin
-Assert-Path $root
-if (!(Test-Path -LiteralPath $root) -and !(Get-Service -Name $name -ErrorAction SilentlyContinue)) { exit 0 }
-Protect-Directory $root
-$script=Join-Path $root ($name+'.remove.ps1')
-Assert-Path $script
-` + "[IO.File]::WriteAllText($script,(" + Quote(l.baseVars()) + "+$support+" + Quote(cleanup) + "),(New-Object Text.UTF8Encoding($true)))\n" + `$task=$name+'-Remove'
+	return l.baseVars() + fmt.Sprintf("$scriptHash='%x'\n", sha256.Sum256(l.RemovalFile())) + `$script=Join-Path $root ($name+'.remove.ps1')
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $script).Hash -ne $scriptHash) { throw 'Removal script hash mismatch' }
+$receipt=Join-Path $root ($name+'.remove.json')
+Set-Content -LiteralPath $receipt -Value '{"status":"pending"}' -Encoding UTF8
+$task=$name+'-Remove'
 $exe=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
 $action=New-ScheduledTaskAction -Execute $exe -Argument ('-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$script+'"')
 $principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-$settings=New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+$settings=New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $null=Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Settings $settings -Force
 Start-ScheduledTask -TaskName $task
 `
+}
+
+func (l Layout) WaitRemoval(seconds int) string {
+	return l.baseVars() + fmt.Sprintf(`for ($i=0; $i -le %d; $i++) {
+  $receipt=Join-Path $root ($name+'.remove.json')
+  if (Test-Path -LiteralPath $receipt) {
+    $r=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
+    if ($r.status -eq 'succeeded') { [Console]::WriteLine('TALUS_REMOVE_OK'); exit 0 }
+    if ($r.status -eq 'failed') { [Console]::WriteLine('TALUS_REMOVE_FAILED'); exit 0 }
+  } elseif (!(Test-Path -LiteralPath $base) -and !(Get-Service -Name $name -ErrorAction SilentlyContinue)) {
+    [Console]::WriteLine('TALUS_REMOVE_OK'); exit 0
+  }
+  if ($i -lt %d) { Start-Sleep -Seconds 1 }
+}
+[Console]::WriteLine('TALUS_REMOVE_PENDING')
+`, seconds, seconds)
 }
 func (l Layout) Wait(attempts int) string {
 	return l.vars() + fmt.Sprintf(`for ($i=0; $i -lt %d; $i++) {

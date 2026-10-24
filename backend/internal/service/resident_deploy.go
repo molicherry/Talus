@@ -127,7 +127,13 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 					m.installJobsMu.Lock()
 					_, busy := m.installJobs[s.ID]
 					if !busy && m.removing[s.ID] == nil && epoch == m.installEpoch && len(m.installJobs) < 4 {
-						jobCtx, stop := context.WithTimeout(ctx, 3*time.Minute)
+						// Include upload time before the detached Windows activation
+						// task's three-minute limit and its completion receipt.
+						budget := 3 * time.Minute
+						if n.InstallOS != "linux" {
+							budget = 10 * time.Minute
+						}
+						jobCtx, stop := context.WithTimeout(ctx, budget)
 						jobCtx = context.WithValue(jobCtx, residentSettingsKey{}, desiredSettings)
 						done := make(chan struct{})
 						m.installJobs[s.ID] = residentJob{cancel: stop, hash: n.TokenHash, done: done}

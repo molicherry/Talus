@@ -2,6 +2,8 @@ package agentproto_test
 
 import (
 	"crypto/sha256"
+	"debug/pe"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -57,6 +59,22 @@ func TestWindowsArtifactMustBeAMD64PE(t *testing.T) {
 		if a.Platform == "windows/amd64" {
 			windowsIndex = i
 		}
+	}
+	// A validly hashed GUI executable has the wrong service/CLI contract.
+	win := &m.Agents[windowsIndex]
+	gui, err := os.ReadFile(filepath.Join(dir, win.File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	peOffset := binary.LittleEndian.Uint32(gui[0x3c:])
+	binary.LittleEndian.PutUint16(gui[int(peOffset)+4+20+68:], pe.IMAGE_SUBSYSTEM_WINDOWS_GUI)
+	if err = os.WriteFile(filepath.Join(dir, win.File), gui, 0600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(gui)
+	win.SHA256 = hex.EncodeToString(digest[:])
+	if err = m.Verify(dir); err == nil || !strings.Contains(err.Error(), "console PE") {
+		t.Fatalf("GUI executable accepted or wrong failure: %v", err)
 	}
 	// A correctly hashed Linux executable must still be refused for Windows.
 	b, err := os.ReadFile(filepath.Join(dir, m.Agents[0].File))

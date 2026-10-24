@@ -69,3 +69,58 @@ configuration upgrades, failed-contact rollback and idempotent removal, then
 cleans up. Cross-compilation and Linux SSH fixtures do not replace native tests.
 The artifact build includes Linux amd64/arm64 and Windows amd64; startup verifies
 each manifest entry, size, SHA-256 and ELF/PE architecture.
+
+## Removal receipts and retries
+
+`Lock-Install 200` waits up to **200 seconds**, checking every 100 milliseconds.
+After committing deletion, the Hub briefly checks the receipt and warns if local
+cleanup is still pending. A failed task retains its script, receipt and
+`Talus-Agent-<installation ID>-Remove` task. Task Scheduler retries up to three
+additional times, one minute apart, with a five-minute limit per run. Failures
+also produce a Windows Application event from `Talus-Agent`.
+
+Use administrator PowerShell with the actual installation ID and original
+ProgramData location:
+
+```powershell
+$installId = '<installation ID>'
+$root = Join-Path $env:ProgramData 'Talus-Agent'
+$name = 'Talus-Agent-' + $installId
+Get-Content -LiteralPath (Join-Path $root ($name + '.remove.json'))
+Get-ScheduledTaskInfo -TaskName ($name + '-Remove')
+```
+
+Receipt status is `pending`, `failed` or `succeeded`, with an error and timestamp
+on failure. After resolving locked files or service-stop failures, retry with
+`Start-ScheduledTask -TaskName ($name + '-Remove')`. Success removes the task and
+script but retains the receipt. If execution was forcibly terminated before a
+receipt could be written, also check Task Scheduler's last result. The Hub does
+not keep polling deleted nodes after SSH disconnects or request cleanup ends.
+
+Activation has a 180-second task limit. The Hub waits 200 seconds for its receipt
+and allows another 10 seconds for SSH completion. Windows and unidentified-host
+deployment jobs have a ten-minute overall budget including uploads. External
+cancellation or connection loss can end the Hub wait earlier; the local task
+continues activation or rollback.
+
+## Changing operating system or ProgramData
+
+Tracked platforms and directories must remain consistent so old services and
+failed installations remain discoverable for cleanup. Before switching Linux to
+Windows or relocating ProgramData, delete the original server in Talus while its
+old system/path is accessible, confirm remote cleanup, then change the system or
+path and add the server again. This creates new server and installation IDs;
+back up any data you need to retain first.
+
+If the change already happened, restore administrative access to the old
+installation and clean up its services/tasks before deleting and re-adding the
+record. Do not bypass checks by editing pending/completed layout fields directly
+in the database. Changing SSH administrators does not move this machine-wide
+installation.
+
+Windows disk capacity sums readable drive-letter roots, skipping inaccessible
+or unlettered volumes; having no readable disk is still an error. Timed-out
+collection children get a ten-second reaping grace period. Each section permits
+at most one stuck old worker and one replacement. If both remain stuck, it keeps
+reporting timeouts until the OS operation recovers or the agent restarts, rather
+than accumulating processes indefinitely.

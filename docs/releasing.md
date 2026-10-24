@@ -6,6 +6,17 @@ Maintainers tag a commit already merged into `main`. CI publishes a versioned
 image and creates a Release draft. After a maintainer reviews and publishes it,
 the promotion workflow advances the same image digest to `latest`.
 
+## Required agent artifacts
+
+Windows amd64 is a **Hub startup requirement**, even when monitoring only Linux.
+Every official, custom or offline Hub build must bundle Linux amd64, Linux arm64
+and Windows amd64 agents plus a matching manifest from the same build. Omitting
+the Windows executable prevents Hub startup. Use `backend/build/agents.sh` and
+the repository Dockerfile; do not copy an older Linux-only artifact directory.
+Startup validates each binary's size, SHA-256, platform and protocol; Windows
+also requires an AMD64 console PE executable. There is currently no supported
+platform-omission switch.
+
 ## Versions and tags
 
 | Type | Example tag | Output after successful CI | Updates `latest` |

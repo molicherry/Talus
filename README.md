@@ -74,6 +74,8 @@ Windows PowerShell 5.1+, SFTP, and Task Scheduler. See [Windows monitoring](docs
 
 ### 3. Start (build from source)
 
+Custom/offline builds must bundle all three agent platforms, including Windows amd64; missing Windows artifacts prevent Hub startup. See [required release artifacts](docs/releasing.md#required-agent-artifacts).
+
 The repository `docker-compose.yml` builds Talus from source:
 
 ```bash

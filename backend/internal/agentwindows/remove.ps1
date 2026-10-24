@@ -2,7 +2,7 @@ Assert-Admin
 Assert-Path $root
 if (!(Test-Path -LiteralPath $root)) {
   if (Get-Service -Name $name -ErrorAction SilentlyContinue) { throw 'Service exists without installation root' }
-  exit 0
+  return
 }
 Protect-Directory $root
 $lock=Lock-Install 200

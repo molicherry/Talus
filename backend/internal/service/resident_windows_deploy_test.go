@@ -61,6 +61,36 @@ func TestWindowsAgentProbe(t *testing.T) {
 	}
 }
 
+func TestWindowsAgentProbeWithUnixTools(t *testing.T) {
+	for _, osName := range []string{"MINGW64_NT-10.0", "MSYS_NT-10.0", "CYGWIN_NT-10.0"} {
+		t.Run(osName, func(t *testing.T) {
+			lease := windowsProbeLease{exec: func(command string) *ExecResult {
+				if command == "uname -s; uname -m" {
+					return &ExecResult{Stdout: osName + "\nx86_64\n"}
+				}
+				return &ExecResult{Stdout: "TALUS_WINDOWS_V1\r\nAMD64\r\n"}
+			}}
+			p, err := NewAgentDeploymentService(nil, "").Probe(context.Background(), lease)
+			if err != nil || p.String() != "windows/amd64" {
+				t.Fatalf("probe: %v %v", p, err)
+			}
+		})
+	}
+}
+
+func TestWindowsAgentProbePreservesUnameFailure(t *testing.T) {
+	lease := windowsProbeLease{exec: func(command string) *ExecResult {
+		if command == "uname -s; uname -m" {
+			return &ExecResult{ExitCode: 42}
+		}
+		return &ExecResult{ExitCode: 127}
+	}}
+	_, err := NewAgentDeploymentService(nil, "").Probe(context.Background(), lease)
+	if err == nil || !strings.Contains(err.Error(), "uname exit=42") || ReasonFromError(err) != ReasonAgentPlatformUnsupported {
+		t.Fatalf("lost probe failure: %v", err)
+	}
+}
+
 func decodeWindowsCommand(t *testing.T, command string) string {
 	t.Helper()
 	parts := strings.Fields(command)
@@ -97,7 +127,7 @@ func decodeWindowsCommand(t *testing.T, command string) string {
 }
 
 func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *testing.T) {
-	for _, scenario := range []string{"success", "hash-mismatch", "health-failure", "no-admin"} {
+	for _, scenario := range []string{"success", "hash-mismatch", "health-failure", "no-admin", "remove-pending", "remove-failure", "remove-invalid"} {
 		t.Run(scenario, func(t *testing.T) {
 			svc, servers, db, ctx, _ := connectionServiceFixture(t)
 			srv, err := svc.Create(ctx, &model.Server{Name: "windows", Host: "windows.example", Port: 22, OwnerID: mw.GetUserClaims(ctx).UserID})
@@ -157,8 +187,20 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 						return
 					}
 					fmt.Fprintln(ch, "TALUS_READY")
-				case strings.Contains(script, "# Pending tasks cannot"):
+				case strings.Contains(script, "# Protect removal payload"):
+				case strings.Contains(script, "Start-ScheduledTask -TaskName $task") && strings.Contains(script, ".remove.ps1"):
 					removed.Store(true)
+				case strings.Contains(script, "TALUS_REMOVE_OK"):
+					status := "TALUS_REMOVE_OK"
+					switch scenario {
+					case "remove-pending":
+						status = "TALUS_REMOVE_PENDING"
+					case "remove-failure":
+						status = "TALUS_REMOVE_FAILED"
+					case "remove-invalid":
+						status = "unknown"
+					}
+					fmt.Fprintln(ch, status)
 				default:
 					t.Error("unexpected Windows command")
 					exitStatus(ch, 1)
@@ -179,7 +221,7 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 				t.Fatal(err)
 			}
 			switch scenario {
-			case "success":
+			case "success", "remove-pending", "remove-failure", "remove-invalid":
 				if after.Deployment != "ready" || after.InstallOS != "windows" || after.InstallHome == nil || *after.InstallHome != "C:/ProgramData" || len(after.PendingInstallLayouts) != 0 {
 					t.Fatalf("installation not persisted: %+v", after)
 				}
@@ -191,8 +233,13 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 					t.Fatal(err)
 				}
 				defer lease.Release()
-				if err = monitor.uninstall(ctx, after, lease); err != nil || !removed.Load() {
+				err = monitor.uninstall(ctx, after, lease)
+				wantErr := scenario == "remove-failure" || scenario == "remove-invalid"
+				if (err != nil) != wantErr || !removed.Load() {
 					t.Fatalf("Windows removal: %v", err)
+				}
+				if wantErr && ReasonFromError(err) != reasonWindowsService {
+					t.Fatalf("removal failure not propagated: %v", err)
 				}
 			case "hash-mismatch":
 				if after.DeployError != ReasonAgentHashMismatch || launched.Load() {

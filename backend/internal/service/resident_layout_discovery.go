@@ -18,20 +18,29 @@ const residentLayoutDiscoveryLimit = 1024
 // that the current SSH account is the one that installed the agent. It does not
 // modify either the host or the stored credential. Root also checks passwd homes;
 // an unprivileged account checks its own home and the system layout only.
-func discoverInstallLayouts(ctx context.Context, n model.AgentNode, lease *sshLease) ([]agentLayout, error) {
+func discoverInstallLayouts(ctx context.Context, n model.AgentNode, lease Lease) ([]agentLayout, error) {
 	if !validDiscoveryInstallID(n.InstallID) {
 		return nil, errors.New("cannot discover resident layout: invalid installation id")
+	}
+	if n.InstallOS == "windows" {
+		layout, err := discoverWindowsLayout(ctx, n.InstallID, lease)
+		if err != nil {
+			return nil, err
+		}
+		return []agentLayout{layout}, nil
 	}
 	result, err := lease.Exec(ctx, residentLayoutDiscoveryScript(n.InstallID), 10*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("discover resident installation layouts: %w", err)
 	}
 	if result == nil || result.ExitCode != 0 || result.StdoutTruncated || result.OutputTruncated {
-		// Windows has a single machine-wide layout, independent of SSH account.
-		if layout, winErr := discoverWindowsLayout(ctx, n.InstallID, lease); winErr == nil {
-			return []agentLayout{layout}, nil
+		// Only legacy Linux installations need discovery: Windows layouts are
+		// persisted before the first remote write. A failed Linux scan is not
+		// evidence of Windows and must retain its original failure details.
+		if result == nil {
+			return nil, errors.New("resident installation layout discovery returned no result")
 		}
-		return nil, errors.New("resident installation layout discovery did not complete")
+		return nil, fmt.Errorf("resident installation layout discovery failed: exit=%d, output_truncated=%t", result.ExitCode, result.StdoutTruncated || result.OutputTruncated)
 	}
 	return parseDiscoveredInstallLayouts(n, result.Stdout)
 }

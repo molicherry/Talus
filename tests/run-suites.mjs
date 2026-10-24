@@ -23,7 +23,7 @@ const SUITES = ["fast", "integration", "ui", "e2e"];
 
 function usage(code) {
   console.error(
-    "usage: run-suites.mjs --gate <M1..M4> | --suite <fast|integration|ui|e2e|all> [--phase <M1..M4>] | --list",
+    "usage: run-suites.mjs --gate <M1..M5> | --suite <fast|integration|ui|e2e|all> [--phase <M1..M5>] | --list",
   );
   process.exit(code);
 }

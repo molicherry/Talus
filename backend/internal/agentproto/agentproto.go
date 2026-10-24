@@ -205,9 +205,9 @@ func checkExecutable(path, platform string) error {
 		return fmt.Errorf("agent %s: invalid PE executable: %w", platform, err)
 	}
 	defer f.Close()
-	_, is64 := f.OptionalHeader.(*pe.OptionalHeader64)
-	if f.Machine != pe.IMAGE_FILE_MACHINE_AMD64 || !is64 || f.Characteristics&pe.IMAGE_FILE_EXECUTABLE_IMAGE == 0 || f.Characteristics&pe.IMAGE_FILE_DLL != 0 {
-		return fmt.Errorf("agent %s: expected a 64-bit AMD64 PE executable", platform)
+	h, is64 := f.OptionalHeader.(*pe.OptionalHeader64)
+	if f.Machine != pe.IMAGE_FILE_MACHINE_AMD64 || !is64 || h.Subsystem != pe.IMAGE_SUBSYSTEM_WINDOWS_CUI || f.Characteristics&pe.IMAGE_FILE_EXECUTABLE_IMAGE == 0 || f.Characteristics&pe.IMAGE_FILE_DLL != 0 {
+		return fmt.Errorf("agent %s: expected a 64-bit AMD64 console PE executable", platform)
 	}
 	return nil
 }

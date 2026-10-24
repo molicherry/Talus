@@ -5198,7 +5198,7 @@
         "REQ-12"
       ],
       "spec_ref": "tests/coverage.json#/cases/68/scenario",
-      "scenario": "Run real Windows services and scheduled tasks through collection, configuration upgrades, failed-contact rollback and detached removal.",
+      "scenario": "Run real Windows services and scheduled tasks through collection, configuration upgrades, failed-contact rollback, failed removal receipts and automatic removal retry; exclude loopback traffic from host counters.",
       "implementations": [
         {
           "implementation_id": "impl-12-03",
@@ -5206,6 +5206,16 @@
           "implementation": {
             "path": "backend/internal/agentwindows/native_windows_test.go",
             "symbol": "TestWindowsNativeDeploymentUpgradeRollbackAndRemoval"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-12-03-loopback",
+          "run_id": "windows-native",
+          "implementation": {
+            "path": "backend/internal/agentclient/platform_windows_test.go",
+            "symbol": "TestWindowsNetworkExcludesLoopbackTraffic"
           },
           "automation_status": "implemented",
           "required": true

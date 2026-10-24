@@ -72,6 +72,8 @@ Windows 需要管理员权限的 SSH 账号、Windows PowerShell 5.1+、SFTP 和
 
 ### 3. 启动（源码构建）
 
+自定义或离线构建必须包含全部三个平台的 Agent，Windows amd64 制品也是 Hub 启动的硬要求。参见[发布制品要求](releasing.zh-CN.md#必需的-agent-制品)。
+
 仓库内的 `docker-compose.yml` 从源码构建 Talus：
 
 ```bash
