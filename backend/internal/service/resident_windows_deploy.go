@@ -34,7 +34,7 @@ func discoverWindowsLayout(ctx context.Context, installID string, lease Lease) (
 		return agentLayout{}, err
 	}
 	if result == nil || result.ExitCode != 0 || result.OutputTruncated || result.StdoutTruncated {
-		return agentLayout{}, deployError(reasonWindowsService, errors.New("Windows deployment context unavailable"))
+		return agentLayout{}, deployError(reasonWindowsService, errors.New("windows deployment context unavailable"))
 	}
 	var v struct {
 		Home  string
@@ -45,7 +45,7 @@ func discoverWindowsLayout(ctx context.Context, installID string, lease Lease) (
 	}
 	home := strings.ReplaceAll(v.Home, "\\", "/")
 	if !v.Admin || !agentwindows.ValidHome(home) {
-		return agentLayout{}, deployError(reasonWindowsService, errors.New("Windows requires an administrator and a local ProgramData directory"))
+		return agentLayout{}, deployError(reasonWindowsService, errors.New("windows requires an administrator and a local ProgramData directory"))
 	}
 	return windowsAgentLayout(installID, home), nil
 }
@@ -56,7 +56,7 @@ func windowsExec(ctx context.Context, lease Lease, script, reason string, budget
 		return err
 	}
 	if r == nil || r.ExitCode != 0 || r.OutputTruncated || r.StdoutTruncated {
-		return deployError(reason, errors.New("Windows agent deployment step failed"))
+		return deployError(reason, errors.New("windows agent deployment step failed"))
 	}
 	return nil
 }
@@ -67,7 +67,7 @@ func verifyWindowsFile(ctx context.Context, lease Lease, name, expected string) 
 		return err
 	}
 	if r == nil || r.ExitCode != 0 || r.OutputTruncated || r.StdoutTruncated || !strings.EqualFold(strings.TrimSpace(r.Stdout), expected) {
-		return deployError(ReasonAgentHashMismatch, errors.New("Windows artifact verification failed"))
+		return deployError(ReasonAgentHashMismatch, errors.New("windows artifact verification failed"))
 	}
 	return nil
 }
@@ -197,7 +197,7 @@ func (m *ResidentMonitor) uninstallWindows(ctx context.Context, installID string
 		return err
 	}
 	if r == nil || r.ExitCode != 0 || r.OutputTruncated || r.StdoutTruncated {
-		return deployError(reasonWindowsService, errors.New("Windows removal receipt unavailable; inspect the retained removal task"))
+		return deployError(reasonWindowsService, errors.New("windows removal receipt unavailable; inspect the retained removal task"))
 	}
 	switch strings.TrimSpace(r.Stdout) {
 	case "TALUS_REMOVE_OK":
@@ -208,7 +208,7 @@ func (m *ResidentMonitor) uninstallWindows(ctx context.Context, installID string
 		return nil
 	case "TALUS_REMOVE_FAILED":
 		status = "failed"
-		return deployError(reasonWindowsService, errors.New("Windows removal failed; inspect the retained removal task and receipt"))
+		return deployError(reasonWindowsService, errors.New("windows removal failed; inspect the retained removal task and receipt"))
 	default:
 		return deployError(reasonWindowsService, errors.New("invalid Windows removal receipt"))
 	}

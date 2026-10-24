@@ -56,7 +56,7 @@ func runDaemon(c agentwire.Config, version, name string) error {
 	}
 	if service {
 		if name == "" {
-			return errors.New("Windows service requires --service-name")
+			return errors.New("windows service requires --service-name")
 		}
 		h := &windowsService{run: func(ctx context.Context) error { return Run(ctx, c, version) }}
 		if err = svc.Run(name, h); err != nil {
