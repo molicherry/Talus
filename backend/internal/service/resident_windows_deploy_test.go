@@ -262,11 +262,12 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 					defer slog.SetDefault(previous)
 					err = monitor.uninstall(ctx, after, lease)
 				}()
-				if scenario == "remove-pending" {
+				switch scenario {
+				case "remove-pending":
 					if !strings.Contains(logs.String(), "level=INFO") || strings.Contains(logs.String(), "level=WARN") {
 						t.Fatalf("normal async removal warned: %s", logs.String())
 					}
-				} else if scenario == "remove-failure" || scenario == "remove-invalid" {
+				case "remove-failure", "remove-invalid":
 					if !strings.Contains(logs.String(), "level=WARN") {
 						t.Fatalf("removal failure did not warn: %s", logs.String())
 					}

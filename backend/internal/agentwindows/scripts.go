@@ -75,8 +75,10 @@ func Command(script string) string {
 	return "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " + base64.StdEncoding.EncodeToString(b)
 }
 
+func isASCIILetter(c byte) bool { return c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' }
+
 func ValidHome(home string) bool {
-	if len(home) < 3 || len(home) > 240 || home[1] != ':' || home[2] != '/' || !((home[0] >= 'A' && home[0] <= 'Z') || (home[0] >= 'a' && home[0] <= 'z')) {
+	if len(home) < 3 || len(home) > 240 || home[1] != ':' || home[2] != '/' || !isASCIILetter(home[0]) {
 		return false
 	}
 	if strings.ContainsAny(home[2:], "\\\r\n\x00:*?\"<>|") {

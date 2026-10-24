@@ -11,7 +11,8 @@ func TestRuntimeLoginLimitPreservesWindowCounts(t *testing.T) {
 	r := config.NewRuntime(config.Config{LoginRateLimit: 2})
 	limiter := NewIPRateLimiter(time.Minute, 10, false)
 	limiter.SetRuntimeConfig(r)
-	if !limiter.Allow("client") || !limiter.Allow("client") || limiter.Allow("client") {
+	first, second := limiter.Allow("client"), limiter.Allow("client")
+	if !first || !second || limiter.Allow("client") {
 		t.Fatal("initial runtime limit ignored")
 	}
 	r.Store(config.Config{LoginRateLimit: 3})

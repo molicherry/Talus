@@ -27,7 +27,7 @@ func (s *AgentDeploymentService) CollectInstalled(ctx context.Context, lease Lea
 		return nil, false, err
 	}
 	if platform.OS != "linux" {
-		return nil, false, deployError(ReasonAgentPlatformUnsupported, errors.New("Windows requires the resident monitoring agent"))
+		return nil, false, deployError(ReasonAgentPlatformUnsupported, errors.New("resident monitoring agent required on Windows"))
 	}
 	desired, err := s.artifactFor(platform)
 	if err != nil {

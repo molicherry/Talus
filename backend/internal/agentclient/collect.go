@@ -74,7 +74,7 @@ func CollectSection(name string) (sectionResult, error) {
 		s.Load15 = &v.Load15
 	case "disk":
 		p, e := disk.Partitions(false)
-		if e != nil && !(runtime.GOOS == "windows" && len(p) > 0) {
+		if e != nil && (runtime.GOOS != "windows" || len(p) == 0) {
 			return r, e
 		}
 		used, total, e := collectDiskUsage(p, disk.Usage, runtime.GOOS == "windows")

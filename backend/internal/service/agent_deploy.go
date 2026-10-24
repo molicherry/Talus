@@ -206,7 +206,7 @@ func (s *AgentDeploymentService) Collect(ctx context.Context, lease Lease) (*age
 		return nil, err
 	}
 	if platform.OS != "linux" {
-		return nil, deployError(ReasonAgentPlatformUnsupported, errors.New("Windows requires the resident monitoring agent"))
+		return nil, deployError(ReasonAgentPlatformUnsupported, errors.New("resident monitoring agent required on Windows"))
 	}
 	artifact, err := s.artifactFor(platform)
 	if err != nil {
@@ -323,7 +323,7 @@ func verifyProtocol(out *agentOutput, artifact agentproto.Artifact, protocol int
 // idempotent: an upload is skipped when the remote hash already matches.
 func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifact agentproto.Artifact) error {
 	if strings.HasPrefix(artifact.Platform, "windows/") {
-		return deployError(ReasonAgentPlatformUnsupported, errors.New("Windows requires the resident monitoring agent"))
+		return deployError(ReasonAgentPlatformUnsupported, errors.New("resident monitoring agent required on Windows"))
 	}
 	localPath := filepath.Join(s.artifactsDir, artifact.File)
 	if _, err := os.Stat(localPath); err != nil {
