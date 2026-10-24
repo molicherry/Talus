@@ -79,7 +79,7 @@ go test -v -count=1 ./internal/agentclient ./internal/agentwire ./internal/agent
 `Lock-Install 200` 最多等待约 **200 秒**，每 100 毫秒检查一次，可等待激活任务释放锁。
 Hub 删除提交后短暂检查卸载回执；仍在等待时记录警告，本机任务继续执行。
 任务失败会保留脚本、回执和 `Talus-Agent-<安装 ID>-Remove` 计划任务，
-任务计划程序每隔 1 分钟重试，最多额外 3 次；每次执行上限为 5 分钟。
+独立的 SYSTEM 任务在失败后等待 1 分钟重试，最多额外 3 次；整个任务执行上限为 20 分钟。
 失败会写入 Windows Application 日志，来源为 `Talus-Agent`。
 
 在管理员 PowerShell 中检查原安装位置的回执（使用实际安装 ID 和原 ProgramData）：
@@ -92,7 +92,7 @@ Get-Content -LiteralPath (Join-Path $root ($name + '.remove.json'))
 Get-ScheduledTaskInfo -TaskName ($name + '-Remove')
 ```
 
-回执 `status` 为 `pending`、`failed` 或 `succeeded`；失败包含错误与更新时间。
+回执 `status` 为 `pending`、`failed` 或 `succeeded`；失败包含错误、尝试次数与更新时间。
 排除占用文件、服务停止失败等原因后，可用 `Start-ScheduledTask -TaskName ($name + '-Remove')`
 手动重试。成功后任务及脚本自动删除，成功回执保留。若任务被强制终止而未能写回执，
 同时查看任务计划程序的最近运行结果。Hub 警告不能替代本机最终回执；SSH 断开或

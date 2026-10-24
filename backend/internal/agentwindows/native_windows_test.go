@@ -170,9 +170,15 @@ func TestWindowsNativeDeploymentUpgradeRollbackAndRemoval(t *testing.T) {
 		deadline := time.Now().Add(timeout)
 		for {
 			b, _ := os.ReadFile(filepath.Join(l.Root(), l.Name()+".remove.json"))
-			var receipt struct{ Status string }
+			var receipt struct {
+				Status  string
+				Attempt int
+			}
 			_ = json.Unmarshal([]byte(strings.TrimPrefix(string(b), "\xef\xbb\xbf")), &receipt)
 			if receipt.Status == status {
+				if status == "succeeded" && receipt.Attempt < 2 {
+					t.Fatalf("automatic retry was not exercised: %s", b)
+				}
 				return
 			}
 			if time.Now().After(deadline) {
@@ -182,15 +188,15 @@ func TestWindowsNativeDeploymentUpgradeRollbackAndRemoval(t *testing.T) {
 		}
 	}
 	waitReceipt("failed", 40*time.Second)
-	mustRun("$t=Get-ScheduledTask -TaskName " + Quote(l.Name()+"-Remove") + "; if($t.Settings.RestartCount -ne 3){exit 1}")
+	mustRun("$t=Get-ScheduledTask -TaskName " + Quote(l.Name()+"-Remove") + "; if($t.State -ne 'Running'){exit 1}")
 	if _, err = os.Stat(l.RemovalPath()); err != nil {
 		t.Fatalf("retry script lost: %v", err)
 	}
 	if err = blocked.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// Task Scheduler performs the retry itself after one minute, with no Hub
-	// request or manual Start-ScheduledTask to conceal a broken retry policy.
+	// The detached task retries after one minute, with no Hub request or
+	// manual Start-ScheduledTask to conceal a broken retry policy.
 	waitReceipt("succeeded", 100*time.Second)
 	mustRun(l.WaitRemoval(0))
 	mustRun(l.Remove()) // idempotent, including a missing service and directory

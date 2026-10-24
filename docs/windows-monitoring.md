@@ -75,8 +75,9 @@ each manifest entry, size, SHA-256 and ELF/PE architecture.
 `Lock-Install 200` waits up to **200 seconds**, checking every 100 milliseconds.
 After committing deletion, the Hub briefly checks the receipt and warns if local
 cleanup is still pending. A failed task retains its script, receipt and
-`Talus-Agent-<installation ID>-Remove` task. Task Scheduler retries up to three
-additional times, one minute apart, with a five-minute limit per run. Failures
+`Talus-Agent-<installation ID>-Remove` task. The detached SYSTEM task retries up to three
+additional times, waiting one minute after each failure, with a twenty-minute
+limit for the entire task. Failures
 also produce a Windows Application event from `Talus-Agent`.
 
 Use administrator PowerShell with the actual installation ID and original
@@ -90,7 +91,7 @@ Get-Content -LiteralPath (Join-Path $root ($name + '.remove.json'))
 Get-ScheduledTaskInfo -TaskName ($name + '-Remove')
 ```
 
-Receipt status is `pending`, `failed` or `succeeded`, with an error and timestamp
+Receipt status is `pending`, `failed` or `succeeded`, with an error, attempt count and timestamp
 on failure. After resolving locked files or service-stop failures, retry with
 `Start-ScheduledTask -TaskName ($name + '-Remove')`. Success removes the task and
 script but retains the receipt. If execution was forcibly terminated before a
