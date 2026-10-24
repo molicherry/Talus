@@ -5,6 +5,15 @@
 维护者从已合并到 `main` 的提交创建 Tag。CI 发布版本镜像并生成 Release 草稿，
 人工审核并发布 Release 后，工作流将同一镜像 digest 推进到 `latest`。
 
+## 必需的 Agent 制品
+
+Windows amd64 制品是 **Hub 启动的硬要求**，即使只监控 Linux 也不能省略。
+官方镜像、自定义镜像及离线构建都必须包含同次构建的 Linux amd64、Linux arm64、
+Windows amd64 Agent 和匹配的 manifest；缺少 Windows 可执行文件会导致 Hub 启动失败。
+使用仓库的 `backend/build/agents.sh` 与 Dockerfile，不要复制旧版仅有 Linux 的制品目录。
+启动校验文件大小、SHA-256、平台和协议版本；Windows 必须是 AMD64 控制台 PE 程序。
+当前没有可省略平台制品的构建开关。
+
 ## 版本与标签
 
 | 类型 | Tag 示例 | CI 成功后的产物 | 更新 `latest` |

@@ -23,6 +23,7 @@ export function ExecPanel({ serverId }: ExecPanelProps) {
   const execMutation = useExecCommand(serverId);
   const { t } = useTranslation();
   const [command, setCommand] = useState("");
+  const [timeoutSeconds, setTimeoutSeconds] = useState("");
   const [outputTab, setOutputTab] = useState<"stdout" | "stderr">("stdout");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -34,7 +35,7 @@ export function ExecPanel({ serverId }: ExecPanelProps) {
       if (!trimmed || execMutation.isPending) return;
 
       execMutation.mutate(
-        { command: trimmed },
+        { command: trimmed, ...(timeoutSeconds ? { timeout: Number(timeoutSeconds) } : {}) },
         {
           onSuccess: () => {
             setHistory((prev) => {
@@ -46,7 +47,7 @@ export function ExecPanel({ serverId }: ExecPanelProps) {
         },
       );
     },
-    [command, execMutation],
+    [command, timeoutSeconds, execMutation],
   );
 
   const handleHistoryClick = useCallback((cmd: string) => {
@@ -73,6 +74,9 @@ export function ExecPanel({ serverId }: ExecPanelProps) {
             spellCheck={false}
           />
         </div>
+        <label className="text-xs text-muted-foreground">{t("exec.timeoutLabel")}
+          <Input type="number" min={1} max={300} step={1} value={timeoutSeconds} onChange={e => setTimeoutSeconds(e.target.value)} placeholder={t("exec.timeoutPlaceholder")} disabled={execMutation.isPending} className="mt-1 w-full sm:w-36" />
+        </label>
         <Button type="submit" disabled={!command.trim() || execMutation.isPending} className="py-2.5">
           {execMutation.isPending ? (
             <Loader2 className="h-4 w-4 animate-spin" />

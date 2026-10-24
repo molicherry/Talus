@@ -1,6 +1,6 @@
-// Package agentprototest builds tiny real ELF fixtures for the agent artifact
+// Package agentprototest builds tiny real ELF/PE fixtures for the agent artifact
 // contract, so tests exercise the same size/hash/architecture checks the Hub
-// performs at startup without compiling the full agent twice.
+// performs at startup without compiling full agents.
 package agentprototest
 
 import (
@@ -11,12 +11,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vpsmanager/backend/internal/agentproto"
 )
 
-// WriteArtifacts cross-compiles a minimal ELF for linux/amd64 and linux/arm64
+// WriteArtifacts cross-compiles a minimal executables for every required platform
 // into dir and writes a matching manifest for version.
 func WriteArtifacts(tb testing.TB, dir, version string) {
 	tb.Helper()
@@ -28,27 +29,29 @@ func WriteArtifacts(tb testing.TB, dir, version string) {
 		tb.Fatalf("write fixture source: %v", err)
 	}
 
-	agents := make([]agentproto.Artifact, 0, 2)
-	for _, target := range []struct{ platform, arch string }{
-		{"linux/amd64", "amd64"},
-		{"linux/arm64", "arm64"},
-	} {
-		out := filepath.Join(dir, "vpsmanager-agent-linux-"+target.arch)
+	agents := make([]agentproto.Artifact, 0, 3)
+	for _, platform := range agentproto.RequiredPlatforms {
+		target := strings.Split(platform, "/")
+		name := "vpsmanager-agent-" + target[0] + "-" + target[1]
+		if target[0] == "windows" {
+			name += ".exe"
+		}
+		out := filepath.Join(dir, name)
 		cmd := exec.Command("go", "build", "-trimpath", "-o", out, source)
-		cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+target.arch)
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+target[0], "GOARCH="+target[1])
 		if combined, err := cmd.CombinedOutput(); err != nil {
-			tb.Fatalf("build %s fixture: %v\n%s", target.arch, err, combined)
+			tb.Fatalf("build %s fixture: %v\n%s", platform, err, combined)
 		}
 		info, err := os.Stat(out)
 		if err != nil {
-			tb.Fatalf("stat %s fixture: %v", target.arch, err)
+			tb.Fatalf("stat %s fixture: %v", platform, err)
 		}
 		digest, err := digestOf(out)
 		if err != nil {
-			tb.Fatalf("digest %s fixture: %v", target.arch, err)
+			tb.Fatalf("digest %s fixture: %v", platform, err)
 		}
 		agents = append(agents, agentproto.Artifact{
-			Platform:        target.platform,
+			Platform:        platform,
 			File:            filepath.Base(out),
 			SHA256:          digest,
 			Size:            info.Size(),

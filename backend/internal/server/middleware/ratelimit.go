@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/config"
 	"github.com/vpsmanager/backend/internal/usage"
 )
 
@@ -94,12 +95,13 @@ func writeRateLimitError(w http.ResponseWriter, r *http.Request) {
 // Unlike RateLimiter (keyed by authenticated user ID), it keys on the client
 // IP address so unauthenticated endpoints such as login can be protected.
 type IPRateLimiter struct {
-	mu         sync.Mutex
-	window     time.Duration
-	maxReqs    int
-	requests   map[string][]time.Time
-	trustProxy bool
-	lastSweep  time.Time
+	runtimeConfig *config.Runtime
+	mu            sync.Mutex
+	window        time.Duration
+	maxReqs       int
+	requests      map[string][]time.Time
+	trustProxy    bool
+	lastSweep     time.Time
 }
 
 // NewIPRateLimiter creates a per-IP rate limiter. Set trustProxy only when
@@ -141,7 +143,11 @@ func (rl *IPRateLimiter) Allow(ip string) bool {
 		}
 	}
 
-	if len(valid) >= rl.maxReqs {
+	limit := rl.maxReqs
+	if rl.runtimeConfig != nil {
+		limit = rl.runtimeConfig.Current().LoginRateLimit
+	}
+	if len(valid) >= limit {
 		rl.requests[ip] = valid
 		return false
 	}
@@ -183,3 +189,6 @@ func clientIP(r *http.Request, trustProxy bool) string {
 	}
 	return host
 }
+
+// SetRuntimeConfig is wired before serving requests.
+func (rl *IPRateLimiter) SetRuntimeConfig(runtime *config.Runtime) { rl.runtimeConfig = runtime }

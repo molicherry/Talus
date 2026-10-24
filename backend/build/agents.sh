@@ -1,9 +1,9 @@
 #!/bin/sh
-# Build both Agent architectures and their versioned artifact manifest.
+# Build all supported Agent platforms and their versioned artifact manifest.
 #
 #   build/agents.sh <build-version> [output-dir]
 #
-# Both linux/amd64 and linux/arm64 are always produced from the same source and
+# Linux amd64/arm64 and Windows amd64 are produced from the same source and
 # the same build version, and the manifest records platform, build version,
 # protocol version, SHA-256 and size. The Hub refuses to start unless every
 # artifact matches its manifest, so a single-architecture build cannot ship by
@@ -21,10 +21,13 @@ cd "$BACKEND_DIR"
 mkdir -p "$OUT"
 OUT=$(CDPATH= cd -- "$OUT" && pwd)
 
-for arch in amd64 arm64; do
-	file="vpsmanager-agent-linux-$arch"
+for platform in linux/amd64 linux/arm64 windows/amd64; do
+	os=${platform%/*}
+	arch=${platform#*/}
+	file="vpsmanager-agent-$os-$arch"
+	[ "$os" != windows ] || file="$file.exe"
 	echo "building $file (version=$VERSION)"
-	CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build \
+	CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
 		-trimpath \
 		-ldflags="-s -w -X ${MODULE}/internal/agentproto.Version=${VERSION}" \
 		-o "$OUT/$file" ./cmd/agent
@@ -40,14 +43,17 @@ manifest="$OUT/agents-manifest.json"
 	printf '  "protocol_version": %s,\n' "$PROTOCOL_VERSION"
 	printf '  "agents": [\n'
 	first=1
-	for arch in amd64 arm64; do
-		file="vpsmanager-agent-linux-$arch"
+	for platform in linux/amd64 linux/arm64 windows/amd64; do
+		os=${platform%/*}
+		arch=${platform#*/}
+		file="vpsmanager-agent-$os-$arch"
+		[ "$os" != windows ] || file="$file.exe"
 		size=$(wc -c <"$OUT/$file" | tr -d ' ')
 		digest=$(sha256sum "$OUT/$file" | cut -d' ' -f1)
 		[ "$first" -eq 1 ] || printf ',\n'
 		first=0
-		printf '    {"platform": "linux/%s", "file": "%s", "sha256": "%s", "size": %s, "build_version": "%s", "protocol_version": %s}' \
-			"$arch" "$file" "$digest" "$size" "$VERSION" "$PROTOCOL_VERSION"
+		printf '    {"platform": "%s", "file": "%s", "sha256": "%s", "size": %s, "build_version": "%s", "protocol_version": %s}' \
+			"$platform" "$file" "$digest" "$size" "$VERSION" "$PROTOCOL_VERSION"
 	done
 	printf '\n  ]\n}\n'
 } >"$manifest"

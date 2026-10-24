@@ -1,4 +1,4 @@
-import { FileClock, Fingerprint, Key, LayoutDashboard, Link2, Server } from "lucide-react";
+import { FileClock, Fingerprint, Key, LayoutDashboard, Link2, Server, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Dialog } from "../ui/dialog";
 import { NavLink } from "react-router-dom";
@@ -26,7 +26,7 @@ interface SidebarProps {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const { t } = useTranslation();
-  const { canViewUsageLogs } = useAuth();
+  const { canViewUsageLogs, isAdmin } = useAuth();
   const { data: updateStatus } = useReleaseUpdate();
   const [openedVersion, setOpenedVersion] = useState<string | null>(null);
   const updateButton = useRef<HTMLButtonElement>(null);
@@ -53,7 +53,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const content = (
     <>
       <nav className="flex-1 space-y-1 overflow-y-auto p-4">
-        {[...navItems, ...(canViewUsageLogs ? [{ to: "/usage-logs", label: "nav.usageLogs", icon: FileClock }] : [])].map(({ to, label, icon: Icon }) => (
+        {[...navItems, ...(isAdmin ? [{ to: "/settings", label: "nav.settings", icon: Settings }] : []), ...(canViewUsageLogs ? [{ to: "/usage-logs", label: "nav.usageLogs", icon: FileClock }] : [])].map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}

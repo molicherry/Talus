@@ -2,7 +2,7 @@
 # Four image/platform combinations, one acceptance check (TC-08-05).
 #
 # Each Dockerfile's artifact stage verifies what the image will ship: the
-# manifest, both agent architectures (ELF class/machine, size, SHA-256) and the
+# manifest, all agent platforms (ELF/PE class/machine, size, SHA-256) and the
 # stamped build version, and the architecture the builder can execute also runs
 # the agent's protocol smoke test. The check runs inside the build, so a mismatch
 # fails the build itself instead of being reported after the fact.

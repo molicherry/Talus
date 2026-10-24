@@ -255,6 +255,7 @@ func (s *SSHService) dialRoute(ctx context.Context, snap *sshRouteSnapshot) (*ss
 // AcquireLease preserves the target-pinned operation contract used by Exec,
 // terminals and multi-step agent deployment while sharing proxy route validation.
 func (s *SSHService) AcquireLease(ctx context.Context, id uint, consumer ...LeaseConsumer) (*sshLease, error) {
+	s = s.settingsSnapshot()
 	h, err := s.getLease(sshpool.WithQuotaConsumer(ctx, string(leaseConsumer(consumer))), id, false)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -290,6 +291,7 @@ func (s *SSHService) getLease(ctx context.Context, id uint, fresh bool) (*sshpoo
 // Callers reporting a connection test must not read a newer route after handoff
 // and attribute that route to an earlier successful handshake.
 func (s *SSHService) getLeaseWithSnapshot(ctx context.Context, id uint, fresh bool) (*sshpool.Lease, *sshRouteSnapshot, error) {
+	s = s.settingsSnapshot()
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, context.Cause(ctx)

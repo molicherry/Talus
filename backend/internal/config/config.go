@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -10,8 +11,10 @@ import (
 	"github.com/vpsmanager/backend/internal/agentwire"
 )
 
-// Config holds all application configuration loaded from environment variables.
+// Config holds application configuration, including effective settings overrides.
 type Config struct {
+	// Environment records provenance without retaining raw deployment values.
+	Environment map[string]bool
 	// Database
 	DatabaseURL string
 
@@ -39,7 +42,8 @@ type Config struct {
 	MetricsRetentionDryRun  bool
 	// MetricsRetentionParseError records an unparsable rollout switch so Validate
 	// rejects startup instead of silently changing the deletion behaviour.
-	MetricsRetentionParseError error
+	MetricsRetentionParseError  error
+	metricsRetentionParseErrors map[string]error
 
 	// Monitoring
 	MonitorInterval int
@@ -72,44 +76,59 @@ type Config struct {
 	UsageRetentionDays          int
 	UsageSensitiveRetentionDays int
 	UsageLegacyWritersDrained   bool
+	// Deployment-only recovery; never exposed as an editable system setting.
+	SettingsIgnoreInvalidOverrides bool
+	settingsRecoveryParseError     error
 }
 
 // Validate rejects illegal configuration before the server starts serving.
 func (c *Config) Validate() error {
+	if err := c.ValidateDeployment(); err != nil {
+		return err
+	}
 	if c.MonitorInterval <= 0 {
-		return fmt.Errorf("MONITOR_INTERVAL must be a positive integer, got %d", c.MonitorInterval)
+		return invalidSetting("MONITOR_INTERVAL", "must be a positive integer, got %d", c.MonitorInterval)
 	}
 	if c.AgentHubURL != "" {
 		if err := (agentwire.Config{HubURL: c.AgentHubURL, Token: strings.Repeat("0", 64), StateDir: "/configured-at-install", IntervalSeconds: c.MonitorInterval, AllowHTTP: c.AgentAllowHTTP}).Validate(); err != nil {
-			return fmt.Errorf("AGENT_HUB_URL / MONITOR_INTERVAL: %w", err)
+			return invalidSetting("AGENT_HUB_URL", "%w", err)
 		}
 	}
 	if c.MetricsRetentionParseError != nil {
 		return c.MetricsRetentionParseError
 	}
-	if c.MonitorToleratedRounds < 0 {
-		return fmt.Errorf("MONITOR_TOLERATED_ROUNDS must not be negative, got %d", c.MonitorToleratedRounds)
-	}
-	if c.MonitorAllowedLatency < 0 {
-		return fmt.Errorf("MONITOR_ALLOWED_LATENCY_SECONDS must not be negative, got %d", c.MonitorAllowedLatency)
-	}
 	if c.ExecTimeout <= 0 {
-		return fmt.Errorf("EXEC_TIMEOUT must be positive, got %d", c.ExecTimeout)
+		return invalidSetting("EXEC_TIMEOUT", "must be positive, got %d", c.ExecTimeout)
 	}
 	if c.ExecTimeoutMax <= 0 || c.ExecTimeoutMax < c.ExecTimeout || c.ExecTimeoutMax > 300 {
-		return fmt.Errorf("EXEC_TIMEOUT_MAX must be positive, >= EXEC_TIMEOUT and <= 300, got %d/%d", c.ExecTimeoutMax, c.ExecTimeout)
+		return invalidSetting("EXEC_TIMEOUT_MAX", "must be positive, >= EXEC_TIMEOUT and <= 300, got %d/%d", c.ExecTimeoutMax, c.ExecTimeout)
 	}
 	if c.ExecOutputLimit <= 0 || c.ExecOutputLimit > 8<<20 {
-		return fmt.Errorf("EXEC_OUTPUT_LIMIT must be positive and <= 8388608, got %d", c.ExecOutputLimit)
+		return invalidSetting("EXEC_OUTPUT_LIMIT", "must be positive and <= 8388608, got %d", c.ExecOutputLimit)
 	}
 	if c.ExecOutputStreamLimit <= 0 || c.ExecOutputStreamLimit > c.ExecOutputLimit || c.ExecOutputStreamLimit > 4<<20 {
-		return fmt.Errorf("EXEC_OUTPUT_STREAM_LIMIT must be positive, <= EXEC_OUTPUT_LIMIT and <= 4194304, got %d/%d", c.ExecOutputStreamLimit, c.ExecOutputLimit)
+		return invalidSetting("EXEC_OUTPUT_STREAM_LIMIT", "must be positive, <= EXEC_OUTPUT_LIMIT and <= 4194304, got %d/%d", c.ExecOutputStreamLimit, c.ExecOutputLimit)
 	}
 	if c.SSHTimeout <= 0 {
-		return fmt.Errorf("SSH_TIMEOUT must be positive, got %d", c.SSHTimeout)
+		return invalidSetting("SSH_TIMEOUT", "must be positive, got %d", c.SSHTimeout)
 	}
 	if c.LoginRateLimit < 0 {
-		return fmt.Errorf("LOGIN_RATE_LIMIT must not be negative, got %d", c.LoginRateLimit)
+		return invalidSetting("LOGIN_RATE_LIMIT", "must not be negative, got %d", c.LoginRateLimit)
+	}
+	return nil
+}
+
+// ValidateDeployment rejects only values that database settings cannot repair.
+// Settings-dependent and cross-field checks must run after merging overrides.
+func (c *Config) ValidateDeployment() error {
+	if c.settingsRecoveryParseError != nil {
+		return c.settingsRecoveryParseError
+	}
+	if c.MonitorToleratedRounds < 0 {
+		return invalidSetting("MONITOR_TOLERATED_ROUNDS", "must not be negative")
+	}
+	if c.MonitorAllowedLatency < 0 {
+		return invalidSetting("MONITOR_ALLOWED_LATENCY_SECONDS", "must not be negative")
 	}
 	return nil
 }
@@ -128,6 +147,15 @@ func Load() *Config {
 	cfg.Port = getEnvOrDefault("PORT", "8080")
 	cfg.LogFormat = getEnvOrDefault("LOG_FORMAT", "json")
 	cfg.LogLevel = getEnvOrDefault("LOG_LEVEL", "info")
+	// Report the same normalized values that the logger actually uses.
+	if cfg.LogFormat != "json" {
+		cfg.LogFormat = "text"
+	}
+	switch cfg.LogLevel {
+	case "debug", "warn", "error":
+	default:
+		cfg.LogLevel = "info"
+	}
 	cfg.AgentArtifactsDir = getEnvOrDefault("AGENT_ARTIFACTS_DIR", "/usr/local/bin")
 	cfg.AgentHubURL = os.Getenv("AGENT_HUB_URL")
 	cfg.AgentAllowHTTP = getEnvBool("AGENT_ALLOW_HTTP")
@@ -138,16 +166,19 @@ func Load() *Config {
 	// dryRun=false) in place — dryRun=false is the deleting configuration.
 	cfg.MetricsRetentionEnabled = false
 	cfg.MetricsRetentionDryRun = true
+	cfg.metricsRetentionParseErrors = make(map[string]error)
 	// Only an explicitly set switch may override a default: a missing or empty
 	// variable reports "unset", which keeps the safe value installed above rather
 	// than reading it as an explicit false (N01).
 	if enabled, err := getEnvBoolStrict("METRICS_RETENTION_ENABLED"); err != nil {
-		cfg.MetricsRetentionParseError = err
+		cfg.metricsRetentionParseErrors["METRICS_RETENTION_ENABLED"] = err
+		cfg.MetricsRetentionParseError = errors.Join(cfg.MetricsRetentionParseError, err)
 	} else if enabled != nil {
 		cfg.MetricsRetentionEnabled = *enabled
 	}
 	if dryRun, err := getEnvBoolStrict("METRICS_RETENTION_DRY_RUN"); err != nil {
-		cfg.MetricsRetentionParseError = err
+		cfg.metricsRetentionParseErrors["METRICS_RETENTION_DRY_RUN"] = err
+		cfg.MetricsRetentionParseError = errors.Join(cfg.MetricsRetentionParseError, err)
 	} else if dryRun != nil {
 		cfg.MetricsRetentionDryRun = *dryRun
 	}
@@ -170,7 +201,30 @@ func Load() *Config {
 	cfg.UsageActiveLimit = getEnvIntOrDefault("USAGE_LOG_ACTIVE_LIMIT", 4096)
 	cfg.UsageRetentionDays = getEnvIntOrDefault("USAGE_LOG_RETENTION_DAYS", 30)
 	cfg.UsageSensitiveRetentionDays = getEnvIntOrDefault("USAGE_LOG_SENSITIVE_RETENTION_DAYS", 90)
+	// Preserve the recorder/retention compatibility defaults, and show those
+	// effective defaults in the settings page instead of misleading zeroes.
+	if cfg.UsageWriteConcurrency <= 0 {
+		cfg.UsageWriteConcurrency = 4
+	}
+	if cfg.UsageActiveLimit <= 0 {
+		cfg.UsageActiveLimit = 4096
+	}
+	if cfg.UsageRetentionDays <= 0 {
+		cfg.UsageRetentionDays = 30
+	}
+	if cfg.UsageSensitiveRetentionDays <= 0 {
+		cfg.UsageSensitiveRetentionDays = 90
+	}
 	cfg.UsageLegacyWritersDrained = getEnvBool("USAGE_LOG_LEGACY_WRITERS_DRAINED")
+	if recovery, err := getEnvBoolStrict("SYSTEM_SETTINGS_IGNORE_INVALID_OVERRIDES"); err != nil {
+		cfg.settingsRecoveryParseError = err
+	} else if recovery != nil {
+		cfg.SettingsIgnoreInvalidOverrides = *recovery
+	}
+	cfg.Environment = make(map[string]bool)
+	for _, setting := range Settings {
+		cfg.Environment[setting.Key] = os.Getenv(setting.Key) != ""
+	}
 
 	return cfg
 }
@@ -244,7 +298,7 @@ func getEnvBoolStrict(key string) (*bool, error) {
 	}
 	parsed, err := strconv.ParseBool(val)
 	if err != nil {
-		return nil, fmt.Errorf("%s=%q is not a valid boolean", key, val)
+		return nil, invalidSetting(key, "is not a valid boolean")
 	}
 	return &parsed, nil
 }

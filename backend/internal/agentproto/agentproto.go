@@ -3,13 +3,14 @@
 //
 // The manifest and the agent's own `--format json` output carry the same build
 // version and protocol version, so a Hub can refuse artifacts that do not match
-// the protocol it speaks. Both linux/amd64 and linux/arm64 must be present: the
-// Hub never silently degrades to a single architecture.
+// the protocol it speaks. Linux amd64/arm64 and Windows amd64 must all be
+// present: the Hub never silently ships an incomplete platform set.
 package agentproto
 
 import (
 	"crypto/sha256"
 	"debug/elf"
+	"debug/pe"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,7 +34,7 @@ var Version = "dev"
 const ManifestName = "agents-manifest.json"
 
 // Platforms that must both be present in every Hub image.
-var RequiredPlatforms = []string{"linux/amd64", "linux/arm64"}
+var RequiredPlatforms = []string{"linux/amd64", "linux/arm64", "windows/amd64"}
 
 // Artifact is one compiled agent binary.
 type Artifact struct {
@@ -107,7 +108,7 @@ func LoadManifest(dir string) (*Manifest, error) {
 		return nil, fmt.Errorf("agent artifacts manifest: protocol_version %d, want %d", manifest.ProtocolVersion, ProtocolVersion)
 	}
 	if len(manifest.Agents) != len(RequiredPlatforms) {
-		return nil, fmt.Errorf("agent artifacts manifest: %d agents, want both %s", len(manifest.Agents), strings.Join(RequiredPlatforms, " and "))
+		return nil, fmt.Errorf("agent artifacts manifest: %d agents, want %s", len(manifest.Agents), strings.Join(RequiredPlatforms, ", "))
 	}
 	seen := map[string]bool{}
 	for _, artifact := range manifest.Agents {
@@ -150,7 +151,7 @@ func (a Artifact) validate() error {
 }
 
 // Verify checks every artifact in dir: present, regular, exact size, exact
-// SHA-256, 64-bit ELF for the declared platform, and a matching build and
+// SHA-256, 64-bit ELF or PE for the declared platform, and a matching build and
 // protocol version. Any mismatch is fatal: the Hub must not start.
 func (m *Manifest) Verify(dir string) error {
 	for _, artifact := range m.Agents {
@@ -175,7 +176,7 @@ func (m *Manifest) Verify(dir string) error {
 		if !strings.EqualFold(digest, artifact.SHA256) {
 			return fmt.Errorf("agent %s: sha256 %s does not match manifest %s", artifact.Platform, digest, artifact.SHA256)
 		}
-		if err := checkELF(path, artifact.Platform); err != nil {
+		if err := checkExecutable(path, artifact.Platform); err != nil {
 			return err
 		}
 	}
@@ -195,7 +196,23 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-// checkELF rejects a binary that is not a 64-bit ELF for the declared platform,
+func checkExecutable(path, platform string) error {
+	if platform != "windows/amd64" {
+		return checkELF(path, platform)
+	}
+	f, err := pe.Open(path)
+	if err != nil {
+		return fmt.Errorf("agent %s: invalid PE executable: %w", platform, err)
+	}
+	defer f.Close()
+	h, is64 := f.OptionalHeader.(*pe.OptionalHeader64)
+	if f.Machine != pe.IMAGE_FILE_MACHINE_AMD64 || !is64 || h.Subsystem != pe.IMAGE_SUBSYSTEM_WINDOWS_CUI || f.Characteristics&pe.IMAGE_FILE_EXECUTABLE_IMAGE == 0 || f.Characteristics&pe.IMAGE_FILE_DLL != 0 {
+		return fmt.Errorf("agent %s: expected a 64-bit AMD64 console PE executable", platform)
+	}
+	return nil
+}
+
+// checkELF rejects a binary that is not a 64-bit ELF or PE for the declared platform,
 // which is what catches a mis-stamped or cross-wired artifact.
 func checkELF(path, platform string) error {
 	var want elf.Machine

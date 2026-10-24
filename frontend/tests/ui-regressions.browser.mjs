@@ -1471,6 +1471,17 @@ try {
     );
   });
 
+  await test("Windows monitoring labels paging files and disables Linux load", async ({ page, state, goto }) => {
+    state.servers[0].os = "windows Microsoft Windows Server 2022 Standard";
+    await goto("/servers/1");
+    await page.getByText("Paging File Usage", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Load", exact: true }).isDisabled(), true);
+    await page.getByText("Not applicable: Windows does not provide Linux load averages.", { exact: true }).waitFor();
+    assert.equal(await page.getByText("Swap Usage", { exact: true }).count(), 0);
+    await page.getByRole("button", { name: /data table/i }).click();
+    await page.getByRole("columnheader", { name: "Paging File", exact: true }).waitFor();
+  });
+
   await test("a late response from the previous range never replaces the current one", async ({
     page,
     state,

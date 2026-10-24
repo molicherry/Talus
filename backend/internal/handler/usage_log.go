@@ -174,7 +174,7 @@ func (h *UsageLogHandler) Get(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, 200, item)
 }
 
-var usageActions = strings.Fields("server.sftp.list server.sftp.stat server.sftp.upload server.sftp.download server.sftp.mkdir server.sftp.rename server.sftp.delete server.sftp.text.read server.sftp.text.write server.sftp.archive server.sftp.upload.start server.sftp.upload.status server.sftp.upload.chunk server.sftp.upload.complete server.sftp.upload.cancel credential.create credential.update credential.delete credential.reveal api_key.create api_key.delete api_key.rotate api_key.permissions.update api_key.reveal server.create server.update server.delete server.host_key.trust server.exec server.terminal service.create service.update service.delete service.credentials service.relay")
+var usageActions = strings.Fields("settings.update server.sftp.list server.sftp.stat server.sftp.upload server.sftp.download server.sftp.mkdir server.sftp.rename server.sftp.delete server.sftp.text.read server.sftp.text.write server.sftp.archive server.sftp.upload.start server.sftp.upload.status server.sftp.upload.chunk server.sftp.upload.complete server.sftp.upload.cancel credential.create credential.update credential.delete credential.reveal api_key.create api_key.delete api_key.rotate api_key.permissions.update api_key.reveal server.create server.update server.delete server.host_key.trust server.exec server.terminal service.create service.update service.delete service.credentials service.relay")
 
 func oneOf(v string, choices []string) bool {
 	if v == "" {
@@ -254,7 +254,7 @@ func parseUsageQuery(v url.Values, now time.Time, continuation bool) (UsageLogQu
 		q.PageSize = n
 	}
 	q.Action, q.Outcome, q.AuthType, q.ResourceType, q.RequestID = v.Get("action"), v.Get("outcome"), v.Get("auth_type"), v.Get("resource_type"), v.Get("request_id")
-	if !oneOf(q.Action, usageActions) || !oneOf(q.Outcome, strings.Fields("running succeeded failed rejected cancelled unknown")) || !oneOf(q.AuthType, strings.Fields("jwt api_key unauthenticated legacy_unknown")) || !oneOf(q.ResourceType, strings.Fields("server credential api_key service")) || (q.RequestID != "" && !mw.ValidRequestID(q.RequestID)) {
+	if !oneOf(q.Action, usageActions) || !oneOf(q.Outcome, strings.Fields("running succeeded failed rejected cancelled unknown")) || !oneOf(q.AuthType, strings.Fields("jwt api_key unauthenticated legacy_unknown")) || !oneOf(q.ResourceType, strings.Fields("server credential api_key service settings")) || (q.RequestID != "" && !mw.ValidRequestID(q.RequestID)) {
 		return q, f, server.ReasonInvalidQuery
 	}
 	f.From, f.To, f.Action, f.Outcome, f.AuthType, f.ResourceType, f.RequestID = from, to, q.Action, q.Outcome, q.AuthType, q.ResourceType, q.RequestID

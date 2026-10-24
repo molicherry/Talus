@@ -23,6 +23,41 @@ func requireResidentInstallLayout(t *testing.T, node model.AgentNode, uid int, h
 	}
 }
 
+func TestWindowsInstallLayoutPersistsAcrossRestartAndFailure(t *testing.T) {
+	db, repo, _, node, _ := agentRepoFixture(t)
+	ctx := context.Background()
+	l := model.AgentInstallLayout{OS: "windows", Home: "C:/ProgramData"}
+	if err := repo.TrackInstallLayouts(ctx, node, []model.AgentInstallLayout{l}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.Get(ctx, node.ServerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(stored.PendingInstallLayouts, []model.AgentInstallLayout{l}) {
+		t.Fatal("lost Windows layout before activation")
+	}
+	if err = repo.SetInstallPlatformLayout(ctx, node, l); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.First(&stored, "server_id = ?", node.ServerID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.InstallOS != "windows" || stored.InstallHome == nil || *stored.InstallHome != l.Home || len(stored.PendingInstallLayouts) != 0 {
+		t.Fatal("lost completed Windows layout")
+	}
+	if err = repo.TrackInstallLayouts(ctx, node, []model.AgentInstallLayout{l}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = repo.Get(ctx, node.ServerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(stored.PendingInstallLayouts, []model.AgentInstallLayout{l}) {
+		t.Fatal("duplicate or misclassified retry layout")
+	}
+}
+
 func TestResidentTrackInstallLayoutsPreservesAccountsAndFinalizes(t *testing.T) {
 	_, repo, _, node, _ := agentRepoFixture(t)
 	ctx := context.Background()

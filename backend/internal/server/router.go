@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
-
 	"github.com/vpsmanager/backend/internal/pkg/token"
 	"github.com/vpsmanager/backend/internal/server/middleware"
 	"github.com/vpsmanager/backend/internal/usage"
@@ -18,6 +17,8 @@ import (
 
 // RouteConfig holds all HTTP handler functions that the router needs to mount.
 type RouteConfig struct {
+	GetSettingsHandler           http.HandlerFunc
+	UpdateSettingsHandler        http.HandlerFunc
 	AgentHTTPHandler             http.HandlerFunc
 	AgentWebSocketHandler        http.HandlerFunc
 	JWTService                   *token.JWTService
@@ -147,6 +148,12 @@ func NewRouter(cfg RouteConfig) chi.Router {
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.UsageCapture(cfg.UsageRecorder))
 		r.Use(middleware.Auth(cfg.JWTService, cfg.APIKeyAuth, cfg.UserGate))
+		if cfg.GetSettingsHandler != nil {
+			r.Get("/api/v1/settings", cfg.GetSettingsHandler)
+		}
+		if cfg.UpdateSettingsHandler != nil {
+			r.Put("/api/v1/settings", cfg.UpdateSettingsHandler)
+		}
 		if cfg.CheckUpdatesHandler != nil {
 			r.Get("/api/v1/updates", cfg.CheckUpdatesHandler)
 		}

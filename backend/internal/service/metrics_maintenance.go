@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/config"
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/telemetry"
 )
@@ -14,10 +15,11 @@ import (
 // daily retention pass. A failed refresh or an incomplete aggregation pauses the
 // corresponding work and is reported, never silently ignored.
 type MetricsMaintenance struct {
-	repo         *repository.MetricRepo
-	logger       *slog.Logger
-	refreshEvery time.Duration
-	pruneEvery   time.Duration
+	runtimeConfig *config.Runtime
+	repo          *repository.MetricRepo
+	logger        *slog.Logger
+	refreshEvery  time.Duration
+	pruneEvery    time.Duration
 	// jobBudget bounds a single cycle so a huge backfill cannot hold shutdown or
 	// the connection pool forever.
 	jobBudget time.Duration
@@ -150,7 +152,12 @@ func (m *MetricsMaintenance) Prune(ctx context.Context) {
 		m.logger.Warn("metrics aggregation incomplete, retention paused for those servers",
 			"pending_servers", len(plan.Pending), "cutoff", plan.Cutoff)
 	}
-	switch retentionDecision(m.retentionEnabled, m.retentionDryRun) {
+	enabled, dryRun := m.retentionEnabled, m.retentionDryRun
+	if m.runtimeConfig != nil {
+		c := m.runtimeConfig.Current()
+		enabled, dryRun = c.MetricsRetentionEnabled, c.MetricsRetentionDryRun
+	}
+	switch retentionDecision(enabled, dryRun) {
 	case retentionDisabled:
 		// Disabled: the cycle still reports exactly what it would delete, which is
 		// the read-only verification step of the rollout.
@@ -203,3 +210,6 @@ func retentionDecision(enabled, dryRun bool) retentionDecisionKind {
 		return retentionApply
 	}
 }
+
+// SetRuntimeConfig is wired before serving requests.
+func (m *MetricsMaintenance) SetRuntimeConfig(runtime *config.Runtime) { m.runtimeConfig = runtime }

@@ -14,6 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/vpsmanager/backend/internal/config"
 	"github.com/vpsmanager/backend/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -41,6 +42,7 @@ type UsageLogFilter struct {
 }
 
 type UsageLogRepo struct {
+	runtimeConfig    *config.Runtime
 	db               *gorm.DB
 	config           UsageLogRepoConfig
 	reconciled       atomic.Uint64
@@ -175,7 +177,7 @@ func recoveryUnknown(v *model.UsageLog) bool {
 }
 func sameOwner(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
 func (r *UsageLogRepo) retention(action string) time.Duration {
-	return (model.UsagePolicy{OrdinaryRetention: r.config.OrdinaryRetention, SensitiveRetention: r.config.SensitiveRetention}).Retention(action)
+	return r.retentionPolicy().Retention(action)
 }
 
 func (r *UsageLogRepo) Upsert(ctx context.Context, input *model.UsageLog) error {
@@ -459,6 +461,7 @@ type UsageCleanupGroupCount struct {
 }
 
 var usageReportActions = []string{
+	"settings.update",
 	"server.sftp.list",
 	"server.sftp.stat",
 	"server.sftp.upload",
@@ -482,7 +485,8 @@ var usageReportActions = []string{
 }
 
 func (r *UsageLogRepo) cleanupCandidates(db *gorm.DB) *gorm.DB {
-	return db.Table("usage_logs AS logs").Where("logs.outcome <> 'running' AND logs.retention_at IS NOT NULL AND logs.retention_at <= clock_timestamp() - (CASE WHEN logs.action IN ? OR RIGHT(logs.action, ?) = ? THEN ?::double precision ELSE ?::double precision END * INTERVAL '1 second')", model.UsageSensitiveActions(), len(model.UsageDeleteActionSuffix), model.UsageDeleteActionSuffix, r.config.SensitiveRetention.Seconds(), r.config.OrdinaryRetention.Seconds()).Where("logs.source <> 'audit_legacy' OR EXISTS (SELECT 1 FROM usage_log_backfill_states WHERE id = ? AND completed_at IS NOT NULL)", usageBackfillID).Where("NOT (logs.outcome = 'unknown' AND logs.recovery_reason = 'owner_lease_expired') OR NOT EXISTS (SELECT 1 FROM usage_log_instances AS i WHERE i.instance_id = logs.owner_instance_id AND i.retired_at IS NULL AND i.lease_until > clock_timestamp())")
+	policy := r.retentionPolicy()
+	return db.Table("usage_logs AS logs").Where("logs.outcome <> 'running' AND logs.retention_at IS NOT NULL AND logs.retention_at <= clock_timestamp() - (CASE WHEN logs.action = 'settings.update' THEN ?::double precision WHEN logs.action IN ? OR RIGHT(logs.action, ?) = ? THEN ?::double precision ELSE ?::double precision END * INTERVAL '1 second')", policy.Retention("settings.update").Seconds(), model.UsageSensitiveActions(), len(model.UsageDeleteActionSuffix), model.UsageDeleteActionSuffix, policy.SensitiveRetention.Seconds(), policy.OrdinaryRetention.Seconds()).Where("logs.source <> 'audit_legacy' OR EXISTS (SELECT 1 FROM usage_log_backfill_states WHERE id = ? AND completed_at IS NOT NULL)", usageBackfillID).Where("NOT (logs.outcome = 'unknown' AND logs.recovery_reason = 'owner_lease_expired') OR NOT EXISTS (SELECT 1 FROM usage_log_instances AS i WHERE i.instance_id = logs.owner_instance_id AND i.retired_at IS NULL AND i.lease_until > clock_timestamp())")
 }
 
 func (r *UsageLogRepo) cleanupReport(db *gorm.DB) ([]UsageCleanupGroupCount, error) {
@@ -793,4 +797,15 @@ func (r *UsageLogRepo) Backfill(ctx context.Context) error {
 		return e
 	})
 	return usageErr(err)
+}
+
+// SetRuntimeConfig is wired before serving requests.
+func (r *UsageLogRepo) SetRuntimeConfig(runtime *config.Runtime) { r.runtimeConfig = runtime }
+
+func (r *UsageLogRepo) retentionPolicy() model.UsagePolicy {
+	if r.runtimeConfig != nil {
+		c := r.runtimeConfig.Current()
+		return (model.UsagePolicy{OrdinaryRetention: time.Duration(c.UsageRetentionDays) * 24 * time.Hour, SensitiveRetention: time.Duration(c.UsageSensitiveRetentionDays) * 24 * time.Hour}).WithDefaults()
+	}
+	return (model.UsagePolicy{OrdinaryRetention: r.config.OrdinaryRetention, SensitiveRetention: r.config.SensitiveRetention}).WithDefaults()
 }

@@ -262,3 +262,18 @@ func TestResidentLayoutDiscoveryPropagatesRemoteFailure(t *testing.T) {
 		t.Fatalf("remote discovery failure accepted: %+v", layouts)
 	}
 }
+
+func TestResidentLayoutDiscoveryFailureDoesNotProbePowerShell(t *testing.T) {
+	calls := 0
+	lease := windowsProbeLease{exec: func(command string) *ExecResult {
+		calls++
+		if strings.Contains(command, "powershell.exe") {
+			t.Error("Linux discovery fell back to PowerShell")
+		}
+		return &ExecResult{ExitCode: 23}
+	}}
+	_, err := discoverInstallLayouts(context.Background(), model.AgentNode{InstallID: "legacy"}, lease)
+	if err == nil || !strings.Contains(err.Error(), "exit=23") || calls != 1 {
+		t.Fatalf("lost discovery failure: %v, calls %d", err, calls)
+	}
+}

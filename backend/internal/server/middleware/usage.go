@@ -16,6 +16,7 @@ type captureRoute struct {
 }
 
 var capturedRoutes = map[string]captureRoute{
+	"PUT /api/v1/settings":                            {"settings.update", "/api/v1/settings", "settings"},
 	"GET /api/v1/servers/{id}/sftp/text":              {"server.sftp.text.read", "/api/v1/servers/{id}/sftp/text", "server"},
 	"PUT /api/v1/servers/{id}/sftp/text":              {"server.sftp.text.write", "/api/v1/servers/{id}/sftp/text", "server"},
 	"GET /api/v1/servers/{id}/sftp/archive":           {"server.sftp.archive", "/api/v1/servers/{id}/sftp/archive", "server"},

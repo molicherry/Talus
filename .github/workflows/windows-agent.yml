@@ -1,0 +1,51 @@
+name: Windows Agent
+
+on:
+  workflow_call:
+  # Validate native Windows changes on feature branches before a PR is opened.
+  # Main, PR and release runs invoke the same tests through the CI workflow.
+  push:
+    branches-ignore: [main]
+    tags-ignore: ['**']
+    paths:
+      - 'backend/internal/agentclient/**'
+      - 'backend/internal/agentwindows/**'
+      - 'backend/internal/agentwire/**'
+      - 'backend/internal/service/*windows*.go'
+      - 'backend/cmd/agent/**'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - '.github/workflows/windows-agent.yml'
+      - 'tests/coverage.json'
+      - 'tests/run-suites.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Native collection, SCM deployment, rollback and removal
+        env:
+          TALUS_WINDOWS_INTEGRATION: '1'
+        run: node tests/run-suites.mjs --gate M5
+      - name: Upload Windows execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-agent-${{ matrix.os }}
+          path: tests/.artifacts/exec-*.json
+          include-hidden-files: true
+          if-no-files-found: error

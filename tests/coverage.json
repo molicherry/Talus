@@ -258,6 +258,27 @@
           "TEST_DATABASE_URL"
         ]
       }
+    },
+    {
+      "run_id": "windows-native",
+      "suite": "integration",
+      "runner": "go-test",
+      "cwd": "backend",
+      "command": [
+        "go",
+        "test",
+        "-count=1",
+        "./internal/agentclient",
+        "./internal/agentwire",
+        "./internal/agentwindows"
+      ],
+      "timeout_seconds": 720,
+      "environment": {
+        "profile": "windows-administrator",
+        "requires": [
+          "TALUS_WINDOWS_INTEGRATION"
+        ]
+      }
     }
   ],
   "gates": {
@@ -295,6 +316,9 @@
       "ui-charts",
       "terminal-e2e",
       "e2e-core"
+    ],
+    "M5": [
+      "windows-native"
     ]
   },
   "phases": {
@@ -312,7 +336,12 @@
       "REQ-08"
     ],
     "M4": [
-      "REQ-09"
+      "REQ-09",
+      "REQ-10",
+      "REQ-11"
+    ],
+    "M5": [
+      "REQ-12"
     ]
   },
   "cases": [
@@ -4637,6 +4666,556 @@
           "implementation": {
             "path": "frontend/tests/ui-regressions.browser.mjs",
             "symbol": "API key rotation does not advance a draft past another administrator's edit"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-10-01",
+      "requirement_ids": [
+        "REQ-10"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/51/scenario",
+      "scenario": "Persist administrator settings with environment fallback, explicit empty and false overrides, deferred capacity values and reset across a real Hub restart.",
+      "implementations": [
+        {
+          "implementation_id": "impl-10-01-01",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/server/settings_startup_test.go",
+            "symbol": "TestSettingsAPIAdminPersistenceAndRestart"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-01-1",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/server/settings_recovery_test.go",
+            "symbol": "TestSettingsInvalidOverrideRecoveryAndFieldError"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-01-2",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/system_settings_test.go",
+            "symbol": "TestSystemSettingsRecoveryIsExplicitAndRepairIsAudited"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-10-02",
+      "requirement_ids": [
+        "REQ-10"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/52/scenario",
+      "scenario": "Commit configuration and its audit event atomically while rejecting stale revisions and rolling back when audit persistence fails.",
+      "implementations": [
+        {
+          "implementation_id": "impl-10-02-01",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/repository/system_settings_test.go",
+            "symbol": "TestSystemSettingsPersistCASAndAuditRollback"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-10-03",
+      "requirement_ids": [
+        "REQ-10"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/53/scenario",
+      "scenario": "Validate settings and destructive retention changes before publishing immutable snapshots; preserve in-flight SSH and Agent job configuration.",
+      "implementations": [
+        {
+          "implementation_id": "impl-10-03-01",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/system_settings_test.go",
+            "symbol": "TestSystemSettingsPrecedenceResetAndRestart"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-10-03-02",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/system_settings_test.go",
+            "symbol": "TestSystemSettingsValidationAndFailedSaveAreAtomic"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-10-03-03",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/system_settings_test.go",
+            "symbol": "TestSystemSettingsRetentionConfirmationAndConcurrentRevision"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-10-03-04",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/system_settings_test.go",
+            "symbol": "TestRuntimeSettingsKeepSSHLeaseSnapshotAndMonitorDesiredState"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-03-1",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/repository/settings_retention_review_test.go",
+            "symbol": "TestSettingsAuditRetentionFloorAndSingleRetentionWindow"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-10-04",
+      "requirement_ids": [
+        "REQ-10"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/54/scenario",
+      "scenario": "Publish consistent configuration under concurrent updates, update derived loggers, and preserve safe environment fallback semantics.",
+      "implementations": [
+        {
+          "implementation_id": "impl-10-04-01",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/runtime_test.go",
+            "symbol": "TestRuntimeLoggerUpdatesDerivedLoggers"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-10-04-02",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/runtime_test.go",
+            "symbol": "TestRuntimeSnapshotsAreConsistentUnderConcurrentUpdates"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-10-04-03",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/runtime_test.go",
+            "symbol": "TestSystemSettingsOverridesMalformedRetentionEnvironmentByKey"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-10-04-04",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/runtime_test.go",
+            "symbol": "TestSystemSettingsDisplayCompatibleDeploymentDefaults"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-04-1",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/settings_review_test.go",
+            "symbol": "TestApplyLiveUsesSettingApplyMetadata"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-04-2",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/settings_review_test.go",
+            "symbol": "TestDeploymentValidationAllowsRepairableOverrides"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-04-3",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/settings_review_test.go",
+            "symbol": "TestSettingsValidationIdentifiesField"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-04-4",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/server/settings_recovery_test.go",
+            "symbol": "TestDeploymentInvalidBeforeDatabaseOrArtifacts"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-04-5",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/system_settings_test.go",
+            "symbol": "TestSystemSettingsPollReportsFailureAndRecoveryWithoutFlooding"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-10-05",
+      "requirement_ids": [
+        "REQ-10"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/55/scenario",
+      "scenario": "Apply updated login and SSH queue limits while retaining active state, and reject wildcard API keys on settings routes.",
+      "implementations": [
+        {
+          "implementation_id": "impl-10-05-01",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/server/middleware/runtime_settings_test.go",
+            "symbol": "TestRuntimeLoginLimitPreservesWindowCounts"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-10-05-02",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/server/middleware/runtime_settings_test.go",
+            "symbol": "TestRuntimeSettingsDenyWildcardAPIKeys"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-10-05-03",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/pkg/sshpool/runtime_settings_test.go",
+            "symbol": "TestRuntimeSSHSlotWaitUsesUpdatedTimeout"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-10-06",
+      "requirement_ids": [
+        "REQ-10"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/56/scenario",
+      "scenario": "Preserve explicit false and empty settings, restore deployment defaults, and display saved capacity alongside the active value.",
+      "implementations": [
+        {
+          "implementation_id": "impl-10-06-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/settings.browser.mjs",
+            "symbol": "settings preserve explicit empty and false values and restore deployment defaults"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-06-1",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/settings.browser.mjs",
+            "symbol": "settings delayed loading honors group hashes"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-10-07",
+      "requirement_ids": [
+        "REQ-10"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/57/scenario",
+      "scenario": "Require confirmation before destructive retention changes and prevent editing fields during an outstanding save.",
+      "implementations": [
+        {
+          "implementation_id": "impl-10-07-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/settings.browser.mjs",
+            "symbol": "settings require destructive retention confirmation and freeze pending saves"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-10-08",
+      "requirement_ids": [
+        "REQ-10"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/58/scenario",
+      "scenario": "Reject inconsistent execution limits and retain user input after a concurrent configuration conflict.",
+      "implementations": [
+        {
+          "implementation_id": "impl-10-08-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/settings.browser.mjs",
+            "symbol": "settings conflict retains the draft and cross-field limits reject invalid saves"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-08-1",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/settings.browser.mjs",
+            "symbol": "settings recovery warning and field errors remain actionable"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-10-09",
+      "requirement_ids": [
+        "REQ-10"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/59/scenario",
+      "scenario": "Deny viewer access to the settings page without requesting protected configuration or showing its navigation entry.",
+      "implementations": [
+        {
+          "implementation_id": "impl-10-09-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/settings.browser.mjs",
+            "symbol": "settings deny viewers without fetching configuration"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-10-10",
+      "requirement_ids": [
+        "REQ-10"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/60/scenario",
+      "scenario": "Render all configuration fields in Chinese on a narrow mobile viewport without horizontal page overflow.",
+      "implementations": [
+        {
+          "implementation_id": "impl-10-10-01",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/settings.browser.mjs",
+            "symbol": "settings Chinese mobile layout stays within the viewport"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-11-01",
+      "requirement_ids": [
+        "REQ-11"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/61/scenario",
+      "scenario": "Require a verified Windows AMD64 PE artifact and reject missing or cross-platform binaries.",
+      "implementations": [
+        {
+          "implementation_id": "impl-11-01",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/agentproto/agentproto_test.go",
+            "symbol": "TestWindowsArtifactMustBeAMD64PE"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-11-02",
+      "requirement_ids": [
+        "REQ-11"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/62/scenario",
+      "scenario": "Detect Windows over OpenSSH and refuse unsupported Windows processor architectures before upload.",
+      "implementations": [
+        {
+          "implementation_id": "impl-11-02",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_windows_deploy_test.go",
+            "symbol": "TestWindowsAgentProbe"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-11-03",
+      "requirement_ids": [
+        "REQ-11"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/63/scenario",
+      "scenario": "Verify Windows uploads before activation and retain machine-wide cleanup metadata on deployment failure.",
+      "implementations": [
+        {
+          "implementation_id": "impl-11-03",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_windows_deploy_test.go",
+            "symbol": "TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-11-04",
+      "requirement_ids": [
+        "REQ-11"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/64/scenario",
+      "scenario": "Persist Windows installation metadata across retries without classifying it as a Linux account layout.",
+      "implementations": [
+        {
+          "implementation_id": "impl-11-04",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/repository/agent_node_layout_test.go",
+            "symbol": "TestWindowsInstallLayoutPersistsAcrossRestartAndFailure"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-11-05",
+      "requirement_ids": [
+        "REQ-11"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/65/scenario",
+      "scenario": "Display paging-file usage and mark Linux load averages as not applicable on Windows.",
+      "implementations": [
+        {
+          "implementation_id": "impl-11-05",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "Windows monitoring labels paging files and disables Linux load"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-12-01",
+      "requirement_ids": [
+        "REQ-12"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/66/scenario",
+      "scenario": "Keep Windows boot identity stable across agent starts and collect native system uptime.",
+      "implementations": [
+        {
+          "implementation_id": "impl-12-01",
+          "run_id": "windows-native",
+          "implementation": {
+            "path": "backend/internal/agentclient/platform_windows_test.go",
+            "symbol": "TestWindowsBootIdentityAndUptime"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-12-02",
+      "requirement_ids": [
+        "REQ-12"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/67/scenario",
+      "scenario": "Handle Windows SCM stop and shutdown without leaving the agent run loop active.",
+      "implementations": [
+        {
+          "implementation_id": "impl-12-02",
+          "run_id": "windows-native",
+          "implementation": {
+            "path": "backend/internal/agentclient/platform_windows_test.go",
+            "symbol": "TestWindowsServiceStopAndFailure"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-12-03",
+      "requirement_ids": [
+        "REQ-12"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/68/scenario",
+      "scenario": "Run real Windows services and scheduled tasks through collection, configuration upgrades, failed-contact rollback, failed removal receipts and automatic removal retry; exclude loopback traffic from host counters.",
+      "implementations": [
+        {
+          "implementation_id": "impl-12-03",
+          "run_id": "windows-native",
+          "implementation": {
+            "path": "backend/internal/agentwindows/native_windows_test.go",
+            "symbol": "TestWindowsNativeDeploymentUpgradeRollbackAndRemoval"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-12-03-loopback",
+          "run_id": "windows-native",
+          "implementation": {
+            "path": "backend/internal/agentclient/platform_windows_test.go",
+            "symbol": "TestWindowsNetworkExcludesLoopbackTraffic"
           },
           "automation_status": "implemented",
           "required": true

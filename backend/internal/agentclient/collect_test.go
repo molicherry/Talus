@@ -3,9 +3,13 @@ package agentclient
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/shirou/gopsutil/v4/disk"
 )
 
 func TestCollectorPartialFailureAndBoundedStuckWorker(t *testing.T) {
@@ -51,5 +55,93 @@ func TestCollectorPartialFailureAndBoundedStuckWorker(t *testing.T) {
 	}
 	if s.CPU == nil || *s.CPU != 50 || s.Errors["load"] != "read_failed" {
 		t.Fatalf("CPU continuity: %+v", s)
+	}
+}
+
+func TestCollectorReplacesStuckWorkerWithoutUnboundedGrowth(t *testing.T) {
+	// Exercise the production grace period using virtual time, independent
+	// of runner speed and goroutine scheduling latency.
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		first, second := make(chan struct{}), make(chan struct{})
+		defer close(second)
+		var releaseFirst sync.Once
+		defer releaseFirst.Do(func() { close(first) })
+		c := &Collector{Run: func(ctx context.Context, name string) (sectionResult, error) {
+			switch calls.Add(1) {
+			case 1:
+				<-first
+			case 2:
+				<-second
+			default:
+				return sectionResult{TotalCPU: 42}, nil
+			}
+			return sectionResult{}, nil
+		}}
+		run := func() (sectionResult, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			return c.runBounded(ctx, "cpu")
+		}
+		for i := 0; i < 2; i++ {
+			if _, err := run(); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("stuck worker: %v", err)
+			}
+			time.Sleep(11 * time.Second)
+		}
+		for i := 0; i < 3; i++ {
+			if _, err := run(); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("unbounded replacement: %v", err)
+			}
+		}
+		if calls.Load() != 2 {
+			t.Fatalf("live worker limit: %d", calls.Load())
+		}
+		releaseFirst.Do(func() { close(first) })
+		c.workersMu.Lock()
+		oldDone := c.workers["cpu"][0].done
+		c.workersMu.Unlock()
+		select {
+		case <-oldDone:
+		case <-time.After(time.Second):
+			t.Fatal("old worker did not exit")
+		}
+		r, err := run()
+		if err != nil || r.TotalCPU != 42 {
+			t.Fatalf("failed to recover with one stuck worker: %+v %v", r, err)
+		}
+		// The late completion of the old worker must not erase the remaining one.
+		c.workersMu.Lock()
+		live := len(c.workers["cpu"])
+		c.workersMu.Unlock()
+		if live != 2 {
+			t.Fatalf("lost tracked worker: %d", live)
+		}
+	})
+}
+
+func TestDiskCollectionSkipsUnavailableWindowsVolumes(t *testing.T) {
+	parts := []disk.PartitionStat{{Device: "C:", Mountpoint: "C:", Fstype: "NTFS"}, {Device: "D:", Mountpoint: "D:/", Fstype: "NTFS"}, {Device: "recovery", Mountpoint: "Volume{hidden}", Fstype: "NTFS"}}
+	usage := func(path string) (*disk.UsageStat, error) {
+		if path == "Volume{hidden}" {
+			t.Error("queried a volume without a drive letter")
+		}
+		if path != "C:/" {
+			return nil, errors.New("access denied")
+		}
+		return &disk.UsageStat{Total: 100, Used: 20}, nil
+	}
+	used, total, err := collectDiskUsage(parts, usage, true)
+	if err != nil || used != 20 || total != 100 {
+		t.Fatalf("partial readable disks: %d/%d %v", used, total, err)
+	}
+	if _, _, err = collectDiskUsage(parts[1:], usage, true); err == nil {
+		t.Fatal("no readable disks must remain an error")
+	}
+	// Linux does not normalize C: to C:/; use a genuinely readable first
+	// filesystem so this checks partial failure rather than all disks failing.
+	parts[0].Mountpoint = "C:/"
+	if _, _, err = collectDiskUsage(parts[:2], usage, false); err == nil {
+		t.Fatal("Linux partial disk failure was hidden")
 	}
 }

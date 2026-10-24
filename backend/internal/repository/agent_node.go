@@ -184,7 +184,7 @@ func (r *AgentNodeRepo) TrackInstallLayouts(ctx context.Context, n model.AgentNo
 			}
 		}
 		if current.InstallUID != nil && current.InstallHome != nil {
-			add(model.AgentInstallLayout{UID: *current.InstallUID, Home: *current.InstallHome})
+			add(model.AgentInstallLayout{OS: current.InstallOS, UID: *current.InstallUID, Home: *current.InstallHome})
 		}
 		for _, layout := range current.PendingInstallLayouts {
 			add(layout)
@@ -209,11 +209,16 @@ func (r *AgentNodeRepo) TrackInstallLayouts(ctx context.Context, n model.AgentNo
 // SetInstallLayout finalizes a successful installation and retirement together.
 // A stale installation cannot overwrite a replacement credential's layout.
 func (r *AgentNodeRepo) SetInstallLayout(ctx context.Context, n model.AgentNode, uid int, home string) error {
-	home = path.Clean(home)
+	return r.SetInstallPlatformLayout(ctx, n, model.AgentInstallLayout{UID: uid, Home: home})
+}
+
+func (r *AgentNodeRepo) SetInstallPlatformLayout(ctx context.Context, n model.AgentNode, layout model.AgentInstallLayout) error {
+	home := path.Clean(layout.Home)
+	uid := layout.UID
 	result := r.db.WithContext(ctx).Model(&model.AgentNode{}).
 		Where("server_id = ? AND token_hash = ?", n.ServerID, n.TokenHash).
-		Select("InstallUID", "InstallHome", "PendingInstallLayouts").
-		Updates(&model.AgentNode{InstallUID: &uid, InstallHome: &home})
+		Select("InstallOS", "InstallUID", "InstallHome", "PendingInstallLayouts").
+		Updates(&model.AgentNode{InstallOS: layout.OS, InstallUID: &uid, InstallHome: &home})
 	if result.Error != nil {
 		return result.Error
 	}

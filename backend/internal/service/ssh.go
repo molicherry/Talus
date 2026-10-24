@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/config"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/server"
 	"github.com/vpsmanager/backend/internal/usage"
@@ -20,7 +21,10 @@ const maxExecTimeout = 300 * time.Second
 const maxExecOutput = 8 << 20
 const maxExecStreamOutput = 4 << 20
 
+// settingsSnapshot copies this value. Do not add mutexes, atomic values, or
+// other fields that cannot be copied; keep shared mutable state behind pointers.
 type SSHService struct {
+	runtimeConfig      *config.Runtime
 	pool               *sshpool.Pool
 	serverRepo         serverSource
 	credSvc            *CredentialService
@@ -115,6 +119,7 @@ func (s *SSHService) SetLeaseObserver(observer func(consumer LeaseConsumer, delt
 
 // Exec runs a command on a target server via SSH.
 func (s *SSHService) Exec(ctx context.Context, serverID uint, command string, timeout time.Duration) (*ExecResult, error) {
+	s = s.settingsSnapshot()
 	if timeout <= 0 {
 		timeout = s.execDefaultTimeout
 	}
@@ -433,6 +438,7 @@ func isConnectionError(err error) bool {
 
 // CopyFile uploads a local artifact over SFTP on a verified SSH connection.
 func (s *SSHService) CopyFile(ctx context.Context, serverID uint, localPath, remotePath string) error {
+	s = s.settingsSnapshot()
 	budget := min(s.execDefaultTimeout, maxExecTimeout)
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
@@ -443,4 +449,20 @@ func (s *SSHService) CopyFile(ctx context.Context, serverID uint, localPath, rem
 	defer lease.Release()
 	err = lease.Upload(ctx, localPath, remotePath, budget)
 	return errors.Join(err, lease.releaseAndWait())
+}
+
+// SetRuntimeConfig is wired before serving requests.
+func (s *SSHService) SetRuntimeConfig(r *config.Runtime) { s.runtimeConfig = r }
+
+func (s *SSHService) settingsSnapshot() *SSHService {
+	if s.runtimeConfig == nil {
+		return s
+	}
+	c := s.runtimeConfig.Current()
+	snapshot := *s
+	snapshot.runtimeConfig = nil
+	snapshot.sshDialTimeout = time.Duration(c.SSHTimeout) * time.Second
+	snapshot.execDefaultTimeout = time.Duration(c.ExecTimeout) * time.Second
+	snapshot.outputLimit, snapshot.outputStreamLimit = c.ExecOutputLimit, c.ExecOutputStreamLimit
+	return &snapshot
 }

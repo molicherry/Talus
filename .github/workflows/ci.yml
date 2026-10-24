@@ -308,6 +308,10 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
+  windows-agent:
+    name: Windows Agent
+    uses: ./.github/workflows/windows-agent.yml
+
   docker:
     name: Docker
     needs: release-policy
@@ -401,7 +405,7 @@ jobs:
   publish-image:
     name: Publish immutable version image
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [release-policy, security, backend, frontend, unified, docker]
+    needs: [release-policy, security, backend, frontend, unified, docker, windows-agent]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

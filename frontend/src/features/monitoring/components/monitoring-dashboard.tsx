@@ -38,6 +38,7 @@ import { TimeRangeSelector } from "./time-range-selector";
 import { TrendChart } from "./trend-chart";
 
 interface MonitoringDashboardProps {
+  os?: string | null;
   serverId: number;
 }
 
@@ -229,12 +230,13 @@ function ThroughputCard({
 }
 
 interface LoadAvgCardProps {
+  applicable?: boolean;
   load1: Nullable;
   load5: Nullable;
   load15: Nullable;
 }
 
-function LoadAvgCard({ load1, load5, load15 }: LoadAvgCardProps) {
+function LoadAvgCard({ load1, load5, load15, applicable = true }: LoadAvgCardProps) {
   const { t } = useTranslation();
   const entries: Array<[string, Nullable]> = [
     ["1m", load1],
@@ -244,28 +246,36 @@ function LoadAvgCard({ load1, load5, load15 }: LoadAvgCardProps) {
   return (
     <Card className="p-5">
       <h3 className="text-sm font-semibold text-foreground">{t("monitoring.loadAverage")}</h3>
-      <div className="mt-4 flex justify-around">
-        {entries.map(([label, value]) => (
-          <div key={label} className="text-center">
-            <p className="text-2xl font-bold tabular-nums text-foreground">
-              {value === null ? METRIC_MISSING_LABEL : value.toFixed(2)}
-            </p>
-            <p className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              {label}
-            </p>
-          </div>
-        ))}
-      </div>
+      {!applicable ? (
+        <p className="mt-4 text-sm text-muted-foreground">{t("monitoring.windowsLoadNotApplicable")}</p>
+      ) : (
+        <div className="mt-4 flex justify-around">
+          {entries.map(([label, value]) => (
+            <div key={label} className="text-center">
+              <p className="text-2xl font-bold tabular-nums text-foreground">
+                {value === null ? METRIC_MISSING_LABEL : value.toFixed(2)}
+              </p>
+              <p className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                {label}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }
 
-export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
+export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) {
+  const isWindows = /^windows(?:\s|$)/i.test(os ?? "");
   const { t } = useTranslation();
   const [timeRange, setTimeRange] = useState<TimeRange>("1h");
   // The page shares one range, one axis and one statistic: the cards,
   // the charts and the data table describe the same numbers.
   const [axisMode, setAxisMode] = useState<AxisMode>("percent");
+  useEffect(() => {
+    if (isWindows && axisMode === "load") setAxisMode("percent");
+  }, [isWindows, axisMode]);
   const [stat, setStat] = useState<MetricStat>("avg");
   const [showDataTable, setShowDataTable] = useState(false);
   const [tablePage, setTablePage] = useState(1);
@@ -378,14 +388,14 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
       const pattern = seriesPattern(index);
       return {
         key: axis.label,
-        label: t(seriesLabelKey(axisMode, index)),
+        label: t(isWindows && axis.label === "swap" ? "metrics.series.pageFile" : seriesLabelKey(axisMode, index)),
         color: AXIS_COLOR[axis.label] ?? SERIES_COLOR.cpu,
         dash: pattern.dash,
         marker: pattern.marker as "circle" | "square" | "triangle" | "diamond",
         values: aligned.series[fields[index]] ?? [],
       };
     });
-  }, [aligned, axisMode, stat, t]);
+  }, [aligned, axisMode, stat, t, isWindows]);
 
   // Screen-reader description of the chart and the caption of
   // the equivalent data view.
@@ -450,6 +460,8 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
             <button
               key={mode}
               type="button"
+              disabled={isWindows && mode === "load"}
+              title={isWindows && mode === "load" ? t("monitoring.windowsLoadNotApplicable") : undefined}
               aria-pressed={axisMode === mode}
               onClick={() => setAxisMode(mode)}
               className={cn(
@@ -533,7 +545,7 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
               max={maxOf(diskPeak)}
             />
             <MetricStatCard
-              label={t("monitoring.swapUsage")}
+              label={t(isWindows ? "monitoring.pageFileUsage" : "monitoring.swapUsage")}
               value={latestOf(pick(swapPeak, swap))}
               avg={weightedMean(points ?? [], "swap_percent_sum", "swap_percent_count", "swap_percent")}
               max={maxOf(swapPeak)}
@@ -679,6 +691,7 @@ export function MonitoringDashboard({ serverId }: MonitoringDashboardProps) {
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <LoadAvgCard
+              applicable={!isWindows}
               load1={latestOf(pick(load1Peak, load1))}
               load5={latestOf(pick(load5Peak, load5))}
               load15={latestOf(pick(load15Peak, load15))}

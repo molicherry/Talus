@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vpsmanager/backend/internal/agentproto"
+	"github.com/vpsmanager/backend/internal/agentwindows"
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 	"github.com/vpsmanager/backend/internal/telemetry"
 )
@@ -146,25 +147,42 @@ func (s *AgentDeploymentService) Probe(ctx context.Context, lease Lease) (AgentP
 	if err != nil {
 		return AgentPlatform{}, fmt.Errorf("probe target: %w", err)
 	}
-	if result == nil || result.ExitCode != 0 {
-		code := -1
-		if result != nil {
-			code = result.ExitCode
+	probeErr := errors.New("uname returned no result")
+	if result != nil {
+		lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+		probeErr = fmt.Errorf("uname exit=%d, output_truncated=%t, lines=%d", result.ExitCode, result.OutputTruncated || result.StdoutTruncated, len(lines))
+		if result.ExitCode == 0 && !result.OutputTruncated && !result.StdoutTruncated && len(lines) >= 2 {
+			osName, arch := strings.ToLower(strings.TrimSpace(lines[0])), strings.TrimSpace(lines[1])
+			if osName == "linux" {
+				if name := archName(arch); name != "" {
+					return AgentPlatform{OS: "linux", Arch: name}, nil
+				}
+				return AgentPlatform{}, deployError(ReasonAgentPlatformUnsupported, fmt.Errorf("unsupported Linux architecture %q", arch))
+			}
+			probeErr = fmt.Errorf("uname identified unsupported target %s/%s", osName, arch)
 		}
-		return AgentPlatform{}, fmt.Errorf("probe target: uname exited %d", code)
 	}
-	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
-	if len(lines) < 2 {
-		return AgentPlatform{}, fmt.Errorf("probe target: unexpected uname output %q", strings.TrimSpace(result.Stdout))
-	}
-	osName := strings.ToLower(strings.TrimSpace(lines[0]))
-	arch := strings.TrimSpace(lines[1])
-	platform := AgentPlatform{OS: "linux", Arch: archName(arch)}
-	if osName != "linux" || platform.Arch == "" {
-		return AgentPlatform{}, deployError(ReasonAgentPlatformUnsupported,
-			fmt.Errorf("unsupported target %s/%s", osName, arch))
+	// Git for Windows, MSYS2 and Cygwin may provide a working uname. A
+	// non-Linux response does not rule out a supported native Windows host.
+	platform, winErr := s.probeWindows(ctx, lease)
+	if winErr != nil {
+		return AgentPlatform{}, fmt.Errorf("probe target (%v): %w", probeErr, winErr)
 	}
 	return platform, nil
+}
+
+func (s *AgentDeploymentService) probeWindows(ctx context.Context, lease Lease) (AgentPlatform, error) {
+	result, err := lease.Exec(ctx, agentwindows.Command(agentwindows.Probe), s.probeBudget)
+	if err != nil {
+		return AgentPlatform{}, err
+	}
+	if result != nil && result.ExitCode == 0 && !result.OutputTruncated && !result.StdoutTruncated {
+		lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+		if len(lines) == 2 && strings.TrimSpace(lines[0]) == "TALUS_WINDOWS_V1" && archName(lines[1]) == "amd64" {
+			return AgentPlatform{OS: "windows", Arch: "amd64"}, nil
+		}
+	}
+	return AgentPlatform{}, deployError(ReasonAgentPlatformUnsupported, errors.New("requires Linux amd64/arm64 or Windows amd64 with PowerShell"))
 }
 
 // archName maps uname -m output onto the bundled platform names.
@@ -186,6 +204,9 @@ func (s *AgentDeploymentService) Collect(ctx context.Context, lease Lease) (*age
 	platform, err := s.Probe(ctx, lease)
 	if err != nil {
 		return nil, err
+	}
+	if platform.OS != "linux" {
+		return nil, deployError(ReasonAgentPlatformUnsupported, errors.New("resident monitoring agent required on Windows"))
 	}
 	artifact, err := s.artifactFor(platform)
 	if err != nil {
@@ -301,6 +322,9 @@ func verifyProtocol(out *agentOutput, artifact agentproto.Artifact, protocol int
 // deploy makes the target run the manifest's artifact for its platform. It is
 // idempotent: an upload is skipped when the remote hash already matches.
 func (s *AgentDeploymentService) deploy(ctx context.Context, lease Lease, artifact agentproto.Artifact) error {
+	if strings.HasPrefix(artifact.Platform, "windows/") {
+		return deployError(ReasonAgentPlatformUnsupported, errors.New("resident monitoring agent required on Windows"))
+	}
 	localPath := filepath.Join(s.artifactsDir, artifact.File)
 	if _, err := os.Stat(localPath); err != nil {
 		return fmt.Errorf("bundled agent %s: %w", artifact.File, err)

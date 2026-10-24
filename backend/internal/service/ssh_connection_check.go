@@ -23,6 +23,7 @@ const maxConnectionTestBudget = 10 * time.Second
 // and never allocates a command or PTY on either SSH server. One budget covers
 // snapshot reads, quota waits, retries, handshakes and identity commits.
 func (s *SSHService) TestConnection(ctx context.Context, id uint) (*ConnectionTestResult, error) {
+	s = s.settingsSnapshot()
 	start := time.Now()
 	budget := s.sshDialTimeout
 	if budget <= 0 || budget > maxConnectionTestBudget {

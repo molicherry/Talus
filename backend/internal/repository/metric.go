@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/vpsmanager/backend/internal/config"
 	"github.com/vpsmanager/backend/internal/model"
 	"gorm.io/gorm"
 )
 
 // MetricRepo provides database access for time-series metrics.
 type MetricRepo struct {
-	db *gorm.DB
+	runtimeConfig *config.Runtime
+	db            *gorm.DB
 	// deltaGapThreshold is the largest spacing between two samples that may
 	// contribute a rate. It tracks the effective collection interval (R07); zero
 	// falls back to DefaultDeltaGapThreshold.
@@ -39,6 +41,9 @@ func DeltaGapForInterval(interval time.Duration) time.Duration {
 
 // gapThreshold is the threshold in force for this repository.
 func (r *MetricRepo) gapThreshold() time.Duration {
+	if r.runtimeConfig != nil {
+		return DeltaGapForInterval(time.Duration(r.runtimeConfig.Current().MonitorInterval) * time.Second)
+	}
 	if r.deltaGapThreshold > 0 {
 		return r.deltaGapThreshold
 	}
@@ -327,3 +332,6 @@ func (r *MetricRepo) Query(
 	}
 	return results, nil
 }
+
+// SetRuntimeConfig is wired before serving requests.
+func (r *MetricRepo) SetRuntimeConfig(runtime *config.Runtime) { r.runtimeConfig = runtime }

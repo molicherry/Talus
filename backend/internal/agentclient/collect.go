@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
+	stdnet "net"
 	"os"
 	"os/exec"
 	"runtime"
@@ -52,7 +52,7 @@ func CollectSection(name string) (sectionResult, error) {
 		}
 		s.MemoryUsed = i64(v.Used)
 		s.MemoryTotal = i64(v.Total)
-		w, e := mem.SwapMemory()
+		w, e := CollectSwapMemory()
 		if e == nil {
 			s.SwapUsed = i64(w.Used)
 			s.SwapTotal = i64(w.Total)
@@ -60,6 +60,11 @@ func CollectSection(name string) (sectionResult, error) {
 			s.Errors = map[string]string{"swap": "read_failed"}
 		}
 	case "load":
+		// Windows has no equivalent Linux load average. Do not publish the
+		// library's process-local approximation from a short-lived worker.
+		if runtime.GOOS == "windows" {
+			return r, nil
+		}
 		v, e := load.Avg()
 		if e != nil {
 			return r, e
@@ -69,27 +74,12 @@ func CollectSection(name string) (sectionResult, error) {
 		s.Load15 = &v.Load15
 	case "disk":
 		p, e := disk.Partitions(false)
-		if e != nil {
+		if e != nil && (runtime.GOOS != "windows" || len(p) == 0) {
 			return r, e
 		}
-		seen := map[string]bool{}
-		var used, total uint64
-		var failed bool
-		for _, p := range p {
-			if seen[p.Device] || (p.Mountpoint != "/" && !physicalFS(p.Fstype)) {
-				continue
-			}
-			seen[p.Device] = true
-			v, e := disk.Usage(p.Mountpoint)
-			if e != nil {
-				failed = true
-				continue
-			}
-			used += v.Used
-			total += v.Total
-		}
-		if total == 0 || failed {
-			return r, errors.New("filesystem unavailable")
+		used, total, e := collectDiskUsage(p, disk.Usage, runtime.GOOS == "windows")
+		if e != nil {
+			return r, e
 		}
 		s.DiskUsed = i64(used)
 		s.DiskTotal = i64(total)
@@ -99,8 +89,22 @@ func CollectSection(name string) (sectionResult, error) {
 			return r, e
 		}
 		var recv, sent uint64
+		loopback := map[string]bool{}
+		if runtime.GOOS == "windows" {
+			// gopsutil v4 uses net.Interfaces().Name for its Windows counters,
+			// including GetIfEntry2; it does not use the adapter Description.
+			interfaces, err := stdnet.Interfaces()
+			if err != nil {
+				return r, err
+			}
+			for _, iface := range interfaces {
+				if iface.Flags&stdnet.FlagLoopback != 0 {
+					loopback[iface.Name] = true
+				}
+			}
+		}
 		for _, n := range v {
-			if n.Name == "lo" || strings.HasPrefix(n.Name, "veth") || strings.HasPrefix(n.Name, "docker") || strings.HasPrefix(n.Name, "br-") {
+			if loopback[n.Name] || n.Name == "lo" || strings.HasPrefix(n.Name, "veth") || strings.HasPrefix(n.Name, "docker") || strings.HasPrefix(n.Name, "br-") {
 				continue
 			}
 			recv += n.BytesRecv
@@ -145,10 +149,47 @@ func CollectSection(name string) (sectionResult, error) {
 func i64(v uint64) *int64 { n := int64(min(v, uint64(math.MaxInt64))); return &n }
 func physicalFS(fs string) bool {
 	switch fs {
-	case "ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "f2fs", "jfs", "reiserfs", "bcachefs", "simfs", "ntfs", "vfat", "exfat":
+	case "ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "f2fs", "jfs", "reiserfs", "bcachefs", "simfs", "ntfs", "refs", "fat", "fat32", "vfat", "exfat":
 		return true
 	}
 	return false
+}
+
+// Windows recovery volumes and removable drives can be inaccessible. Sum only
+// readable drive-letter roots there; Linux retains its all-filesystems contract.
+func collectDiskUsage(partitions []disk.PartitionStat, usage func(string) (*disk.UsageStat, error), windows bool) (uint64, uint64, error) {
+	seen := map[string]bool{}
+	var used, total uint64
+	var failed bool
+	for _, p := range partitions {
+		if seen[p.Device] || (p.Mountpoint != "/" && !physicalFS(strings.ToLower(p.Fstype))) {
+			continue
+		}
+		if windows && !windowsDriveRoot(p.Mountpoint) {
+			continue
+		}
+		seen[p.Device] = true
+		mountpoint := p.Mountpoint
+		if windows && len(mountpoint) == 2 {
+			mountpoint += "/" // gopsutil can return C:; query its root, not its cwd.
+		}
+		v, err := usage(mountpoint)
+		if err != nil {
+			failed = true
+			continue
+		}
+		used += v.Used
+		total += v.Total
+	}
+	if total == 0 || (failed && !windows) {
+		return 0, 0, errors.New("filesystem unavailable")
+	}
+	return used, total, nil
+}
+
+func windowsDriveRoot(p string) bool {
+	return (len(p) == 2 || len(p) == 3 && (p[2] == '/' || p[2] == '\\')) && p[1] == ':' &&
+		((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z'))
 }
 
 type Collector struct {
@@ -159,41 +200,60 @@ type Collector struct {
 	metadataAt time.Time
 	Run        func(context.Context, string) (sectionResult, error)
 	workersMu  sync.Mutex
-	workers    map[string]chan collectionResult
+	workers    map[string][]*collectionWorker
 }
 
-type collectionResult struct {
-	result sectionResult
-	err    error
+// At most one abandoned worker and one replacement may be alive per section.
+// A grace period lets CommandContext reap killed children before a takeover.
+// Keeping the abandoned worker tracked prevents repeated timeouts leaking an
+// unbounded number of processes when the kernel cannot finish a syscall.
+type collectionWorker struct {
+	done       chan struct{}
+	result     sectionResult
+	err        error
+	retryAfter time.Time // protected by workersMu
 }
 
 func (c *Collector) runBounded(ctx context.Context, name string) (sectionResult, error) {
+	if err := ctx.Err(); err != nil {
+		return sectionResult{}, err
+	}
 	c.workersMu.Lock()
 	if c.workers == nil {
-		c.workers = map[string]chan collectionResult{}
+		c.workers = map[string][]*collectionWorker{}
 	}
-	if previous := c.workers[name]; previous != nil {
+	live := make([]*collectionWorker, 0, 2)
+	for _, w := range c.workers[name] {
 		select {
-		case <-previous:
-			delete(c.workers, name)
+		case <-w.done:
 		default:
+			live = append(live, w)
+		}
+	}
+	c.workers[name] = live
+	if len(live) > 0 {
+		last := live[len(live)-1]
+		if len(live) >= 2 || last.retryAfter.IsZero() || time.Now().Before(last.retryAfter) {
 			c.workersMu.Unlock()
 			return sectionResult{}, context.DeadlineExceeded
 		}
 	}
 	childCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	done := make(chan collectionResult, 1)
-	c.workers[name] = done
+	w := &collectionWorker{done: make(chan struct{})}
+	c.workers[name] = append(live, w)
 	c.workersMu.Unlock()
-	go func() { r, e := c.run(childCtx, name); done <- collectionResult{r, e} }()
+	go func() {
+		w.result, w.err = c.run(childCtx, name)
+		close(w.done)
+	}()
 	defer cancel()
 	select {
-	case result := <-done:
-		c.workersMu.Lock()
-		delete(c.workers, name)
-		c.workersMu.Unlock()
-		return result.result, result.err
+	case <-w.done:
+		return w.result, w.err
 	case <-childCtx.Done():
+		c.workersMu.Lock()
+		w.retryAfter = time.Now().Add(10 * time.Second)
+		c.workersMu.Unlock()
 		return sectionResult{}, childCtx.Err()
 	}
 }
@@ -203,11 +263,11 @@ func NewCollector() (*Collector, error) {
 	if e != nil {
 		return nil, e
 	}
-	b, e := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	boot, e := bootID()
 	if e != nil {
 		return nil, e
 	}
-	return &Collector{Executable: exe, BootID: strings.TrimSpace(string(b))}, nil
+	return &Collector{Executable: exe, BootID: boot}, nil
 }
 
 func (c *Collector) run(ctx context.Context, name string) (sectionResult, error) {
@@ -215,6 +275,7 @@ func (c *Collector) run(ctx context.Context, name string) (sectionResult, error)
 		return c.Run(ctx, name)
 	}
 	cmd := exec.CommandContext(ctx, c.Executable, "--agent-collect", name)
+	cmd.WaitDelay = time.Second
 	// Each section has bounded output; children only emit one compact object.
 	var b limitedBuffer
 	b.limit = 32 << 10
@@ -325,12 +386,8 @@ func (c *Collector) Collect(ctx context.Context) (agentwire.Sample, error) {
 	s.OS = c.metadata.OS
 	s.Kernel = c.metadata.Kernel
 	s.CPUModel = c.metadata.CPUModel
-	// /proc/uptime does not touch filesystems or execute external commands.
-	if b, e := os.ReadFile("/proc/uptime"); e == nil {
-		var uptime float64
-		if _, e = fmt.Sscan(string(b), &uptime); e == nil && uptime >= 0 {
-			s.Uptime = i64(uint64(uptime))
-		}
+	if uptime, e := systemUptime(); e == nil {
+		s.Uptime = i64(uptime)
 	}
 	if len(s.Errors) == 0 {
 		s.Errors = nil
