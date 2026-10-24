@@ -555,6 +555,10 @@ SFTP 传输总预算为 10 分钟，HTTP 读写空闲超时为 30 秒。代理�
 
 `/api/v1/services/*/relay` 应关闭响应缓冲，以便增量转发流式内容。终端路由须启用 WebSocket 升级，并按预期交互会话时长配置空闲超时；上表中的普通 HTTP 超时不代表终端会话时限。
 
+## 开发
+
+本地环境、前后端联调及验证流程见[开发指南](development.zh-CN.md)（[English](development.md)）。[架构说明](architecture.zh-CN.md)介绍模块职责和运行链路；[AGENTS.md](../AGENTS.md)为编码 Agent 提供仓库指引。
+
 ## 测试
 
 通过[统一测试入口](../tests/README.md)运行 `fast`、`integration`、`ui`、`e2e` 套件及 M1–M4 门禁。M5 在 Windows 管理员会话中验证原生监控；CI 分别在 Windows Server 2022 和 2025 上运行，两者通过后才允许发布镜像。命令与前提见 [Windows 监控测试说明](../tests/README.md#windows-monitoring-coverage)。[测试索引](../tests/coverage.md)由机器清单生成，列出场景、实现和执行命令。

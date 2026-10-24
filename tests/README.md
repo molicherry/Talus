@@ -1,5 +1,7 @@
 # Tests
 
+For toolchain installation, a local Hub and an isolated test database, start with the [development guide](../docs/development.md) ([简体中文](../docs/development.zh-CN.md)). This document owns the test inventory, acceptance gates and execution-evidence rules.
+
 `tests/` is the central inventory for every test case. It does **not** replace
 the language-native runners: Go keeps its in-package `*_test.go` (so white-box
 tests can reach unexported identifiers), and the frontend keeps its

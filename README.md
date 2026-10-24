@@ -634,6 +634,10 @@ Once any record has been upgraded, the original Argon2id-only image cannot read 
 - Changing a password invalidates existing JWTs and actively closes that user's terminal sessions. API keys have a separate lifecycle.
 - **Explicit SSH host-key confirmation**: on first connection, Talus records the presented SHA256 fingerprint and stops before SSH authentication. An administrator must verify it against a trusted source and confirm it before connecting. Jump and target hosts are confirmed separately. Existing trusted keys remain valid; changed keys block authentication until explicitly approved. Confirmation checks the displayed fingerprint and connection revision to reject stale requests.
 
+## Development
+
+Start with the [development guide](docs/development.md) ([简体中文](docs/development.zh-CN.md)) for local setup, frontend/backend iteration and verification. The [architecture guide](docs/architecture.md) maps module responsibilities and runtime flows; [AGENTS.md](AGENTS.md) provides repository guidance for coding agents.
+
 ## Tests
 
 Use [the unified test entry point](tests/README.md) for the `fast`, `integration`,
