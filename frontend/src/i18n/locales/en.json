@@ -78,7 +78,7 @@
     "name": "Name",
     "namePlaceholder": "e.g. AI Assistant",
     "generate": "Generate",
-    "created": "Key created — copy it now, it won't be shown again.",
+    "created": "Key created. Copy it and store it securely; you can copy it again from the key list.",
     "empty": "No API keys yet",
     "scopesLabel": "Scopes",
     "scopes": {
@@ -243,7 +243,7 @@
     "summaryTotal": "Servers",
     "summaryOnline": "Online",
     "summaryOffline": "Offline",
-    "summaryCaption": "Live fleet status, refreshed every minute."
+    "summaryCaption": "Live fleet status, refreshed automatically."
   },
   "errors": {
     "api_key_not_found": "API key not found",
@@ -423,7 +423,7 @@
     "titleNamed": "Monitoring — {{name}}",
     "backTo": "Back to {{name}}",
     "loadError": "Failed to load metrics",
-    "emptyState": "No metrics data yet. Monitoring data collects every 60 seconds.",
+    "emptyState": "No metrics data yet. Check the agent's deployment and connection status.",
     "cpuUsage": "CPU Usage",
     "memoryUsage": "Memory Usage",
     "diskUsage": "Disk Usage",

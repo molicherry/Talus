@@ -63,8 +63,10 @@ Windows amd64 Agent 和匹配的 manifest；缺少 Windows 可执行文件会导
    gh run watch <run-id> --exit-status
    ```
 
-   Tag 校验、发布策略回归、前后端、M1–M4、Docker 验收和 CodeQL 全部通过后，
-   CI 才会发布 `ghcr.io/molicherry/talus:v0.12.0`。镜像包含 Linux amd64/arm64，
+   Tag 校验、发布策略回归、前后端、M1–M4、Windows Server 2022 和 2025 上的原生 M5、
+   Docker 验收和 CodeQL 全部通过后，CI 才会发布 `ghcr.io/molicherry/talus:v0.12.0`。
+   M5 需在管理员会话中运行，命令与前提见 [Windows 监控测试说明](../tests/README.md#windows-monitoring-coverage)。
+   镜像包含 Linux amd64/arm64，
    来自 Docker 门禁导出的 OCI 归档。`release-image.json` 记录 Tag 对象、提交、
    镜像 digest 和 CI 运行 ID；正式版和 RC 的草稿自动附上此文件。test 到此完成。
 

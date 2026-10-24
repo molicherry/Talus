@@ -25,12 +25,11 @@ The `query-layer.test.mjs` suite compiles `src/lib/query.ts` to a gitignored
 temp module first (the file is TypeScript with React imports, so it can't be
 `import`ed directly by node). `tests/run.sh` handles that step.
 
-> The `useQuery`/`useMutation` HOOK render flags (`isLoading`/`isPending` and
-> the mutation reset semantics) are now covered via `computeQueryFlags`
-> (query-flags.test.mjs) for the query side. The `useMutation` reset semantics
-> still need a real React renderer to test the `setState` path — those were
-> verified via live-browser E2E during the session (documented in
-> `.auto/prompt.md`).
+> `query-flags.test.mjs` verifies the pure `computeQueryFlags` logic for query
+> render flags. It does not mount React hooks or verify the `setState` path in
+> `useMutation.reset`. A dedicated React-renderer regression for that reset path
+> remains a coverage gap; historical manual browser checks have no retained
+> evidence in this repository and are not a current automated test result.
 
 ## UI regression suite
 

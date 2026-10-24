@@ -1,10 +1,10 @@
 **API Key 权限编辑与旧版本迁移方案**
 
-状态：已在 `feat/api-key-permission-edit` 分支实施。设计基于仓库 `cf5c7ac`，2026-10-23；验收用例登记在 `tests/coverage.json`。
+状态：已通过 [#63](https://github.com/molicherry/Talus/pull/63) 合入 `main`。本设计基于仓库 `cf5c7ac`，2026-10-23；下方“实施前基线”保留当时的实现背景，不代表当前行为。现行使用方式见 [README 的 API Key 说明](README.zh-CN.md)，验收用例登记在 `tests/coverage.json`。
 
 目标是让管理员直接修改现有 Key 的操作权限和服务器范围，调用方继续使用原密钥；升级后旧 Key 也可进入同一编辑流程。权限迁移、密文迁移、所有者回填分别处理，避免互相覆盖数据。
 
-**1. 已核实的项目现状**
+**1. 实施前基线（`cf5c7ac`）**
 
 - [APIKey 模型](../backend/internal/model/apikey.go)已经包含 `scopes`、`server_ids`、认证哈希、可选的加密明文、加密版本及所有者版本，没有权限更新版本号。
 - [服务层](../backend/internal/service/apikey.go)只实现创建、列表、删除、查看密钥和验证。[仓储](../backend/internal/repository/apikey.go)按哈希查询数据库；[鉴权中间件](../backend/internal/server/middleware/auth.go)每次 HTTP 请求读取权限，没有权限正向缓存。

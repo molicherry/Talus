@@ -78,7 +78,7 @@
     "name": "名称",
     "namePlaceholder": "例如：AI 助手",
     "generate": "生成",
-    "created": "密钥已创建 — 请立即复制，之后无法再次查看",
+    "created": "密钥已创建，请复制并安全保存。之后可在密钥列表中再次复制。",
     "empty": "暂无 API 密钥",
     "scopesLabel": "权限范围",
     "scopes": {
@@ -243,7 +243,7 @@
     "summaryTotal": "服务器总数",
     "summaryOnline": "在线",
     "summaryOffline": "离线",
-    "summaryCaption": "实时状态，每分钟刷新。"
+    "summaryCaption": "实时状态，自动刷新。"
   },
   "errors": {
     "api_key_not_found": "API Key 不存在",
@@ -423,7 +423,7 @@
     "titleNamed": "监控 — {{name}}",
     "backTo": "返回 {{name}}",
     "loadError": "加载监控数据失败",
-    "emptyState": "暂无监控数据，每 60 秒采集一次。",
+    "emptyState": "暂无监控数据，请检查 Agent 的部署和连接状态。",
     "cpuUsage": "CPU 使用率",
     "memoryUsage": "内存使用率",
     "diskUsage": "磁盘使用率",

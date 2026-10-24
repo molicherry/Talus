@@ -89,6 +89,11 @@ fields. Peaks are maxima of observed samples, not guaranteed continuous-time
 maxima. Numeric values may be `null`; preserve gaps instead of converting them
 to zero. A non-null zero is an actual zero measurement.
 
+For Windows nodes, the `swap_*` fields describe paging-file usage, not Linux swap
+or the Windows commit limit. Linux load averages are not applicable on Windows;
+report those fields as not applicable rather than zero or a collection failure.
+Use the server's OS and monitoring diagnostics when interpreting missing metrics.
+
 Gauge sums/counts are also available for combining buckets: `cpu_sum`/`cpu_count`,
 `memory_percent_sum`/`memory_percent_count`, `disk_percent_sum`/`disk_percent_count`,
 `swap_percent_sum`/`swap_percent_count`, and `load1_sum`/`load1_count` (likewise
@@ -136,7 +141,16 @@ the underlying sample is recent. Report missing/stale values explicitly.
 
 The Hub installs/repairs agents over the configured SSH/SFTP route. Nodes report
 to the node-reachable HTTPS `AGENT_HUB_URL` over outbound WSS with HTTPS fallback.
-Installation requires running systemd and `flock`; non-root SSH accounts need
-user lingering. Talus does not automatically elevate via sudo. Deployment
-problems and missing Hub configuration need administrator attention, not changes
-to the metric query or an assumption that the server is offline.
+An administrator can configure this URL in **System settings → Monitoring** or
+through deployment environment variables. Linux installation requires running
+systemd and `flock`; non-root SSH accounts need user lingering. Windows requires
+an administrator SSH account, PowerShell 5.1+, running Task Scheduler, writable
+local ProgramData, and a Hub certificate trusted by LocalSystem. The Windows
+agent runs as a native service; staging files use SYSTEM/Administrators ACLs,
+and a detached scheduled task performs activation and rollback.
+
+Talus does not automatically elevate an unprivileged login. Installation/repair
+has a three-minute budget for recorded Linux installations, or ten minutes for
+Windows or an unidentified platform, including uploads and activation waits.
+Deployment problems and missing Hub configuration need administrator attention,
+not changes to the metric query or an assumption that the server is offline.

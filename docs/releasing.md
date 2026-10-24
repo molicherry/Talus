@@ -72,8 +72,11 @@ platform-omission switch.
    gh run watch <run-id> --exit-status
    ```
 
-   Tag validation, release-policy regressions, backend, frontend, M1–M4, Docker
-   acceptance and CodeQL must pass before publishing `ghcr.io/molicherry/talus:v0.12.0`.
+   Tag validation, release-policy regressions, backend, frontend, M1–M4, native
+   Windows M5 on both Server 2022 and 2025, Docker acceptance and CodeQL must pass
+   before publishing `ghcr.io/molicherry/talus:v0.12.0`. M5 runs in an administrator
+   session; see [Windows monitoring coverage](../tests/README.md#windows-monitoring-coverage)
+   for the command and prerequisites.
    The Linux amd64/arm64 image comes from the OCI archive exported by the Docker
    gate. `release-image.json` records the tag object, commit, digest and CI run ID;
    stable/RC drafts attach it automatically. Test releases are complete here.
