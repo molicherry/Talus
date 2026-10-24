@@ -113,7 +113,7 @@ function initialSettings() {
 }
 async function fixture(
   browser,
-  { role = "admin", mobile = false, language = "en" } = {},
+  { role = "admin", mobile = false, language = "en", readDelay = 0 } = {},
 ) {
   const context = await browser.newContext({
     viewport: mobile
@@ -137,6 +137,7 @@ async function fixture(
     reads: 0,
     errors: [],
     conflict: false,
+    invalidKey: null,
     hold: null,
   };
   await context.route("**/api/**", async (route) => {
@@ -151,11 +152,23 @@ async function fixture(
     if (path === "/api/v1/settings") {
       if (req.method() === "GET") {
         state.reads++;
+        if (readDelay) await delay(readDelay);
         return reply(state.data);
       }
       const patch = req.postDataJSON();
       state.writes.push(patch);
       if (state.hold) await state.hold;
+      if (state.invalidKey)
+        return reply(
+          {
+            error: {
+              code: 422,
+              reason: "settings_invalid",
+              params: { key: state.invalidKey },
+            },
+          },
+          422,
+        );
       if (state.conflict)
         return reply(
           { error: { code: 409, reason: "conflict", message: "conflict" } },
@@ -170,6 +183,7 @@ async function fixture(
           s.restart_required = s.value !== s.effective_value;
         }
       state.data.revision++;
+      delete state.data.recovery;
       return reply(state.data);
     }
     if (path === "/api/v1/servers/summary")
@@ -368,6 +382,49 @@ try {
         (await page.locator("#AGENT_HUB_URL").inputValue()) ===
         "https://deployment.example",
     );
+  });
+  await test(
+    "settings delayed loading honors group hashes",
+    async ({ page }) => {
+      for (const group of ["retention", "monitoring"]) {
+        await page.goto(`${base}/settings#${group}`);
+        await page.locator(`#${group}`).waitFor();
+        await until(async () => {
+          const bounds = await page.locator(`#${group}`).boundingBox();
+          return bounds && bounds.y >= -1 && bounds.y < 100;
+        }, `scrolled to ${group} after data loaded`);
+      }
+    },
+    { readDelay: 250 },
+  );
+  await test("settings recovery warning and field errors remain actionable", async ({
+    page,
+    state,
+  }) => {
+    state.data.recovery = { revision: 1, key: "MONITOR_INTERVAL" };
+    await page.reload();
+    await page
+      .getByRole("alert")
+      .filter({ hasText: "Recovery mode" })
+      .waitFor();
+    assert.match(
+      await page.getByRole("alert").textContent(),
+      /saving replaces the original override document/,
+    );
+    await page.locator("#MONITOR_INTERVAL").fill("10");
+    state.invalidKey = "MONITOR_INTERVAL";
+    await save(page);
+    await page
+      .getByRole("alert")
+      .filter({
+        hasText: "Check the value and allowed range for Sampling interval",
+      })
+      .waitFor();
+    assert.equal(await page.locator("#MONITOR_INTERVAL").inputValue(), "10");
+    state.invalidKey = null;
+    await save(page);
+    await saved(page);
+    assert.equal(await page.getByRole("alert").count(), 0);
   });
   await test(
     "settings deny viewers without fetching configuration",

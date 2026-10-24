@@ -158,6 +158,7 @@ func startupServerEnv(dsn, port string, extra map[string]string) map[string]stri
 		"DB_MAX_OPEN_CONNECTIONS": "16", "USAGE_LOG_WRITE_CONCURRENCY": "2",
 		"USAGE_LOG_ACTIVE_LIMIT": "4096", "USAGE_LOG_RETENTION_DAYS": "30",
 		"USAGE_LOG_SENSITIVE_RETENTION_DAYS": "90", "USAGE_LOG_LEGACY_WRITERS_DRAINED": "false",
+		"SYSTEM_SETTINGS_IGNORE_INVALID_OVERRIDES": "false",
 	}
 	for key, value := range extra {
 		env[key] = value

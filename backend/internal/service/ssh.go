@@ -21,6 +21,8 @@ const maxExecTimeout = 300 * time.Second
 const maxExecOutput = 8 << 20
 const maxExecStreamOutput = 4 << 20
 
+// settingsSnapshot copies this value. Do not add mutexes, atomic values, or
+// other fields that cannot be copied; keep shared mutable state behind pointers.
 type SSHService struct {
 	runtimeConfig      *config.Runtime
 	pool               *sshpool.Pool
@@ -436,7 +438,8 @@ func isConnectionError(err error) bool {
 
 // CopyFile uploads a local artifact over SFTP on a verified SSH connection.
 func (s *SSHService) CopyFile(ctx context.Context, serverID uint, localPath, remotePath string) error {
-	budget := min(s.settingsSnapshot().execDefaultTimeout, maxExecTimeout)
+	s = s.settingsSnapshot()
+	budget := min(s.execDefaultTimeout, maxExecTimeout)
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	lease, err := s.AcquireLease(ctx, serverID, LeaseConsumerExec)

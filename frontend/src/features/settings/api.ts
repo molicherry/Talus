@@ -21,6 +21,9 @@ const SettingSchema = z.object({
 const SettingsSchema = z.object({
   revision: z.number().int().positive(),
   settings: z.array(SettingSchema),
+  recovery: z
+    .object({ revision: z.number().int(), key: z.string() })
+    .optional(),
   migration: z
     .object({ state: z.string(), imported: z.number().optional() })
     .optional(),

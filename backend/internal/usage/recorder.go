@@ -941,7 +941,7 @@ func (r *Recorder) trackedOperations() []string {
 }
 
 // SetRuntimeConfig is wired before serving requests.
-func (s *Recorder) SetRuntimeConfig(r *config.Runtime) { s.runtimeConfig = r }
+func (r *Recorder) SetRuntimeConfig(runtime *config.Runtime) { r.runtimeConfig = runtime }
 
 func (r *Recorder) retentionPolicy() model.UsagePolicy {
 	if r.runtimeConfig != nil {

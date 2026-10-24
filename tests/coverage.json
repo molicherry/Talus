@@ -4689,6 +4689,26 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-01-1",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/server/settings_recovery_test.go",
+            "symbol": "TestSettingsInvalidOverrideRecoveryAndFieldError"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-01-2",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/system_settings_test.go",
+            "symbol": "TestSystemSettingsRecoveryIsExplicitAndRepairIsAudited"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -4759,6 +4779,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-03-1",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/repository/settings_retention_review_test.go",
+            "symbol": "TestSettingsAuditRetentionFloorAndSingleRetentionWindow"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -4806,6 +4836,56 @@
           "implementation": {
             "path": "backend/internal/config/runtime_test.go",
             "symbol": "TestSystemSettingsDisplayCompatibleDeploymentDefaults"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-04-1",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/settings_review_test.go",
+            "symbol": "TestApplyLiveUsesSettingApplyMetadata"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-04-2",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/settings_review_test.go",
+            "symbol": "TestDeploymentValidationAllowsRepairableOverrides"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-04-3",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/settings_review_test.go",
+            "symbol": "TestSettingsValidationIdentifiesField"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-04-4",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/cmd/server/settings_recovery_test.go",
+            "symbol": "TestDeploymentInvalidBeforeDatabaseOrArtifacts"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-04-5",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/system_settings_test.go",
+            "symbol": "TestSystemSettingsPollReportsFailureAndRecoveryWithoutFlooding"
           },
           "automation_status": "implemented",
           "required": true
@@ -4869,6 +4949,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-06-1",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/settings.browser.mjs",
+            "symbol": "settings delayed loading honors group hashes"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -4906,6 +4996,16 @@
           "implementation": {
             "path": "frontend/tests/settings.browser.mjs",
             "symbol": "settings conflict retains the draft and cross-field limits reject invalid saves"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-settings-review-tc-10-08-1",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/settings.browser.mjs",
+            "symbol": "settings recovery warning and field errors remain actionable"
           },
           "automation_status": "implemented",
           "required": true

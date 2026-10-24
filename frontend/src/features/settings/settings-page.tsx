@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Button } from "../../components/ui/button";
 import { Input, Select } from "../../components/ui/field";
 import { ConfirmDialog } from "../../components/ui/confirm-dialog";
@@ -56,6 +56,7 @@ export function SettingsPage() {
 
 function SettingsSession() {
   const { t } = useTranslation();
+  const { hash } = useLocation();
   const visible = usePageVisibility();
   const [data, setData] = useState<Settings | null>(null);
   const [draft, setDraft] = useState<SettingsPatch>({});
@@ -68,6 +69,15 @@ function SettingsSession() {
   const [serverError, setServerError] = useState(false);
   const lifetime = useRef<AbortController | null>(null);
   const dirty = Object.keys(draft).length > 0;
+  const loaded = data !== null;
+
+  useEffect(() => {
+    if (!loaded) return;
+    const group = hash.slice(1);
+    if (groups.includes(group)) {
+      document.getElementById(group)?.scrollIntoView({ block: "start" });
+    }
+  }, [loaded, hash]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -186,7 +196,17 @@ function SettingsSession() {
         setConfirm(true);
       else if (e instanceof ApiClientError && e.status === 409)
         setError(t("settings.conflict"));
-      else setError(translateApiError(e, t));
+      else if (
+        e instanceof ApiClientError &&
+        e.reason === "settings_invalid" &&
+        typeof e.params?.key === "string"
+      ) {
+        const key = e.params.key;
+        const field = data.settings.some((s) => s.key === key)
+          ? t(`settings.fields.${key}.label`)
+          : key;
+        setError(t("settings.invalidField", { field }));
+      } else setError(translateApiError(e, t));
     } finally {
       if (!signal?.aborted) setPending(false);
     }
@@ -336,6 +356,17 @@ function SettingsSession() {
           className="rounded-lg border border-border p-4 text-sm"
         >
           {notice}
+        </p>
+      )}
+      {data?.recovery && (
+        <p
+          role="alert"
+          className="rounded-lg border border-warning/30 p-4 text-sm text-warning"
+        >
+          {t("settings.recovery", {
+            revision: data.recovery.revision,
+            key: data.recovery.key,
+          })}
         </p>
       )}
       {!data ? (

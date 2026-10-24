@@ -1,11 +1,15 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/vpsmanager/backend/internal/config"
 	"github.com/vpsmanager/backend/internal/model"
@@ -14,14 +18,19 @@ import (
 
 type memorySettingsStore struct {
 	sync.Mutex
-	row    model.SystemSettings
-	fail   bool
-	audits []model.AuditEvent
+	row          model.SystemSettings
+	fail         bool
+	loadFailures int
+	audits       []model.AuditEvent
 }
 
 func (s *memorySettingsStore) Load(context.Context) (model.SystemSettings, error) {
 	s.Lock()
 	defer s.Unlock()
+	if s.loadFailures > 0 {
+		s.loadFailures--
+		return model.SystemSettings{}, errors.New("database unavailable")
+	}
 	return s.row, nil
 }
 func (s *memorySettingsStore) Save(_ context.Context, revision uint64, row model.SystemSettings, audit *model.AuditEvent) error {
@@ -177,5 +186,78 @@ func TestRuntimeSettingsKeepSSHLeaseSnapshotAndMonitorDesiredState(t *testing.T)
 	r.Store(base)
 	if m.Statuses(context.Background(), []uint{1})[1].Deployment != "setup_required" {
 		t.Fatal("cleared URL not shown")
+	}
+}
+
+func TestSystemSettingsRecoveryIsExplicitAndRepairIsAudited(t *testing.T) {
+	base := settingsTestBase()
+	store := &memorySettingsStore{row: model.SystemSettings{ID: 1, Revision: 9, Overrides: []byte(`{"MONITOR_INTERVAL":"SECRET_INVALID_VALUE","LOG_LEVEL":"debug"}`)}}
+	_, err := NewSystemSettingsService(context.Background(), store, base)
+	var invalid *SettingsLoadError
+	if !errors.As(err, &invalid) || invalid.Revision != 9 || invalid.Key != "MONITOR_INTERVAL" || strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("unsafe or incomplete diagnostics: %v", err)
+	}
+	base.SettingsIgnoreInvalidOverrides = true
+	s, err := NewSystemSettingsService(context.Background(), store, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := s.Get(context.Background())
+	if err != nil || view.Recovery == nil || view.Recovery.Revision != 9 || s.Runtime().Current().LogLevel != "info" || len(store.audits) != 0 || !strings.Contains(string(store.row.Overrides), "SECRET") {
+		t.Fatal("recovery must report deployment fallback and preserve the invalid document")
+	}
+	if _, err := settingRequest(t, s, `{"MONITOR_INTERVAL":10}`, false); err != nil {
+		t.Fatal(err)
+	}
+	view, err = s.Get(context.Background())
+	if err != nil || view.Recovery != nil || view.Revision != 10 || len(store.audits) != 1 || strings.Contains(string(store.row.Overrides), "SECRET") {
+		t.Fatal("repair did not atomically replace the document with an audit")
+	}
+	if !strings.Contains(store.audits[0].Details, `"recovery":{"revision":9,"key":"MONITOR_INTERVAL"}`) {
+		t.Fatal("repair audit lost the ignored revision and field")
+	}
+	// Invalid later revisions never replace a running instance's valid snapshot.
+	store.row.Revision++
+	store.row.Overrides = []byte(`{"EXEC_TIMEOUT_MAX":1}`)
+	if err := s.Refresh(context.Background()); err == nil || s.Runtime().Current().MonitorInterval != 10 {
+		t.Fatal("refresh discarded last valid configuration")
+	}
+	base.ExecTimeoutMax = 0
+	if _, err := NewSystemSettingsService(context.Background(), store, base); err == nil {
+		t.Fatal("recovery bypassed invalid deployment values")
+	}
+	base = settingsTestBase()
+	base.SettingsIgnoreInvalidOverrides = true
+	store.row.Overrides = []byte(`{"LOG_LEVEL":"debug"}`)
+	valid, err := NewSystemSettingsService(context.Background(), store, base)
+	if err != nil || valid.Runtime().Current().LogLevel != "debug" || valid.recovery != nil {
+		t.Fatal("recovery switch ignored a valid document")
+	}
+	store.loadFailures = 1
+	if _, err := NewSystemSettingsService(context.Background(), store, base); err == nil {
+		t.Fatal("recovery hid database unavailability")
+	}
+}
+
+func TestSystemSettingsPollReportsFailureAndRecoveryWithoutFlooding(t *testing.T) {
+	s, store := newMemorySettings(t, settingsTestBase())
+	store.loadFailures = 3
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer slog.SetDefault(previous)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ticks := make(chan time.Time)
+	done := make(chan struct{})
+	go func() { defer close(done); s.poll(ctx, ticks) }()
+	now := time.Now()
+	for _, seconds := range []int{0, 5, 65, 70, 75} {
+		ticks <- now.Add(time.Duration(seconds) * time.Second)
+	}
+	cancel()
+	<-done
+	if strings.Count(logs.String(), "system settings refresh failed") != 2 || strings.Count(logs.String(), "system settings refresh recovered") != 1 {
+		t.Fatalf("poll diagnostics missing or unbounded: %s", logs.String())
 	}
 }

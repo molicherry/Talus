@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 	"sync"
@@ -34,9 +35,49 @@ type SettingView struct {
 	RestartRequired bool   `json:"restart_required"`
 }
 type SettingsView struct {
-	Revision uint64        `json:"revision"`
-	Settings []SettingView `json:"settings"`
+	Revision uint64            `json:"revision"`
+	Settings []SettingView     `json:"settings"`
+	Recovery *SettingsRecovery `json:"recovery,omitempty"`
 }
+
+type SettingsRecovery struct {
+	Revision uint64 `json:"revision"`
+	Key      string `json:"key"`
+}
+
+// SettingsLoadError deliberately omits values and parser error text from logs.
+type SettingsLoadError struct {
+	Revision uint64
+	Key      string
+	Err      error
+}
+
+func (e *SettingsLoadError) Error() string {
+	return fmt.Sprintf("invalid system settings revision=%d key=%q", e.Revision, e.Key)
+}
+func (e *SettingsLoadError) Unwrap() error { return e.Err }
+
+func mergeStoredSettings(base config.Config, row model.SystemSettings) (config.Config, map[string]json.RawMessage, error) {
+	values := map[string]json.RawMessage{}
+	err := json.Unmarshal(row.Overrides, &values)
+	var desired config.Config
+	if err == nil && values == nil {
+		err = errors.New("overrides must be an object")
+	}
+	if err == nil {
+		desired, err = config.MergeSettings(base, values)
+	}
+	if err != nil {
+		key := "overrides"
+		var field *config.SettingValidationError
+		if errors.As(err, &field) {
+			key = field.Key
+		}
+		return base, nil, &SettingsLoadError{Revision: row.Revision, Key: key, Err: err}
+	}
+	return desired, values, nil
+}
+
 type SettingsUpdate struct {
 	Revision               uint64                     `json:"revision"`
 	Values                 map[string]json.RawMessage `json:"values"`
@@ -51,6 +92,7 @@ type SystemSettingsService struct {
 	row        model.SystemSettings
 	overrides  map[string]json.RawMessage
 	onChange   func()
+	recovery   *SettingsRecovery
 }
 
 func NewSystemSettingsService(ctx context.Context, store settingsStore, base config.Config) (*SystemSettingsService, error) {
@@ -58,15 +100,27 @@ func NewSystemSettingsService(ctx context.Context, store settingsStore, base con
 	if err != nil {
 		return nil, err
 	}
-	values := map[string]json.RawMessage{}
-	if err = json.Unmarshal(row.Overrides, &values); err != nil {
-		return nil, err
-	}
-	boot, err := config.MergeSettings(base, values)
+	boot, values, err := mergeStoredSettings(base, row)
+	var recovery *SettingsRecovery
 	if err != nil {
-		return nil, err
+		if !base.SettingsIgnoreInvalidOverrides {
+			return nil, err
+		}
+		var invalid *SettingsLoadError
+		if !errors.As(err, &invalid) {
+			return nil, err
+		}
+		// Discard the invalid document only in memory. A later, audited settings
+		// save replaces it using the same optimistic revision check as usual.
+		boot, err = config.MergeSettings(base, nil)
+		if err != nil {
+			return nil, fmt.Errorf("settings recovery deployment configuration is invalid: %w", err)
+		}
+		values = map[string]json.RawMessage{}
+		recovery = &SettingsRecovery{Revision: row.Revision, Key: invalid.Key}
+		slog.Warn("ignoring invalid system settings overrides; using deployment configuration", "revision", row.Revision, "key", invalid.Key)
 	}
-	return &SystemSettingsService{store: store, base: base, boot: boot, runtime: config.NewRuntime(boot), row: row, overrides: values}, nil
+	return &SystemSettingsService{store: store, base: base, boot: boot, runtime: config.NewRuntime(boot), row: row, overrides: values, recovery: recovery}, nil
 }
 func (s *SystemSettingsService) Runtime() *config.Runtime { return s.runtime }
 
@@ -76,7 +130,7 @@ func (s *SystemSettingsService) SetOnChange(f func()) { s.onChange = f }
 func (s *SystemSettingsService) viewLocked() SettingsView {
 	desired, _ := config.MergeSettings(s.base, s.overrides)
 	effective := s.runtime.Current()
-	view := SettingsView{Revision: s.row.Revision, Settings: make([]SettingView, 0, len(config.Settings))}
+	view := SettingsView{Revision: s.row.Revision, Settings: make([]SettingView, 0, len(config.Settings)), Recovery: s.recovery}
 	for _, d := range config.Settings {
 		source := "default"
 		if s.base.Environment[d.Key] {
@@ -111,15 +165,12 @@ func (s *SystemSettingsService) Refresh(ctx context.Context) error {
 	if row.Revision == s.row.Revision {
 		return nil
 	}
-	values := map[string]json.RawMessage{}
-	if err := json.Unmarshal(row.Overrides, &values); err != nil {
-		return err
-	}
-	desired, err := config.MergeSettings(s.base, values)
+	desired, values, err := mergeStoredSettings(s.base, row)
 	if err != nil {
 		return err
 	}
 	s.row, s.overrides = row, values
+	s.recovery = nil
 	s.runtime.Store(config.ApplyLive(desired, s.boot))
 	if s.onChange != nil {
 		s.onChange()
@@ -131,14 +182,34 @@ func (s *SystemSettingsService) Refresh(ctx context.Context) error {
 func (s *SystemSettingsService) Poll(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	s.poll(ctx, ticker.C)
+}
+
+func (s *SystemSettingsService) poll(ctx context.Context, ticks <-chan time.Time) {
+	var lastFailure time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case now, ok := <-ticks:
+			if !ok {
+				return
+			}
 			readCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			_ = s.Refresh(readCtx)
+			err := s.Refresh(readCtx)
 			cancel()
+			if ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				if lastFailure.IsZero() || now.Sub(lastFailure) >= time.Minute {
+					slog.Warn("system settings refresh failed; retaining last valid configuration", "error", err)
+					lastFailure = now
+				}
+			} else if !lastFailure.IsZero() {
+				slog.Info("system settings refresh recovered")
+				lastFailure = time.Time{}
+			}
 		}
 	}
 }
@@ -162,7 +233,7 @@ func (s *SystemSettingsService) Update(ctx context.Context, req SettingsUpdate, 
 	}
 	for k, v := range req.Values {
 		if !known[k] {
-			return SettingsView{}, fmt.Errorf("%w: %s", ErrSettingsInvalid, k)
+			return SettingsView{}, &config.SettingValidationError{Key: k, Err: ErrSettingsInvalid}
 		}
 		if strings.TrimSpace(string(v)) == "null" {
 			delete(values, k)
@@ -173,7 +244,7 @@ func (s *SystemSettingsService) Update(ctx context.Context, req SettingsUpdate, 
 	before, _ := config.MergeSettings(s.base, s.overrides)
 	desired, err := config.MergeSettings(s.base, values)
 	if err != nil {
-		return SettingsView{}, fmt.Errorf("%w: %v", ErrSettingsInvalid, err)
+		return SettingsView{}, fmt.Errorf("%w: %w", ErrSettingsInvalid, err)
 	}
 	if config.RetentionConfirmationRequired(before, desired) && !req.ConfirmRetentionChange {
 		return SettingsView{}, ErrSettingsRetentionConfirmation
@@ -195,7 +266,11 @@ func (s *SystemSettingsService) Update(ctx context.Context, req SettingsUpdate, 
 		return SettingsView{}, err
 	}
 	next := model.SystemSettings{ID: 1, Revision: s.row.Revision + 1, Overrides: encoded}
-	details, _ := json.Marshal(map[string]any{"revision": next.Revision, "changes": changes})
+	detail := map[string]any{"revision": next.Revision, "changes": changes}
+	if s.recovery != nil {
+		detail["recovery"] = s.recovery
+	}
+	details, _ := json.Marshal(detail)
 	audit.Action = "settings.update"
 	audit.ResourceType = "settings"
 	audit.ResourceID = 1
@@ -208,6 +283,7 @@ func (s *SystemSettingsService) Update(ctx context.Context, req SettingsUpdate, 
 		return SettingsView{}, err
 	}
 	s.row, s.overrides = next, values
+	s.recovery = nil
 	s.runtime.Store(config.ApplyLive(desired, s.boot))
 	if s.onChange != nil {
 		s.onChange()

@@ -191,4 +191,4 @@ func clientIP(r *http.Request, trustProxy bool) string {
 }
 
 // SetRuntimeConfig is wired before serving requests.
-func (s *IPRateLimiter) SetRuntimeConfig(r *config.Runtime) { s.runtimeConfig = r }
+func (rl *IPRateLimiter) SetRuntimeConfig(runtime *config.Runtime) { rl.runtimeConfig = runtime }

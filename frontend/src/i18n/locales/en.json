@@ -977,6 +977,7 @@
     "forgottenUpload": "Recovery information cleared. The old temporary file may still need removal from its original server."
   },
   "settings": {
+    "recovery": "Recovery mode: all database overrides at revision {{revision}} were ignored (invalid field: {{key}}). Deployment values are active. Review all settings: saving replaces the original override document and records an audit event. After repair, remove the recovery switch and recreate the Hub.",
     "description": "Saved settings override deployment environment variables. Unset overrides inherit deployment values or application defaults.",
     "denied": "Only administrators can view and change system settings.",
     "invalidField": "Check the value and allowed range for {{field}}.",
@@ -1049,7 +1050,7 @@
       },
       "USAGE_LOG_SENSITIVE_RETENTION_DAYS": {
         "label": "Sensitive operation retention (days)",
-        "help": "Applies to sensitive and deletion operations. Reducing retention requires confirmation."
+        "help": "Applies to sensitive and deletion operations. Reducing retention requires confirmation. System settings changes are retained for at least 90 days, even when this value is lower."
       },
       "METRICS_RETENTION_ENABLED": {
         "label": "Enable metric retention cleanup",

@@ -21,6 +21,20 @@ type Setting struct {
 	Choices []string `json:"choices,omitempty"`
 }
 
+// SettingValidationError identifies an invalid field without exposing its value
+// in API responses or persisted-override diagnostics.
+type SettingValidationError struct {
+	Key string
+	Err error
+}
+
+func (e *SettingValidationError) Error() string { return e.Key + ": " + e.Err.Error() }
+func (e *SettingValidationError) Unwrap() error { return e.Err }
+
+func invalidSetting(key, format string, args ...any) error {
+	return &SettingValidationError{Key: key, Err: fmt.Errorf(format, args...)}
+}
+
 var Settings = []Setting{
 	{Key: "AGENT_HUB_URL", Field: "AgentHubURL", Group: "monitoring", Kind: "string", Apply: "agent"},
 	{Key: "MONITOR_INTERVAL", Field: "MonitorInterval", Group: "monitoring", Kind: "number", Apply: "agent", Min: 1, Max: 60},
@@ -68,17 +82,17 @@ func MergeSettings(base Config, values map[string]json.RawMessage) (Config, erro
 	for key, raw := range values {
 		d, ok := known[key]
 		if !ok {
-			return base, fmt.Errorf("%s: unknown setting", key)
+			return base, invalidSetting(key, "unknown setting")
 		}
 		field := reflect.ValueOf(&result).Elem().FieldByName(d.Field)
 		if strings.TrimSpace(string(raw)) == "null" {
-			return base, fmt.Errorf("%s: null is not a stored override", key)
+			return base, invalidSetting(key, "null is not a stored override")
 		}
 		switch d.Kind {
 		case "string":
 			var v string
 			if json.Unmarshal(raw, &v) != nil || len(v) > 2048 {
-				return base, fmt.Errorf("%s: invalid string", key)
+				return base, invalidSetting(key, "invalid string")
 			}
 			if key == "AGENT_HUB_URL" {
 				v = strings.TrimRight(strings.TrimSpace(v), "/")
@@ -89,20 +103,20 @@ func MergeSettings(base Config, values map[string]json.RawMessage) (Config, erro
 					valid = valid || choice == v
 				}
 				if !valid {
-					return base, fmt.Errorf("%s: invalid choice", key)
+					return base, invalidSetting(key, "invalid choice")
 				}
 			}
 			field.SetString(v)
 		case "boolean":
 			var v bool
 			if json.Unmarshal(raw, &v) != nil {
-				return base, fmt.Errorf("%s: expected boolean", key)
+				return base, invalidSetting(key, "expected boolean")
 			}
 			field.SetBool(v)
 		case "number":
 			var v int64
 			if json.Unmarshal(raw, &v) != nil || v < d.Min || v > d.Max {
-				return base, fmt.Errorf("%s: expected integer in [%d, %d]", key, d.Min, d.Max)
+				return base, invalidSetting(key, "expected integer in [%d, %d]", d.Min, d.Max)
 			}
 			field.SetInt(v)
 		}
@@ -115,9 +129,12 @@ func MergeSettings(base Config, values map[string]json.RawMessage) (Config, erro
 
 // ApplyLive preserves the boot-time allocation sizes until the next restart.
 func ApplyLive(desired, boot Config) Config {
-	desired.DBMaxOpenConnections = boot.DBMaxOpenConnections
-	desired.UsageWriteConcurrency = boot.UsageWriteConcurrency
-	desired.UsageActiveLimit = boot.UsageActiveLimit
+	target, initial := reflect.ValueOf(&desired).Elem(), reflect.ValueOf(boot)
+	for _, setting := range Settings {
+		if setting.Apply == "restart" {
+			target.FieldByName(setting.Field).Set(initial.FieldByName(setting.Field))
+		}
+	}
 	return desired
 }
 

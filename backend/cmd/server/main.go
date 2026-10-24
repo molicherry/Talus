@@ -35,7 +35,12 @@ func main() {
 
 	setupLogger(cfg.LogFormat, cfg.LogLevel)
 
-	// Validate the effective configuration after loading persisted overrides.
+	// Fail before migrations for deployment-only values. Database overrides may
+	// legitimately repair the other fields, which are validated after merging.
+	if err := cfg.ValidateDeployment(); err != nil {
+		slog.Error("invalid deployment configuration", "error", err)
+		os.Exit(1)
+	}
 
 	// Initialize JWT service
 	jwtSvc := token.NewJWTService(cfg.JWTSecret, 24*time.Hour)

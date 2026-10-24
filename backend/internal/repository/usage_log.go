@@ -486,7 +486,7 @@ var usageReportActions = []string{
 
 func (r *UsageLogRepo) cleanupCandidates(db *gorm.DB) *gorm.DB {
 	policy := r.retentionPolicy()
-	return db.Table("usage_logs AS logs").Where("logs.outcome <> 'running' AND logs.retention_at IS NOT NULL AND logs.retention_at <= clock_timestamp() - (CASE WHEN logs.action IN ? OR RIGHT(logs.action, ?) = ? THEN ?::double precision ELSE ?::double precision END * INTERVAL '1 second')", model.UsageSensitiveActions(), len(model.UsageDeleteActionSuffix), model.UsageDeleteActionSuffix, policy.SensitiveRetention.Seconds(), policy.OrdinaryRetention.Seconds()).Where("logs.source <> 'audit_legacy' OR EXISTS (SELECT 1 FROM usage_log_backfill_states WHERE id = ? AND completed_at IS NOT NULL)", usageBackfillID).Where("NOT (logs.outcome = 'unknown' AND logs.recovery_reason = 'owner_lease_expired') OR NOT EXISTS (SELECT 1 FROM usage_log_instances AS i WHERE i.instance_id = logs.owner_instance_id AND i.retired_at IS NULL AND i.lease_until > clock_timestamp())")
+	return db.Table("usage_logs AS logs").Where("logs.outcome <> 'running' AND logs.retention_at IS NOT NULL AND logs.retention_at <= clock_timestamp() - (CASE WHEN logs.action = 'settings.update' THEN ?::double precision WHEN logs.action IN ? OR RIGHT(logs.action, ?) = ? THEN ?::double precision ELSE ?::double precision END * INTERVAL '1 second')", policy.Retention("settings.update").Seconds(), model.UsageSensitiveActions(), len(model.UsageDeleteActionSuffix), model.UsageDeleteActionSuffix, policy.SensitiveRetention.Seconds(), policy.OrdinaryRetention.Seconds()).Where("logs.source <> 'audit_legacy' OR EXISTS (SELECT 1 FROM usage_log_backfill_states WHERE id = ? AND completed_at IS NOT NULL)", usageBackfillID).Where("NOT (logs.outcome = 'unknown' AND logs.recovery_reason = 'owner_lease_expired') OR NOT EXISTS (SELECT 1 FROM usage_log_instances AS i WHERE i.instance_id = logs.owner_instance_id AND i.retired_at IS NULL AND i.lease_until > clock_timestamp())")
 }
 
 func (r *UsageLogRepo) cleanupReport(db *gorm.DB) ([]UsageCleanupGroupCount, error) {
@@ -800,7 +800,7 @@ func (r *UsageLogRepo) Backfill(ctx context.Context) error {
 }
 
 // SetRuntimeConfig is wired before serving requests.
-func (s *UsageLogRepo) SetRuntimeConfig(r *config.Runtime) { s.runtimeConfig = r }
+func (r *UsageLogRepo) SetRuntimeConfig(runtime *config.Runtime) { r.runtimeConfig = runtime }
 
 func (r *UsageLogRepo) retentionPolicy() model.UsagePolicy {
 	if r.runtimeConfig != nil {

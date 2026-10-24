@@ -53,6 +53,11 @@ func UsageActionSensitive(action string) bool {
 
 func (p UsagePolicy) Retention(action string) time.Duration {
 	p = p.WithDefaults()
+	// An administrator shortening the general sensitive policy must not erase
+	// recent evidence of that policy change from the usage-log view.
+	if action == "settings.update" {
+		return max(p.SensitiveRetention, DefaultUsageSensitiveRetention)
+	}
 	if UsageActionSensitive(action) {
 		return p.SensitiveRetention
 	}

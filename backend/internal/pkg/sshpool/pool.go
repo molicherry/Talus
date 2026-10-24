@@ -629,10 +629,10 @@ func quotaConsumer(ctx context.Context) string {
 }
 
 // SetRuntimeConfig is wired before serving requests.
-func (s *Pool) SetRuntimeConfig(r *config.Runtime) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.runtimeConfig = r
+func (p *Pool) SetRuntimeConfig(runtime *config.Runtime) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.runtimeConfig = runtime
 }
 
 func (p *Pool) idleLimit() time.Duration {

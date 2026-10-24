@@ -334,4 +334,4 @@ func (r *MetricRepo) Query(
 }
 
 // SetRuntimeConfig is wired before serving requests.
-func (s *MetricRepo) SetRuntimeConfig(r *config.Runtime) { s.runtimeConfig = r }
+func (r *MetricRepo) SetRuntimeConfig(runtime *config.Runtime) { r.runtimeConfig = runtime }

@@ -212,4 +212,4 @@ func retentionDecision(enabled, dryRun bool) retentionDecisionKind {
 }
 
 // SetRuntimeConfig is wired before serving requests.
-func (s *MetricsMaintenance) SetRuntimeConfig(r *config.Runtime) { s.runtimeConfig = r }
+func (m *MetricsMaintenance) SetRuntimeConfig(runtime *config.Runtime) { m.runtimeConfig = runtime }

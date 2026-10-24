@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/vpsmanager/backend/internal/config"
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
@@ -99,7 +100,12 @@ func (h *SystemSettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrSettingsRetentionConfirmation):
 			code, reason = http.StatusConflict, server.ReasonSettingsRetentionConfirmation
 		}
-		server.WriteError(w, r, server.NewAppError(code, reason))
+		appErr := server.NewAppError(code, reason)
+		var field *config.SettingValidationError
+		if reason == server.ReasonSettingsInvalid && errors.As(err, &field) {
+			appErr.Params = map[string]any{"key": field.Key}
+		}
+		server.WriteError(w, r, appErr)
 		return
 	}
 	op.SetResult("succeeded", "")

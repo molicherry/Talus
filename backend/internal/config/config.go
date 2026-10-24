@@ -76,44 +76,59 @@ type Config struct {
 	UsageRetentionDays          int
 	UsageSensitiveRetentionDays int
 	UsageLegacyWritersDrained   bool
+	// Deployment-only recovery; never exposed as an editable system setting.
+	SettingsIgnoreInvalidOverrides bool
+	settingsRecoveryParseError     error
 }
 
 // Validate rejects illegal configuration before the server starts serving.
 func (c *Config) Validate() error {
+	if err := c.ValidateDeployment(); err != nil {
+		return err
+	}
 	if c.MonitorInterval <= 0 {
-		return fmt.Errorf("MONITOR_INTERVAL must be a positive integer, got %d", c.MonitorInterval)
+		return invalidSetting("MONITOR_INTERVAL", "must be a positive integer, got %d", c.MonitorInterval)
 	}
 	if c.AgentHubURL != "" {
 		if err := (agentwire.Config{HubURL: c.AgentHubURL, Token: strings.Repeat("0", 64), StateDir: "/configured-at-install", IntervalSeconds: c.MonitorInterval, AllowHTTP: c.AgentAllowHTTP}).Validate(); err != nil {
-			return fmt.Errorf("AGENT_HUB_URL / MONITOR_INTERVAL: %w", err)
+			return invalidSetting("AGENT_HUB_URL", "%w", err)
 		}
 	}
 	if c.MetricsRetentionParseError != nil {
 		return c.MetricsRetentionParseError
 	}
-	if c.MonitorToleratedRounds < 0 {
-		return fmt.Errorf("MONITOR_TOLERATED_ROUNDS must not be negative, got %d", c.MonitorToleratedRounds)
-	}
-	if c.MonitorAllowedLatency < 0 {
-		return fmt.Errorf("MONITOR_ALLOWED_LATENCY_SECONDS must not be negative, got %d", c.MonitorAllowedLatency)
-	}
 	if c.ExecTimeout <= 0 {
-		return fmt.Errorf("EXEC_TIMEOUT must be positive, got %d", c.ExecTimeout)
+		return invalidSetting("EXEC_TIMEOUT", "must be positive, got %d", c.ExecTimeout)
 	}
 	if c.ExecTimeoutMax <= 0 || c.ExecTimeoutMax < c.ExecTimeout || c.ExecTimeoutMax > 300 {
-		return fmt.Errorf("EXEC_TIMEOUT_MAX must be positive, >= EXEC_TIMEOUT and <= 300, got %d/%d", c.ExecTimeoutMax, c.ExecTimeout)
+		return invalidSetting("EXEC_TIMEOUT_MAX", "must be positive, >= EXEC_TIMEOUT and <= 300, got %d/%d", c.ExecTimeoutMax, c.ExecTimeout)
 	}
 	if c.ExecOutputLimit <= 0 || c.ExecOutputLimit > 8<<20 {
-		return fmt.Errorf("EXEC_OUTPUT_LIMIT must be positive and <= 8388608, got %d", c.ExecOutputLimit)
+		return invalidSetting("EXEC_OUTPUT_LIMIT", "must be positive and <= 8388608, got %d", c.ExecOutputLimit)
 	}
 	if c.ExecOutputStreamLimit <= 0 || c.ExecOutputStreamLimit > c.ExecOutputLimit || c.ExecOutputStreamLimit > 4<<20 {
-		return fmt.Errorf("EXEC_OUTPUT_STREAM_LIMIT must be positive, <= EXEC_OUTPUT_LIMIT and <= 4194304, got %d/%d", c.ExecOutputStreamLimit, c.ExecOutputLimit)
+		return invalidSetting("EXEC_OUTPUT_STREAM_LIMIT", "must be positive, <= EXEC_OUTPUT_LIMIT and <= 4194304, got %d/%d", c.ExecOutputStreamLimit, c.ExecOutputLimit)
 	}
 	if c.SSHTimeout <= 0 {
-		return fmt.Errorf("SSH_TIMEOUT must be positive, got %d", c.SSHTimeout)
+		return invalidSetting("SSH_TIMEOUT", "must be positive, got %d", c.SSHTimeout)
 	}
 	if c.LoginRateLimit < 0 {
-		return fmt.Errorf("LOGIN_RATE_LIMIT must not be negative, got %d", c.LoginRateLimit)
+		return invalidSetting("LOGIN_RATE_LIMIT", "must not be negative, got %d", c.LoginRateLimit)
+	}
+	return nil
+}
+
+// ValidateDeployment rejects only values that database settings cannot repair.
+// Settings-dependent and cross-field checks must run after merging overrides.
+func (c *Config) ValidateDeployment() error {
+	if c.settingsRecoveryParseError != nil {
+		return c.settingsRecoveryParseError
+	}
+	if c.MonitorToleratedRounds < 0 {
+		return invalidSetting("MONITOR_TOLERATED_ROUNDS", "must not be negative")
+	}
+	if c.MonitorAllowedLatency < 0 {
+		return invalidSetting("MONITOR_ALLOWED_LATENCY_SECONDS", "must not be negative")
 	}
 	return nil
 }
@@ -201,6 +216,11 @@ func Load() *Config {
 		cfg.UsageSensitiveRetentionDays = 90
 	}
 	cfg.UsageLegacyWritersDrained = getEnvBool("USAGE_LOG_LEGACY_WRITERS_DRAINED")
+	if recovery, err := getEnvBoolStrict("SYSTEM_SETTINGS_IGNORE_INVALID_OVERRIDES"); err != nil {
+		cfg.settingsRecoveryParseError = err
+	} else if recovery != nil {
+		cfg.SettingsIgnoreInvalidOverrides = *recovery
+	}
 	cfg.Environment = make(map[string]bool)
 	for _, setting := range Settings {
 		cfg.Environment[setting.Key] = os.Getenv(setting.Key) != ""
@@ -278,7 +298,7 @@ func getEnvBoolStrict(key string) (*bool, error) {
 	}
 	parsed, err := strconv.ParseBool(val)
 	if err != nil {
-		return nil, fmt.Errorf("%s=%q is not a valid boolean", key, val)
+		return nil, invalidSetting(key, "is not a valid boolean")
 	}
 	return &parsed, nil
 }

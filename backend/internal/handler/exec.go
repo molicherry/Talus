@@ -124,4 +124,4 @@ func (h *ExecHandler) Execute(w http.ResponseWriter, r *http.Request) {
 }
 
 // SetRuntimeConfig is wired before serving requests.
-func (s *ExecHandler) SetRuntimeConfig(r *config.Runtime) { s.runtimeConfig = r }
+func (h *ExecHandler) SetRuntimeConfig(runtime *config.Runtime) { h.runtimeConfig = runtime }
