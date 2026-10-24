@@ -76,8 +76,10 @@ go test -v -count=1 ./internal/agentclient ./internal/agentwire ./internal/agent
 
 ## 卸载回执与重试
 
-`Lock-Install 200` 最多等待约 **200 秒**，每 100 毫秒检查一次，可等待激活任务释放锁。
-Hub 删除提交后短暂检查卸载回执；仍在等待时记录警告，本机任务继续执行。
+首次卸载的 `Lock-Install 200` 最多等待约 **200 秒**，每 100 毫秒检查一次，可等待激活任务释放锁。
+后续三次重试分别最多等待锁 60、30、10 秒，累计锁等待最多 300 秒，为停止服务和删除目录留出时间。
+Hub 删除提交后短暂检查卸载回执；仍在等待时记录 Info，本机任务继续执行。
+未能调度任务、无法读取回执或卸载失败才记录 Warn。
 任务失败会保留脚本、回执和 `Talus-Agent-<安装 ID>-Remove` 计划任务，
 独立的 SYSTEM 任务在失败后等待 1 分钟重试，最多额外 3 次；整个任务执行上限为 20 分钟。
 失败会写入 Windows Application 日志，来源为 `Talus-Agent`。
@@ -95,7 +97,7 @@ Get-ScheduledTaskInfo -TaskName ($name + '-Remove')
 回执 `status` 为 `pending`、`failed` 或 `succeeded`；失败包含错误、尝试次数与更新时间。
 排除占用文件、服务停止失败等原因后，可用 `Start-ScheduledTask -TaskName ($name + '-Remove')`
 手动重试。成功后任务及脚本自动删除，成功回执保留。若任务被强制终止而未能写回执，
-同时查看任务计划程序的最近运行结果。Hub 警告不能替代本机最终回执；SSH 断开或
+同时查看任务计划程序的最近运行结果。Hub 日志不能替代本机最终回执；SSH 断开或
 删除请求结束后，Hub 不再持续轮询已删除节点。
 
 激活任务上限为 180 秒，Hub 等待回执 200 秒，并为 SSH 返回留出 10 秒。

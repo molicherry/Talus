@@ -193,15 +193,14 @@ func windowsDriveRoot(p string) bool {
 }
 
 type Collector struct {
-	Executable       string
-	BootID           string
-	previous         *sectionResult
-	metadata         agentwire.Sample
-	metadataAt       time.Time
-	Run              func(context.Context, string) (sectionResult, error)
-	workersMu        sync.Mutex
-	workers          map[string][]*collectionWorker
-	workerRetryGrace time.Duration
+	Executable string
+	BootID     string
+	previous   *sectionResult
+	metadata   agentwire.Sample
+	metadataAt time.Time
+	Run        func(context.Context, string) (sectionResult, error)
+	workersMu  sync.Mutex
+	workers    map[string][]*collectionWorker
 }
 
 // At most one abandoned worker and one replacement may be alive per section.
@@ -223,7 +222,7 @@ func (c *Collector) runBounded(ctx context.Context, name string) (sectionResult,
 	if c.workers == nil {
 		c.workers = map[string][]*collectionWorker{}
 	}
-	live := c.workers[name][:0]
+	live := make([]*collectionWorker, 0, 2)
 	for _, w := range c.workers[name] {
 		select {
 		case <-w.done:
@@ -253,11 +252,7 @@ func (c *Collector) runBounded(ctx context.Context, name string) (sectionResult,
 		return w.result, w.err
 	case <-childCtx.Done():
 		c.workersMu.Lock()
-		grace := c.workerRetryGrace
-		if grace <= 0 {
-			grace = 10 * time.Second
-		}
-		w.retryAfter = time.Now().Add(grace)
+		w.retryAfter = time.Now().Add(10 * time.Second)
 		c.workersMu.Unlock()
 		return sectionResult{}, childCtx.Err()
 	}

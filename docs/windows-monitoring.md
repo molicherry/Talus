@@ -72,10 +72,13 @@ each manifest entry, size, SHA-256 and ELF/PE architecture.
 
 ## Removal receipts and retries
 
-`Lock-Install 200` waits up to **200 seconds**, checking every 100 milliseconds.
-After committing deletion, the Hub briefly checks the receipt and warns if local
-cleanup is still pending. A failed task retains its script, receipt and
-`Talus-Agent-<installation ID>-Remove` task. The detached SYSTEM task retries up to three
+The first removal attempt uses `Lock-Install 200`, waiting up to **200 seconds**
+and checking every 100 milliseconds. Subsequent attempts wait at most 60, 30 and
+10 seconds for the lock: 300 seconds in total, leaving room for service shutdown
+and directory deletion. After committing deletion, the Hub briefly checks the
+receipt and logs pending cleanup at Info. Scheduling failures, unavailable
+receipts and failed removal are logged at Warn. A failed task retains its script,
+receipt and `Talus-Agent-<installation ID>-Remove` task. The detached SYSTEM task retries up to three
 additional times, waiting one minute after each failure, with a twenty-minute
 limit for the entire task. Failures
 also produce a Windows Application event from `Talus-Agent`.

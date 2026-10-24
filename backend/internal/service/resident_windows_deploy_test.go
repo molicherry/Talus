@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log/slog"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -88,6 +89,27 @@ func TestWindowsAgentProbePreservesUnameFailure(t *testing.T) {
 	_, err := NewAgentDeploymentService(nil, "").Probe(context.Background(), lease)
 	if err == nil || !strings.Contains(err.Error(), "uname exit=42") || ReasonFromError(err) != ReasonAgentPlatformUnsupported {
 		t.Fatalf("lost probe failure: %v", err)
+	}
+}
+
+func TestLinuxAgentProbeToleratesTrailingOutput(t *testing.T) {
+	for _, arch := range []string{"x86_64", "aarch64", "riscv64"} {
+		t.Run(arch, func(t *testing.T) {
+			lease := windowsProbeLease{exec: func(command string) *ExecResult {
+				if command != "uname -s; uname -m" {
+					t.Fatal("Linux probe fell back to PowerShell")
+				}
+				return &ExecResult{Stdout: "Linux\n" + arch + "\nshell logout message\n"}
+			}}
+			p, err := NewAgentDeploymentService(nil, "").Probe(context.Background(), lease)
+			if arch == "riscv64" {
+				if ReasonFromError(err) != ReasonAgentPlatformUnsupported {
+					t.Fatalf("unsupported Linux architecture: %v", err)
+				}
+			} else if err != nil || p.OS != "linux" || p.Arch != archName(arch) {
+				t.Fatalf("Linux probe: %+v %v", p, err)
+			}
+		})
 	}
 }
 
@@ -233,7 +255,22 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 					t.Fatal(err)
 				}
 				defer lease.Release()
-				err = monitor.uninstall(ctx, after, lease)
+				var logs bytes.Buffer
+				previous := slog.Default()
+				func() {
+					slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+					defer slog.SetDefault(previous)
+					err = monitor.uninstall(ctx, after, lease)
+				}()
+				if scenario == "remove-pending" {
+					if !strings.Contains(logs.String(), "level=INFO") || strings.Contains(logs.String(), "level=WARN") {
+						t.Fatalf("normal async removal warned: %s", logs.String())
+					}
+				} else if scenario == "remove-failure" || scenario == "remove-invalid" {
+					if !strings.Contains(logs.String(), "level=WARN") {
+						t.Fatalf("removal failure did not warn: %s", logs.String())
+					}
+				}
 				wantErr := scenario == "remove-failure" || scenario == "remove-invalid"
 				if (err != nil) != wantErr || !removed.Load() {
 					t.Fatalf("Windows removal: %v", err)

@@ -163,7 +163,11 @@ func (m *ResidentMonitor) uninstallWindows(ctx context.Context, installID string
 	status := "not_scheduled"
 	defer func() {
 		if status != "succeeded" {
-			slog.WarnContext(ctx, "Windows agent removal not confirmed; inspect local task and receipt", "install_id", installID, "status", status, "task", l.Name()+"-Remove", "receipt", l.Root()+"/"+l.Name()+".remove.json")
+			level := slog.LevelWarn
+			if status == "pending" {
+				level = slog.LevelInfo
+			}
+			slog.Log(ctx, level, "Windows agent removal not confirmed; inspect local task and receipt", "install_id", installID, "status", status, "task", l.Name()+"-Remove", "receipt", l.Root()+"/"+l.Name()+".remove.json")
 		}
 	}()
 	if err := windowsExec(ctx, lease, l.PrepareRemoval(), reasonWindowsService, 5*time.Second); err != nil {

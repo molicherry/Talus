@@ -116,14 +116,14 @@ func (l Layout) ActivationFile(binaryHash, configHash string) []byte {
 func (l Layout) Launch(scriptHash string) string {
 	return l.vars() + "$scriptHash=" + Quote(scriptHash) + fmt.Sprintf("\n$activationSeconds=%d\n", ActivationTaskSeconds) + launch
 }
-func (l Layout) Remove() string { return l.baseVars() + common + remove }
+func (l Layout) Remove() string { return l.baseVars() + "$lockSeconds=200\n" + common + remove }
 
 // RemovalFile is uploaded into the protected root before its hash is checked
 // by RemoveDetached. Keeping the payload out of the SSH command also bounds
 // command length when retry/receipt handling grows.
 func (l Layout) RemovalPath() string { return l.Root() + "/" + l.Name() + ".remove.ps1" }
 func (l Layout) RemovalFile() []byte {
-	return []byte("\xef\xbb\xbf" + l.baseVars() + common + "function Invoke-Removal {\n" + remove + "\n}\n" + removalResult)
+	return []byte("\xef\xbb\xbf" + l.baseVars() + common + "function Invoke-Removal([int]$lockSeconds) {\n" + remove + "\n}\n" + removalResult)
 }
 func (l Layout) PrepareRemoval() string {
 	return l.baseVars() + common + `# Protect removal payload before upload.

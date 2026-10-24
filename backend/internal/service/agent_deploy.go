@@ -149,9 +149,9 @@ func (s *AgentDeploymentService) Probe(ctx context.Context, lease Lease) (AgentP
 	}
 	probeErr := errors.New("uname returned no result")
 	if result != nil {
-		probeErr = fmt.Errorf("uname exit=%d, output_truncated=%t", result.ExitCode, result.OutputTruncated || result.StdoutTruncated)
 		lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
-		if result.ExitCode == 0 && !result.OutputTruncated && !result.StdoutTruncated && len(lines) == 2 {
+		probeErr = fmt.Errorf("uname exit=%d, output_truncated=%t, lines=%d", result.ExitCode, result.OutputTruncated || result.StdoutTruncated, len(lines))
+		if result.ExitCode == 0 && !result.OutputTruncated && !result.StdoutTruncated && len(lines) >= 2 {
 			osName, arch := strings.ToLower(strings.TrimSpace(lines[0])), strings.TrimSpace(lines[1])
 			if osName == "linux" {
 				if name := archName(arch); name != "" {

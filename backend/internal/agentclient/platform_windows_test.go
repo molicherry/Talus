@@ -91,7 +91,9 @@ func TestWindowsNetworkExcludesLoopbackTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	const traffic = 32 << 20
+	// Leave headroom for background runner traffic while keeping a leaked
+	// loopback transfer larger than the assertion threshold.
+	const traffic = 128 << 20
 	go func() {
 		conn, e := listener.Accept()
 		if e != nil {
@@ -110,7 +112,7 @@ func TestWindowsNetworkExcludesLoopbackTraffic(t *testing.T) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
 	block := make([]byte, 1<<20)
-	for i := 0; i < 32; i++ {
+	for sent := 0; sent < traffic; sent += len(block) {
 		if _, err = conn.Write(block); err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +125,7 @@ func TestWindowsNetworkExcludesLoopbackTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, delta := range []int64{*after.Sample.NetRecv - *before.Sample.NetRecv, *after.Sample.NetSent - *before.Sample.NetSent} {
-		if delta < 0 || delta >= traffic/2 {
+		if delta < 0 || delta >= traffic*3/4 {
 			t.Fatalf("loopback traffic leaked into host counters: %d bytes", delta)
 		}
 	}

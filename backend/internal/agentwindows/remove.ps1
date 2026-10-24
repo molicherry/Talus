@@ -5,7 +5,7 @@ if (!(Test-Path -LiteralPath $root)) {
   return
 }
 Protect-Directory $root
-$lock=Lock-Install 200
+$lock=Lock-Install $lockSeconds
 try {
   Assert-Path $base
   # Pending tasks cannot start another activation after removal. A running
