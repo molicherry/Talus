@@ -719,9 +719,9 @@ try {
         last_contact_at: timestamp, last_sample_at: timestamp,
       };
       await goto("/servers/1");
-      await page.getByText("Collection: Partial failure", { exact: true }).waitFor();
+      await page.getByText("Last collection: Partial failure", { exact: true }).waitFor();
       await page.getByText("Disk: Collection timed out", { exact: true }).waitFor();
-      await page.getByText("8 samples pending · 2 samples dropped", { exact: true }).waitFor();
+      await page.getByText("8 samples awaiting storage confirmation · 2 samples dropped in total", { exact: true }).waitFor();
       assert.equal(await page.getByRole("status").filter({ hasText: "Online" }).count(), 1);
       state.servers[0].monitoring = { ...state.servers[0].monitoring, collection: "healthy", data: "backfilling", errors: {}, pending_samples: 4 };
       await until(async () => await page.getByText("Data: Backfilling", { exact: true }).count() === 1, "monitoring refresh", 8000);
@@ -730,7 +730,7 @@ try {
       assert.equal(overflow, false, "monitoring status overflows viewport");
       state.failReads.add("/api/v1/servers/1");
       await until(async () => await page.getByRole("alert").count() > 0, "failed refresh message", 12000);
-      assert.equal(await page.getByText("Collection: Healthy", { exact: true }).count(), 1, "failed refresh discarded monitoring status");
+      assert.equal(await page.getByText("Last collection: Healthy", { exact: true }).count(), 1, "failed refresh discarded monitoring status");
       await capture(page, `resident-monitoring-${mobile ? "mobile" : "desktop"}`);
     }, mobile);
   }

@@ -1,17 +1,29 @@
 {
   "agentMonitor": {
-    "collectionLabel": "Collection",
+    "connectionLabel": "Agent communication",
+    "collectionLabel": "Last collection",
     "dataLabel": "Data",
     "contact": "Last contact (Hub clock)",
     "sample": "Last sample (node clock)",
     "persisted": "Last committed (Hub clock)",
     "staleHint": "Stored data cannot currently be confirmed as up to date; collection may still be running normally. Check time synchronization (NTP) on the node and Hub, the reporting connection, pending samples, and storage status.",
-    "pending": "{{count}} samples pending",
-    "dropped": "{{count}} samples dropped",
+    "statusHint": "Communication reflects contact between the agent and Hub, not SSH availability. Collection reflects the last reported sample and may retain its previous result after contact is lost.",
+    "connectionHint": "Check the agent service, Hub address, and network access from the node to the Hub. Missing reports do not necessarily mean the server is powered off.",
+    "backfillHint": "Recent samples have been stored, but some samples still await confirmation. Buffered history will continue to be reported; historical data may still be incomplete.",
+    "pending": "{{count}} samples awaiting storage confirmation",
+    "pendingHint": "Counts come from the agent's last report. Pending samples may already have been sent but not yet acknowledged as stored.",
+    "dropped": "{{count}} samples dropped in total",
+    "droppedHint": "The cumulative count includes samples removed by buffer size or age limits and samples rejected by the Hub, not just losses from the latest collection.",
     "version": "Agent version",
+    "connection": {
+      "online": "Healthy",
+      "reconnecting": "Awaiting recovery",
+      "unreachable": "Contact lost",
+      "unknown": "Awaiting contact"
+    },
     "deployment": {
-      "pending": "Agent waiting to install",
-      "installing": "Installing agent",
+      "pending": "Awaiting deployment or configuration sync",
+      "installing": "Deploying agent",
       "ready": "Agent ready",
       "failed": "Agent deployment failed",
       "setup_required": "Monitoring setup required"
@@ -25,6 +37,7 @@
     "data": {
       "fresh": "Fresh",
       "stale": "Updates delayed",
+      "waiting": "Waiting for a sample",
       "backfilling": "Backfilling"
     },
     "sections": {
@@ -38,7 +51,7 @@
       "host": "System information",
       "storage": "Storage",
       "spool": "Local buffer",
-      "clock": "Node clock"
+      "clock": "Sample time"
     },
     "reasons": {
       "hub_url_required": "Set the node-reachable Hub HTTPS address in system settings.",
@@ -58,7 +71,9 @@
       "agent_hash_mismatch": "The uploaded artifact failed integrity verification.",
       "agent_platform_unsupported": "This node platform is not supported.",
       "read_failed": "Could not read this metric",
-      "write_failed": "Data could not be persisted; pending samples will be retried",
+      "write_failed": "The Hub could not confirm storage of this batch. Check Hub logs, database connectivity, and storage space; the agent retries within its buffer retention limits.",
+      "spool_write_failed": "The agent could not reliably save local pending samples. Check node disk space and permissions on the agent data directory; some samples may not be recoverable.",
+      "unknown_error": "An unrecognized monitoring error occurred. Check agent and Hub logs.",
       "timeout": "Collection timed out",
       "warming_up": "Collecting a CPU baseline",
       "counter_reset": "Counter reset; waiting for the next sample",
@@ -424,7 +439,7 @@
     "titleNamed": "Monitoring — {{name}}",
     "backTo": "Back to {{name}}",
     "loadError": "Failed to load metrics",
-    "emptyState": "No metrics data yet. Check the agent's deployment and connection status.",
+    "emptyState": "No monitoring data in the selected time range. Try a wider range and check agent deployment, communication, time synchronization, and storage status.",
     "cpuUsage": "CPU Usage",
     "memoryUsage": "Memory Usage",
     "diskUsage": "Disk Usage",
@@ -438,9 +453,9 @@
     "windowsLoadNotApplicable": "Not applicable: Windows does not provide Linux load averages.",
     "swapUsage": "Swap Usage",
     "loadAverage": "Load Average",
-    "lastCollected": "Last collected {{time}}",
-    "neverCollected": "Awaiting first sample",
-    "gapNote": "A break in a line means no sample was collected for that interval.",
+    "lastCollected": "Latest sample in selected range: {{time}} (node clock)",
+    "neverCollected": "No samples in the selected time range",
+    "gapNote": "A line break means no valid data is available to display for that interval. Collection errors, pending reports, or data retention may cause gaps; a gap does not mean zero.",
     "avg": "Avg",
     "max": "Max",
     "rx": "RX",

@@ -1,17 +1,29 @@
 {
   "agentMonitor": {
-    "collectionLabel": "采集",
+    "connectionLabel": "Agent 通信",
+    "collectionLabel": "最近采集",
     "dataLabel": "数据",
     "contact": "最近联系（Hub 时间）",
     "sample": "最近采样（节点时间）",
     "persisted": "最近成功落库（Hub 时间）",
-    "staleHint": "暂时无法确认数据为最新，采集可能仍在正常运行。请检查节点与 Hub 的时间同步（NTP）、上报连接、待发送样本和入库状态。",
-    "pending": "待发送 {{count}} 条",
-    "dropped": "已丢弃 {{count}} 条",
+    "staleHint": "暂时无法确认数据为最新，采集可能仍在正常运行。请检查节点与 Hub 的时间同步（NTP）、上报连接、待确认样本和入库状态。",
+    "statusHint": "通信状态反映 Agent 与 Hub 的联系，不代表 SSH 可用。采集状态来自最近一次上报，断联后仍可能显示上次结果。",
+    "connectionHint": "请检查节点上的 Agent 服务、Hub 地址及节点到 Hub 的网络访问。暂未收到上报不代表服务器已关机。",
+    "backfillHint": "新近样本已入库，仍有样本等待确认。缓冲中的历史样本会继续补报，不代表历史数据已全部补齐。",
+    "pending": "待确认入库 {{count}} 条",
+    "pendingHint": "数量来自 Agent 最近一次上报；待确认样本可能已发送，但尚未收到入库确认。",
+    "dropped": "累计丢弃 {{count}} 条",
+    "droppedHint": "累计丢弃包括缓冲超限、保留时间到期及 Hub 拒绝的样本，不代表本轮丢弃数量。",
     "version": "Agent 版本",
+    "connection": {
+      "online": "正常",
+      "reconnecting": "等待恢复",
+      "unreachable": "联系中断",
+      "unknown": "等待联系"
+    },
     "deployment": {
-      "pending": "等待安装 Agent",
-      "installing": "正在安装 Agent",
+      "pending": "等待部署或同步配置",
+      "installing": "正在部署 Agent",
       "ready": "Agent 已就绪",
       "failed": "Agent 部署失败",
       "setup_required": "需要配置监控"
@@ -20,11 +32,12 @@
       "healthy": "正常",
       "partial": "部分异常",
       "failed": "采集失败",
-      "unknown": "等待首次采样"
+      "unknown": "等待样本"
     },
     "data": {
       "fresh": "最新",
       "stale": "更新延迟",
+      "waiting": "等待样本",
       "backfilling": "历史补报中"
     },
     "sections": {
@@ -38,7 +51,7 @@
       "host": "系统信息",
       "storage": "数据存储",
       "spool": "本地缓冲",
-      "clock": "节点时钟"
+      "clock": "样本时间"
     },
     "reasons": {
       "hub_url_required": "请在系统设置中填写节点能够访问的 Hub HTTPS 地址。",
@@ -58,7 +71,9 @@
       "agent_hash_mismatch": "上传文件未通过完整性校验。",
       "agent_platform_unsupported": "暂不支持此节点的系统或架构。",
       "read_failed": "无法读取此项指标",
-      "write_failed": "数据暂时无法持久保存，待发送样本会继续重试",
+      "write_failed": "Hub 未能确认本批样本入库。请检查 Hub 日志、数据库连接及存储空间；Agent 会在缓冲保留范围内重试。",
+      "spool_write_failed": "Agent 无法可靠保存本地待发送样本。请检查节点磁盘空间及 Agent 数据目录权限；部分样本可能无法补报。",
+      "unknown_error": "发生未识别的监控错误，请检查 Agent 和 Hub 日志。",
       "timeout": "采集超时",
       "warming_up": "正在建立 CPU 采样基线",
       "counter_reset": "计数器已重置，等待下一次采样",
@@ -424,7 +439,7 @@
     "titleNamed": "监控 — {{name}}",
     "backTo": "返回 {{name}}",
     "loadError": "加载监控数据失败",
-    "emptyState": "暂无监控数据，请检查 Agent 的部署和连接状态。",
+    "emptyState": "所选时段暂无监控数据。可扩大时间范围，并检查 Agent 的部署、通信、时间同步及入库状态。",
     "cpuUsage": "CPU 使用率",
     "memoryUsage": "内存使用率",
     "diskUsage": "磁盘使用率",
@@ -438,9 +453,9 @@
     "windowsLoadNotApplicable": "不适用：Windows 不提供 Linux 的负载均值。",
     "swapUsage": "Swap 使用率",
     "loadAverage": "负载均值",
-    "lastCollected": "最后采集 {{time}}",
-    "neverCollected": "等待首次采集",
-    "gapNote": "曲线断点表示该时段未采集到数据。",
+    "lastCollected": "所选时段最新样本 {{time}}（节点时间）",
+    "neverCollected": "所选时段暂无采样记录",
+    "gapNote": "曲线断点表示该时段没有可展示的有效数据，可能与采集异常、尚未上报或数据保留策略有关，不代表指标值为零。",
     "avg": "均值",
     "max": "峰值",
     "rx": "接收",
