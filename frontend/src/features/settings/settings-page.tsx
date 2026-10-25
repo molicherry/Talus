@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "../../components/ui/button";
 import { Input, Select } from "../../components/ui/field";
@@ -68,8 +68,24 @@ function SettingsSession() {
   const [servers, setServers] = useState<ServerSummary[]>([]);
   const [serverError, setServerError] = useState(false);
   const lifetime = useRef<AbortController | null>(null);
+  const pageRef = useRef<HTMLDivElement | null>(null);
+  const actionsRef = useRef<HTMLDivElement | null>(null);
   const dirty = Object.keys(draft).length > 0;
   const loaded = data !== null;
+
+  // Keep anchor targets and focused fields below both sticky bars, including
+  // when translated controls wrap or a save error expands the action area.
+  useLayoutEffect(() => {
+    const actions = actionsRef.current;
+    if (!actions) return;
+    const measure = () => pageRef.current?.style.setProperty(
+      "--settings-actions-height", `${actions.getBoundingClientRect().height}px`,
+    );
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(actions);
+    return () => observer.disconnect();
+  }, [loaded]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -335,14 +351,14 @@ function SettingsSession() {
   };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div ref={pageRef} className="mx-auto max-w-4xl space-y-6 [--settings-actions-height:0px]">
       <div>
         <h1 className="text-2xl font-semibold">{t("nav.settings")}</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           {t("settings.description")}
         </p>
       </div>
-      {error && (
+      {error && !data && (
         <p
           role="alert"
           className="rounded-lg border border-danger/30 bg-danger-subtle p-4 text-sm text-danger"
@@ -350,13 +366,32 @@ function SettingsSession() {
           {error}
         </p>
       )}
-      {notice && (
-        <p
-          role="status"
-          className="rounded-lg border border-border p-4 text-sm"
-        >
-          {notice}
-        </p>
+      {data && (
+        <div ref={actionsRef} className="sticky top-16 z-20 space-y-3 rounded-xl border border-border bg-card p-3 shadow-sm sm:p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-sm text-muted-foreground">
+              {t(dirty ? "settings.unsaved" : "settings.upToDate")}
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={pending}
+                onClick={() => {
+                  setDraft({});
+                  setReload((v) => v + 1);
+                }}
+              >
+                {t("settings.reload")}
+              </Button>
+              <Button type="submit" form="system-settings-form" disabled={!dirty || pending}>
+                {t(pending ? "settings.saving" : "settings.save")}
+              </Button>
+            </div>
+          </div>
+          {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+          {notice && <p role="status" className="text-sm">{notice}</p>}
+        </div>
       )}
       {data?.recovery && (
         <p
@@ -376,6 +411,8 @@ function SettingsSession() {
       ) : (
         <>
           <form
+            id="system-settings-form"
+            className="[&_:is(section,input,select,summary,button)]:scroll-mt-[calc(1rem+var(--settings-actions-height))]"
             onSubmit={(e) => {
               e.preventDefault();
               void save();
@@ -409,26 +446,6 @@ function SettingsSession() {
                   </section>
                 );
               })}
-              <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
-                <span className="text-sm text-muted-foreground">
-                  {t(dirty ? "settings.unsaved" : "settings.upToDate")}
-                </span>
-                <div className="flex gap-3">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      setDraft({});
-                      setReload((v) => v + 1);
-                    }}
-                  >
-                    {t("settings.reload")}
-                  </Button>
-                  <Button type="submit" disabled={!dirty || pending}>
-                    {t(pending ? "settings.saving" : "settings.save")}
-                  </Button>
-                </div>
-              </div>
             </fieldset>
           </form>
           <section className="rounded-xl border border-border bg-card p-5 sm:p-6">

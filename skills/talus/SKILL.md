@@ -12,10 +12,13 @@ triggers: ["Talus", "manage server", "execute command on server", "check server 
 
 # Talus Skill — Agent Operation Guide
 
-Talus is a self-hosted Linux server management platform. The Hub uses SSH/SFTP
-for commands, terminals, files, and installation of a resident monitoring agent.
-That agent runs under systemd and reports over outbound WSS, with HTTPS fallback;
-monitoring does not require an additional inbound port on the node.
+Talus is a self-hosted platform for managing Linux servers and monitoring Windows
+Server. The Hub uses SSH/SFTP for commands, terminals, files, and installation of
+a resident monitoring agent. The agent runs as a systemd system/user service on
+Linux or a native Windows service, and reports over outbound WSS with HTTPS
+fallback. Monitoring requires node access to the Hub, with no additional inbound
+port on the node. Windows monitoring support does not establish full Windows
+compatibility for the browser terminal or file browser.
 
 Keep this entire `talus/` directory when installing the skill. Detailed contracts
 are bundled in [File API](references/files.md) and [Monitoring API](references/metrics.md);
@@ -76,15 +79,18 @@ These routes reject API keys regardless of scopes. Paths are relative to `/api/v
 
 | Route | Operation |
 | --- | --- |
-| `DELETE /servers/{id}` | Delete server and uninstall its resident agent |
+| `DELETE /servers/{id}` | Delete server, revoke its node credential, and attempt remote agent cleanup |
 | `POST /servers/{id}/connection/test` | Test the SSH connection route |
 | `POST /credentials`, `PUT /credentials/{id}`, `DELETE /credentials/{id}` | Mutate credentials |
 | `GET /credentials/{id}/reveal` | Reveal a credential secret |
 | `GET /api-keys`, `POST /api-keys`, `DELETE /api-keys/{id}` | Manage API keys |
+| `PATCH /api-keys/{id}` | Edit permissions and server scope without changing the key value |
+| `POST /api-keys/{id}/rotate` | Replace the key value while preserving permissions and server scope |
 | `GET /api-keys/{id}/reveal` | Reveal a stored API key |
 | `POST /services`, `PUT /services/{id}`, `DELETE /services/{id}` | Mutate services |
 | `GET /services/{id}/credentials` | Read service secrets |
 | `GET /usage-logs`, `GET /usage-logs/filter-options`, `GET /usage-logs/{id}` | Read operation history |
+| `GET /settings`, `PUT /settings` | Read or update system settings |
 | `GET /auth/profile`, `PUT /auth/password` | User account operations |
 
 Administrator JWT checks also protect `POST /servers/{id}/host-key/trust` and
@@ -99,6 +105,11 @@ the server has a proxy route or is used as another server's SSH jump host.
 The public health/version/login/setup entry points do not authorize management
 operations. `/agent/report` and `/agent/connect` use separate node authentication
 and are not endpoints for this skill.
+
+Server deletion can succeed even if SSH is unreachable or remote cleanup fails.
+The Hub logs cleanup failures and does not keep retrying deleted nodes; an
+administrator may need to remove residual files/services manually. A Windows
+removal task that was successfully scheduled has its own bounded local retries.
 
 ## Common tasks
 
@@ -240,10 +251,14 @@ the user's requested scope. Never guess a registered service's URL or credential
    permit the new server ID before subsequent calls.
 4. Execute `whoami` with `servers:exec`; expect the configured SSH username and
    exit code 0. Do not assume root access.
-5. For monitoring, the administrator must configure a node-reachable HTTPS
-   `AGENT_HUB_URL` on the Hub. Installation needs SFTP, running systemd and `flock`;
-   a non-root account needs user lingering. Talus does not automatically sudo.
-   Check `monitoring.deployment` and data freshness after automatic deployment.
+5. For monitoring, an administrator sets the node-reachable Hub HTTPS URL in
+   **System settings → Monitoring**, or supplies deployment-time `AGENT_HUB_URL`.
+   Installation needs SFTP. Linux additionally needs running systemd and `flock`;
+   a non-root account needs user lingering. Windows needs an administrator SSH
+   account, PowerShell 5.1+, running Task Scheduler, writable local ProgramData,
+   and a Hub certificate trusted by LocalSystem. Talus does not automatically
+   elevate an unprivileged login. Check `monitoring.deployment` and data freshness
+   after automatic deployment; saving settings alone does not confirm node adoption.
 
 To update a server, read its current detail and send only intended fields via
 `PUT /api/v1/servers/{id}`. Preserve omitted credentials; `credential_id:null`
@@ -258,7 +273,10 @@ Create services and API keys through the Web UI. Select the needed scopes from
 the permission table and the intended server restrictions. API key values can
 be revealed again in the Web UI when a recoverable value is stored; API keys
 themselves cannot call reveal endpoints. Legacy keys without a stored value
-cannot be revealed. Metadata/list endpoints do not return stored secret values.
+cannot be revealed, but an administrator can rotate them to a new recoverable
+value. Rotation immediately invalidates the old value and closes its terminal
+sessions; configure the new value in callers. Metadata/list endpoints do not
+return stored secret values.
 
 ## Troubleshooting
 
@@ -275,5 +293,8 @@ cannot be revealed. Metadata/list endpoints do not return stored secret values.
 | `metrics_rollup_not_ready` / `metrics_query_timeout` (503) | Report unavailable data; retry with backoff or a smaller range, without inventing zero samples. |
 | Exec/Relay timeout or interrupted response | Check the operation's resulting state before replaying a mutation. |
 
-If a key lacks a required scope or server ID, the administrator must create an
-appropriately scoped replacement in the Web UI and configure it for the caller.
+If a key lacks a required scope or server ID, ask an administrator to edit that
+key's permissions and server scope in the Web UI. The key value remains unchanged,
+so the caller keeps its existing configuration. Permission changes close existing
+terminal sessions; reconnect using the updated permissions. Rotate the key only
+when its secret value needs replacement, then update the caller's configuration.

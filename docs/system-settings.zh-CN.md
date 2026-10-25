@@ -61,7 +61,7 @@ Agent 地址保存成功只说明配置已持久化，不代表目标节点可�
 | `VPSMANAGER_MASTER_KEY` | 必填 | Hub 环境/密钥管理：凭据加密主密钥。数据库迁移、恢复时保持原密钥 |
 | `JWT_SECRET` | 必填 | Hub 环境/密钥管理：JWT 签名及相关会话凭据 |
 | `PORT` | `8080` | 独立进程为监听端口；仓库 Compose 的 `.env` 值控制宿主机端口映射，Hub 容器内部仍为 8080 |
-| `AGENT_ARTIFACTS_DIR` | `/usr/local/bin` | Hub 环境与挂载：Agent manifest 及 amd64/arm64 程序目录；启动校验 |
+| `AGENT_ARTIFACTS_DIR` | `/usr/local/bin` | Hub 环境与挂载：Agent manifest 及 Linux amd64/arm64、Windows amd64 程序目录；三个平台均须提供，启动校验 |
 | `TRUST_PROXY` | `false` | Hub 环境：仅在可信反向代理覆盖 X-Forwarded-For 时开启，影响登录 IP 识别 |
 | `STATIC_DIR` | 独立进程为空；镜像 `/app/static` | Hub 环境与挂载：前端静态资源目录 |
 | `DB_PASSWORD` | 必填 | Compose `.env`：PostgreSQL 初始化密码及 Hub 连接串；不是 Hub 独立读取的参数 |

@@ -719,9 +719,9 @@ try {
         last_contact_at: timestamp, last_sample_at: timestamp,
       };
       await goto("/servers/1");
-      await page.getByText("Collection: Partial failure", { exact: true }).waitFor();
+      await page.getByText("Last collection: Partial failure", { exact: true }).waitFor();
       await page.getByText("Disk: Collection timed out", { exact: true }).waitFor();
-      await page.getByText("8 samples pending · 2 samples dropped", { exact: true }).waitFor();
+      await page.getByText("8 samples awaiting storage confirmation · 2 samples dropped in total", { exact: true }).waitFor();
       assert.equal(await page.getByRole("status").filter({ hasText: "Online" }).count(), 1);
       state.servers[0].monitoring = { ...state.servers[0].monitoring, collection: "healthy", data: "backfilling", errors: {}, pending_samples: 4 };
       await until(async () => await page.getByText("Data: Backfilling", { exact: true }).count() === 1, "monitoring refresh", 8000);
@@ -730,10 +730,110 @@ try {
       assert.equal(overflow, false, "monitoring status overflows viewport");
       state.failReads.add("/api/v1/servers/1");
       await until(async () => await page.getByRole("alert").count() > 0, "failed refresh message", 12000);
-      assert.equal(await page.getByText("Collection: Healthy", { exact: true }).count(), 1, "failed refresh discarded monitoring status");
+      assert.equal(await page.getByText("Last collection: Healthy", { exact: true }).count(), 1, "failed refresh discarded monitoring status");
       await capture(page, `resident-monitoring-${mobile ? "mobile" : "desktop"}`);
     }, mobile);
   }
+
+  for (const mobile of [false, true]) {
+    await test(`resident monitoring covers connection and initial sample states (${mobile ? "mobile" : "desktop"})`, async ({ page, state, goto }) => {
+      const base = { deployment: "ready", collection: "healthy", data: "stale", pending_samples: 0, dropped_samples: 0, last_sample_at: timestamp };
+      const cases = [
+        { status: { ...base, connection: "online", data: "fresh" }, communication: "Healthy", data: "Fresh", warning: false },
+        { status: { ...base, connection: "online" }, communication: "Healthy", data: "Updates delayed", warning: true },
+        { status: { ...base, connection: "reconnecting" }, communication: "Awaiting recovery", data: "Updates delayed", warning: true, disconnected: true },
+        { status: { ...base, connection: "unreachable" }, communication: "Contact lost", data: "Updates delayed", warning: true, disconnected: true },
+        { status: { ...base, connection: "unknown", collection: "unknown", last_sample_at: undefined }, communication: "Awaiting contact", data: "Waiting for a sample", warning: false },
+        { status: { ...base, connection: "unknown", collection: "unknown", last_sample_at: undefined, deployment: "setup_required", deployment_error: "hub_url_required" }, communication: "Awaiting contact", data: "Waiting for a sample", warning: false, setup: true },
+        { status: { ...base, connection: "unknown", collection: "unknown", last_sample_at: undefined, deployment: "pending" }, communication: "Awaiting contact", data: "Waiting for a sample", warning: false, deploymentLabel: "Awaiting deployment or configuration sync" },
+        { status: { ...base, connection: "unknown", collection: "unknown", last_sample_at: undefined, deployment: "installing" }, communication: "Awaiting contact", data: "Waiting for a sample", warning: false, deploymentLabel: "Deploying agent" },
+        { status: { ...base, connection: "online", collection: "partial", errors: { spool: "write_failed", storage: "write_failed" } }, communication: "Healthy", data: "Updates delayed", warning: true, storage: true },
+      ];
+      for (const compact of [false, true]) {
+        for (const c of cases) {
+          state.servers[0].monitoring = c.status;
+          state.servers[0].status = ({ online: "online", reconnecting: "checking", unreachable: "offline", unknown: "unknown" })[c.status.connection];
+          // A peer with identical labels makes unscoped compact locators ambiguous.
+          state.servers[1].monitoring = c.status;
+          await goto(compact ? "/servers" : "/servers/1");
+          const target = compact
+            ? page.getByRole("row").filter({ has: page.getByRole("button", { name: state.servers[0].name, exact: true }) })
+            : page.getByRole("main");
+          const communication = target.getByText(`Agent communication: ${c.communication}`, { exact: true });
+          await communication.waitFor();
+          await target.getByText(`Data: ${c.data}`, { exact: true }).waitFor();
+          const color = await communication.evaluate((element) => getComputedStyle(element).color);
+          // Compare against the actual theme token, not a hard-coded color.
+          const expectedColor = await communication.evaluate((element, warning) => {
+            const probe = document.createElement("span");
+            probe.style.color = `var(--color-${warning ? "warning" : "muted-foreground"})`;
+            element.append(probe);
+            const color = getComputedStyle(probe).color;
+            probe.remove();
+            return color;
+          }, c.warning);
+          assert.equal(color, expectedColor, `incorrect severity: ${JSON.stringify(c.status)}`);
+          assert.equal(await target.getByText(/Check the agent service, Hub address/).count(), c.disconnected && !compact ? 1 : 0);
+          assert.equal(await target.getByText(/Stored data cannot currently be confirmed/).count(), c.status.last_sample_at && c.status.data === "stale" ? 1 : 0);
+          assert.equal(await target.getByText(/Last sample \(node clock\):/).count(), compact ? 0 : 1);
+          if (c.deploymentLabel) await target.getByText(c.deploymentLabel, { exact: true }).waitFor();
+          if (c.setup) await target.getByRole("link", { name: "Configure monitoring" }).waitFor();
+          if (c.storage && !compact) {
+            await target.getByText(/Local buffer: The agent could not reliably save/).waitFor();
+            await target.getByText(/Storage: The Hub could not confirm storage/).waitFor();
+          }
+        }
+      }
+    }, mobile);
+  }
+
+  await test("header scroll offset is scoped to the authenticated layout", async ({ page, state, goto }) => {
+    // Keep the authenticated fixture: login is outside MainLayout either way.
+    // SPA navigation exercises cleanup without re-running addInitScript or
+    // replacing the document (which would hide a leaked html class).
+    const navigate = (path) => page.evaluate((path) => {
+      window.history.pushState({}, "", path);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, path);
+    await goto("/servers/1");
+    const header = page.locator("header");
+    await header.waitFor();
+    const height = (await header.boundingBox()).height;
+    assert.equal(await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop)), height);
+    await navigate("/login");
+    await page.getByRole("button", { name: "Sign in", exact: true }).waitFor();
+    assert.equal(await page.locator("header").count(), 0);
+    const padding = await page.evaluate(() => getComputedStyle(document.documentElement).scrollPaddingTop);
+    assert.ok(padding === "auto" || parseFloat(padding) === 0, `login must not reserve a missing header: ${padding}`);
+    await navigate("/servers/1");
+    await header.waitFor();
+    assert.equal(await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop)), height, "remount restores the offset");
+
+    state.custom = async ({ path, url, reply }) => {
+      if (path !== "/api/v1/usage-logs") return false;
+      const query = Object.fromEntries(url.searchParams);
+      query.page_size = Number(query.page_size);
+      await reply({ items: [], query, id_upper_bound: "9007199254742000", next_cursor: null, has_more: false, consistency: "bounded_keyset" });
+      return true;
+    };
+    await page.setViewportSize({ width: 390, height: 844 });
+    await navigate("/usage-logs");
+    await page.getByRole("button", { name: "Show filters", exact: true }).click();
+    // Allow start alignment without clamping at the end of this empty fixture.
+    await page.addStyleTag({ content: 'body::after { content: ""; display: block; height: 100vh; }' });
+    await page.getByRole("button", { name: "Apply filters", exact: true }).click();
+    const results = page.locator('div[tabindex="-1"][aria-busy]');
+    await until(() => results.evaluate(element => element === document.activeElement), "filtered results receive focus");
+    const offset = await results.evaluate(element => ({
+      margin: parseFloat(getComputedStyle(element).scrollMarginTop),
+      padding: parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop),
+      rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+      top: element.getBoundingClientRect().top,
+    }));
+    assert.equal(offset.margin, offset.rem, "results preserve their additional one-rem margin");
+    assert.equal(offset.padding, (await header.boundingBox()).height, "document reserves the header height");
+    assert.ok(Math.abs(offset.top - offset.padding - offset.margin) <= 1, `results stack header padding and target margin: ${JSON.stringify(offset)}`);
+  });
 
   await test("SSH connection routes save atomically; jump filtering and saved connection tests", async ({ page, state, goto }) => {
     state.servers[0] = { ...state.servers[0], connection: { mode: "direct" }, connection_revision: 7 };
@@ -1299,6 +1399,28 @@ try {
     "monitoring exposes the range/axis/statistic vocabulary with a data table",
     async ({ page, goto }) => {
       await goto("/servers/1");
+      for (const [title, series] of [["CPU Usage", "CPU"], ["Memory Usage", "Memory"], ["Disk Usage", "Disk"], ["Swap Usage", "Swap"]]) {
+        const chart = page.getByRole("slider", { name: title, exact: true });
+        await chart.waitFor();
+        await chart.focus();
+        await page.keyboard.press("End");
+        const value = await chart.getAttribute("aria-valuetext");
+        assert.ok(value.includes(`${series}:`), `${title} must plot its own series`);
+        const description = await page.locator(`#${await chart.getAttribute("aria-describedby")}`).textContent();
+        assert.equal(description.split(title).length - 1, 1, "description names its metric once");
+        assert.ok(!description.includes("Usage (%)"), "single chart description must not repeat the combined axis title");
+        for (const other of ["CPU", "Memory", "Disk", "Swap"].filter((name) => name !== series)) {
+          assert.ok(!value.includes(`${other}:`), `${title} must not mix in ${other}`);
+        }
+      }
+      const cpuBox = await page.getByRole("slider", { name: "CPU Usage", exact: true }).boundingBox();
+      const memoryBox = await page.getByRole("slider", { name: "Memory Usage", exact: true }).boundingBox();
+      assert.ok(Math.abs(cpuBox.y - memoryBox.y) < 1 && memoryBox.x > cpuBox.x, "desktop usage charts use two columns");
+      await page.getByRole("button", { name: "中文", exact: true }).click();
+      const chineseCPU = page.getByRole("slider", { name: "CPU 使用率", exact: true });
+      await chineseCPU.waitFor();
+      assert.match(await page.locator(`#${await chineseCPU.getAttribute("aria-describedby")}`).textContent(), /^CPU 使用率。范围/);
+      await page.getByRole("button", { name: "EN", exact: true }).click();
 
       // Ranges: 15m and 30d are offered; 30d asks for the 6h granularity and is
       // shown as downsampled instead of implying minute resolution.
@@ -1385,6 +1507,7 @@ try {
   await test(
     "monitoring controls stay reachable and touch-sized at 375px",
     async ({ page, goto }) => {
+      await page.setViewportSize({ width: 375, height: 844 });
       await goto("/servers/1");
       for (const name of ["15m", "Usage (%)", "Average"]) {
         const control = page.getByRole("button", { name, exact: true });
@@ -1392,6 +1515,17 @@ try {
         const box = await control.boundingBox();
         assert.ok(box && box.height >= 44, `${name} is only ${box?.height}px tall, want >= 44px`);
       }
+      const cpu = page.getByRole("slider", { name: "CPU Usage", exact: true });
+      const memory = page.getByRole("slider", { name: "Memory Usage", exact: true });
+      await memory.waitFor();
+      const cpuBox = await cpu.boundingBox();
+      const memoryBox = await memory.boundingBox();
+      assert.ok(Math.abs(cpuBox.x - memoryBox.x) < 1 && memoryBox.y > cpuBox.y + cpuBox.height, "mobile usage charts stack vertically");
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const header = await page.locator("header").boundingBox();
+      assert.ok(Math.abs(header.y) < 1 && header.height > 0, "global header stays at the top after scrolling");
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      await capture(page, "monitoring-mobile-sticky-header");
     },
     true,
   );

@@ -33,7 +33,7 @@
 ```
 
 - **Management and monitoring**: The Hub uses SSH for management and agent installation. Resident agents call back to `AGENT_HUB_URL` over WSS/HTTPS for monitoring.
-- **Resident agent**: The verified binary runs as a systemd system/user service, with a private persistent outbox (24h / 64 MiB). Samples are removed only after transactional, deduplicated storage acknowledges them. A running systemd manager and `flock` are required; user services require lingering for the SSH account. Talus does not run sudo.
+- **Resident agent**: The verified binary runs as a systemd system/user service on Linux or a native Windows service, with a private persistent outbox (24h / 64 MiB). Samples are removed only after transactional, deduplicated storage acknowledges them. Linux requires a running systemd manager and `flock`; user services require lingering for the SSH account. Windows requires an administrator SSH account, PowerShell 5.1+ and Task Scheduler. Talus does not elevate an unprivileged login automatically.
 - **Credentials**: Encrypted at rest with a master key you control. Secret values are omitted from list responses; authenticated administrators can reveal them through dedicated, audited endpoints.
 
 ## Quick Start
@@ -128,7 +128,9 @@ Administrators can open **Usage Logs** for filtered operation history and detail
 
 ### 7. Manage Files over SFTP
 
-Talus file management uses the configured SSH account and SSH port. It reuses encrypted credentials, explicit host-key confirmation, direct/SOCKS5/jump routing, connection revisions and pool quotas. The target must enable its SSH `sftp` subsystem. Internal file uploads and monitoring-agent deployment use the same supervised SFTP transport; the previous shell-based upload is replaced, with no automatic shell fallback. Agent deployment retains its pinned SSH connection through upload, SHA256 verification and atomic activation. Uploaded artifacts stay private (`0600`) until activation sets the executable permissions. No additional FTP server or target agent is required. These operations have the filesystem permissions of that SSH account; the API does not add a directory jail or `sudo` access.
+Talus file management uses the configured SSH account and SSH port. It reuses encrypted credentials, explicit host-key confirmation, direct/SOCKS5/jump routing, connection revisions and pool quotas. The target must enable its SSH `sftp` subsystem. File management requires no additional FTP server or target agent. These operations have the filesystem permissions of that SSH account; the API does not add a directory jail or `sudo` access.
+
+Internal file uploads and monitoring-agent deployment use the same supervised SFTP transport, with no automatic shell fallback. Linux agent deployment retains its pinned SSH connection through upload, SHA256 verification and atomic activation; uploaded artifacts stay private (`0600`) until activation sets executable permissions. Windows agent deployment restricts staging-directory ACLs to SYSTEM and local Administrators before uploading secrets, verifies SHA256, and uses a detached scheduled task for activation and rollback. This Windows monitoring support does not establish full Windows compatibility for the file browser or terminal; see [Windows monitoring](docs/windows-monitoring.md).
 
 The terminal, file panel and text editor follow the global light/dark/system theme. Theme changes preserve the SSH session, terminal output and editor draft.
 
@@ -591,13 +593,15 @@ Resident contact expires after 45 seconds; data becomes stale after three sampli
 
 ### Monitoring agent upgrades
 
-Resident monitoring does not schedule per-sample SSH commands. Installation/repair uses a separate three-minute budget, at most four concurrent deployments, and one job per server. Failed deployments retry after at least one minute. Missing `AGENT_HUB_URL` is shown as setup required, with a link to System settings. Saving a new URL or interval queues node configuration updates; saving alone does not mean every node has adopted them. Existing metric history is retained.
+Resident monitoring does not schedule per-sample SSH commands. Installation/repair uses a separate budget: three minutes for a recorded Linux installation, or ten minutes for Windows or an unidentified platform, including uploads and activation waits. At most four deployments run concurrently, with one job per server. Failed deployments retry after at least one minute. Missing `AGENT_HUB_URL` is shown as setup required, with a link to System settings. Saving a new URL or interval queues node configuration updates; saving alone does not mean every node has adopted them. Existing metric history is retained.
 
 Artifacts and configuration are verified before activation. Compatible resident agents keep reporting while an update is staged. The new service must contact the Hub after restart; failed activation restores the previous executable, configuration and service unit where available.
 
-Deleting a server uninstalls its resident agent and removes its recorded installation locations, even after `AGENT_HUB_URL` is cleared or the SSH credential changes to another account. Installation locations are saved before remote files change and retained until the new service is healthy and previous installations are retired. Cleanup or metadata failures leave deployment failed and eligible for retry. Root can stop a previous owner's user unit; a downgraded login that cannot stop it cannot complete the migration. Legacy installations without account records are discovered on the host; root checks account home directories rather than assuming the current login owns the service. A concurrent delete that cannot acquire cleanup ownership succeeds only if the server was already deleted; otherwise it returns a conflict for retry.
+Deleting a server commits the record deletion and revokes its node credential, then attempts to uninstall the resident agent from its recorded locations using the current SSH credentials. This cleanup is attempted even after `AGENT_HUB_URL` is cleared or the SSH account changes. Deletion still succeeds if SSH is unreachable or remote cleanup fails; check Hub warnings and clean up remaining files/services manually when necessary. The Hub does not keep retrying deleted nodes. A Windows removal task that was successfully scheduled has its own bounded local retries; see [removal receipts and retries](docs/windows-monitoring.md#removal-receipts-and-retries). A concurrent delete that cannot acquire cleanup ownership succeeds only if the server was already deleted; otherwise it returns a conflict for retry.
 
-Cross-account user cleanup runs entirely as the installation owner and requires `runuser`; if that account cannot be resolved or switched to, its files remain and cleanup reports a failure. Lock files are never truncated, and symbolic links or non-regular locks are rejected. HOME aliases pointing to the same directory keep the active installation and its outbox. Moving the same account to a different physical HOME is rejected before remote files change; migrate that account's installation manually first.
+During installation or migration of a managed node, installation locations are saved before remote files change and retained until the new service is healthy and previous installations are retired. Cleanup or metadata failures leave deployment failed and eligible for retry. On Linux, root can stop a previous owner's user unit; a downgraded login that cannot stop it cannot complete the migration. Legacy Linux installations without account records are discovered on the host; root checks account home directories rather than assuming the current login owns the service.
+
+On Linux, cross-account user cleanup runs entirely as the installation owner and requires `runuser`; if that account cannot be resolved or switched to, its files remain and cleanup reports a failure. Lock files are never truncated, and symbolic links or non-regular locks are rejected. HOME aliases pointing to the same directory keep the active installation and its outbox. Moving the same account to a different physical HOME is rejected before remote files change; migrate that account's installation manually first. Windows installations are machine-wide and do not move when SSH administrators change.
 
 ### Docker upgrades and encrypted data
 
@@ -630,10 +634,17 @@ Once any record has been upgraded, the original Argon2id-only image cannot read 
 - Changing a password invalidates existing JWTs and actively closes that user's terminal sessions. API keys have a separate lifecycle.
 - **Explicit SSH host-key confirmation**: on first connection, Talus records the presented SHA256 fingerprint and stops before SSH authentication. An administrator must verify it against a trusted source and confirm it before connecting. Jump and target hosts are confirmed separately. Existing trusted keys remain valid; changed keys block authentication until explicitly approved. Confirmation checks the displayed fingerprint and connection revision to reject stale requests.
 
+## Development
+
+Start with the [development guide](docs/development.md) ([简体中文](docs/development.zh-CN.md)) for local setup, frontend/backend iteration and verification. The [architecture guide](docs/architecture.md) maps module responsibilities and runtime flows; [AGENTS.md](AGENTS.md) provides repository guidance for coding agents.
+
 ## Tests
 
 Use [the unified test entry point](tests/README.md) for the `fast`, `integration`,
-`ui`, and `e2e` suites and the M1–M4 gates. The generated
+`ui`, and `e2e` suites and the M1–M4 gates. M5 verifies native Windows monitoring
+from an administrator session; CI runs it on Windows Server 2022 and 2025 and
+requires both runs before publishing an image. See [Windows monitoring coverage](tests/README.md#windows-monitoring-coverage)
+for its command and prerequisites. The generated
 [test inventory](tests/coverage.md) lists scenarios, implementations, and commands.
 
 M1's deployment check starts the current Hub with an owned temporary database
