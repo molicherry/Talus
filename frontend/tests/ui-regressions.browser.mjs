@@ -753,10 +753,15 @@ try {
         for (const c of cases) {
           state.servers[0].monitoring = c.status;
           state.servers[0].status = ({ online: "online", reconnecting: "checking", unreachable: "offline", unknown: "unknown" })[c.status.connection];
+          // A peer with identical labels makes unscoped compact locators ambiguous.
+          state.servers[1].monitoring = c.status;
           await goto(compact ? "/servers" : "/servers/1");
-          const communication = page.getByText(`Agent communication: ${c.communication}`, { exact: true });
+          const target = compact
+            ? page.getByRole("row").filter({ has: page.getByRole("button", { name: state.servers[0].name, exact: true }) })
+            : page.getByRole("main");
+          const communication = target.getByText(`Agent communication: ${c.communication}`, { exact: true });
           await communication.waitFor();
-          await page.getByText(`Data: ${c.data}`, { exact: true }).waitFor();
+          await target.getByText(`Data: ${c.data}`, { exact: true }).waitFor();
           const color = await communication.evaluate((element) => getComputedStyle(element).color);
           // Compare against the actual theme token, not a hard-coded color.
           const expectedColor = await communication.evaluate((element, warning) => {
@@ -768,21 +773,21 @@ try {
             return color;
           }, c.warning);
           assert.equal(color, expectedColor, `incorrect severity: ${JSON.stringify(c.status)}`);
-          assert.equal(await page.getByText(/Check the agent service, Hub address/).count(), c.disconnected && !compact ? 1 : 0);
-          assert.equal(await page.getByText(/Stored data cannot currently be confirmed/).count(), c.status.last_sample_at && c.status.data === "stale" ? 1 : 0);
-          assert.equal(await page.getByText(/Last sample \(node clock\):/).count(), compact ? 0 : 1);
-          if (c.deploymentLabel) await page.getByText(c.deploymentLabel, { exact: true }).waitFor();
-          if (c.setup) await page.getByRole("link", { name: "Configure monitoring" }).waitFor();
+          assert.equal(await target.getByText(/Check the agent service, Hub address/).count(), c.disconnected && !compact ? 1 : 0);
+          assert.equal(await target.getByText(/Stored data cannot currently be confirmed/).count(), c.status.last_sample_at && c.status.data === "stale" ? 1 : 0);
+          assert.equal(await target.getByText(/Last sample \(node clock\):/).count(), compact ? 0 : 1);
+          if (c.deploymentLabel) await target.getByText(c.deploymentLabel, { exact: true }).waitFor();
+          if (c.setup) await target.getByRole("link", { name: "Configure monitoring" }).waitFor();
           if (c.storage && !compact) {
-            await page.getByText(/Local buffer: The agent could not reliably save/).waitFor();
-            await page.getByText(/Storage: The Hub could not confirm storage/).waitFor();
+            await target.getByText(/Local buffer: The agent could not reliably save/).waitFor();
+            await target.getByText(/Storage: The Hub could not confirm storage/).waitFor();
           }
         }
       }
     }, mobile);
   }
 
-  await test("header scroll offset is scoped to the authenticated layout", async ({ page, goto }) => {
+  await test("header scroll offset is scoped to the authenticated layout", async ({ page, state, goto }) => {
     // Keep the authenticated fixture: login is outside MainLayout either way.
     // SPA navigation exercises cleanup without re-running addInitScript or
     // replacing the document (which would hide a leaked html class).
@@ -803,6 +808,31 @@ try {
     await navigate("/servers/1");
     await header.waitFor();
     assert.equal(await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop)), height, "remount restores the offset");
+
+    state.custom = async ({ path, url, reply }) => {
+      if (path !== "/api/v1/usage-logs") return false;
+      const query = Object.fromEntries(url.searchParams);
+      query.page_size = Number(query.page_size);
+      await reply({ items: [], query, id_upper_bound: "9007199254742000", next_cursor: null, has_more: false, consistency: "bounded_keyset" });
+      return true;
+    };
+    await page.setViewportSize({ width: 390, height: 844 });
+    await navigate("/usage-logs");
+    await page.getByRole("button", { name: "Show filters", exact: true }).click();
+    // Allow start alignment without clamping at the end of this empty fixture.
+    await page.addStyleTag({ content: 'body::after { content: ""; display: block; height: 100vh; }' });
+    await page.getByRole("button", { name: "Apply filters", exact: true }).click();
+    const results = page.locator('div[tabindex="-1"][aria-busy]');
+    await until(() => results.evaluate(element => element === document.activeElement), "filtered results receive focus");
+    const offset = await results.evaluate(element => ({
+      margin: parseFloat(getComputedStyle(element).scrollMarginTop),
+      padding: parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop),
+      rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+      top: element.getBoundingClientRect().top,
+    }));
+    assert.equal(offset.margin, offset.rem, "results preserve their additional one-rem margin");
+    assert.equal(offset.padding, (await header.boundingBox()).height, "document reserves the header height");
+    assert.ok(Math.abs(offset.top - offset.padding - offset.margin) <= 1, `results stack header padding and target margin: ${JSON.stringify(offset)}`);
   });
 
   await test("SSH connection routes save atomically; jump filtering and saved connection tests", async ({ page, state, goto }) => {
