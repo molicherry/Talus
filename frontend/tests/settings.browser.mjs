@@ -231,6 +231,13 @@ const saved = (page) =>
     "saved form",
   );
 const row = (page, key) => page.locator(`#${key}`).locator("..");
+async function assertPinnedActions(page) {
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const header = await page.locator("header").boundingBox();
+  const save = await page.locator('button[form="system-settings-form"]').boundingBox();
+  assert.ok(Math.abs(header.y) < 1 && header.height === 64, "global header remains visible");
+  assert.ok(save.y >= header.y + header.height && save.y + save.height < 240, "save stays below the header near the top, without scrolling back");
+}
 let browser,
   failed = 0;
 nameSuite("settings", import.meta.url);
@@ -298,6 +305,7 @@ try {
     await saved(page);
     assert.deepEqual(state.writes[1].values, { AGENT_HUB_URL: null });
     await page.locator("#DB_MAX_OPEN_CONNECTIONS").fill("48");
+    await assertPinnedActions(page);
     await save(page);
     await until(() => state.writes.length === 3);
     await saved(page);
@@ -391,7 +399,8 @@ try {
         await page.locator(`#${group}`).waitFor();
         await until(async () => {
           const bounds = await page.locator(`#${group}`).boundingBox();
-          return bounds && bounds.y >= -1 && bounds.y < 100;
+          const actionsBottom = await page.locator('button[form="system-settings-form"]').evaluate((button) => button.closest(".sticky").getBoundingClientRect().bottom);
+          return bounds && bounds.y >= actionsBottom && bounds.y < actionsBottom + 24;
         }, `scrolled to ${group} after data loaded`);
       }
     },
@@ -442,7 +451,7 @@ try {
   );
   await test(
     "settings Chinese mobile layout stays within the viewport",
-    async ({ page }) => {
+    async ({ page, state }) => {
       assert.equal(
         await page
           .getByRole("heading", { name: "系统设置", exact: true })
@@ -451,6 +460,15 @@ try {
       );
       assert.equal(await page.locator("input, select").count(), 19);
       await page.locator("#capacity").scrollIntoViewIfNeeded();
+      await page.locator("#DB_MAX_OPEN_CONNECTIONS").fill("48");
+      await assertPinnedActions(page);
+      await page.locator('button[form="system-settings-form"]').click();
+      await until(() => state.writes.length === 1);
+      await until(() => page.locator('button[form="system-settings-form"]').isDisabled());
+      const saveNotice = page.getByRole("status").filter({ hasText: "已保存" });
+      await saveNotice.waitFor();
+      const noticeBox = await saveNotice.boundingBox();
+      assert.ok(noticeBox.y >= 64 && noticeBox.y + noticeBox.height < 300, "save feedback stays visible without scrolling back");
       assert.equal(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= window.innerWidth,

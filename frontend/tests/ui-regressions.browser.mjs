@@ -1299,6 +1299,20 @@ try {
     "monitoring exposes the range/axis/statistic vocabulary with a data table",
     async ({ page, goto }) => {
       await goto("/servers/1");
+      for (const [title, series] of [["CPU Usage", "CPU"], ["Memory Usage", "Memory"], ["Disk Usage", "Disk"], ["Swap Usage", "Swap"]]) {
+        const chart = page.getByRole("slider", { name: title, exact: true });
+        await chart.waitFor();
+        await chart.focus();
+        await page.keyboard.press("End");
+        const value = await chart.getAttribute("aria-valuetext");
+        assert.ok(value.includes(`${series}:`), `${title} must plot its own series`);
+        for (const other of ["CPU", "Memory", "Disk", "Swap"].filter((name) => name !== series)) {
+          assert.ok(!value.includes(`${other}:`), `${title} must not mix in ${other}`);
+        }
+      }
+      const cpuBox = await page.getByRole("slider", { name: "CPU Usage", exact: true }).boundingBox();
+      const memoryBox = await page.getByRole("slider", { name: "Memory Usage", exact: true }).boundingBox();
+      assert.ok(Math.abs(cpuBox.y - memoryBox.y) < 1 && memoryBox.x > cpuBox.x, "desktop usage charts use two columns");
 
       // Ranges: 15m and 30d are offered; 30d asks for the 6h granularity and is
       // shown as downsampled instead of implying minute resolution.
@@ -1385,6 +1399,7 @@ try {
   await test(
     "monitoring controls stay reachable and touch-sized at 375px",
     async ({ page, goto }) => {
+      await page.setViewportSize({ width: 375, height: 844 });
       await goto("/servers/1");
       for (const name of ["15m", "Usage (%)", "Average"]) {
         const control = page.getByRole("button", { name, exact: true });
@@ -1392,6 +1407,17 @@ try {
         const box = await control.boundingBox();
         assert.ok(box && box.height >= 44, `${name} is only ${box?.height}px tall, want >= 44px`);
       }
+      const cpu = page.getByRole("slider", { name: "CPU Usage", exact: true });
+      const memory = page.getByRole("slider", { name: "Memory Usage", exact: true });
+      await memory.waitFor();
+      const cpuBox = await cpu.boundingBox();
+      const memoryBox = await memory.boundingBox();
+      assert.ok(Math.abs(cpuBox.x - memoryBox.x) < 1 && memoryBox.y > cpuBox.y + cpuBox.height, "mobile usage charts stack vertically");
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const header = await page.locator("header").boundingBox();
+      assert.ok(Math.abs(header.y) < 1 && header.height === 64, "global header stays at the top after scrolling");
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      await capture(page, "monitoring-mobile-sticky-header");
     },
     true,
   );

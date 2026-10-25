@@ -153,6 +153,10 @@
   --shadow-dropdown: var(--shadow-dropdown);
 }
 
+html {
+  scroll-padding-top: 4rem;
+}
+
 body {
   margin: 0;
   background-color: var(--color-background);

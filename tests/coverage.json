@@ -691,7 +691,7 @@
         "REQ-04"
       ],
       "spec_ref": "tests/coverage.json#/cases/6/scenario",
-      "scenario": "Apply correct time ranges, aggregation intervals, axes, and units; distinguish zero from null without implying finer sampling.",
+      "scenario": "Apply correct time ranges, aggregation intervals, axes, and units; distinguish zero from null without implying finer sampling. Show CPU, memory, disk and swap usage in separate charts, with two desktop columns, one mobile column and a persistent global header.",
       "implementations": [
         {
           "implementation_id": "impl-04-01a",
@@ -4938,7 +4938,7 @@
         "REQ-10"
       ],
       "spec_ref": "tests/coverage.json#/cases/56/scenario",
-      "scenario": "Preserve explicit false and empty settings, restore deployment defaults, and display saved capacity alongside the active value.",
+      "scenario": "Preserve explicit false and empty settings, restore deployment defaults, and display saved capacity alongside the active value. Keep save actions below the global header while scrolling and reveal group anchors below both bars.",
       "implementations": [
         {
           "implementation_id": "impl-10-06-01",
@@ -5038,7 +5038,7 @@
         "REQ-10"
       ],
       "spec_ref": "tests/coverage.json#/cases/60/scenario",
-      "scenario": "Render all configuration fields in Chinese on a narrow mobile viewport without horizontal page overflow.",
+      "scenario": "Render all configuration fields in Chinese on a narrow mobile viewport without horizontal page overflow; save lower-page changes and show feedback from the persistent top action bar.",
       "implementations": [
         {
           "implementation_id": "impl-10-10-01",

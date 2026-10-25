@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, type ReactNode } from "react";
 
 import { translateApiError } from "../../../lib/api-error";
 import { Card } from "../../../components/ui/card";
@@ -135,17 +135,18 @@ interface MetricStatProps {
   value: Nullable;
   avg: Nullable;
   max: Nullable;
+  children?: ReactNode;
 }
 
-function MetricStatCard({ label, value, avg, max }: MetricStatProps) {
+function MetricStatCard({ label, value, avg, max, children }: MetricStatProps) {
   const { t } = useTranslation();
   const level = percentLevel(value);
   return (
-    <Card className="p-4">
+    <Card className="min-w-0 p-4">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
           {label}
-        </span>
+        </h3>
         <span
           className={cn("h-2 w-2 rounded-full", metricLevelFill[level])}
           aria-hidden="true"
@@ -164,6 +165,7 @@ function MetricStatCard({ label, value, avg, max }: MetricStatProps) {
           <span className="font-mono tabular-nums text-foreground">{formatPercent(max, 1)}</span>
         </span>
       </div>
+      {children}
     </Card>
   );
 }
@@ -379,6 +381,12 @@ export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) 
   const load5Peak = aligned.series.load_5_peak ?? [];
   const load15Peak = aligned.series.load_15_peak ?? [];
   const pick = (peak: Nullable[], average: Nullable[]) => (stat === "peak" ? peak : average);
+  const usageCards = [
+    { key: "cpu", label: t("monitoring.cpuUsage"), value: latestOf(pick(cpuPeak, cpu)), avg: weightedMean(points ?? [], "cpu_sum", "cpu_count", "cpu_percent"), max: maxOf(cpuPeak) },
+    { key: "memory", label: t("monitoring.memoryUsage"), value: latestOf(pick(memoryPeak, memory)), avg: weightedMean(points ?? [], "memory_percent_sum", "memory_percent_count", "memory_percent"), max: maxOf(memoryPeak) },
+    { key: "disk", label: t("monitoring.diskUsage"), value: latestOf(pick(diskPeak, disk)), avg: weightedMean(points ?? [], "disk_percent_sum", "disk_percent_count", "disk_percent"), max: maxOf(diskPeak) },
+    { key: "swap", label: t(isWindows ? "monitoring.pageFileUsage" : "monitoring.swapUsage"), value: latestOf(pick(swapPeak, swap)), avg: weightedMean(points ?? [], "swap_percent_sum", "swap_percent_count", "swap_percent"), max: maxOf(swapPeak) },
+  ];
 
   // Chart series for the selected axis and statistic, each distinguished by its
   // dash pattern and marker as well as its colour.
@@ -525,34 +533,28 @@ export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) 
 
       {data && (points?.length ?? 0) > 0 && (
         <>
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <MetricStatCard
-              label={t("monitoring.cpuUsage")}
-              value={latestOf(pick(cpuPeak, cpu))}
-              avg={weightedMean(points ?? [], "cpu_sum", "cpu_count", "cpu_percent")}
-              max={maxOf(cpuPeak)}
-            />
-            <MetricStatCard
-              label={t("monitoring.memoryUsage")}
-              value={latestOf(pick(memoryPeak, memory))}
-              avg={weightedMean(points ?? [], "memory_percent_sum", "memory_percent_count", "memory_percent")}
-              max={maxOf(memoryPeak)}
-            />
-            <MetricStatCard
-              label={t("monitoring.diskUsage")}
-              value={latestOf(pick(diskPeak, disk))}
-              avg={weightedMean(points ?? [], "disk_percent_sum", "disk_percent_count", "disk_percent")}
-              max={maxOf(diskPeak)}
-            />
-            <MetricStatCard
-              label={t(isWindows ? "monitoring.pageFileUsage" : "monitoring.swapUsage")}
-              value={latestOf(pick(swapPeak, swap))}
-              avg={weightedMean(points ?? [], "swap_percent_sum", "swap_percent_count", "swap_percent")}
-              max={maxOf(swapPeak)}
-            />
+          <div className={cn("grid gap-4", axisMode === "percent" ? "grid-cols-1 xl:grid-cols-2" : "grid-cols-2 lg:grid-cols-4")}>
+            {usageCards.map((card) => (
+              <MetricStatCard key={card.key} label={card.label} value={card.value} avg={card.avg} max={card.max}>
+                {axisMode === "percent" && (
+                  <TrendChart
+                    className="mt-3"
+                    height={200}
+                    times={times}
+                    yMax={100}
+                    formatTime={formatTime}
+                    formatValue={axisConfig.formatValue}
+                    formatAxis={axisConfig.formatAxis}
+                    ariaLabel={card.label}
+                    description={`${card.label}. ${description}`}
+                    series={chartSeries.filter((series) => series.key === card.key)}
+                  />
+                )}
+              </MetricStatCard>
+            ))}
           </div>
 
-          <Card className="p-5">
+          {axisMode !== "percent" && <Card className="p-5">
             <h3 className="text-sm font-semibold text-foreground">
               {t(`metrics.axis.${axisMode}`)}
             </h3>
@@ -568,7 +570,7 @@ export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) 
               description={description}
               series={chartSeries}
             />
-          </Card>
+          </Card>}
 
           {(notice || coverage) && (
             <p role="status" className="text-xs text-muted-foreground">
