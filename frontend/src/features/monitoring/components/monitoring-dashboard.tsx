@@ -379,14 +379,17 @@ export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) 
   const seriesByAxis = useMemo(() => {
     const build = (mode: AxisMode) => {
       const fields = seriesForStat(mode, stat);
-      return AXIS_SERIES[mode].map((axis, index) => ({
-        key: axis.label,
-        label: locale.t(isWindows && axis.label === "swap" ? "metrics.series.pageFile" : seriesLabelKey(mode, index)),
-        color: AXIS_COLOR[axis.label] ?? SERIES_COLOR.cpu,
-        ...seriesPattern(index),
-        marker: seriesPattern(index).marker as "circle" | "square" | "triangle" | "diamond",
-        values: aligned.series[fields[index]] ?? [],
-      }));
+      return AXIS_SERIES[mode].map((axis, index) => {
+        const pattern = seriesPattern(index);
+        return {
+          key: axis.label,
+          label: locale.t(isWindows && axis.label === "swap" ? "metrics.series.pageFile" : seriesLabelKey(mode, index)),
+          color: AXIS_COLOR[axis.label] ?? SERIES_COLOR.cpu,
+          dash: pattern.dash,
+          marker: pattern.marker as "circle" | "square" | "triangle" | "diamond",
+          values: aligned.series[fields[index]] ?? [],
+        };
+      });
     };
     return { percent: build("percent"), throughput: build("throughput"), load: build("load") };
   }, [aligned, stat, locale, isWindows]);

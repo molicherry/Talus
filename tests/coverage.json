@@ -1083,11 +1083,81 @@
       ]
     },
     {
+      "case_id": "TC-04-06",
+      "requirement_ids": [
+        "REQ-04"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/11/scenario",
+      "scenario": "Distinguish live contact, last collection and persisted freshness; cover online, reconnecting, unreachable and unknown agents, neutral pending/installing/setup and initial samples, delayed samples, backfill and separate spool/storage failures in detail and compact views on desktop and mobile.",
+      "implementations": [
+        {
+          "implementation_id": "impl-04-06-1",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "resident monitoring separates live contact, partial collection and backfill (desktop)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-06-2",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "resident monitoring separates live contact, partial collection and backfill (mobile)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-06-3",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "resident monitoring covers connection and initial sample states (desktop)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-06-4",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "resident monitoring covers connection and initial sample states (mobile)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-04-07",
+      "requirement_ids": [
+        "REQ-04"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/12/scenario",
+      "scenario": "Own the document header offset for the authenticated layout lifetime without :has(); preserve target-specific margins, remove the offset on SPA navigation to login, and restore it on remount.",
+      "implementations": [
+        {
+          "implementation_id": "impl-04-07",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "header scroll offset is scoped to the authenticated layout"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
       "case_id": "TC-05-01",
       "requirement_ids": [
         "REQ-05"
       ],
-      "spec_ref": "tests/coverage.json#/cases/11/scenario",
+      "spec_ref": "tests/coverage.json#/cases/13/scenario",
       "scenario": "Commit or roll back password and token-version changes atomically; reject old JWTs and accept newly issued JWTs.",
       "implementations": [
         {
@@ -1140,7 +1210,7 @@
       "requirement_ids": [
         "REQ-05"
       ],
-      "spec_ref": "tests/coverage.json#/cases/12/scenario",
+      "spec_ref": "tests/coverage.json#/cases/14/scenario",
       "scenario": "Reject revoked JWTs during WS authentication and close existing sessions, including registration races.",
       "implementations": [
         {
@@ -1182,7 +1252,7 @@
       "requirement_ids": [
         "REQ-05"
       ],
-      "spec_ref": "tests/coverage.json#/cases/13/scenario",
+      "spec_ref": "tests/coverage.json#/cases/15/scenario",
       "scenario": "Clear authentication across tabs, keep API Keys independent, and reject legacy JWTs without a version claim.",
       "implementations": [
         {
@@ -1235,7 +1305,7 @@
       "requirement_ids": [
         "REQ-05"
       ],
-      "spec_ref": "tests/coverage.json#/cases/14/scenario",
+      "spec_ref": "tests/coverage.json#/cases/16/scenario",
       "scenario": "Serialize registration, ready admission, and revocation around COMMIT; cancel preparing sessions and reject new ready or input permissions for revoked versions.",
       "implementations": [
         {
@@ -1278,7 +1348,7 @@
       "requirement_ids": [
         "REQ-05"
       ],
-      "spec_ref": "tests/coverage.json#/cases/15/scenario",
+      "spec_ref": "tests/coverage.json#/cases/17/scenario",
       "scenario": "Read the primary database without positive version caching, enforce authentication budgets, and reject admission during unresolved commits, including restart recovery.",
       "implementations": [
         {
@@ -1342,7 +1412,7 @@
       "requirement_ids": [
         "REQ-06"
       ],
-      "spec_ref": "tests/coverage.json#/cases/16/scenario",
+      "spec_ref": "tests/coverage.json#/cases/18/scenario",
       "scenario": "Release upload leases on success and every error path; preserve capacity after repeated uploads.",
       "implementations": [
         {
@@ -1373,7 +1443,7 @@
       "requirement_ids": [
         "REQ-06"
       ],
-      "spec_ref": "tests/coverage.json#/cases/17/scenario",
+      "spec_ref": "tests/coverage.json#/cases/19/scenario",
       "scenario": "Recover from blocked or canceled uploads and prevent stale-generation lease returns.",
       "implementations": [
         {
@@ -1426,7 +1496,7 @@
       "requirement_ids": [
         "REQ-06"
       ],
-      "spec_ref": "tests/coverage.json#/cases/18/scenario",
+      "spec_ref": "tests/coverage.json#/cases/20/scenario",
       "scenario": "Reuse one target-pinned lease, propagate copy errors, and reclaim resources within one absolute 3-second deadline; completed SSH/SFTP operations allow a 2-second grace, while cancellation uses 100 ms. Nested deployment and Monitor stages never reset the budget.",
       "implementations": [
         {
@@ -1490,7 +1560,7 @@
       "requirement_ids": [
         "REQ-07"
       ],
-      "spec_ref": "tests/coverage.json#/cases/19/scenario",
+      "spec_ref": "tests/coverage.json#/cases/21/scenario",
       "scenario": "Return complete results for 20-30-second commands and honor the configured default timeout.",
       "implementations": [
         {
@@ -1554,7 +1624,7 @@
       "requirement_ids": [
         "REQ-07"
       ],
-      "spec_ref": "tests/coverage.json#/cases/20/scenario",
+      "spec_ref": "tests/coverage.json#/cases/22/scenario",
       "scenario": "Enforce an 8-MiB retained-output total and 4-MiB per-stream limits, distinguish exact-limit from discarded output, preserve true exit status, and reclaim resources after timeout or cancellation.",
       "implementations": [
         {
@@ -1640,7 +1710,7 @@
       "requirement_ids": [
         "REQ-07"
       ],
-      "spec_ref": "tests/coverage.json#/cases/21/scenario",
+      "spec_ref": "tests/coverage.json#/cases/23/scenario",
       "scenario": "Enforce explicit ordinary/stream Relay modes with 30/300-second totals and a 30-second progress idle limit; handle header/body timeouts, write failures, and cancellation.",
       "implementations": [
         {
@@ -1759,7 +1829,7 @@
       "requirement_ids": [
         "REQ-07"
       ],
-      "spec_ref": "tests/coverage.json#/cases/22/scenario",
+      "spec_ref": "tests/coverage.json#/cases/24/scenario",
       "scenario": "Verify 100-ms SSH cancellation/Relay and 2-second completed SSH/terminal graces inside one absolute 3-second teardown deadline; preserve the original outcome and never reset budgets or falsely publish done/release.",
       "implementations": [
         {
@@ -1879,7 +1949,7 @@
       "requirement_ids": [
         "REQ-08"
       ],
-      "spec_ref": "tests/coverage.json#/cases/23/scenario",
+      "spec_ref": "tests/coverage.json#/cases/25/scenario",
       "scenario": "Enforce min(nodes, 16) active collections, one in-flight task per node, bounded pending work, capped jittered backoff, cancellation exclusions, successful recovery, and shutdown cleanup.",
       "implementations": [
         {
@@ -2009,7 +2079,7 @@
       "requirement_ids": [
         "REQ-08"
       ],
-      "spec_ref": "tests/coverage.json#/cases/24/scenario",
+      "spec_ref": "tests/coverage.json#/cases/26/scenario",
       "scenario": "Select architecture-compatible Agents, check version/hash, update atomically, report permission failures, and reconcile unknown activation outcomes.",
       "implementations": [
         {
@@ -2168,7 +2238,7 @@
       "requirement_ids": [
         "REQ-08"
       ],
-      "spec_ref": "tests/coverage.json#/cases/25/scenario",
+      "spec_ref": "tests/coverage.json#/cases/27/scenario",
       "scenario": "Calculate adjacent-sample rates correctly across resets, gaps, and duplicate timestamps; retain observed maxima.",
       "implementations": [
         {
@@ -2308,7 +2378,7 @@
       "requirement_ids": [
         "REQ-08"
       ],
-      "spec_ref": "tests/coverage.json#/cases/26/scenario",
+      "spec_ref": "tests/coverage.json#/cases/28/scenario",
       "scenario": "Probe the target OS and architecture before upload; preserve failure classes and perform zero uploads when probing or artifact selection fails.",
       "implementations": [
         {
@@ -2368,7 +2438,7 @@
       "requirement_ids": [
         "REQ-08"
       ],
-      "spec_ref": "tests/coverage.json#/cases/27/scenario",
+      "spec_ref": "tests/coverage.json#/cases/29/scenario",
       "scenario": "Verify both Agent architectures, manifest hashes, and protocol output inside every amd64 and arm64 Hub image built from either Dockerfile.",
       "implementations": [
         {
@@ -2438,7 +2508,7 @@
       "requirement_ids": [
         "REQ-08"
       ],
-      "spec_ref": "tests/coverage.json#/cases/28/scenario",
+      "spec_ref": "tests/coverage.json#/cases/30/scenario",
       "scenario": "Enforce 35-day retention and six-hour rollups, trim rolling-window partial buckets, recover aggregation gaps beyond 48 hours, preserve statistics, and measure storage costs.",
       "implementations": [
         {
@@ -2608,7 +2678,7 @@
       "requirement_ids": [
         "REQ-08"
       ],
-      "spec_ref": "tests/coverage.json#/cases/29/scenario",
+      "spec_ref": "tests/coverage.json#/cases/31/scenario",
       "scenario": "Correlate scheduled collections and deployment attempts, count failures and skips, and emit alerts at the defined lag and retention thresholds without logging credentials or raw remote error payloads.",
       "implementations": [
         {
@@ -2781,7 +2851,7 @@
       "requirement_ids": [
         "REQ-08"
       ],
-      "spec_ref": "tests/coverage.json#/cases/30/scenario",
+      "spec_ref": "tests/coverage.json#/cases/32/scenario",
       "scenario": "Fail startup before HTTP/Monitor on invalid bundled artifacts; accept reports matching a verified current or historically trusted compatible artifact, reject legacy output without metric insertion, and preserve node isolation and history.",
       "implementations": [
         {
@@ -2855,7 +2925,7 @@
       "requirement_ids": [
         "REQ-09"
       ],
-      "spec_ref": "tests/coverage.json#/cases/31/scenario",
+      "spec_ref": "tests/coverage.json#/cases/33/scenario",
       "scenario": "Provide usable toolbar controls, search, font sizing, fullscreen, clipboard actions, and client-side clearing.",
       "implementations": [
         {
@@ -3115,7 +3185,7 @@
       "requirement_ids": [
         "REQ-09"
       ],
-      "spec_ref": "tests/coverage.json#/cases/32/scenario",
+      "spec_ref": "tests/coverage.json#/cases/34/scenario",
       "scenario": "Support 375px and landscape layouts, PTY resizing, stable focus, and reconnect cleanup.",
       "implementations": [
         {
@@ -3345,7 +3415,7 @@
       "requirement_ids": [
         "REQ-06"
       ],
-      "spec_ref": "tests/coverage.json#/cases/33/scenario",
+      "spec_ref": "tests/coverage.json#/cases/35/scenario",
       "scenario": "Establish direct, single-jump SSH, and SOCKS5 routes with independent SSH identities, upstream target DNS, strict proxy authentication, and no direct fallback after proxy failure.",
       "implementations": [
         {
@@ -3421,7 +3491,7 @@
       "requirement_ids": [
         "REQ-06"
       ],
-      "spec_ref": "tests/coverage.json#/cases/34/scenario",
+      "spec_ref": "tests/coverage.json#/cases/36/scenario",
       "scenario": "Use the saved proxy route for command execution, interactive terminals, and file uploads while keeping target SSH credentials separate from proxy and jump credentials.",
       "implementations": [
         {
@@ -3475,7 +3545,7 @@
       "requirement_ids": [
         "REQ-06"
       ],
-      "spec_ref": "tests/coverage.json#/cases/35/scenario",
+      "spec_ref": "tests/coverage.json#/cases/37/scenario",
       "scenario": "Persist server and route changes atomically, preserve routes for legacy partial updates, encrypt and retain proxy secrets only for unchanged endpoints, and migrate existing servers without altering direct access.",
       "implementations": [
         {
@@ -3595,7 +3665,7 @@
       "requirement_ids": [
         "REQ-06"
       ],
-      "spec_ref": "tests/coverage.json#/cases/36/scenario",
+      "spec_ref": "tests/coverage.json#/cases/38/scenario",
       "scenario": "Allow only JWT administrators to configure or test routes and trust proxied host keys; preserve API-key target restrictions and prevent proxy metadata or secrets from leaking through responses and logs.",
       "implementations": [
         {
@@ -3704,7 +3774,7 @@
       "requirement_ids": [
         "REQ-06"
       ],
-      "spec_ref": "tests/coverage.json#/cases/37/scenario",
+      "spec_ref": "tests/coverage.json#/cases/39/scenario",
       "scenario": "Revalidate route snapshots across slot waits, cache hits, and explicit host-key confirmation; pin jump and target identities separately and reject stale identity results without breaking sequential lease primitives.",
       "implementations": [
         {
@@ -3857,7 +3927,7 @@
       "requirement_ids": [
         "REQ-06"
       ],
-      "spec_ref": "tests/coverage.json#/cases/38/scenario",
+      "spec_ref": "tests/coverage.json#/cases/40/scenario",
       "scenario": "Keep concurrency slots and cached transports bound to their original lease generation; make duplicate settlement harmless and prevent stale or ambiguous returns from entering a newer route cache.",
       "implementations": [
         {
@@ -3999,7 +4069,7 @@
       "requirement_ids": [
         "REQ-06"
       ],
-      "spec_ref": "tests/coverage.json#/cases/39/scenario",
+      "spec_ref": "tests/coverage.json#/cases/41/scenario",
       "scenario": "Cancel stalled proxy negotiation and nested SSH handshakes within the shared budget, bound saved-connection tests across snapshot and quota waits, bypass stale cache probes for fresh tests, and close complete transport chains without affecting active owners.",
       "implementations": [
         {
@@ -4119,7 +4189,7 @@
       "requirement_ids": [
         "REQ-06"
       ],
-      "spec_ref": "tests/coverage.json#/cases/40/scenario",
+      "spec_ref": "tests/coverage.json#/cases/42/scenario",
       "scenario": "Keep proxy passwords out of form state, preserve omitted secrets only for unchanged endpoints, validate SOCKS5 byte limits, and serialize route writes separately from safe read projections.",
       "implementations": [
         {
@@ -4140,7 +4210,7 @@
       "requirement_ids": [
         "REQ-09"
       ],
-      "spec_ref": "tests/coverage.json#/cases/41/scenario",
+      "spec_ref": "tests/coverage.json#/cases/43/scenario",
       "scenario": "Select eligible SSH jump hosts, save route changes with the expected revision, and permit fresh connection testing only after connection edits are saved.",
       "implementations": [
         {
@@ -4161,7 +4231,7 @@
       "requirement_ids": [
         "REQ-09"
       ],
-      "spec_ref": "tests/coverage.json#/cases/42/scenario",
+      "spec_ref": "tests/coverage.json#/cases/44/scenario",
       "scenario": "Leave saved SOCKS5 passwords blank, require a replacement after endpoint changes, and clear stale proxy secrets when switching authentication or route modes.",
       "implementations": [
         {
@@ -4182,7 +4252,7 @@
       "requirement_ids": [
         "REQ-09"
       ],
-      "spec_ref": "tests/coverage.json#/cases/43/scenario",
+      "spec_ref": "tests/coverage.json#/cases/45/scenario",
       "scenario": "Include the complete selected connection route in the initial server creation request so a new proxy target is never briefly saved as direct.",
       "implementations": [
         {
@@ -4203,7 +4273,7 @@
       "requirement_ids": [
         "REQ-09"
       ],
-      "spec_ref": "tests/coverage.json#/cases/44/scenario",
+      "spec_ref": "tests/coverage.json#/cases/46/scenario",
       "scenario": "Preserve unsaved connection edits after a revision conflict and explain that the saved configuration must be reloaded before retrying.",
       "implementations": [
         {
@@ -4224,7 +4294,7 @@
       "requirement_ids": [
         "REQ-09"
       ],
-      "spec_ref": "tests/coverage.json#/cases/45/scenario",
+      "spec_ref": "tests/coverage.json#/cases/47/scenario",
       "scenario": "Freeze all server and connection fields while an atomic save is pending so its response cannot erase later edits or apply a route the user changed during the request.",
       "implementations": [
         {
@@ -4245,7 +4315,7 @@
       "requirement_ids": [
         "REQ-09"
       ],
-      "spec_ref": "tests/coverage.json#/cases/46/scenario",
+      "spec_ref": "tests/coverage.json#/cases/48/scenario",
       "scenario": "Keep connection-test state and results bound to the server that started the request when navigating between cached server detail pages.",
       "implementations": [
         {
@@ -4266,7 +4336,7 @@
       "requirement_ids": [
         "REQ-09"
       ],
-      "spec_ref": "tests/coverage.json#/cases/47/scenario",
+      "spec_ref": "tests/coverage.json#/cases/49/scenario",
       "scenario": "Refresh persisted host-key warnings and connection revisions after a failed connection test so detail and editor views reflect identity changes caused by the attempted handshake.",
       "implementations": [
         {
@@ -4287,7 +4357,7 @@
       "requirement_ids": [
         "REQ-02"
       ],
-      "spec_ref": "tests/coverage.json#/cases/48/scenario",
+      "spec_ref": "tests/coverage.json#/cases/50/scenario",
       "scenario": "Preserve original API keys and explicit policies through migration, restart and edits; retire historical scope grants and reject malformed legacy data atomically.",
       "implementations": [
         {
@@ -4347,7 +4417,7 @@
       "requirement_ids": [
         "REQ-05"
       ],
-      "spec_ref": "tests/coverage.json#/cases/49/scenario",
+      "spec_ref": "tests/coverage.json#/cases/51/scenario",
       "scenario": "Update API key permissions with administrator authorization, revision conflicts, atomic audit and bounded commit uncertainty fencing; revoke preparing and active terminals without affecting other identities. Rotate key values without changing legacy policies, reject stale authentication and concurrent replacements, and atomically audit or roll back replacements.",
       "implementations": [
         {
@@ -4547,7 +4617,7 @@
       "requirement_ids": [
         "REQ-09"
       ],
-      "spec_ref": "tests/coverage.json#/cases/50/scenario",
+      "spec_ref": "tests/coverage.json#/cases/52/scenario",
       "scenario": "Edit existing API key permissions on desktop and mobile, preserve drafts on conflicts, keep unchanged restrictions through server loading failures, and handle wildcard keys and older backends explicitly. Confirm and copy rotated keys on desktop/mobile; require reload after conflicts or uncertain results.",
       "implementations": [
         {
@@ -4677,7 +4747,7 @@
       "requirement_ids": [
         "REQ-10"
       ],
-      "spec_ref": "tests/coverage.json#/cases/51/scenario",
+      "spec_ref": "tests/coverage.json#/cases/53/scenario",
       "scenario": "Persist administrator settings with environment fallback, explicit empty and false overrides, deferred capacity values and reset across a real Hub restart.",
       "implementations": [
         {
@@ -4717,7 +4787,7 @@
       "requirement_ids": [
         "REQ-10"
       ],
-      "spec_ref": "tests/coverage.json#/cases/52/scenario",
+      "spec_ref": "tests/coverage.json#/cases/54/scenario",
       "scenario": "Commit configuration and its audit event atomically while rejecting stale revisions and rolling back when audit persistence fails.",
       "implementations": [
         {
@@ -4737,7 +4807,7 @@
       "requirement_ids": [
         "REQ-10"
       ],
-      "spec_ref": "tests/coverage.json#/cases/53/scenario",
+      "spec_ref": "tests/coverage.json#/cases/55/scenario",
       "scenario": "Validate settings and destructive retention changes before publishing immutable snapshots; preserve in-flight SSH and Agent job configuration.",
       "implementations": [
         {
@@ -4797,7 +4867,7 @@
       "requirement_ids": [
         "REQ-10"
       ],
-      "spec_ref": "tests/coverage.json#/cases/54/scenario",
+      "spec_ref": "tests/coverage.json#/cases/56/scenario",
       "scenario": "Publish consistent configuration under concurrent updates, update derived loggers, and preserve safe environment fallback semantics.",
       "implementations": [
         {
@@ -4897,7 +4967,7 @@
       "requirement_ids": [
         "REQ-10"
       ],
-      "spec_ref": "tests/coverage.json#/cases/55/scenario",
+      "spec_ref": "tests/coverage.json#/cases/57/scenario",
       "scenario": "Apply updated login and SSH queue limits while retaining active state, and reject wildcard API keys on settings routes.",
       "implementations": [
         {
@@ -4937,7 +5007,7 @@
       "requirement_ids": [
         "REQ-10"
       ],
-      "spec_ref": "tests/coverage.json#/cases/56/scenario",
+      "spec_ref": "tests/coverage.json#/cases/58/scenario",
       "scenario": "Preserve explicit false and empty settings, restore deployment defaults, and display saved capacity alongside the active value. Keep save actions below the global header while scrolling and reveal group anchors below both bars.",
       "implementations": [
         {
@@ -4967,7 +5037,7 @@
       "requirement_ids": [
         "REQ-10"
       ],
-      "spec_ref": "tests/coverage.json#/cases/57/scenario",
+      "spec_ref": "tests/coverage.json#/cases/59/scenario",
       "scenario": "Require confirmation before destructive retention changes and prevent editing fields during an outstanding save.",
       "implementations": [
         {
@@ -4987,7 +5057,7 @@
       "requirement_ids": [
         "REQ-10"
       ],
-      "spec_ref": "tests/coverage.json#/cases/58/scenario",
+      "spec_ref": "tests/coverage.json#/cases/60/scenario",
       "scenario": "Reject inconsistent execution limits and retain user input after a concurrent configuration conflict.",
       "implementations": [
         {
@@ -5017,7 +5087,7 @@
       "requirement_ids": [
         "REQ-10"
       ],
-      "spec_ref": "tests/coverage.json#/cases/59/scenario",
+      "spec_ref": "tests/coverage.json#/cases/61/scenario",
       "scenario": "Deny viewer access to the settings page without requesting protected configuration or showing its navigation entry.",
       "implementations": [
         {
@@ -5037,7 +5107,7 @@
       "requirement_ids": [
         "REQ-10"
       ],
-      "spec_ref": "tests/coverage.json#/cases/60/scenario",
+      "spec_ref": "tests/coverage.json#/cases/62/scenario",
       "scenario": "Render all configuration fields in Chinese on a narrow mobile viewport without horizontal page overflow; save lower-page changes and show feedback from the persistent top action bar.",
       "implementations": [
         {
@@ -5057,7 +5127,7 @@
       "requirement_ids": [
         "REQ-11"
       ],
-      "spec_ref": "tests/coverage.json#/cases/61/scenario",
+      "spec_ref": "tests/coverage.json#/cases/63/scenario",
       "scenario": "Require a verified Windows AMD64 PE artifact and reject missing or cross-platform binaries.",
       "implementations": [
         {
@@ -5077,7 +5147,7 @@
       "requirement_ids": [
         "REQ-11"
       ],
-      "spec_ref": "tests/coverage.json#/cases/62/scenario",
+      "spec_ref": "tests/coverage.json#/cases/64/scenario",
       "scenario": "Detect Windows over OpenSSH and refuse unsupported Windows processor architectures before upload.",
       "implementations": [
         {
@@ -5097,7 +5167,7 @@
       "requirement_ids": [
         "REQ-11"
       ],
-      "spec_ref": "tests/coverage.json#/cases/63/scenario",
+      "spec_ref": "tests/coverage.json#/cases/65/scenario",
       "scenario": "Verify Windows uploads before activation and retain machine-wide cleanup metadata on deployment failure.",
       "implementations": [
         {
@@ -5117,7 +5187,7 @@
       "requirement_ids": [
         "REQ-11"
       ],
-      "spec_ref": "tests/coverage.json#/cases/64/scenario",
+      "spec_ref": "tests/coverage.json#/cases/66/scenario",
       "scenario": "Persist Windows installation metadata across retries without classifying it as a Linux account layout.",
       "implementations": [
         {
@@ -5137,7 +5207,7 @@
       "requirement_ids": [
         "REQ-11"
       ],
-      "spec_ref": "tests/coverage.json#/cases/65/scenario",
+      "spec_ref": "tests/coverage.json#/cases/67/scenario",
       "scenario": "Display paging-file usage and mark Linux load averages as not applicable on Windows.",
       "implementations": [
         {
@@ -5157,7 +5227,7 @@
       "requirement_ids": [
         "REQ-12"
       ],
-      "spec_ref": "tests/coverage.json#/cases/66/scenario",
+      "spec_ref": "tests/coverage.json#/cases/68/scenario",
       "scenario": "Keep Windows boot identity stable across agent starts and collect native system uptime.",
       "implementations": [
         {
@@ -5177,7 +5247,7 @@
       "requirement_ids": [
         "REQ-12"
       ],
-      "spec_ref": "tests/coverage.json#/cases/67/scenario",
+      "spec_ref": "tests/coverage.json#/cases/69/scenario",
       "scenario": "Handle Windows SCM stop and shutdown without leaving the agent run loop active.",
       "implementations": [
         {
@@ -5197,7 +5267,7 @@
       "requirement_ids": [
         "REQ-12"
       ],
-      "spec_ref": "tests/coverage.json#/cases/68/scenario",
+      "spec_ref": "tests/coverage.json#/cases/70/scenario",
       "scenario": "Run real Windows services and scheduled tasks through collection, configuration upgrades, failed-contact rollback, failed removal receipts and automatic removal retry; exclude loopback traffic from host counters.",
       "implementations": [
         {
@@ -5216,76 +5286,6 @@
           "implementation": {
             "path": "backend/internal/agentclient/platform_windows_test.go",
             "symbol": "TestWindowsNetworkExcludesLoopbackTraffic"
-          },
-          "automation_status": "implemented",
-          "required": true
-        }
-      ]
-    },
-    {
-      "case_id": "TC-04-06",
-      "requirement_ids": [
-        "REQ-04"
-      ],
-      "spec_ref": "tests/coverage.json#/cases/69/scenario",
-      "scenario": "Distinguish live contact, last collection and persisted freshness; cover online, reconnecting, unreachable and unknown agents, neutral pending setup/initial samples, delayed samples, backfill and separate spool/storage failures on desktop and mobile.",
-      "implementations": [
-        {
-          "implementation_id": "impl-04-06-1",
-          "run_id": "ui-charts",
-          "implementation": {
-            "path": "frontend/tests/ui-regressions.browser.mjs",
-            "symbol": "resident monitoring separates live contact, partial collection and backfill (desktop)"
-          },
-          "automation_status": "implemented",
-          "required": true
-        },
-        {
-          "implementation_id": "impl-04-06-2",
-          "run_id": "ui-charts",
-          "implementation": {
-            "path": "frontend/tests/ui-regressions.browser.mjs",
-            "symbol": "resident monitoring separates live contact, partial collection and backfill (mobile)"
-          },
-          "automation_status": "implemented",
-          "required": true
-        },
-        {
-          "implementation_id": "impl-04-06-3",
-          "run_id": "ui-charts",
-          "implementation": {
-            "path": "frontend/tests/ui-regressions.browser.mjs",
-            "symbol": "resident monitoring covers connection and initial sample states (desktop)"
-          },
-          "automation_status": "implemented",
-          "required": true
-        },
-        {
-          "implementation_id": "impl-04-06-4",
-          "run_id": "ui-charts",
-          "implementation": {
-            "path": "frontend/tests/ui-regressions.browser.mjs",
-            "symbol": "resident monitoring covers connection and initial sample states (mobile)"
-          },
-          "automation_status": "implemented",
-          "required": true
-        }
-      ]
-    },
-    {
-      "case_id": "TC-04-07",
-      "requirement_ids": [
-        "REQ-04"
-      ],
-      "spec_ref": "tests/coverage.json#/cases/70/scenario",
-      "scenario": "Reserve the sticky header offset only while the authenticated layout is mounted, preserving target-specific margins and removing the offset on login.",
-      "implementations": [
-        {
-          "implementation_id": "impl-04-07",
-          "run_id": "ui-charts",
-          "implementation": {
-            "path": "frontend/tests/ui-regressions.browser.mjs",
-            "symbol": "header scroll offset is scoped to the authenticated layout"
           },
           "automation_status": "implemented",
           "required": true

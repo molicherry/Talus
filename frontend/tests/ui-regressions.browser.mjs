@@ -745,49 +745,64 @@ try {
         { status: { ...base, connection: "unreachable" }, communication: "Contact lost", data: "Updates delayed", warning: true, disconnected: true },
         { status: { ...base, connection: "unknown", collection: "unknown", last_sample_at: undefined }, communication: "Awaiting contact", data: "Waiting for a sample", warning: false },
         { status: { ...base, connection: "unknown", collection: "unknown", last_sample_at: undefined, deployment: "setup_required", deployment_error: "hub_url_required" }, communication: "Awaiting contact", data: "Waiting for a sample", warning: false, setup: true },
+        { status: { ...base, connection: "unknown", collection: "unknown", last_sample_at: undefined, deployment: "pending" }, communication: "Awaiting contact", data: "Waiting for a sample", warning: false, deploymentLabel: "Awaiting deployment or configuration sync" },
+        { status: { ...base, connection: "unknown", collection: "unknown", last_sample_at: undefined, deployment: "installing" }, communication: "Awaiting contact", data: "Waiting for a sample", warning: false, deploymentLabel: "Deploying agent" },
         { status: { ...base, connection: "online", collection: "partial", errors: { spool: "write_failed", storage: "write_failed" } }, communication: "Healthy", data: "Updates delayed", warning: true, storage: true },
       ];
-      for (const c of cases) {
-        state.servers[0].monitoring = c.status;
-        state.servers[0].status = ({ online: "online", reconnecting: "checking", unreachable: "offline", unknown: "unknown" })[c.status.connection];
-        await goto("/servers/1");
-        const communication = page.getByText(`Agent communication: ${c.communication}`, { exact: true });
-        await communication.waitFor();
-        await page.getByText(`Data: ${c.data}`, { exact: true }).waitFor();
-        const color = await communication.evaluate((element) => getComputedStyle(element).color);
-        // Compare against the actual theme token, not a hard-coded color.
-        const expectedColor = await communication.evaluate((element, warning) => {
-          const probe = document.createElement("span");
-          probe.style.color = `var(--color-${warning ? "warning" : "muted-foreground"})`;
-          element.append(probe);
-          const color = getComputedStyle(probe).color;
-          probe.remove();
-          return color;
-        }, c.warning);
-        assert.equal(color, expectedColor, `incorrect severity: ${JSON.stringify(c.status)}`);
-        assert.equal(await page.getByText(/Check the agent service, Hub address/).count(), c.disconnected ? 1 : 0);
-        assert.equal(await page.getByText(/Stored data cannot currently be confirmed/).count(), c.status.last_sample_at && c.status.data === "stale" ? 1 : 0);
-        if (c.setup) await page.getByRole("link", { name: "Configure monitoring" }).waitFor();
-        if (c.storage) {
-          await page.getByText(/Local buffer: The agent could not reliably save/).waitFor();
-          await page.getByText(/Storage: The Hub could not confirm storage/).waitFor();
+      for (const compact of [false, true]) {
+        for (const c of cases) {
+          state.servers[0].monitoring = c.status;
+          state.servers[0].status = ({ online: "online", reconnecting: "checking", unreachable: "offline", unknown: "unknown" })[c.status.connection];
+          await goto(compact ? "/servers" : "/servers/1");
+          const communication = page.getByText(`Agent communication: ${c.communication}`, { exact: true });
+          await communication.waitFor();
+          await page.getByText(`Data: ${c.data}`, { exact: true }).waitFor();
+          const color = await communication.evaluate((element) => getComputedStyle(element).color);
+          // Compare against the actual theme token, not a hard-coded color.
+          const expectedColor = await communication.evaluate((element, warning) => {
+            const probe = document.createElement("span");
+            probe.style.color = `var(--color-${warning ? "warning" : "muted-foreground"})`;
+            element.append(probe);
+            const color = getComputedStyle(probe).color;
+            probe.remove();
+            return color;
+          }, c.warning);
+          assert.equal(color, expectedColor, `incorrect severity: ${JSON.stringify(c.status)}`);
+          assert.equal(await page.getByText(/Check the agent service, Hub address/).count(), c.disconnected && !compact ? 1 : 0);
+          assert.equal(await page.getByText(/Stored data cannot currently be confirmed/).count(), c.status.last_sample_at && c.status.data === "stale" ? 1 : 0);
+          assert.equal(await page.getByText(/Last sample \(node clock\):/).count(), compact ? 0 : 1);
+          if (c.deploymentLabel) await page.getByText(c.deploymentLabel, { exact: true }).waitFor();
+          if (c.setup) await page.getByRole("link", { name: "Configure monitoring" }).waitFor();
+          if (c.storage && !compact) {
+            await page.getByText(/Local buffer: The agent could not reliably save/).waitFor();
+            await page.getByText(/Storage: The Hub could not confirm storage/).waitFor();
+          }
         }
       }
     }, mobile);
   }
 
   await test("header scroll offset is scoped to the authenticated layout", async ({ page, goto }) => {
+    // Keep the authenticated fixture: login is outside MainLayout either way.
+    // SPA navigation exercises cleanup without re-running addInitScript or
+    // replacing the document (which would hide a leaked html class).
+    const navigate = (path) => page.evaluate((path) => {
+      window.history.pushState({}, "", path);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, path);
     await goto("/servers/1");
     const header = page.locator("header");
     await header.waitFor();
     const height = (await header.boundingBox()).height;
     assert.equal(await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop)), height);
-    await page.evaluate(() => localStorage.removeItem("auth_token"));
-    await goto("/login");
+    await navigate("/login");
     await page.getByRole("button", { name: "Sign in", exact: true }).waitFor();
     assert.equal(await page.locator("header").count(), 0);
     const padding = await page.evaluate(() => getComputedStyle(document.documentElement).scrollPaddingTop);
     assert.ok(padding === "auto" || parseFloat(padding) === 0, `login must not reserve a missing header: ${padding}`);
+    await navigate("/servers/1");
+    await header.waitFor();
+    assert.equal(await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop)), height, "remount restores the offset");
   });
 
   await test("SSH connection routes save atomically; jump filtering and saved connection tests", async ({ page, state, goto }) => {

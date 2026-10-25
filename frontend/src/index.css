@@ -156,7 +156,7 @@
 /* The document is the app's scroll container. Reserve the sticky header only
    while the authenticated layout is mounted; login pages have no header.
    Target scroll margins (e.g. usage logs' 1rem) remain intentional extra space. */
-html:has(.talus-app-layout) {
+html.talus-app-layout {
   scroll-padding-top: 4rem;
 }
 
