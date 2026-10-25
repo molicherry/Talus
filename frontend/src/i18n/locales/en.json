@@ -2,9 +2,10 @@
   "agentMonitor": {
     "collectionLabel": "Collection",
     "dataLabel": "Data",
-    "contact": "Last contact",
-    "sample": "Last sample",
-    "persisted": "Last committed",
+    "contact": "Last contact (Hub clock)",
+    "sample": "Last sample (node clock)",
+    "persisted": "Last committed (Hub clock)",
+    "staleHint": "Stored data cannot currently be confirmed as up to date; collection may still be running normally. Check time synchronization (NTP) on the node and Hub, the reporting connection, pending samples, and storage status.",
     "pending": "{{count}} samples pending",
     "dropped": "{{count}} samples dropped",
     "version": "Agent version",
@@ -23,7 +24,7 @@
     },
     "data": {
       "fresh": "Fresh",
-      "stale": "Stale",
+      "stale": "Updates delayed",
       "backfilling": "Backfilling"
     },
     "sections": {
@@ -61,7 +62,7 @@
       "timeout": "Collection timed out",
       "warming_up": "Collecting a CPU baseline",
       "counter_reset": "Counter reset; waiting for the next sample",
-      "clock_skew": "Node clock is out of sync; invalid timestamps are rejected and counted as dropped samples"
+      "clock_skew": "Sample timestamps are outside the Hub's accepted range. Check time synchronization (NTP) on the node and Hub; samples outside this range are rejected and counted as dropped."
     }
   },
   "apiKeys": {

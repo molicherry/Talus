@@ -16,6 +16,9 @@ export function AgentMonitoringStatus({ status, compact = false }: { status?: Mo
         <span>{t("agentMonitor.collectionLabel")}: {t(`agentMonitor.collection.${status.collection}`)}</span>
         <span>{t("agentMonitor.dataLabel")}: {t(`agentMonitor.data.${status.data}`)}</span>
       </div>
+      {status.data === "stale" && status.last_sample_at && (
+        <p className="mt-1">{t("agentMonitor.staleHint")}</p>
+      )}
       {status.deployment_error && <p className="mt-1">{t(`agentMonitor.reasons.${status.deployment_error}`, t("agentMonitor.reasons.deployment_failed"))}</p>}
       {isAdmin && status.deployment_error === "hub_url_required" && <Link className="mt-2 inline-block text-link underline" to="/settings#monitoring">{t("settings.configure")}</Link>}
       {!compact && (

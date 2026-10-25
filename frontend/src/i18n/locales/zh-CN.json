@@ -2,9 +2,10 @@
   "agentMonitor": {
     "collectionLabel": "采集",
     "dataLabel": "数据",
-    "contact": "最近联系",
-    "sample": "最近采样",
-    "persisted": "最近成功落库",
+    "contact": "最近联系（Hub 时间）",
+    "sample": "最近采样（节点时间）",
+    "persisted": "最近成功落库（Hub 时间）",
+    "staleHint": "暂时无法确认数据为最新，采集可能仍在正常运行。请检查节点与 Hub 的时间同步（NTP）、上报连接、待发送样本和入库状态。",
     "pending": "待发送 {{count}} 条",
     "dropped": "已丢弃 {{count}} 条",
     "version": "Agent 版本",
@@ -23,7 +24,7 @@
     },
     "data": {
       "fresh": "最新",
-      "stale": "已过期",
+      "stale": "更新延迟",
       "backfilling": "历史补报中"
     },
     "sections": {
@@ -61,7 +62,7 @@
       "timeout": "采集超时",
       "warming_up": "正在建立 CPU 采样基线",
       "counter_reset": "计数器已重置，等待下一次采样",
-      "clock_skew": "节点时钟不同步；无效时间戳的样本会被拒绝并计入丢弃数量"
+      "clock_skew": "样本时间超出 Hub 接受范围。请检查节点与 Hub 的时间同步（NTP）；超出范围的样本会被拒绝并计入丢弃数量。"
     }
   },
   "apiKeys": {
