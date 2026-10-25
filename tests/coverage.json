@@ -5221,6 +5221,76 @@
           "required": true
         }
       ]
+    },
+    {
+      "case_id": "TC-04-06",
+      "requirement_ids": [
+        "REQ-04"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/69/scenario",
+      "scenario": "Distinguish live contact, last collection and persisted freshness; cover online, reconnecting, unreachable and unknown agents, neutral pending setup/initial samples, delayed samples, backfill and separate spool/storage failures on desktop and mobile.",
+      "implementations": [
+        {
+          "implementation_id": "impl-04-06-1",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "resident monitoring separates live contact, partial collection and backfill (desktop)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-06-2",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "resident monitoring separates live contact, partial collection and backfill (mobile)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-06-3",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "resident monitoring covers connection and initial sample states (desktop)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-06-4",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "resident monitoring covers connection and initial sample states (mobile)"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-04-07",
+      "requirement_ids": [
+        "REQ-04"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/70/scenario",
+      "scenario": "Reserve the sticky header offset only while the authenticated layout is mounted, preserving target-specific margins and removing the offset on login.",
+      "implementations": [
+        {
+          "implementation_id": "impl-04-07",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "header scroll offset is scoped to the authenticated layout"
+          },
+          "automation_status": "implemented",
+          "required": true
+        }
+      ]
     }
   ],
   "scan_exemptions": [

@@ -270,7 +270,8 @@ function LoadAvgCard({ load1, load5, load15, applicable = true }: LoadAvgCardPro
 
 export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) {
   const isWindows = /^windows(?:\s|$)/i.test(os ?? "");
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
+  const locale = useMemo(() => ({ t, lang }), [t, lang]);
   const [timeRange, setTimeRange] = useState<TimeRange>("1h");
   // The page shares one range, one axis and one statistic: the cards,
   // the charts and the data table describe the same numbers.
@@ -332,7 +333,7 @@ export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) 
   const notice = downsampleNotice(data?.meta);
   const coverage = formatCoverage(data?.meta?.coverage);
 
-  const formatTime = makeTimeFormatter(timeRange);
+  const formatTime = useMemo(() => makeTimeFormatter(timeRange), [timeRange]);
   // `data.points`/`data.window` keep a stable reference between renders, so the
   // alignment below only recomputes when a fetch actually returns new data.
   const points = data?.points;
@@ -356,10 +357,6 @@ export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) 
   // Last collected comes from real samples — never a filled empty bucket.
   const lastCollected = aligned.lastSampleTime;
 
-  const cpu = aligned.series.cpu_percent ?? [];
-  const memory = aligned.series.memory_percent ?? [];
-  const disk = aligned.series.disk_percent ?? [];
-  const swap = aligned.series.swap_percent ?? [];
   const netRecv = aligned.series.net_recv_rate ?? [];
   const netSent = aligned.series.net_sent_rate ?? [];
   const diskRead = aligned.series.disk_read_rate ?? [];
@@ -369,10 +366,6 @@ export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) 
   const load15 = aligned.series.load_15 ?? [];
   // The sampled maxima are separate columns; the page-level statistic
   // decides which column every card and side chart reads (R15).
-  const cpuPeak = aligned.series.cpu_peak ?? [];
-  const memoryPeak = aligned.series.memory_peak ?? [];
-  const diskPeak = aligned.series.disk_peak ?? [];
-  const swapPeak = aligned.series.swap_peak ?? [];
   const netRecvPeak = aligned.series.net_recv_peak ?? [];
   const netSentPeak = aligned.series.net_sent_peak ?? [];
   const diskReadPeak = aligned.series.disk_read_peak ?? [];
@@ -381,57 +374,73 @@ export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) 
   const load5Peak = aligned.series.load_5_peak ?? [];
   const load15Peak = aligned.series.load_15_peak ?? [];
   const pick = (peak: Nullable[], average: Nullable[]) => (stat === "peak" ? peak : average);
-  const usageCards = [
-    { key: "cpu", label: t("monitoring.cpuUsage"), value: latestOf(pick(cpuPeak, cpu)), avg: weightedMean(points ?? [], "cpu_sum", "cpu_count", "cpu_percent"), max: maxOf(cpuPeak) },
-    { key: "memory", label: t("monitoring.memoryUsage"), value: latestOf(pick(memoryPeak, memory)), avg: weightedMean(points ?? [], "memory_percent_sum", "memory_percent_count", "memory_percent"), max: maxOf(memoryPeak) },
-    { key: "disk", label: t("monitoring.diskUsage"), value: latestOf(pick(diskPeak, disk)), avg: weightedMean(points ?? [], "disk_percent_sum", "disk_percent_count", "disk_percent"), max: maxOf(diskPeak) },
-    { key: "swap", label: t(isWindows ? "monitoring.pageFileUsage" : "monitoring.swapUsage"), value: latestOf(pick(swapPeak, swap)), avg: weightedMean(points ?? [], "swap_percent_sum", "swap_percent_count", "swap_percent"), max: maxOf(swapPeak) },
-  ];
-
-  // Chart series for the selected axis and statistic, each distinguished by its
-  // dash pattern and marker as well as its colour.
-  const chartSeries = useMemo(() => {
-    const fields = seriesForStat(axisMode, stat);
-    return AXIS_SERIES[axisMode].map((axis, index) => {
-      const pattern = seriesPattern(index);
-      return {
+  // Keep each chart's series array stable during table toggles/pagination.
+  // The locale object includes the language because `t` itself stays stable.
+  const seriesByAxis = useMemo(() => {
+    const build = (mode: AxisMode) => {
+      const fields = seriesForStat(mode, stat);
+      return AXIS_SERIES[mode].map((axis, index) => ({
         key: axis.label,
-        label: t(isWindows && axis.label === "swap" ? "metrics.series.pageFile" : seriesLabelKey(axisMode, index)),
+        label: locale.t(isWindows && axis.label === "swap" ? "metrics.series.pageFile" : seriesLabelKey(mode, index)),
         color: AXIS_COLOR[axis.label] ?? SERIES_COLOR.cpu,
-        dash: pattern.dash,
-        marker: pattern.marker as "circle" | "square" | "triangle" | "diamond",
+        ...seriesPattern(index),
+        marker: seriesPattern(index).marker as "circle" | "square" | "triangle" | "diamond",
         values: aligned.series[fields[index]] ?? [],
-      };
-    });
-  }, [aligned, axisMode, stat, t, isWindows]);
+      }));
+    };
+    return { percent: build("percent"), throughput: build("throughput"), load: build("load") };
+  }, [aligned, stat, locale, isWindows]);
+  const chartSeries = seriesByAxis[axisMode];
 
-  // Screen-reader description of the chart and the caption of
-  // the equivalent data view.
-  const description = useMemo(() => {
-    const built = chartDescription({
-      title: t(`metrics.axis.${axisMode}`),
-      from: data?.window.from ?? "",
-      to: data?.window.to ?? "",
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      actualInterval: data?.meta?.actualInterval ?? "",
-      stat,
-      unit: axisUnit(axisMode),
-      lastSampleAt: aligned.lastSampleTime,
-    });
-    return t(built.key, built.params);
-  }, [aligned.lastSampleTime, axisMode, data?.meta?.actualInterval, data?.window.from, data?.window.to, stat, t]);
+  const usageCards = useMemo(() => {
+    const definitions = [
+      { key: "cpu", title: "monitoring.cpuUsage", sum: "cpu_sum", count: "cpu_count" },
+      { key: "memory", title: "monitoring.memoryUsage", sum: "memory_percent_sum", count: "memory_percent_count" },
+      { key: "disk", title: "monitoring.diskUsage", sum: "disk_percent_sum", count: "disk_percent_count" },
+      { key: "swap", title: isWindows ? "monitoring.pageFileUsage" : "monitoring.swapUsage", sum: "swap_percent_sum", count: "swap_percent_count" },
+    ];
+    return definitions.map((card, index) => ({
+      key: card.key,
+      label: locale.t(card.title),
+      value: latestOf(seriesByAxis.percent[index].values),
+      avg: weightedMean(points ?? [], card.sum, card.count, AXIS_SERIES.percent[index].avgField),
+      max: maxOf(aligned.series[AXIS_SERIES.percent[index].peakField] ?? []),
+      series: [seriesByAxis.percent[index]],
+    }));
+  }, [aligned, points, seriesByAxis, isWindows, locale]);
+
+  // Each independent chart describes its own metric, range and statistic.
+  const descriptions = useMemo(() => {
+    const describe = (title: string, mode: AxisMode) => {
+      const built = chartDescription({
+        title,
+        from: data?.window.from ?? "",
+        to: data?.window.to ?? "",
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        actualInterval: data?.meta?.actualInterval ?? "",
+        stat,
+        unit: axisUnit(mode),
+        lastSampleAt: aligned.lastSampleTime,
+      });
+      return locale.t(built.key, built.params);
+    };
+    return {
+      main: describe(locale.t(`metrics.axis.${axisMode}`), axisMode),
+      usage: usageCards.map((card) => describe(card.label, "percent")),
+    };
+  }, [aligned.lastSampleTime, axisMode, data?.meta?.actualInterval, data?.window.from, data?.window.to, stat, usageCards, locale]);
 
   const caption = useMemo(() => {
     const built = dataTableCaption({
-      title: t(`metrics.axis.${axisMode}`),
+      title: locale.t(`metrics.axis.${axisMode}`),
       from: data?.window.from ?? "",
       to: data?.window.to ?? "",
       interval: data?.meta?.actualInterval ?? "",
       stat,
       unit: axisUnit(axisMode),
     });
-    return t(built.key, built.params);
-  }, [axisMode, data?.meta?.actualInterval, data?.window.from, data?.window.to, stat, t]);
+    return locale.t(built.key, built.params);
+  }, [axisMode, data?.meta?.actualInterval, data?.window.from, data?.window.to, stat, locale]);
 
   // Only a configuration change (range, axis, statistic) returns the data view to
   // its first page: an automatic refresh must not move the reader (R17). The page
@@ -534,7 +543,7 @@ export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) 
       {data && (points?.length ?? 0) > 0 && (
         <>
           <div className={cn("grid gap-4", axisMode === "percent" ? "grid-cols-1 xl:grid-cols-2" : "grid-cols-2 lg:grid-cols-4")}>
-            {usageCards.map((card) => (
+            {usageCards.map((card, index) => (
               <MetricStatCard key={card.key} label={card.label} value={card.value} avg={card.avg} max={card.max}>
                 {axisMode === "percent" && (
                   <TrendChart
@@ -546,8 +555,8 @@ export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) 
                     formatValue={axisConfig.formatValue}
                     formatAxis={axisConfig.formatAxis}
                     ariaLabel={card.label}
-                    description={`${card.label}. ${description}`}
-                    series={chartSeries.filter((series) => series.key === card.key)}
+                    description={descriptions.usage[index]}
+                    series={card.series}
                   />
                 )}
               </MetricStatCard>
@@ -567,7 +576,7 @@ export function MonitoringDashboard({ serverId, os }: MonitoringDashboardProps) 
               formatValue={axisConfig.formatValue}
               formatAxis={axisConfig.formatAxis}
               ariaLabel={t(`metrics.axis.${axisMode}`)}
-              description={description}
+              description={descriptions.main}
               series={chartSeries}
             />
           </Card>}

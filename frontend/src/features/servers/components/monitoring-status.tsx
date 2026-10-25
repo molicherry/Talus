@@ -8,8 +8,13 @@ export function AgentMonitoringStatus({ status, compact = false }: { status?: Mo
   const { t } = useTranslation();
   const { isAdmin } = useAuth();
   if (!status) return null;
-  const issue = status.connection !== "online" || status.deployment !== "ready" || status.collection === "partial" || status.collection === "failed" || status.data === "stale";
   const waitingForSample = status.data === "stale" && !status.last_sample_at;
+  // Setup and the first report are pending states, not evidence of a failure.
+  const issue = status.connection === "unreachable" || status.connection === "reconnecting"
+    || status.deployment === "failed" || status.collection === "partial" || status.collection === "failed"
+    || (status.data === "stale" && !waitingForSample)
+    || Object.keys(status.errors ?? {}).length > 0
+    || Boolean(status.deployment_error && status.deployment_error !== "hub_url_required");
   return (
     <div className={`mt-3 text-xs ${issue ? "text-warning" : "text-muted-foreground"}`}>
       <div className="flex flex-wrap gap-x-3 gap-y-1" aria-live="polite">

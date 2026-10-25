@@ -5,6 +5,8 @@
 维护者从已合并到 `main` 的提交创建 Tag。CI 发布版本镜像并生成 Release 草稿，
 人工审核并发布 Release 后，工作流将同一镜像 digest 推进到 `latest`。
 
+[下次发布说明](release-notes-next.md)包含根目录 `AGENTS.md` 纳入版本控制的源码检出注意事项；首次包含该变更的 Release 须带上这段升级说明。
+
 ## 必需的 Agent 制品
 
 Windows amd64 制品是 **Hub 启动的硬要求**，即使只监控 Linux 也不能省略。

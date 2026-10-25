@@ -222,21 +222,26 @@ async function fixture(
 }
 const save = (page) =>
   page.getByRole("button", { name: "Save settings", exact: true }).click();
-const saved = (page) =>
-  until(
-    () =>
-      page
-        .getByRole("button", { name: "Save settings", exact: true })
-        .isDisabled(),
-    "saved form",
-  );
+const saved = (page) => until(async () => {
+  const button = page.locator('button[form="system-settings-form"]');
+  const notice = page.getByRole("status").filter({ hasText: /Settings saved|设置已保存/ });
+  return await notice.isVisible() && await page.locator("#AGENT_HUB_URL").isEnabled()
+    && await button.isDisabled();
+}, "successful save, editable form and no unsaved changes");
 const row = (page, key) => page.locator(`#${key}`).locator("..");
 async function assertPinnedActions(page) {
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   const header = await page.locator("header").boundingBox();
-  const save = await page.locator('button[form="system-settings-form"]').boundingBox();
-  assert.ok(Math.abs(header.y) < 1 && header.height === 64, "global header remains visible");
-  assert.ok(save.y >= header.y + header.height && save.y + save.height < 240, "save stays below the header near the top, without scrolling back");
+  const button = page.locator('button[form="system-settings-form"]');
+  const save = await button.boundingBox();
+  const actions = await button.evaluate((element) => {
+    const rect = element.closest(".sticky").getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom };
+  });
+  assert.ok(Math.abs(header.y) <= 1 && header.height > 0, "global header remains visible");
+  assert.ok(Math.abs(actions.top - (header.y + header.height)) <= 1, "actions sit directly below the header");
+  assert.ok(save.y >= actions.top && save.y + save.height <= actions.bottom
+    && actions.bottom < page.viewportSize().height, "save is inside the visible action bar");
 }
 let browser,
   failed = 0;
@@ -346,6 +351,8 @@ try {
     await until(() => state.writes.length === 1);
     assert.equal(state.writes[0].confirm_retention_change, true);
     assert.equal(await page.locator("#AGENT_HUB_URL").isDisabled(), true);
+    assert.equal(await page.locator('button[form="system-settings-form"]').isDisabled(), true);
+    assert.equal(await page.getByRole("status").filter({ hasText: "Settings saved" }).count(), 0, "pending is not a successful save");
     release();
     state.hold = null;
     await dialog.waitFor({ state: "hidden" });
@@ -464,11 +471,12 @@ try {
       await assertPinnedActions(page);
       await page.locator('button[form="system-settings-form"]').click();
       await until(() => state.writes.length === 1);
-      await until(() => page.locator('button[form="system-settings-form"]').isDisabled());
+      await saved(page);
       const saveNotice = page.getByRole("status").filter({ hasText: "已保存" });
       await saveNotice.waitFor();
       const noticeBox = await saveNotice.boundingBox();
-      assert.ok(noticeBox.y >= 64 && noticeBox.y + noticeBox.height < 300, "save feedback stays visible without scrolling back");
+      const header = await page.locator("header").boundingBox();
+      assert.ok(noticeBox.y >= header.y + header.height && noticeBox.y + noticeBox.height < page.viewportSize().height, "save feedback stays visible without scrolling back");
       assert.equal(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= window.innerWidth,

@@ -108,6 +108,10 @@ Final publication must emit `release.published`. Do not use Actions'
 
 ## Release notes
 
+The [upcoming release notes](release-notes-next.md) include the source-checkout
+compatibility note for the newly tracked root `AGENTS.md`. Carry it into the
+first Release containing that change.
+
 New Releases include English and Simplified Chinese descriptions with equivalent
 feature, fix, security and upgrade information. CI creates a bilingual draft;
 maintainers complete and review it. Translation is not automatic.
