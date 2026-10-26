@@ -30,7 +30,7 @@ func TestWindowsCommandQuotingAndLength(t *testing.T) {
 		t.Fatalf("UTF-16 roundtrip = %q", got)
 	}
 	l := Layout{Home: "C:/Program Data/部署 ' data", InstallID: "1b46756d8aaf43ebaed9a142ed766d58", Attempt: "32b16cc9fb5643348e5b449837c52d19"}
-	for _, script := range []string{Probe, Context, l.Prepare(), l.Launch(strings.Repeat("c", 64)), l.Wait(ActivationWaitSeconds), l.PrepareRemoval(), l.RemoveDetached(), l.WaitRemoval(2)} {
+	for _, script := range []string{Probe, Context, l.Prepare(), RunFetch(l.Stage()+"/agent.exe.fetch.ps1", strings.Repeat("a", 64)), l.Launch(strings.Repeat("c", 64)), l.Wait(ActivationWaitSeconds), l.PrepareRemoval(), l.RemoveDetached(), l.WaitRemoval(2)} {
 		if Command(script) != Command(strings.ReplaceAll(strings.ReplaceAll(script, "\r\n", "\n"), "\n", "\r\n")) {
 			t.Fatal("Windows checkout changed command transport")
 		}
@@ -64,7 +64,7 @@ func TestWindowsPowerShellSyntaxAndTransport(t *testing.T) {
 		t.Skip("PowerShell unavailable")
 	}
 	l := Layout{Home: "C:/Program Data/部署 ' data", InstallID: "test-id", Attempt: "test-attempt"}
-	for _, script := range []string{Probe, Context, l.Prepare(), l.Activate("a", "b"), l.Launch("c"), l.Wait(1), l.Remove(), string(l.RemovalFile()), l.PrepareRemoval(), l.RemoveDetached(), l.WaitRemoval(2)} {
+	for _, script := range []string{Probe, Context, l.Prepare(), l.FetchArtifact(l.Stage()+"/download.json", strings.Repeat("a", 64), 123, "pull", 300), l.Activate("a", "b"), l.Launch("c"), l.Wait(1), l.Remove(), string(l.RemovalFile()), l.PrepareRemoval(), l.RemoveDetached(), l.WaitRemoval(2)} {
 		check := "$e=$null;$t=$null;[void][Management.Automation.Language.Parser]::ParseInput(" + Quote(script) + ",[ref]$t,[ref]$e);if($e.Count){$e|Out-String|Write-Output;exit 1}"
 		args := strings.Fields(Command(check))[1:]
 		if out, err := exec.Command(ps, args...).CombinedOutput(); err != nil {

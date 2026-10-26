@@ -5313,6 +5313,93 @@
           "required": true
         }
       ]
+    },
+    {
+      "case_id": "TC-08-09",
+      "requirement_ids": [
+        "REQ-08"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/71/scenario",
+      "scenario": "Download only authenticated immutable Agent artifacts, resume and cache verified bytes, separate transfer and activation capacity, and retry failed installations with bounded jittered backoff.",
+      "implementations": [
+        {
+          "implementation_id": "impl-08-09-http-ranges",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_http_test.go",
+            "symbol": "TestAgentArtifactHTTPAuthorizationRangesAndVersionPinning"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Only node credentials can download current manifest bytes; HEAD, Range and validators preserve immutable content, and changed bytes or unknown digests are refused."
+        },
+        {
+          "implementation_id": "impl-08-09-node-revocation",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_http_test.go",
+            "symbol": "TestAgentArtifactHTTPRevokesReplacedAndDeletedNodes"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Real database-backed node replacement and deletion revoke artifact access while a replacement credential can download the pinned artifact."
+        },
+        {
+          "implementation_id": "impl-08-09-pull-cache",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_transfer_test.go",
+            "symbol": "TestAgentArtifactPullResumesCachesAndRejectsCorruption"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The real Linux bootstrap resumes interrupted HTTP bytes, safely restarts when Range is ignored, rejects corrupt content and reuses cached or installed artifacts without another download."
+        },
+        {
+          "implementation_id": "impl-08-09-stage-capacity",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_scheduler_test.go",
+            "symbol": "TestResidentStagesSeparateTransferAndActivationCapacity"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Four activation waits coexist with four transfers; waiting for activation releases transfer capacity, and queued transfers honor cancellation."
+        },
+        {
+          "implementation_id": "impl-08-09-job-backoff",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_scheduler_test.go",
+            "symbol": "TestResidentSchedulerBoundsJobsBacksOffAndResetsDesiredState"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Bound pending jobs, deduplicate nodes, apply jittered exponential retry backoff and reset obsolete backoff after desired-state or route changes."
+        },
+        {
+          "implementation_id": "impl-08-09-windows-pull",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/agentwindows/fetch_test.go",
+            "symbol": "TestWindowsArtifactPullResumesAndReusesVerifiedCache"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "Execute the Windows download body on available PowerShell to verify range resumption, ignored-range recovery, checksum rejection and cache reuse; native Windows acceptance covers real ACLs."
+        },
+        {
+          "implementation_id": "impl-08-09-bootstrap-fallback",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_bootstrap_test.go",
+            "symbol": "TestAgentArtifactBootstrapUsesPullAndFallsBackToSFTP"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The real SSH/SFTP bootstrap avoids binary uploads after a successful HTTP pull, falls back and populates the same verified cache when HTTP is unavailable, and reuses the artifact on configuration-only retries."
+        }
+      ]
     }
   ],
   "scan_exemptions": [

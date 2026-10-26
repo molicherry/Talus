@@ -30,6 +30,10 @@ func writeBudgetFor(r *http.Request) time.Duration {
 	if r.Method == http.MethodGet && p == "/api/v1/agent/connect" {
 		return 0
 	}
+	if (r.Method == http.MethodGet || r.Method == http.MethodHead) && strings.HasPrefix(p, "/api/v1/agent/artifacts/") {
+		// The artifact handler owns total and idle transfer deadlines.
+		return 0
+	}
 	if r.Method == http.MethodDelete {
 		if id, ok := strings.CutPrefix(strings.TrimSuffix(p, "/"), "/api/v1/servers/"); ok && id != "" && !strings.Contains(id, "/") {
 			return ServerDeleteWriteBudget

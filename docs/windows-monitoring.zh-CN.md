@@ -106,6 +106,13 @@ Get-ScheduledTaskInfo -TaskName ($name + '-Remove')
 不会启动本次后台激活任务。
 外部取消或连接中断仍可能提前结束 Hub 等待，本机任务继续完成激活或回滚。
 
+引导过程使用内置 HTTP 客户端下载二进制，复用安装目录中按摘要命名的缓存。
+未完成下载通过 Range/If-Range 续传，缓存和下载内容均须通过 SHA256 校验。
+缓存继承 SYSTEM/Administrators 专属 ACL。下载脚本以带 BOM 的 UTF-8 文件上传，
+校验后执行，避免 cmd.exe 命令长度限制；凭据保存在另一个受保护的文件中，
+由下载脚本删除。HTTP 路径不可用时可回退 SFTP。公共传输、队列和重试规则见
+[监控 Agent 升级](README.zh-CN.md#监控-agent-升级)。
+
 ## 更换操作系统或 ProgramData
 
 已登记的安装平台、目录必须保持一致，以保留旧服务及失败部署的清理依据。

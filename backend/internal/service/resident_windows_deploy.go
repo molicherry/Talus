@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -116,7 +115,7 @@ func (m *ResidentMonitor) installWindows(ctx context.Context, n model.AgentNode,
 	activation := l.ActivationFile(artifact.SHA256, configHash)
 	// Windows OpenSSH does not offer POSIX chmod. Prepare has already restricted
 	// the staging directory to Administrators and SYSTEM, before secrets arrive.
-	if err = lease.uploadPrivateDirectory(ctx, filepath.Join(m.deployer.artifactsDir, artifact.File), "/"+l.Stage()+"/agent.exe", agentArtifactUploadBudget); err != nil {
+	if err = m.stageArtifact(ctx, lease, artifact, cfg, l.Base(), l.Base()+"/agent.exe", l.Stage()+"/agent.exe", &l); err != nil {
 		return err
 	}
 	if err = verifyWindowsFile(ctx, lease, l.Stage()+"/agent.exe", artifact.SHA256); err != nil {
@@ -144,6 +143,9 @@ func (m *ResidentMonitor) installWindows(ctx context.Context, n model.AgentNode,
 		if err = verifyWindowsFile(ctx, lease, path.Join(l.Stage(), f.name), repository.TokenHash(string(f.data))); err != nil {
 			return err
 		}
+	}
+	if err = m.beginActivation(ctx); err != nil {
+		return err
 	}
 	if err = activateWindowsAgent(ctx, lease, l, repository.TokenHash(string(activation))); err != nil {
 		return err

@@ -139,7 +139,10 @@ intervals, with a minimum of 15 seconds. Replayed history can fill gaps without
 making a disconnected node online; a recent storage timestamp alone does not prove
 the underlying sample is recent. Report missing/stale values explicitly.
 
-The Hub installs/repairs agents over the configured SSH/SFTP route. Nodes report
+The Hub supervises agent installation/repair over the configured SSH/SFTP route.
+Binaries are reused from verified node caches or pulled over HTTPS from the Hub,
+with SFTP fallback when HTTP is unavailable. Partial HTTP downloads can resume;
+configuration-only updates reuse matching binaries. Nodes report
 to the node-reachable HTTPS `AGENT_HUB_URL` over outbound WSS with HTTPS fallback.
 An administrator can configure this URL in **System settings → Monitoring** or
 through deployment environment variables. Linux installation requires running
@@ -150,7 +153,10 @@ agent runs as a native service; staging files use SYSTEM/Administrators ACLs,
 and a detached scheduled task performs activation and rollback.
 
 Talus does not automatically elevate an unprivileged login. Installation/repair
-has a three-minute budget for recorded Linux installations, or ten minutes for
-Windows or an unidentified platform, including uploads and activation waits.
+has a twelve-minute budget after transfer admission. Transfer and activation each
+allow four concurrent jobs, with at most sixteen admitted jobs and one installer
+per node. Failed installs use jittered exponential backoff from at least one
+minute to at most fifteen minutes. Internal artifact GET/HEAD requests use node
+credentials, not API keys, and do not establish agent monitoring presence.
 Deployment problems and missing Hub configuration need administrator attention,
 not changes to the metric query or an assumption that the server is offline.

@@ -109,6 +109,16 @@ and SSH cleanup; otherwise it retries without starting a detached task. External
 cancellation or connection loss can end the Hub wait earlier; the local task
 continues activation or rollback.
 
+The bootstrap downloads binaries with the built-in HTTP client and reuses a
+digest-keyed cache under the installation directory. Partial downloads resume
+with Range/If-Range; cached and downloaded bytes are checked with SHA256. The
+cache inherits SYSTEM/Administrators-only ACLs. Download scripts are uploaded as
+UTF-8 files with a BOM and verified before execution, avoiding cmd.exe's command
+length limit; credentials stay in a separate protected file removed by the
+download script. An unavailable HTTP path can fall back to SFTP. See
+[Monitoring agent upgrades](../README.md#monitoring-agent-upgrades) for shared
+transfer, queue and retry rules.
+
 ## Changing operating system or ProgramData
 
 Tracked platforms and directories must remain consistent so old services and

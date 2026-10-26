@@ -54,6 +54,14 @@ func (r *residentMigrationRemote) handler(t *testing.T) func(string, ssh.Channel
 	inherited := r.files.handler()
 	return func(command string, ch ssh.Channel, closed <-chan struct{}) {
 		switch {
+		case strings.HasPrefix(command, "set -eu\ncache_dir="):
+			if strings.Contains(command, "mode='store'\n") {
+				fmt.Fprintln(ch, "TALUS_ARTIFACT_READY")
+				exitStatus(ch, 0)
+			} else {
+				fmt.Fprintln(ch, "TALUS_PULL_UNAVAILABLE")
+				exitStatus(ch, 75)
+			}
 		case strings.HasPrefix(command, "id -u;"):
 			home := r.home
 			if r.uid.Load() == 0 {

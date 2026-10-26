@@ -182,15 +182,28 @@ func (l *sshLease) end(unhealthy bool, err error) {
 // Exec and Upload preserve ownership across a deployment's sequential
 // primitives. Their caller must eventually Release or Discard the lease.
 func (l *sshLease) Exec(ctx context.Context, command string, budget time.Duration) (*ExecResult, error) {
-	operation, err := l.begin(ctx)
-	if err != nil {
-		return nil, err
-	}
 	if budget <= 0 {
 		budget = l.svc.execDefaultTimeout
 	}
 	if budget > maxExecTimeout {
 		budget = maxExecTimeout
+	}
+	return l.exec(ctx, command, budget)
+}
+
+// execTransfer supervises a bootstrap download with the transfer's own bounded
+// context instead of borrowing the unrelated interactive-command timeout cap.
+func (l *sshLease) execTransfer(ctx context.Context, command string, budget time.Duration) (*ExecResult, error) {
+	if budget <= 0 {
+		return nil, context.DeadlineExceeded
+	}
+	return l.exec(ctx, command, budget)
+}
+
+func (l *sshLease) exec(ctx context.Context, command string, budget time.Duration) (*ExecResult, error) {
+	operation, err := l.begin(ctx)
+	if err != nil {
+		return nil, err
 	}
 	result, err, transportClosed := l.svc.runCommand(operation, l.h.Client, command, budget)
 	l.end(transportClosed || isConnectionError(err), err)

@@ -221,6 +221,22 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 				}
 				script := decodeWindowsCommand(t, command)
 				switch {
+				case strings.Contains(script, "Download script hash mismatch"):
+					m := regexp.MustCompile(`\$script='([^']+)'`).FindStringSubmatch(script)
+					if len(m) != 2 {
+						t.Fatal("missing download payload path")
+					}
+					payload, ok := remote.file("/" + m[1])
+					if !ok {
+						t.Fatal("download script was not uploaded")
+					}
+					if strings.Contains(string(payload), "$mode='store'\n") {
+						fmt.Fprintln(ch, "TALUS_ARTIFACT_READY")
+					} else {
+						fmt.Fprintln(ch, "TALUS_PULL_UNAVAILABLE")
+						exitStatus(ch, 75)
+						return
+					}
 				case command == agentwindows.Command(agentwindows.Probe):
 					fmt.Fprint(ch, "TALUS_WINDOWS_V1\r\nAMD64\r\n")
 				case command == agentwindows.Command(agentwindows.Context):
@@ -246,7 +262,7 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 					}
 					fmt.Fprintln(ch, hash)
 				case strings.Contains(script, "Start-ScheduledTask -TaskName $task") && !strings.Contains(script, ".remove.ps1"):
-					if remote.count("sftp.upload ") != 3 {
+					if remote.count("sftp.upload ") != 6 {
 						t.Error("activation before complete uploads")
 					}
 					launched.Store(true)

@@ -1,0 +1,136 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/vpsmanager/backend/internal/model"
+)
+
+func TestResidentStagesSeparateTransferAndActivationCapacity(t *testing.T) {
+	m := NewResidentMonitor(nil, nil, nil, "", false, 1)
+	begin := func() (context.Context, *residentStages) {
+		t.Helper()
+		ctx, s, err := m.beginInstall(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(s.finish)
+		return ctx, s
+	}
+	activations := []*residentStages{}
+	for i := 0; i < 4; i++ {
+		ctx, s := begin()
+		if err := m.beginActivation(ctx); err != nil {
+			t.Fatal(err)
+		}
+		activations = append(activations, s)
+	}
+	contexts := []context.Context{}
+	for i := 0; i < 4; i++ {
+		ctx, _ := begin()
+		contexts = append(contexts, ctx)
+	}
+	if len(m.transferSlots) != 4 || len(m.activationSlots) != 4 {
+		t.Fatal("activation waits prevented independent transfers")
+	}
+	transitioned := make(chan error, 1)
+	go func() { transitioned <- m.beginActivation(contexts[0]) }()
+	waitFor(t, "release transfer slot before activation wait", func() bool { return len(m.transferSlots) == 3 })
+	_, extra := begin()
+	select {
+	case <-transitioned:
+		t.Fatal("activation exceeded its concurrency limit")
+	default:
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	waiting := make(chan error, 1)
+	go func() {
+		_, s, err := m.beginInstall(ctx)
+		if s != nil {
+			s.finish()
+		}
+		waiting <- err
+	}()
+	cancel()
+	select {
+	case err := <-waiting:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("queued transfer cancellation: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued transfer ignored cancellation")
+	}
+	extra.finish()
+	activations[0].finish()
+	select {
+	case err := <-transitioned:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("activation did not take the released slot")
+	}
+	if len(m.activationSlots) != 4 {
+		t.Fatal("stage transition lost activation ownership")
+	}
+}
+
+func TestResidentSchedulerBoundsJobsBacksOffAndResetsDesiredState(t *testing.T) {
+	m := NewResidentMonitor(nil, nil, nil, "", false, 1)
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	for i := uint(1); i <= residentMaxInstallJobs; i++ {
+		if !m.scheduleInstall(ctx, model.AgentNode{ServerID: i}, 0, "v1", &wg, func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }) {
+			t.Fatalf("job %d was not admitted", i)
+		}
+	}
+	if m.scheduleInstall(ctx, model.AgentNode{ServerID: 1}, 0, "v1", &wg, func(context.Context) error { return nil }) {
+		t.Fatal("admitted two installers for one node")
+	}
+	if m.scheduleInstall(ctx, model.AgentNode{ServerID: 99}, 0, "v1", &wg, func(context.Context) error { return nil }) {
+		t.Fatal("pending installation queue grew beyond its bound")
+	}
+	cancel()
+	wg.Wait()
+	if len(m.installJobs) != 0 || len(m.installRetries) != 0 {
+		t.Fatal("canceled jobs retained admission/backoff")
+	}
+	n := model.AgentNode{ServerID: 1}
+	if !m.scheduleInstall(context.Background(), n, 0, "v1", &wg, func(context.Context) error { return errors.New("slow node") }) {
+		t.Fatal("failed job not admitted")
+	}
+	wg.Wait()
+	r := m.installRetries[1]
+	if delay := time.Until(r.due); delay < 59*time.Second || delay > 90*time.Second {
+		t.Fatalf("first failure has no bounded jittered retry: %v", delay)
+	}
+	if m.scheduleInstall(context.Background(), n, 0, "v1", &wg, func(context.Context) error { return nil }) {
+		t.Fatal("ignored retry backoff")
+	}
+	if !m.scheduleInstall(context.Background(), n, 0, "v2-route", &wg, func(context.Context) error { return nil }) {
+		t.Fatal("changed desired version/route retained obsolete backoff")
+	}
+	wg.Wait()
+	if len(m.installRetries) != 0 {
+		t.Fatal("successful install retained failure backoff")
+	}
+	previous := time.Duration(0)
+	for failures := 1; failures <= 8; failures++ {
+		delay := residentRetryDelay(failures)
+		if delay < time.Minute || delay > 15*time.Minute {
+			t.Fatal("retry escaped its bounds")
+		}
+		// Once the base reaches its cap, adjacent jitter intervals overlap;
+		// an individual capped delay need not exceed the previous sample.
+		if failures <= 4 && delay <= previous {
+			t.Fatal(fmt.Sprintf("retry did not back off after %d failures", failures))
+		}
+		previous = delay
+	}
+}

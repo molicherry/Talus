@@ -29,7 +29,7 @@ type residentJob struct {
 }
 
 // Start reconciles desired installations, not sampling. A healthy resident agent
-// consumes no SSH sessions. Four independent installation leases are allowed.
+// consumes no SSH sessions. Transfer and activation capacity are independent.
 func (m *ResidentMonitor) Start(ctx context.Context) {
 	var wg sync.WaitGroup
 	defer func() {
@@ -124,30 +124,11 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 					if n.LastAttempt != nil && time.Since(*n.LastAttempt) < time.Minute {
 						continue
 					}
-					m.installJobsMu.Lock()
-					_, busy := m.installJobs[s.ID]
-					if !busy && m.removing[s.ID] == nil && epoch == m.installEpoch && len(m.installJobs) < 4 {
-						// Leave time for slow uploads, verification and activation,
-						// including the detached Windows task and its receipt.
-						jobCtx, stop := context.WithTimeout(ctx, agentInstallBudget)
-						jobCtx = context.WithValue(jobCtx, residentSettingsKey{}, desiredSettings)
-						done := make(chan struct{})
-						m.installJobs[s.ID] = residentJob{cancel: stop, hash: n.TokenHash, done: done}
-						wg.Add(1)
-						go func(n model.AgentNode) {
-							defer wg.Done()
-							defer stop()
-							defer func() {
-								m.installJobsMu.Lock()
-								delete(m.installJobs, n.ServerID)
-								close(done)
-								m.installJobsMu.Unlock()
-								m.NotifyTopologyChange()
-							}()
-							m.installJob(jobCtx, n, desired, config)
-						}(n)
-					}
-					m.installJobsMu.Unlock()
+					jobCtx := context.WithValue(ctx, residentSettingsKey{}, desiredSettings)
+					key := fmt.Sprintf("%s:%s:%d", desired, config, s.ConnectionRevision)
+					m.scheduleInstall(jobCtx, n, epoch, key, &wg, func(ctx context.Context) error {
+						return m.installJob(ctx, n, desired, config)
+					})
 				}
 				m.mu.Lock()
 				for id, v := range m.nodes {
@@ -163,6 +144,11 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 				for id, j := range m.installJobs {
 					if !live[id] {
 						j.cancel()
+					}
+				}
+				for id := range m.installRetries {
+					if !live[id] {
+						delete(m.installRetries, id)
 					}
 				}
 				m.installJobsMu.Unlock()
@@ -183,11 +169,19 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 	}
 }
 
-func (m *ResidentMonitor) installJob(ctx context.Context, n model.AgentNode, desired, configHash string) {
+func (m *ResidentMonitor) installJob(ctx context.Context, n model.AgentNode, desired, configHash string) error {
+	ctx, stages, err := m.beginInstall(ctx)
+	if err != nil {
+		return err
+	}
+	defer stages.finish()
+	// Queue time does not consume the installation's transfer/activation budget.
+	ctx, cancelInstall := context.WithTimeout(ctx, agentInstallBudget)
+	defer cancelInstall()
 	state, reason := "installing", ""
 	_ = m.repo.Deployment(ctx, n, state, reason, n.InstalledHash, n.ConfigHash)
 	m.setDeployment(n, state, reason)
-	err := m.install(ctx, n)
+	err = m.install(ctx, n)
 	state = "ready"
 	if err != nil {
 		state = "failed"
@@ -203,6 +197,7 @@ func (m *ResidentMonitor) installJob(ctx context.Context, n model.AgentNode, des
 	defer cancel()
 	_ = m.repo.Deployment(storeCtx, n, state, reason, desired, configHash)
 	m.setDeployment(n, state, reason)
+	return err
 }
 
 func (m *ResidentMonitor) setDeployment(n model.AgentNode, state, reason string) {
@@ -226,6 +221,9 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 		return err
 	}
 	defer lease.Release()
+	if stages, _ := ctx.Value(residentStagesKey{}).(*residentStages); stages != nil {
+		stages.lease = lease
+	}
 	platform, err := m.deployer.Probe(ctx, lease)
 	if err != nil {
 		return err
@@ -317,7 +315,7 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 		return err
 	}
 	next := base + "/.next-" + id
-	if err = lease.Upload(ctx, filepath.Join(m.deployer.artifactsDir, artifact.File), next, agentArtifactUploadBudget); err != nil {
+	if err = m.stageArtifact(ctx, lease, artifact, cfg, base, binary, next, nil); err != nil {
 		return err
 	}
 	hash, err := m.deployer.remoteHash(ctx, lease, shellQuote(next))
@@ -358,6 +356,9 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 	}
 	// Keep the prior executable/configuration until the new service demonstrates
 	// authenticated contact with the Hub. Roll back locally even if SSH drops.
+	if err := m.beginActivation(ctx); err != nil {
+		return err
+	}
 	script := residentActivationScript(binary, config, unit, unitName, next, ctl, 20)
 	result, err = lease.Exec(ctx, script, 45*time.Second)
 	if err != nil {

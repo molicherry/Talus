@@ -474,6 +474,7 @@ func main() {
 		UpdateSettingsHandler:        settingsHandler.Update,
 		AgentHTTPHandler:             monitorSvc.AgentHTTP,
 		AgentWebSocketHandler:        monitorSvc.AgentWebSocket,
+		AgentArtifactHandler:         monitorSvc.AgentArtifact,
 		JWTService:                   jwtSvc,
 		UserGate:                     userGate,
 		APIKeyAuth:                   apiKeyAuth,

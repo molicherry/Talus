@@ -82,6 +82,8 @@ SSH service 解析加密凭据、已经确认的主机密钥和当前连接路�
 
 生产入口创建 `ResidentMonitor`，负责协调 Agent 安装及设置同步，不会为每次采样执行 SSH 命令。service 包仍保留旧的 `MonitorService` 采集路径和测试；不能据此判断生产仍通过 SSH 采样。
 
+安装任务在独立的传输与激活名额之间保留同一个节点所有权。SSH 监督引导命令和 SFTP 传输；节点也可用已有节点凭据从 Hub 拉取按摘要寻址的不可变制品。私有内容缓存跨重试保留，支持字节范围续传，并在激活前校验。制品接口复用节点认证，不使用管理员/API-key 权限，也不会更新监控在线状态。安装时限、队列上限和重试规则由[监控 Agent 升级](README.zh-CN.md#监控-agent-升级)维护。
+
 Agent 本地采集，将待发送样本保存在持久队列，使用节点专属凭据经 WSS 上报并在必要时回退 HTTPS。事务去重落库后才确认样本。UI 分别展示连接、采集和持久化数据新鲜度，其中一项健康不代表其他项健康。历史指标使用有预算限制的原始或聚合查询，见[监控 API](../skills/talus/references/metrics.md)。
 
 Linux 安装使用 systemd 系统或用户服务；Windows 使用原生服务、受保护的暂存 ACL 和独立激活、卸载计划任务。[Windows 指南](windows-monitoring.zh-CN.md)负责前提、回滚、卸载回执及支持平台。制品构建与检查位于 [backend/build/agents.sh](../backend/build/agents.sh) 和 [cmd/agentverify](../backend/cmd/agentverify)。
