@@ -76,6 +76,9 @@ Windows amd64 Agent 和匹配的 manifest；缺少 Windows 可执行文件会导
    复核变更列表，清除所有 `<!-- release:todo -->`。涉及升级操作时，两种语言均说明
    迁移、配置、兼容性及回滚代价。保留语言标记和 `release-image.json` 附件。
    标题默认等于 Tag，可附加主题；自动化按 `tag_name` 识别 Release，重试保留人工修改。
+   草稿查询遍历 Release 列表的所有分页，再按匹配的 Release ID 读取详情；GitHub 的
+   按 Tag 查询接口只返回已发布的 Release。同一 Tag 存在多份 Release 时明确报错，
+   由维护者处理重复项，不会任意选取或再建草稿。
 3. 使用 GitHub 页面或维护者自己的 `gh` 身份发布审核后的草稿。RC 保留 pre-release 标记，
    补发较低版本的修复时不勾选 “Set as latest release”。CLI 示例：
 
@@ -86,6 +89,9 @@ Windows amd64 Agent 和匹配的 manifest；缺少 Windows 可执行文件会导
 4. 正式版等待 **Promote published Release** 成功。工作流复核 Tag、`main` 祖先关系、
    成功的 Tag CI、证据和镜像架构，再将最高已发布且带证据的正式版现有 digest 复制到
    `latest`，并设为 GitHub 最新版。它不重新构建，RC/test 不推进 latest。
+   发布事件必须指向已发布、带有匹配 `release-image.json` 证据的正式版 `vX.Y.Z`。
+   临时 `untagged-*` 标签或缺失证据会明确报错，不再因处理了旧版本而显示成功；
+   合规的延迟事件仍会处理带证据的最高已发布正式版。
 5. 确认版本镜像、Release 和晋升结果后，再宣布 `latest` 可用。审核草稿期间，版本镜像已可用。
 
 最后发布 Release 必须产生 `release.published` 事件。不要用 Actions 的 `GITHUB_TOKEN`
@@ -183,10 +189,16 @@ Hub 缓存 GitHub Release 完整正文，前端按界面语言选择内容；切
 | --- | --- |
 | CI 门禁失败 | 临时故障重跑原 CI；源码修复使用新 Tag。失败 Tag 保留，不发布镜像或 Release。 |
 | 镜像已发布，草稿未生成 | 重跑失败任务；已有版本镜像经验证后复用，不覆盖。草稿重试保留人工修改和已有证据。 |
+| 现有草稿缺少证据附件 | 使用修正后的草稿查询，在 `release-image-evidence` 产物仍可用时重跑 **Create Release draft**；原始证据会补回同一 Release ID，不重建镜像，也不修改审核后的说明。 |
 | OCI 归档已过期 | 归档保留 7 天；过期后重跑全部 CI。已有版本镜像仍只复用。 |
 | Release 已发布，晋升失败 | 修复临时 API/镜像仓库故障或说明错误，再重跑晋升任务。代码或产物出错则发新版本。 |
+| 发布使用 `untagged-*` 标签或缺少证据 | 发布事件触发的晋升在写入前报错。调查 Release 与 Tag 的关联并恢复原始 Tag/CI 证据；恢复任务处理旧的已纳入流程的版本并显示成功，不代表本次版本已发布。 |
 | Tag、证据、CI 或镜像不匹配 | 保留原 latest，调查差异；不得删除校验或修改证据来强行通过。 |
 | 尚无带证据的正式发布 | 恢复正常跳过，不修改镜像或 Release。没有证据附件的历史 Release 不参与晋升。 |
+
+Tag CI 重跑使用该 Tag 提交中的工作流和脚本。仅将发布脚本修复合并到 `main`，
+不会更新旧 Tag 的运行；旧草稿应使用修正后的脚本和原始 CI 证据恢复，不能移动 Tag
+或跳过校验。草稿修复仅在 Release 仍为草稿时补充缺失证据，不会发布草稿或推进 `latest`。
 
 也可从 `main` 手动触发恢复：
 

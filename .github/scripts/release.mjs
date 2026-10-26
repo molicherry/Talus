@@ -134,7 +134,11 @@ export async function draftRelease({ api, receipt, baseline }) {
   const kind = parseTag(receipt.tag).kind;
   if (kind === "test") return { skipped: "internal test tag" };
   assertReceipt(receipt, { tag: receipt.tag, image: `ghcr.io/${api.repository.toLowerCase()}` });
-  let release = await api.request("GET", `releases/tags/${receipt.tag}`, undefined, { missing: true });
+  // The by-tag endpoint only returns published Releases. Include drafts when
+  // retrying so that reviewed notes and the original Release ID are preserved.
+  const matches = (await api.list("releases")).filter(item => item.tag_name === receipt.tag);
+  if (matches.length > 1) throw new Error(`Multiple Releases match ${receipt.tag}; resolve the duplicate drafts before retrying`);
+  let release = matches.length ? await api.request("GET", `releases/${matches[0].id}`) : undefined;
   if (!release) {
     const generated = await api.request("POST", "releases/generate-notes", {
       tag_name: receipt.tag, target_commitish: receipt.commit,
@@ -159,13 +163,28 @@ export async function draftRelease({ api, receipt, baseline }) {
   return { url: release.html_url, draft: release.draft };
 }
 
-export async function promoteLatest({ api, registry, validate = validateTag }) {
+export async function promoteLatest({ api, registry, validate = validateTag, publishedRelease }) {
+  // A publication event must not look successful after silently excluding the
+  // triggering Release (for example, an accidental untagged-* publication).
+  if (publishedRelease !== undefined && !stableReleases([publishedRelease]).length) {
+    throw new Error("Published Release must use a stable vX.Y.Z tag and must not be a draft or prerelease");
+  }
+  const releases = await api.list("releases");
+  if (publishedRelease !== undefined) {
+    const trigger = releases.find(item => item.id === publishedRelease.id);
+    if (!trigger || trigger.tag_name !== publishedRelease.tag_name || !stableReleases([trigger]).length) {
+      throw new Error("Published Release no longer matches its publication event");
+    }
+    const evidence = await readReceipt(api, trigger);
+    if (evidence === undefined) throw new Error(`Published Release ${trigger.tag_name} has no ${RECEIPT}; restore its CI evidence before promotion`);
+    assertReceipt(evidence, { tag: trigger.tag_name, image: `ghcr.io/${api.repository.toLowerCase()}` });
+  }
   // Reconcile the highest enrolled stable, rather than the triggering event.
   // GitHub may replace a pending concurrency-group run with a newer event.
   // Absence of the evidence asset marks historical releases as unenrolled.
   // An existing but invalid/unreadable asset must fail, never fall back.
   let release, receipt;
-  for (const candidate of stableReleases(await api.list("releases"))) {
+  for (const candidate of stableReleases(releases)) {
     const evidence = await readReceipt(api, candidate);
     if (evidence === undefined) continue;
     release = candidate;
@@ -210,7 +229,12 @@ async function main() {
     validateTag(receipt.tag, receipt.commit, receipt.tagObject);
     result = await draftRelease({ api: new GitHub(repository, process.env.GH_TOKEN), receipt, baseline: previousStable(receipt.tag) });
   } else if (mode === "promote") {
-    result = await promoteLatest({ api: new GitHub(repository, process.env.GH_TOKEN), registry: new Registry() });
+    let publishedRelease;
+    if (process.env.GITHUB_EVENT_NAME === "release") {
+      publishedRelease = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")).release;
+      if (!publishedRelease) throw new Error("Publication event is missing its Release");
+    }
+    result = await promoteLatest({ api: new GitHub(repository, process.env.GH_TOKEN), registry: new Registry(), publishedRelease });
   } else throw new Error("Usage: release.mjs validate | publish-image ARCHIVE | draft RECEIPT | promote");
   console.log(JSON.stringify(result));
 }

@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import {
   assertSuccessfulCI, compareTags, stableReleases, parseTag, previousStable,
@@ -55,7 +56,9 @@ function apiFixture({ releases = [structuredClone(published)], evidence = struct
     async request(method, path, body) {
       calls.push([method, path, body]);
       if (method !== "GET") writes.push([method, path, body]);
-      if (method === "GET" && path.startsWith("releases/tags/")) return this.releases.find(item => item.tag_name === path.slice("releases/tags/".length)) || null;
+      // GitHub's by-tag endpoint only returns published Releases.
+      if (method === "GET" && path.startsWith("releases/tags/")) return this.releases.find(item => !item.draft && item.tag_name === path.slice("releases/tags/".length)) || null;
+      if (method === "GET" && /^releases\/\d+$/.test(path)) return this.releases.find(item => item.id === Number(path.split("/").at(-1)));
       if (method === "GET" && path === "releases/assets/9") return this.evidence;
       if (method === "GET" && /^releases\/assets\/\d+$/.test(path)) return this.evidenceByRelease[Number(path.split("/").at(-1)) - 9000];
       if (method === "GET" && path === `actions/runs/${receipt.runId}`) return this.run;
@@ -266,11 +269,61 @@ test("draft retries preserve all human edits and published Releases", async () =
   }
 });
 
+test("draft recovery restores missing evidence to the existing ID and is idempotent", async () => {
+  const draft = { ...published, id: 42, draft: true, name: "Reviewed title", body: "Reviewed bilingual notes" };
+  const api = apiFixture({ releases: [draft], evidence: null });
+  await draftRelease({ api, receipt });
+  assert.deepEqual(api.writes, [["POST", "releases/42/assets?name=release-image.json", receipt]]);
+  assert.equal(api.releases.length, 1);
+  assert.equal(draft.name, "Reviewed title");
+  assert.equal(draft.body, "Reviewed bilingual notes");
+  api.writes.length = 0;
+  await draftRelease({ api, receipt });
+  assert.deepEqual(api.writes, []);
+});
+
+test("draft lookup finds an existing draft beyond the first API page without using the by-tag endpoint", async () => {
+  const calls = [];
+  const draft = { ...published, id: 42, draft: true };
+  const api = new GitHub(repository, "fixture-token", async (url, options) => {
+    const { pathname, searchParams } = new URL(url);
+    const path = pathname.slice(`/repos/${repository}/`.length);
+    calls.push([options.method, path]);
+    if (options.method === "GET" && path === "releases") {
+      return new Response(JSON.stringify(searchParams.get("page") === "1"
+        ? Array.from({ length: 100 }, (_, i) => ({ ...published, id: 100 + i, tag_name: `v1.0.${i}` }))
+        : [draft]));
+    }
+    if (options.method === "GET" && path === "releases/42") return new Response(JSON.stringify(draft));
+    if (options.method === "GET" && path === "releases/42/assets") return new Response("[]");
+    if (options.method === "GET" && path.startsWith("releases/tags/")) return new Response("{}", { status: 404 });
+    if (options.method === "POST" && path === "releases/42/assets") {
+      assert.equal(new URL(url).hostname, "uploads.github.com");
+      assert.deepEqual(JSON.parse(options.body), receipt);
+      return new Response("{}");
+    }
+    assert.fail(`Unexpected GitHub request: ${options.method} ${url}`);
+  });
+  await draftRelease({ api, receipt });
+  assert.equal(calls.filter(([, path]) => path === "releases").length, 2);
+  assert.ok(!calls.some(([, path]) => path.startsWith("releases/tags/")));
+  assert.deepEqual(calls.filter(([method]) => method === "POST"), [["POST", "releases/42/assets"]]);
+});
+
+test("duplicate Releases for a tag and a failed draft lookup cannot create or modify a Release", async () => {
+  const api = apiFixture({ releases: [published, { ...published, id: 2, draft: true }] });
+  await assert.rejects(draftRelease({ api, receipt }), /Multiple Releases/);
+  assert.deepEqual(api.writes, []);
+  api.list = async () => { throw new Error("GitHub HTTP 403"); };
+  await assert.rejects(draftRelease({ api, receipt }), /403/);
+  assert.deepEqual(api.writes, []);
+});
+
 test("draft retries still reject a different tag or incorrect prerelease flag", async () => {
   for (const mutation of [{ tag_name: "v0.13.0" }, { prerelease: true }]) {
     const api = apiFixture();
     const request = api.request.bind(api);
-    api.request = async (...args) => args[1] === `releases/tags/${tag}` ? { ...published, ...mutation } : request(...args);
+    api.request = async (...args) => args[1] === "releases/1" ? { ...published, ...mutation } : request(...args);
     await assert.rejects(draftRelease({ api, receipt }), /tag policy/);
     assert.deepEqual(api.writes, []);
   }
@@ -349,10 +402,63 @@ test("an unreadable evidence asset fails instead of being treated as an unenroll
 });
 
 test("a delayed/older event reconciles the highest published stable rather than the event tag", async () => {
-  const api = apiFixture({ releases: [{ ...published, id: 2, tag_name: "v0.9.0" }, published] });
+  const older = { ...published, id: 2, tag_name: "v0.9.0" };
+  const api = apiFixture({ releases: [older, published], evidenceByRelease: { 1: receipt, 2: { ...receipt, tag: older.tag_name } } });
   const registry = registryFixture({ existing: { digest } });
-  assert.equal((await promoteLatest({ api, registry, validate() {} })).tag, tag);
+  assert.equal((await promoteLatest({ api, registry, publishedRelease: older, validate() {} })).tag, tag);
   assert.equal(registry.copies.length, 1);
+});
+
+test("publication events reject temporary tags, missing evidence and mismatched Release state before any writes", async () => {
+  for (const mutation of [
+    { tag_name: "untagged-9931f697a03729380914" },
+    { tag_name: `${tag}-test.1` },
+    { draft: true },
+    { prerelease: true },
+    { id: 99 },
+    { tag_name: "v0.13.0" },
+  ]) {
+    const api = apiFixture(), registry = registryFixture({ existing: { digest } });
+    await assert.rejects(promoteLatest({ api, registry, publishedRelease: { ...published, ...mutation }, validate() {} }));
+    assert.deepEqual(api.writes, []);
+    assert.deepEqual(registry.copies, []);
+  }
+  const newer = { ...published, id: 3, tag_name: "v0.13.0" };
+  for (const evidence of [undefined, null, receipt]) {
+    const api = apiFixture({ releases: [published, newer], evidenceByRelease: {
+      1: receipt, ...(evidence === undefined ? {} : { 3: evidence }),
+    } });
+    const registry = registryFixture({ existing: { digest } });
+    await assert.rejects(promoteLatest({ api, registry, publishedRelease: newer, validate() {} }),
+      evidence === undefined ? /no release-image.json/ : /Invalid release image evidence/);
+    assert.deepEqual(api.writes, []);
+    assert.deepEqual(registry.copies, []);
+    assert.ok(!api.calls.some(([, path]) => path === "releases/1/assets"));
+  }
+});
+
+test("a valid publication event promotes its verified image", async () => {
+  const api = apiFixture(), registry = registryFixture({ existing: { digest } });
+  const result = await promoteLatest({ api, registry, publishedRelease: published, validate() {} });
+  assert.equal(result.tag, tag);
+  assert.equal(result.decision, "promote");
+  assert.deepEqual(registry.copies, [[`docker://${image}@${digest}`, `docker://${image}:latest`]]);
+});
+
+test("the promotion command reads and rejects invalid publication event payloads before contacting GitHub", t => {
+  const root = mkdtempSync(join(tmpdir(), "talus-release-event-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const eventPath = join(root, "event.json");
+  for (const [event, error] of [
+    [{}, /Publication event is missing its Release/],
+    [{ release: { ...published, tag_name: "untagged-9931f697a03729380914" } }, /must use a stable vX.Y.Z tag/],
+  ]) {
+    writeFileSync(eventPath, JSON.stringify(event));
+    assert.throws(() => execFileSync(process.execPath, [fileURLToPath(new URL("../.github/scripts/release.mjs", import.meta.url)), "promote"], {
+      env: { ...process.env, GITHUB_REPOSITORY: repository, GITHUB_EVENT_NAME: "release", GITHUB_EVENT_PATH: eventPath },
+      stdio: ["ignore", "pipe", "pipe"], timeout: 5_000,
+    }), result => result.status === 1 && error.test(String(result.stderr)));
+  }
 });
 
 test("promotion retries and a newer current latest never rewrite the image", async () => {
