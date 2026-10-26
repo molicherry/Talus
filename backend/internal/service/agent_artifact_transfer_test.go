@@ -34,7 +34,7 @@ func TestAgentArtifactPullResumesCachesAndRejectsCorruption(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("If-Range") != `"`+a.SHA256+`"` {
 					t.Error("download authentication/validator missing")
-					http.Error(w, "unauthorized", 401)
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
 					return
 				}
 				mu.Lock()

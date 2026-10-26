@@ -303,13 +303,16 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 			dir := t.TempDir()
 			agentprototest.WriteArtifacts(t, dir, "windows-test")
 			monitor := NewResidentMonitor(agents, servers, NewAgentDeploymentService(sshSvc, dir), "https://hub.example", false, 5)
-			monitor.installJob(ctx, node, "desired", "config")
+			installErr := monitor.installJob(ctx, node, "desired", "config")
 			after, err := agents.Get(ctx, srv.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			switch scenario {
 			case "success", "remove-pending", "remove-failure", "remove-invalid":
+				if installErr != nil {
+					t.Fatalf("Windows installation failed: %v", installErr)
+				}
 				if after.Deployment != "ready" || after.InstallOS != "windows" || after.InstallHome == nil || *after.InstallHome != "C:/ProgramData" || len(after.PendingInstallLayouts) != 0 {
 					t.Fatalf("installation not persisted: %+v", after)
 				}
@@ -346,15 +349,15 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 					t.Fatalf("removal failure not propagated: %v", err)
 				}
 			case "hash-mismatch":
-				if after.DeployError != ReasonAgentHashMismatch || launched.Load() {
+				if ReasonFromError(installErr) != ReasonAgentHashMismatch || after.DeployError != ReasonAgentHashMismatch || launched.Load() {
 					t.Fatal("unverified executable activated")
 				}
 			case "health-failure":
-				if after.DeployError != ReasonAgentHealthCheckFailed || len(after.PendingInstallLayouts) != 1 || after.PendingInstallLayouts[0].OS != "windows" {
+				if ReasonFromError(installErr) != ReasonAgentHealthCheckFailed || after.DeployError != ReasonAgentHealthCheckFailed || len(after.PendingInstallLayouts) != 1 || after.PendingInstallLayouts[0].OS != "windows" {
 					t.Fatal("failed install lost cleanup layout")
 				}
 			case "no-admin":
-				if after.DeployError != reasonWindowsService || prepared.Load() || remote.count("sftp.upload ") != 0 {
+				if ReasonFromError(installErr) != reasonWindowsService || after.DeployError != reasonWindowsService || prepared.Load() || remote.count("sftp.upload ") != 0 {
 					t.Fatal("unprivileged account modified Windows host")
 				}
 			}

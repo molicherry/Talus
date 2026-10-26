@@ -129,7 +129,7 @@ func TestResidentSchedulerBoundsJobsBacksOffAndResetsDesiredState(t *testing.T) 
 		// Once the base reaches its cap, adjacent jitter intervals overlap;
 		// an individual capped delay need not exceed the previous sample.
 		if failures <= 4 && delay <= previous {
-			t.Fatal(fmt.Sprintf("retry did not back off after %d failures", failures))
+			t.Fatalf("retry did not back off after %d failures", failures)
 		}
 		previous = delay
 	}

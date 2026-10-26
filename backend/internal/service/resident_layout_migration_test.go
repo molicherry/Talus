@@ -190,10 +190,13 @@ func newResidentMigrationFixture(t *testing.T, oldUID int, oldHome string, curre
 
 func (f residentMigrationFixture) install(t *testing.T, node model.AgentNode) model.AgentNode {
 	t.Helper()
-	f.monitor.installJob(context.Background(), node, "new-artifact", "new-config")
+	installErr := f.monitor.installJob(context.Background(), node, "new-artifact", "new-config")
 	after, err := f.agents.Get(f.ctx, node.ServerID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if (installErr == nil) != (after.Deployment == "ready") {
+		t.Fatalf("job result disagrees with persisted state: err=%v deployment=%q reason=%q", installErr, after.Deployment, after.DeployError)
 	}
 	return after
 }

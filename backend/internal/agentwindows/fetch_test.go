@@ -57,7 +57,7 @@ func TestWindowsArtifactPullResumesAndReusesVerifiedCache(t *testing.T) {
 			var ranges []string
 			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Header.Get("Authorization") != "Bearer "+token {
-					http.Error(w, "bad token", 401)
+					http.Error(w, "bad token", http.StatusUnauthorized)
 					return
 				}
 				mu.Lock()

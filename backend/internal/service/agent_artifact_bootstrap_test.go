@@ -59,7 +59,7 @@ func TestAgentArtifactBootstrapUsesPullAndFallsBackToSFTP(t *testing.T) {
 					return
 				}
 				if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("a", 64) {
-					http.Error(w, "bad token", 401)
+					http.Error(w, "bad token", http.StatusUnauthorized)
 					return
 				}
 				if unavailable {
