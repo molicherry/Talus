@@ -28,14 +28,14 @@ func TestWindowsArtifactPullResumesAndReusesVerifiedCache(t *testing.T) {
 	if err != nil {
 		t.Skip("PowerShell unavailable")
 	}
-	for _, scenario := range []string{"resume", "range-ignored", "corrupt", "installed-reuse", "sftp-cache"} {
+	for _, scenario := range []string{"resume", "range-ignored", "corrupt", "installed-reuse", "sftp-cache", "busy", "busy-resume", "rate-limited", "redirect", "redirect-resume", "bad-gateway", "interrupted", "deadline"} {
 		t.Run(scenario, func(t *testing.T) {
 			payload := bytes.Repeat([]byte("windows-agent"), 4096)
 			sum := sha256.Sum256(payload)
 			digest := hex.EncodeToString(sum[:])
 			token := strings.Repeat("a", 64)
-			base := filepath.Join(t.TempDir(), "install ' path")
-			stage := filepath.Join(base, "staging", "attempt")
+			layout := Layout{Home: t.TempDir(), InstallID: "install ' path", Attempt: "attempt"}
+			base, stage := layout.Base(), layout.Stage()
 			cache := filepath.Join(base, "cache")
 			if err := os.MkdirAll(stage, 0700); err != nil {
 				t.Fatal(err)
@@ -43,7 +43,7 @@ func TestWindowsArtifactPullResumesAndReusesVerifiedCache(t *testing.T) {
 			if err := os.MkdirAll(cache, 0700); err != nil {
 				t.Fatal(err)
 			}
-			if scenario == "resume" || scenario == "range-ignored" {
+			if scenario == "resume" || scenario == "range-ignored" || strings.HasSuffix(scenario, "-resume") {
 				if err := os.WriteFile(filepath.Join(cache, digest+".part"), payload[:57], 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -62,8 +62,33 @@ func TestWindowsArtifactPullResumesAndReusesVerifiedCache(t *testing.T) {
 				}
 				mu.Lock()
 				ranges = append(ranges, r.Header.Get("Range"))
+				count := len(ranges)
 				mu.Unlock()
 				w.Header().Set("ETag", `"`+digest+`"`)
+				status := map[string]int{"busy": 503, "busy-resume": 503, "rate-limited": 429, "redirect": 302, "redirect-resume": 302, "bad-gateway": 502}[scenario]
+				if status != 0 {
+					w.Header().Set("Location", "https://other.example/artifact")
+					w.WriteHeader(status)
+					_, _ = w.Write(payload)
+					return
+				}
+				if (scenario == "interrupted" || scenario == "deadline") && count == 1 {
+					w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+					_, _ = w.Write(payload[:len(payload)/2])
+					w.(http.Flusher).Flush()
+					if scenario == "deadline" {
+						select {
+						case <-r.Context().Done():
+						case <-time.After(3 * time.Second):
+						}
+					} else {
+						conn, _, err := w.(http.Hijacker).Hijack()
+						if err == nil {
+							_ = conn.Close()
+						}
+					}
+					return
+				}
 				if scenario == "range-ignored" {
 					r.Header.Del("Range")
 				}
@@ -81,15 +106,20 @@ func TestWindowsArtifactPullResumesAndReusesVerifiedCache(t *testing.T) {
 				if err := os.WriteFile(config, raw, 0600); err != nil {
 					t.Fatal(err)
 				}
-				vars := "$ErrorActionPreference='Stop'\n$base=" + Quote(base) + "\n$root=" + Quote(base) + "\n$stage=" + Quote(stage) + "\n$fetchConfig=" + Quote(config) + "\n$digest=" + Quote(digest) + "\n$mode=" + Quote(mode) + "\n$size=" + strconv.Itoa(len(payload)) + "L\n$seconds=10\n$name='test'\n"
+				seconds := 10
+				if scenario == "deadline" {
+					seconds = 1
+				}
 				stubs := "function Assert-Admin {}\nfunction Protect-Directory($p) { Assert-Path $p; [void][IO.Directory]::CreateDirectory($p) }\nfunction Lock-Install { return [IO.File]::Open((Join-Path $base '.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None) }\n"
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 				defer cancel()
 				scriptPath := filepath.Join(stage, "fetch.ps1")
-				if err := os.WriteFile(scriptPath, []byte("\xef\xbb\xbf"+vars+common+stubs+fetch), 0600); err != nil {
+				script := []byte(strings.Replace(string(layout.FetchFile(config, digest, int64(len(payload)), mode, 10)), common, common+stubs, 1))
+				if err := os.WriteFile(scriptPath, script, 0600); err != nil {
 					t.Fatal(err)
 				}
-				cmd := exec.CommandContext(ctx, ps, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", scriptPath)
+				scriptHash := sha256.Sum256(script)
+				cmd := exec.CommandContext(ctx, ps, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", RunFetch(scriptPath, hex.EncodeToString(scriptHash[:]), seconds))
 				cmd.Env = append(os.Environ(), "NO_PROXY=127.0.0.1,localhost", "no_proxy=127.0.0.1,localhost")
 				out, err := cmd.CombinedOutput()
 				code := 0
@@ -109,6 +139,14 @@ func TestWindowsArtifactPullResumesAndReusesVerifiedCache(t *testing.T) {
 				return code, string(out)
 			}
 			mode := "pull"
+			if scenario == "interrupted" || scenario == "deadline" {
+				if code, out := run(mode); code != 76 {
+					t.Fatalf("interruption lost progress classification: %d %s", code, out)
+				}
+				if p, err := os.ReadFile(filepath.Join(cache, digest+".part")); err != nil || !bytes.Equal(p, payload[:len(payload)/2]) {
+					t.Fatalf("partial bytes not retained: %d %v", len(p), err)
+				}
+			}
 			if scenario == "sftp-cache" {
 				mode = "store"
 				if err := os.WriteFile(filepath.Join(stage, "agent.exe"), payload, 0600); err != nil {
@@ -116,6 +154,21 @@ func TestWindowsArtifactPullResumesAndReusesVerifiedCache(t *testing.T) {
 				}
 			}
 			code, out := run(mode)
+			wantFailure := map[string]int{"busy": 79, "busy-resume": 79, "rate-limited": 79, "redirect": 75, "redirect-resume": 75, "bad-gateway": 75}[scenario]
+			if wantFailure != 0 {
+				if code != wantFailure {
+					t.Fatalf("incorrect HTTP failure classification: %d want=%d %s", code, wantFailure, out)
+				}
+				p, err := os.ReadFile(filepath.Join(cache, digest+".part"))
+				if strings.HasSuffix(scenario, "-resume") {
+					if err != nil || !bytes.Equal(p, payload[:57]) {
+						t.Fatalf("HTTP error lost or polluted partial bytes: %d %v", len(p), err)
+					}
+				} else if len(p) != 0 {
+					t.Fatal("HTTP error body became artifact progress")
+				}
+				return
+			}
 			if scenario == "corrupt" {
 				if code != 77 {
 					t.Fatalf("corrupt bytes accepted: %d %s", code, out)

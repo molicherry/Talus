@@ -20,7 +20,7 @@ import (
 )
 
 func TestAgentArtifactPullResumesCachesAndRejectsCorruption(t *testing.T) {
-	for _, scenario := range []string{"interrupted", "range-ignored", "corrupt", "installed-reuse", "sftp-cache"} {
+	for _, scenario := range []string{"interrupted", "range-ignored", "corrupt", "installed-reuse", "sftp-cache", "redirect", "redirect-resume", "busy", "busy-resume", "rate-limited", "bad-gateway", "missing-hash"} {
 		t.Run(scenario, func(t *testing.T) {
 			payload := bytes.Repeat([]byte("verified-agent-bytes"), 16<<10)
 			a := agentproto.Artifact{SHA256: repository.TokenHash(string(payload)), Size: int64(len(payload))}
@@ -42,6 +42,13 @@ func TestAgentArtifactPullResumesCachesAndRejectsCorruption(t *testing.T) {
 				count := len(ranges)
 				mu.Unlock()
 				w.Header().Set("ETag", `"`+a.SHA256+`"`)
+				status := map[string]int{"redirect": 302, "redirect-resume": 302, "busy": 503, "busy-resume": 503, "rate-limited": 429, "bad-gateway": 502}[scenario]
+				if status != 0 {
+					w.Header().Set("Location", "https://other.example/artifact")
+					w.WriteHeader(status)
+					_, _ = w.Write(payload)
+					return
+				}
 				if scenario == "interrupted" && count == 1 {
 					w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
 					w.WriteHeader(200)
@@ -72,7 +79,7 @@ func TestAgentArtifactPullResumesCachesAndRejectsCorruption(t *testing.T) {
 				}
 			}
 			part := filepath.Join(base, "cache", a.SHA256+".part")
-			if scenario == "range-ignored" {
+			if scenario == "range-ignored" || strings.HasSuffix(scenario, "-resume") {
 				if err := os.WriteFile(part, payload[:91], 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -93,6 +100,17 @@ func TestAgentArtifactPullResumesCachesAndRejectsCorruption(t *testing.T) {
 				defer cancel()
 				cmd := exec.CommandContext(ctx, "sh", "-c", linuxArtifactCommand(base, current, next, config, mode, a, 8))
 				cmd.Env = append(os.Environ(), "NO_PROXY=127.0.0.1,localhost", "no_proxy=127.0.0.1,localhost")
+				if scenario == "missing-hash" {
+					bin := t.TempDir()
+					rm, err := exec.LookPath("rm")
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Symlink(rm, filepath.Join(bin, "rm")); err != nil {
+						t.Fatal(err)
+					}
+					cmd.Env = append(cmd.Env, "PATH="+bin)
+				}
 				out, err := cmd.CombinedOutput()
 				code := 0
 				if err != nil {
@@ -124,6 +142,20 @@ func TestAgentArtifactPullResumesCachesAndRejectsCorruption(t *testing.T) {
 				mode = "store"
 			}
 			out, code := run("second", mode)
+			wantFailure := map[string]int{"redirect": 75, "redirect-resume": 75, "busy": 79, "busy-resume": 79, "rate-limited": 79, "bad-gateway": 75, "missing-hash": 78}[scenario]
+			if wantFailure != 0 {
+				if code != wantFailure {
+					t.Fatalf("incorrect failure classification: code=%d want=%d output=%s", code, wantFailure, out)
+				}
+				if strings.HasSuffix(scenario, "-resume") {
+					if p, err := os.ReadFile(part); err != nil || !bytes.Equal(p, payload[:91]) {
+						t.Fatalf("HTTP error lost or polluted existing progress: %d %v", len(p), err)
+					}
+				} else if p, _ := os.ReadFile(part); len(p) != 0 {
+					t.Fatal("HTTP error body became artifact progress")
+				}
+				return
+			}
 			if scenario == "corrupt" {
 				if code != 77 {
 					t.Fatalf("corrupt artifact accepted: %d %s", code, out)

@@ -121,9 +121,6 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 					if !residentInstallNeeded(n, desired, config, lastContact, m.now()) {
 						continue
 					}
-					if n.LastAttempt != nil && time.Since(*n.LastAttempt) < time.Minute {
-						continue
-					}
 					jobCtx := context.WithValue(ctx, residentSettingsKey{}, desiredSettings)
 					key := fmt.Sprintf("%s:%s:%d", desired, config, s.ConnectionRevision)
 					m.scheduleInstall(jobCtx, n, epoch, key, &wg, func(ctx context.Context) error {

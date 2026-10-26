@@ -155,8 +155,10 @@ and a detached scheduled task performs activation and rollback.
 Talus does not automatically elevate an unprivileged login. Installation/repair
 has a twelve-minute budget after transfer admission. Transfer and activation each
 allow four concurrent jobs, with at most sixteen admitted jobs and one installer
-per node. Failed installs use jittered exponential backoff from at least one
-minute to at most fifteen minutes. Internal artifact GET/HEAD requests use node
-credentials, not API keys, and do not establish agent monitoring presence.
+per node. Interrupted pulls that saved new bytes and HTTP 429/503 retry after
+thirty seconds while retaining progress; other failures use jittered exponential
+backoff from at least one minute to at most fifteen minutes. Internal artifact
+GET/HEAD requests use node credentials, not API keys, and do not establish agent
+monitoring presence.
 Deployment problems and missing Hub configuration need administrator attention,
 not changes to the metric query or an assumption that the server is offline.

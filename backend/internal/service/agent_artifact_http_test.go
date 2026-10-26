@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vpsmanager/backend/internal/agentproto/agentprototest"
@@ -93,6 +94,80 @@ func TestAgentArtifactHTTPAuthorizationRangesAndVersionPinning(t *testing.T) {
 	router.ServeHTTP(w, r)
 	if w.Code != 404 {
 		t.Fatal("served bytes which no longer match the manifest digest")
+	}
+}
+
+type artifactDeadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (w *artifactDeadlineRecorder) SetWriteDeadline(at time.Time) error {
+	w.deadlines = append(w.deadlines, at)
+	return nil
+}
+
+func TestAgentArtifactHTTPDeadlinesAndCapacity(t *testing.T) {
+	m, _ := monitorFixture()
+	dir := t.TempDir()
+	agentprototest.WriteArtifacts(t, dir, "deadline-test")
+	m.deployer = NewAgentDeploymentService(nil, dir)
+	manifest, err := m.deployer.Manifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/agent/artifacts/" + manifest.Agents[0].SHA256
+	router := chi.NewRouter()
+	router.Use(middleware.WriteDeadline)
+	router.Get("/api/v1/agent/artifacts/{sha256}", m.AgentArtifact)
+	router.Head("/api/v1/agent/artifacts/{sha256}", m.AgentArtifact)
+	for _, tc := range []struct {
+		name, method, path string
+		auth, busy         bool
+		status             int
+	}{
+		{"anonymous", "GET", path, false, false, 401},
+		{"unknown-digest", "GET", "/api/v1/agent/artifacts/unknown", true, false, 404},
+		{"unmatched-route", "GET", path + "/extra", true, false, 404},
+		{"wrong-method", "POST", path, true, false, 405},
+		{"busy", "GET", path, true, true, 503},
+		{"stream", "GET", path, true, false, 200},
+		{"head", "HEAD", path, true, false, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.busy {
+				for i := 0; i < cap(m.artifactSlots); i++ {
+					m.artifactSlots <- struct{}{}
+				}
+				defer func() {
+					for len(m.artifactSlots) != 0 {
+						<-m.artifactSlots
+					}
+				}()
+			}
+			r := httptest.NewRequest(tc.method, tc.path, nil)
+			if tc.auth {
+				r.Header.Set("Authorization", "Bearer "+strings.Repeat("a", 64))
+			}
+			w := &artifactDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+			router.ServeHTTP(w, r)
+			if w.Code != tc.status || len(w.deadlines) == 0 {
+				t.Fatalf("unprotected request or wrong response: status=%d deadlines=%v", w.Code, w.deadlines)
+			}
+			if d := time.Until(w.deadlines[0]); d < 14*time.Second || d > 15*time.Second {
+				t.Fatalf("ordinary request lost its default write budget: %v", d)
+			}
+			if tc.status == 200 {
+				if d := time.Until(w.deadlines[len(w.deadlines)-1]); len(w.deadlines) < 2 || d < 29*time.Second || d > 30*time.Second {
+					t.Fatalf("artifact stream did not replace the short deadline: %v", w.deadlines)
+				}
+			} else if len(w.deadlines) != 1 {
+				t.Fatal("failed request extended the default write budget")
+			}
+			if tc.busy && w.Header().Get("Retry-After") != "30" {
+				t.Fatal("capacity response omitted its retry interval")
+			}
+		})
 	}
 }
 

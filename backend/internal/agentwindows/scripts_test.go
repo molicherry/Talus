@@ -30,7 +30,7 @@ func TestWindowsCommandQuotingAndLength(t *testing.T) {
 		t.Fatalf("UTF-16 roundtrip = %q", got)
 	}
 	l := Layout{Home: "C:/Program Data/部署 ' data", InstallID: "1b46756d8aaf43ebaed9a142ed766d58", Attempt: "32b16cc9fb5643348e5b449837c52d19"}
-	for _, script := range []string{Probe, Context, l.Prepare(), RunFetch(l.Stage()+"/agent.exe.fetch.ps1", strings.Repeat("a", 64)), l.Launch(strings.Repeat("c", 64)), l.Wait(ActivationWaitSeconds), l.PrepareRemoval(), l.RemoveDetached(), l.WaitRemoval(2)} {
+	for _, script := range []string{Probe, Context, l.Prepare(), RunFetch(l.Stage()+"/agent.exe.fetch.ps1", strings.Repeat("a", 64), 300), l.Launch(strings.Repeat("c", 64)), l.Wait(ActivationWaitSeconds), l.PrepareRemoval(), l.RemoveDetached(), l.WaitRemoval(2)} {
 		if Command(script) != Command(strings.ReplaceAll(strings.ReplaceAll(script, "\r\n", "\n"), "\n", "\r\n")) {
 			t.Fatal("Windows checkout changed command transport")
 		}

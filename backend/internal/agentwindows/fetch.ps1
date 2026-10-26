@@ -45,7 +45,9 @@ try {
     try {
       $request=[Net.HttpWebRequest]::Create($uri)
       $request.AllowAutoRedirect=$false
-      $request.Timeout=10000
+      $remaining=[int][Math]::Ceiling(($seconds-$clock.Elapsed.TotalSeconds)*1000)
+      if ($remaining -le 0) { throw 'Artifact transfer deadline reached' }
+      $request.Timeout=[Math]::Min(10000,$remaining)
       $request.ReadWriteTimeout=30000
       $request.Headers['Authorization']='Bearer '+$settings.token
       $request.Headers['Accept-Encoding']='identity'
@@ -53,12 +55,16 @@ try {
       if ($offset -gt 0) { $request.AddRange($offset) }
       try { $response=$request.GetResponse() }
       catch [Net.WebException] {
+        if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -in @(429,503)) {
+          $_.Exception.Response.Close(); [Console]::WriteLine('TALUS_PULL_BUSY'); exit 79
+        }
         if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 416 -and $offset -gt 0) {
           $_.Exception.Response.Close(); Remove-Item -LiteralPath $part -Force; continue
         }
         throw
       }
       $status=[int]$response.StatusCode
+      if ($status -notin @(200,206)) { throw 'Artifact HTTP path unavailable' }
       if ($offset -gt 0 -and ($status -ne 206 -or $response.Headers['ETag'] -ne ('"'+$digest+'"'))) {
         Remove-Item -LiteralPath $part -Force; continue
       }
@@ -67,7 +73,15 @@ try {
       $file=[IO.File]::Open($part,[IO.FileMode]::Append,[IO.FileAccess]::Write,[IO.FileShare]::None)
       $buffer=New-Object byte[] 65536
       $written=$offset
-      while (($count=$stream.Read($buffer,0,$buffer.Length)) -gt 0) {
+      while ($true) {
+        $remaining=[int][Math]::Ceiling(($seconds-$clock.Elapsed.TotalSeconds)*1000)
+        if ($remaining -le 0) { throw 'Artifact transfer deadline reached' }
+        $read=$stream.ReadAsync($buffer,0,$buffer.Length)
+        if (!$read.Wait([Math]::Min(30000,$remaining))) {
+          $request.Abort(); throw 'Artifact transfer read deadline reached'
+        }
+        $count=$read.GetAwaiter().GetResult()
+        if ($count -eq 0) { break }
         if ($written+$count -gt $size) { throw 'Artifact exceeds expected size' }
         $file.Write($buffer,0,$count); $written+=$count
         if ($clock.Elapsed.TotalSeconds -ge $seconds) { throw 'Artifact transfer deadline reached' }

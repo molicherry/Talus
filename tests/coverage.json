@@ -5320,7 +5320,7 @@
         "REQ-08"
       ],
       "spec_ref": "tests/coverage.json#/cases/71/scenario",
-      "scenario": "Download only authenticated immutable Agent artifacts, resume and cache verified bytes, separate transfer and activation capacity, and retry failed installations with bounded jittered backoff.",
+      "scenario": "Download only authenticated immutable Agent artifacts, cache verification until file metadata changes, resume verified bytes with short progress/capacity retries, separate transfer and activation capacity, and back off node failures.",
       "implementations": [
         {
           "implementation_id": "impl-08-09-http-ranges",
@@ -5353,7 +5353,7 @@
           },
           "automation_status": "implemented",
           "required": true,
-          "verification": "The real Linux bootstrap resumes interrupted HTTP bytes, safely restarts when Range is ignored, rejects corrupt content and reuses cached or installed artifacts without another download."
+          "verification": "The real Linux bootstrap resumes interrupted bytes, safely handles ignored Range, rejects corrupt content, classifies redirects and 429/503 without polluting progress, reports missing hash tools and reuses cached or installed artifacts."
         },
         {
           "implementation_id": "impl-08-09-stage-capacity",
@@ -5386,7 +5386,7 @@
           },
           "automation_status": "implemented",
           "required": false,
-          "verification": "Execute the Windows download body on available PowerShell to verify range resumption, ignored-range recovery, checksum rejection and cache reuse; native Windows acceptance covers real ACLs."
+          "verification": "Execute the Windows download body on available PowerShell to verify resumption, ignored Range, checksum rejection, cache reuse, HTTP error classification and bounded reads that retain progress; native Windows acceptance covers real ACLs."
         },
         {
           "implementation_id": "impl-08-09-bootstrap-fallback",
@@ -5397,7 +5397,51 @@
           },
           "automation_status": "implemented",
           "required": true,
-          "verification": "The real SSH/SFTP bootstrap avoids binary uploads after a successful HTTP pull, falls back and populates the same verified cache when HTTP is unavailable, and reuses the artifact on configuration-only retries."
+          "verification": "The real SSH/SFTP bootstrap avoids binary uploads on HTTP success or transient progress/capacity outcomes, falls back for unavailable and redirected HTTP, reports missing hash tools, and caches binaries across configuration-only retries."
+        },
+        {
+          "implementation_id": "impl-08-09-verification-cache",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_cache_test.go",
+            "symbol": "TestAgentArtifactVerificationCachesAndInvalidatesFileMetadata"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Unchanged opened files are hashed once across repeated requests; inode replacement and same-size writes invalidate verification and reject corrupted bytes."
+        },
+        {
+          "implementation_id": "impl-08-09-manifest-cache",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_cache_test.go",
+            "symbol": "TestAgentArtifactManifestCacheInvalidatesAndReturnsOwnedCopies"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The cached manifest returns independent values and reloads after file changes, refusing invalid replacements."
+        },
+        {
+          "implementation_id": "impl-08-09-http-deadlines-capacity",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_http_test.go",
+            "symbol": "TestAgentArtifactHTTPDeadlinesAndCapacity"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Unauthorized, missing, wrong-method and saturated artifact requests retain ordinary write deadlines; valid streams replace the deadline and capacity responses include Retry-After."
+        },
+        {
+          "implementation_id": "impl-08-09-transfer-short-retry",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_scheduler_test.go",
+            "symbol": "TestResidentSchedulerRetriesTransferProgressAndCapacityAfterThirtySeconds"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Repeated progressing or busy downloads retry after thirty seconds without growing the node failure count; persisted last attempts still enforce the restart minimum."
         }
       ]
     }

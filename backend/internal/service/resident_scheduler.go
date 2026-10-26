@@ -12,6 +12,7 @@ import (
 )
 
 const residentMaxInstallJobs = 16
+const residentTransferRetryDelay = 30 * time.Second
 
 type residentRetry struct {
 	key      string
@@ -29,7 +30,13 @@ func (m *ResidentMonitor) scheduleInstall(ctx context.Context, n model.AgentNode
 		return false
 	}
 	retry := m.installRetries[n.ServerID]
-	if retry.key == key && m.now().Before(retry.due) {
+	if retry.key == key {
+		if m.now().Before(retry.due) {
+			return false
+		}
+	} else if retry.key == "" && n.LastAttempt != nil && m.now().Sub(*n.LastAttempt) < time.Minute {
+		// After a restart there is no in-memory outcome; retain the persisted
+		// minimum. A known progressing/busy pull can retry after 30s instead.
 		return false
 	}
 	jobCtx, stop := context.WithCancel(ctx)
@@ -47,8 +54,12 @@ func (m *ResidentMonitor) scheduleInstall(ctx context.Context, n model.AgentNode
 			if retry.key != key {
 				retry = residentRetry{key: key}
 			}
-			retry.failures++
-			retry.due = m.now().Add(residentRetryDelay(retry.failures))
+			delay := residentTransferRetryDelay
+			if !errors.Is(err, errArtifactPullProgress) && !errors.Is(err, errArtifactPullBusy) {
+				retry.failures++
+				delay = residentRetryDelay(retry.failures)
+			}
+			retry.due = m.now().Add(delay)
 			m.installRetries[n.ServerID] = retry
 			slog.Info("resident agent retry scheduled", "server_id", n.ServerID, "failures", retry.failures, "retry_after_ms", retry.due.Sub(m.now()).Milliseconds())
 		}

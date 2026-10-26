@@ -134,3 +134,43 @@ func TestResidentSchedulerBoundsJobsBacksOffAndResetsDesiredState(t *testing.T) 
 		previous = delay
 	}
 }
+
+func TestResidentSchedulerRetriesTransferProgressAndCapacityAfterThirtySeconds(t *testing.T) {
+	for _, outcome := range []error{errArtifactPullProgress, errArtifactPullBusy} {
+		t.Run(outcome.Error(), func(t *testing.T) {
+			m := NewResidentMonitor(nil, nil, nil, "", false, 1)
+			now := time.Now()
+			m.now = func() time.Time { return now }
+			n := model.AgentNode{ServerID: 1}
+			var wg sync.WaitGroup
+			for attempt := 0; attempt < 4; attempt++ {
+				if !m.scheduleInstall(context.Background(), n, 0, "v1", &wg, func(context.Context) error { return fmt.Errorf("download: %w", outcome) }) {
+					t.Fatal("transfer did not resume at short retry deadline")
+				}
+				wg.Wait()
+				retry := m.installRetries[1]
+				if retry.failures != 0 || retry.due.Sub(now) != 30*time.Second {
+					t.Fatalf("progress/capacity counted as node failure: %+v", retry)
+				}
+				lastAttempt := now
+				n.LastAttempt = &lastAttempt
+				now = now.Add(29 * time.Second)
+				if m.scheduleInstall(context.Background(), n, 0, "v1", &wg, func(context.Context) error { return nil }) {
+					t.Fatal("ignored short retry deadline")
+				}
+				now = now.Add(time.Second)
+			}
+			// A restarted Hub has no transient outcome and retains the persisted
+			// one-minute minimum instead of retrying in a tight loop.
+			m.installRetries = make(map[uint]residentRetry)
+			if m.scheduleInstall(context.Background(), n, 0, "v1", &wg, func(context.Context) error { return nil }) {
+				t.Fatal("restart bypassed persisted last-attempt protection")
+			}
+			now = now.Add(30 * time.Second)
+			if !m.scheduleInstall(context.Background(), n, 0, "v1", &wg, func(context.Context) error { return nil }) {
+				t.Fatal("persisted protection exceeded one minute")
+			}
+			wg.Wait()
+		})
+	}
+}

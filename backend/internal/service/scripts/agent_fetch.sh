@@ -3,6 +3,12 @@
 umask 077
 trap 'rm -f -- "$fetch_config"' EXIT
 trap 'exit 1' HUP INT TERM
+if command -v sha256sum >/dev/null; then hash_tool=sha256sum
+elif command -v shasum >/dev/null; then hash_tool=shasum
+else
+  printf '%s\n' TALUS_HASH_TOOL_MISSING
+  exit 78
+fi
 test ! -L "$cache_dir" && mkdir -p -- "$cache_dir" && chmod 0700 "$cache_dir"
 cache="$cache_dir/$digest.bin"
 part="$cache_dir/$digest.part"
@@ -19,9 +25,9 @@ for file in "$cache_dir"/*; do
   case "$file" in "$cache"|"$part") ;; *) rm -f -- "$file" ;; esac
 done
 hash_file() {
-  if command -v sha256sum >/dev/null; then sha256sum < "$1"
-  elif command -v shasum >/dev/null; then shasum -a 256 < "$1"
-  else return 1; fi | { read -r sum rest; printf '%s' "$sum"; }
+  if test "$hash_tool" = sha256sum; then sum=$(sha256sum < "$1") || return 1
+  else sum=$(shasum -a 256 < "$1") || return 1; fi
+  printf '%s' "${sum%% *}"
 }
 valid_artifact() {
   test -f "$1" && test ! -L "$1" &&
@@ -61,18 +67,36 @@ if ! command -v curl >/dev/null; then
 fi
 offset=0
 if test -f "$part"; then offset=$(wc -c < "$part"); fi
-status=0
-http_code=$(curl --config "$fetch_config" --fail --silent --show-error \
-  --connect-timeout 10 --speed-time 30 --speed-limit 1 --max-time "$seconds" \
-  --max-filesize "$size" --continue-at - --output "$part" --write-out '%{http_code}') || status=$?
+pull() {
+  status=0
+  http_code=$(curl --config "$fetch_config" --fail --silent --show-error \
+    --connect-timeout 10 --speed-time 30 --speed-limit 1 --max-time "$seconds" \
+    --max-filesize "$size" --output "$part" --write-out '%{http_code}' "$@") || status=$?
+}
+pull --continue-at -
 # A proxy that ignores Range must never have a full response appended to a part.
-if test "$status" = 33 || test "$http_code" = 416; then
+if test "$http_code" = 416 || { test "$http_code" = 200 && test "$status" = 33; }; then
   rm -f -- "$part"
   offset=0
-  status=0
-  curl --config "$fetch_config" --fail --silent --show-error \
-    --connect-timeout 10 --speed-time 30 --speed-limit 1 --max-time "$seconds" \
-    --max-filesize "$size" --output "$part" || status=$?
+  pull
+fi
+# Capacity contention is retried without starting another full SFTP transfer.
+# curl --fail leaves existing partial bytes untouched on 429/503 responses.
+case "$http_code" in
+  429|503) printf '%s\n' TALUS_PULL_BUSY; exit 79 ;;
+  200|206) ;;
+  *)
+    # Redirect/error bodies are not artifact progress. A resumed curl refuses
+    # to append these responses; a new download may have saved their body.
+    if test "$offset" = 0; then rm -f -- "$part"; fi
+    printf '%s\n' TALUS_PULL_UNAVAILABLE
+    exit 75
+    ;;
+esac
+if test "$offset" = 0 && test "$http_code" != 200; then
+  rm -f -- "$part"
+  printf '%s\n' TALUS_PULL_UNAVAILABLE
+  exit 75
 fi
 if test "$status" != 0; then
   if test -f "$part" && test "$(wc -c < "$part")" -gt "$offset"; then

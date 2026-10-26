@@ -39,6 +39,10 @@ func TestWriteDeadlinePerRoute(t *testing.T) {
 		{"unrelated-delete", http.MethodDelete, "/api/v1/credentials/8", DefaultWriteBudget},
 		{"server-list", http.MethodGet, "/api/v1/servers", DefaultWriteBudget},
 		{"unrelated-post", http.MethodPost, "/api/v1/credentials", DefaultWriteBudget},
+		{"artifact-get", http.MethodGet, "/api/v1/agent/artifacts/digest", DefaultWriteBudget},
+		{"artifact-head", http.MethodHead, "/api/v1/agent/artifacts/digest", DefaultWriteBudget},
+		{"artifact-unknown-route", http.MethodGet, "/api/v1/agent/artifacts/extra/path", DefaultWriteBudget},
+		{"artifact-wrong-method", http.MethodPost, "/api/v1/agent/artifacts/digest", DefaultWriteBudget},
 	}
 	handler := WriteDeadline(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	for _, tc := range cases {

@@ -134,7 +134,7 @@ func TestWindowsNativeDeploymentUpgradeRollbackAndRemoval(t *testing.T) {
 		if err := os.WriteFile(fetchPath, fetchScript, 0600); err != nil {
 			t.Fatal(err)
 		}
-		mustRun(RunFetch(fetchPath, hash(fetchScript)))
+		mustRun(RunFetch(fetchPath, hash(fetchScript), 300))
 		// Launch returns before activation completes; SCM and Task Scheduler
 		// must finish installation independently of this PowerShell process.
 		mustRun(v.Launch(hash(activation)))

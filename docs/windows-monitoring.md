@@ -115,7 +115,10 @@ with Range/If-Range; cached and downloaded bytes are checked with SHA256. The
 cache inherits SYSTEM/Administrators-only ACLs. Download scripts are uploaded as
 UTF-8 files with a BOM and verified before execution, avoiding cmd.exe's command
 length limit; credentials stay in a separate protected file removed by the
-download script. An unavailable HTTP path can fall back to SFTP. See
+download script. An unavailable HTTP path can fall back to SFTP; HTTP 429/503
+and interrupted pulls with new bytes retain progress and retry after thirty
+seconds. Reads are bounded by both an idle limit and the remaining transfer
+budget so progress can be reported before SSH cancellation. See
 [Monitoring agent upgrades](../README.md#monitoring-agent-upgrades) for shared
 transfer, queue and retry rules.
 

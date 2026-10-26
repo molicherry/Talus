@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,6 +29,7 @@ func (m *ResidentMonitor) AgentArtifact(w http.ResponseWriter, r *http.Request) 
 	case m.artifactSlots <- struct{}{}:
 		defer func() { <-m.artifactSlots }()
 	default:
+		w.Header().Set("Retry-After", "30")
 		http.Error(w, "artifact transfers busy", http.StatusServiceUnavailable)
 		return
 	}
@@ -48,28 +48,22 @@ func (m *ResidentMonitor) AgentArtifact(w http.ResponseWriter, r *http.Request) 
 		if artifact.SHA256 != digest {
 			continue
 		}
-		f, err := os.Open(filepath.Join(m.deployer.artifactsDir, artifact.File))
+		path := filepath.Join(m.deployer.artifactsDir, artifact.File)
+		f, err := os.Open(path)
 		if err != nil {
 			break
 		}
 		defer f.Close()
-		info, err := f.Stat()
-		if err != nil || !info.Mode().IsRegular() || info.Size() != artifact.Size {
-			break
-		}
 		if strings.Contains(r.Header.Get("Range"), ",") {
 			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", artifact.Size))
 			http.Error(w, "one byte range is supported", http.StatusRequestedRangeNotSatisfiable)
 			return
 		}
-		h := sha256.New()
-		if _, err = io.Copy(h, f); err != nil || hex.EncodeToString(h.Sum(nil)) != digest {
+		info, err := m.deployer.bundleCache.verify(f, path, artifact)
+		if err != nil {
 			break
 		}
-		if _, err = f.Seek(0, io.SeekStart); err != nil {
-			break
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), agentArtifactUploadBudget)
+		ctx, cancel := context.WithTimeout(r.Context(), agentArtifactTransferBudget)
 		defer cancel()
 		writer := &artifactResponseWriter{ResponseWriter: w, ctx: ctx}
 		writer.refreshDeadline()

@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,12 +37,9 @@ func (c artifactCountingChannel) Read(p []byte) (int, error) {
 // shell confined by its test-generated paths. HTTP success avoids binary SFTP;
 // an unavailable pull seeds the same verified cache through the fallback.
 func TestAgentArtifactBootstrapUsesPullAndFallsBackToSFTP(t *testing.T) {
-	for _, unavailable := range []bool{false, true} {
-		name := "http-pull"
-		if unavailable {
-			name = "sftp-fallback"
-		}
+	for _, name := range []string{"http-pull", "sftp-fallback", "redirect-fallback", "busy-retry", "progress-retry", "deadline-retry", "missing-hash"} {
 		t.Run(name, func(t *testing.T) {
+			unavailable := name == "sftp-fallback" || name == "redirect-fallback"
 			base := filepath.Join(t.TempDir(), "remote ' stage")
 			if err := os.MkdirAll(base, 0700); err != nil {
 				t.Fatal(err)
@@ -52,8 +51,9 @@ func TestAgentArtifactBootstrapUsesPullAndFallsBackToSFTP(t *testing.T) {
 				t.Fatal(err)
 			}
 			var requests atomic.Int32
+			var retryReady atomic.Bool
 			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requests.Add(1)
+				count := requests.Add(1)
 				if r.URL.Path != "/api/v1/agent/artifacts/"+a.SHA256 {
 					http.NotFound(w, r)
 					return
@@ -63,7 +63,32 @@ func TestAgentArtifactBootstrapUsesPullAndFallsBackToSFTP(t *testing.T) {
 					return
 				}
 				if unavailable {
-					http.Error(w, "temporarily unavailable", 503)
+					status := http.StatusNotFound
+					if name == "redirect-fallback" {
+						status = http.StatusFound
+					}
+					http.Error(w, "download unavailable", status)
+					return
+				}
+				if name == "busy-retry" && !retryReady.Load() {
+					http.Error(w, "transfers busy", http.StatusServiceUnavailable)
+					return
+				}
+				if (name == "progress-retry" || name == "deadline-retry") && count == 1 {
+					w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+					_, _ = w.Write(payload[:len(payload)/2])
+					w.(http.Flusher).Flush()
+					if name == "deadline-retry" {
+						select {
+						case <-r.Context().Done():
+						case <-time.After(5 * time.Second):
+						}
+					} else {
+						conn, _, err := w.(http.Hijacker).Hijack()
+						if err == nil {
+							_ = conn.Close()
+						}
+					}
 					return
 				}
 				w.Header().Set("ETag", `"`+a.SHA256+`"`)
@@ -88,6 +113,9 @@ func TestAgentArtifactBootstrapUsesPullAndFallsBackToSFTP(t *testing.T) {
 				cmd.Stdout = ch
 				cmd.Stderr = ch.Stderr()
 				cmd.Env = append(os.Environ(), "NO_PROXY=127.0.0.1,localhost", "no_proxy=127.0.0.1,localhost")
+				if name == "missing-hash" {
+					cmd.Env = append(cmd.Env, "PATH="+filepath.Join(base, "tools"))
+				}
 				code := uint32(0)
 				if err := cmd.Run(); err != nil {
 					code = 1
@@ -108,6 +136,43 @@ func TestAgentArtifactBootstrapUsesPullAndFallsBackToSFTP(t *testing.T) {
 			m := NewResidentMonitor(nil, nil, NewAgentDeploymentService(svc, local), hub.URL, true, 5)
 			cfg := agentwire.Config{HubURL: hub.URL, Token: strings.Repeat("a", 64), StateDir: filepath.Join(base, "outbox"), IntervalSeconds: 5, AllowHTTP: true}
 			next := filepath.Join(base, ".next-one")
+			if name == "missing-hash" {
+				if err := os.Mkdir(filepath.Join(base, "tools"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				rm, err := exec.LookPath("rm")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(rm, filepath.Join(base, "tools", "rm")); err != nil {
+					t.Fatal(err)
+				}
+				err = m.stageArtifact(context.Background(), lease, a, cfg, base, filepath.Join(base, "agent"), next, nil)
+				if ReasonFromError(err) != ReasonAgentToolMissing || requests.Load() != 0 || sftpBytes.Load() > a.Size/2 {
+					t.Fatalf("missing hash tool misclassified or transferred binary: %v", err)
+				}
+				if err := lease.releaseAndWait(); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if name == "busy-retry" || name == "progress-retry" || name == "deadline-retry" {
+				ctx := context.Background()
+				if name == "deadline-retry" {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, 4*time.Second)
+					defer cancel()
+				}
+				err := m.stageArtifact(ctx, lease, a, cfg, base, filepath.Join(base, "agent"), next, nil)
+				want := errArtifactPullBusy
+				if name == "progress-retry" || name == "deadline-retry" {
+					want = errArtifactPullProgress
+				}
+				if !errors.Is(err, want) || sftpBytes.Load() > a.Size/2 {
+					t.Fatalf("transient HTTP result triggered binary SFTP or lost classification: %v", err)
+				}
+				retryReady.Store(true)
+			}
 			if err := m.stageArtifact(context.Background(), lease, a, cfg, base, filepath.Join(base, "agent"), next, nil); err != nil {
 				t.Fatal(err)
 			}

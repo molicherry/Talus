@@ -110,7 +110,9 @@ Get-ScheduledTaskInfo -TaskName ($name + '-Remove')
 未完成下载通过 Range/If-Range 续传，缓存和下载内容均须通过 SHA256 校验。
 缓存继承 SYSTEM/Administrators 专属 ACL。下载脚本以带 BOM 的 UTF-8 文件上传，
 校验后执行，避免 cmd.exe 命令长度限制；凭据保存在另一个受保护的文件中，
-由下载脚本删除。HTTP 路径不可用时可回退 SFTP。公共传输、队列和重试规则见
+由下载脚本删除。HTTP 路径不可用时可回退 SFTP；HTTP 429/503 和已保存新增字节的
+中断会保留进度，在 30 秒后重试。读取同时受空闲上限及剩余传输预算约束，以便在
+SSH 取消前返回进度结果。公共传输、队列和重试规则见
 [监控 Agent 升级](README.zh-CN.md#监控-agent-升级)。
 
 ## 更换操作系统或 ProgramData

@@ -26,6 +26,12 @@ type artifactDownload struct {
 	AllowHTTP bool   `json:"allow_http,omitempty"`
 }
 
+// These are scheduling outcomes, not a broken node or an unusable HTTP route.
+var (
+	errArtifactPullProgress = errors.New("artifact pull interrupted; partial download retained")
+	errArtifactPullBusy     = errors.New("artifact pull temporarily busy")
+)
+
 func artifactCurlConfig(download artifactDownload, digest string) []byte {
 	quote := func(s string) string { return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) }
 	protocols := "=https"
@@ -67,7 +73,7 @@ func (m *ResidentMonitor) stageArtifact(ctx context.Context, lease *sshLease, ar
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, agentArtifactUploadBudget)
+	ctx, cancel := context.WithTimeout(ctx, agentArtifactTransferBudget)
 	defer cancel()
 	download := artifactDownload{URL: strings.TrimRight(cfg.HubURL, "/") + "/api/v1/agent/artifacts/" + artifact.SHA256, Token: cfg.Token, AllowHTTP: cfg.AllowHTTP}
 	configPath := next + ".fetch"
@@ -84,7 +90,9 @@ func (m *ResidentMonitor) stageArtifact(ctx context.Context, lease *sshLease, ar
 	run := func(mode string) (*ExecResult, error) {
 		seconds := 1
 		if deadline, ok := ctx.Deadline(); ok {
-			seconds = max(1, int(time.Until(deadline).Seconds()))
+			// Leave time for the script to flush its partial file and return a
+			// progress result before the SSH operation's outer deadline.
+			seconds = max(1, int((time.Until(deadline) - 3*time.Second).Seconds()))
 		}
 		if windows {
 			scriptPath := next + ".fetch.ps1"
@@ -93,7 +101,10 @@ func (m *ResidentMonitor) stageArtifact(ctx context.Context, lease *sshLease, ar
 				return nil, err
 			}
 			deadline, _ := ctx.Deadline()
-			return lease.execTransfer(ctx, agentwindows.Command(agentwindows.RunFetch(scriptPath, repository.TokenHash(string(script)))), max(0, time.Until(deadline)))
+			// Script upload also consumes the transfer budget. Pass the fresh
+			// remainder at invocation so a slow bootstrap still reports progress.
+			seconds = max(1, int((time.Until(deadline) - 3*time.Second).Seconds()))
+			return lease.execTransfer(ctx, agentwindows.Command(agentwindows.RunFetch(scriptPath, repository.TokenHash(string(script)), seconds)), max(0, time.Until(deadline)))
 		}
 		deadline, _ := ctx.Deadline()
 		return lease.execTransfer(ctx, linuxArtifactCommand(base, current, next, configPath, mode, artifact, seconds), max(0, time.Until(deadline)))
@@ -110,7 +121,13 @@ func (m *ResidentMonitor) stageArtifact(ctx context.Context, lease *sshLease, ar
 		return deployError(ReasonAgentHashMismatch, errors.New("downloaded artifact checksum mismatch"))
 	}
 	if r != nil && r.ExitCode == 76 {
-		return errors.New("artifact pull interrupted; partial download retained")
+		return errArtifactPullProgress
+	}
+	if r != nil && r.ExitCode == 78 {
+		return deployError(ReasonAgentToolMissing, errors.New("target has neither sha256sum nor shasum"))
+	}
+	if r != nil && r.ExitCode == 79 {
+		return errArtifactPullBusy
 	}
 	if r == nil || r.ExitCode != 75 || strings.TrimSpace(r.Stdout) != "TALUS_PULL_UNAVAILABLE" {
 		return errors.New("artifact cache preparation failed")
