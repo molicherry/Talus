@@ -87,6 +87,10 @@ platform-omission switch.
    rollback costs in both languages when applicable. Keep language markers and
    the `release-image.json` asset. The title defaults to the tag and may include
    a theme; automation identifies Releases by `tag_name` and preserves human edits.
+   Draft lookup includes every page of the Release list, then reads the matching
+   Release by ID; GitHub's by-tag endpoint only returns published Releases.
+   Duplicate Releases for the same tag fail for manual resolution instead of
+   selecting one or creating another draft.
 3. Publish the reviewed draft using the GitHub UI or a maintainer's own `gh`
    identity. Keep RCs marked pre-release. For an older stable backport, leave
    “Set as latest release” unchecked. CLI example:
@@ -100,6 +104,10 @@ platform-omission switch.
    copies the highest published stable with evidence to `latest` by its existing
    digest and marks it latest on GitHub. It does not rebuild. RC/test releases
    never advance either latest.
+   A publication event must refer to a published stable `vX.Y.Z` Release with
+   matching `release-image.json` evidence. Temporary `untagged-*` tags and
+   missing evidence fail explicitly instead of reporting success for an older
+   release. A valid delayed event still reconciles the highest enrolled stable.
 5. Verify the version image, Release and promotion before announcing `latest`.
    Version images are already available while drafts await review.
 
@@ -213,10 +221,18 @@ intervals are described in [update notifications](../README.md#update-notificati
 | --- | --- |
 | CI gate fails | Retry transient failures; source fixes need a new tag. Keep the failed tag; publish no image or Release. |
 | Image exists but draft creation fails | Rerun failed jobs; verify and reuse the existing image. Draft retries preserve human edits and evidence. |
+| Existing draft is missing its evidence asset | With the corrected draft lookup, rerun **Create Release draft** while its `release-image-evidence` artifact is available. It restores the original evidence to the same Release ID without rebuilding or changing reviewed notes. |
 | OCI archive expires | Archives last 7 days; rerun all CI after expiry. Existing version images remain immutable. |
 | Published Release fails promotion | Correct transient API/registry failures or notes, then retry promotion. Code/artifact mistakes need a new version. |
+| Publication uses an `untagged-*` tag or has no evidence | Publication-triggered promotion fails before writes. Investigate the Release association and recover the original tag/CI evidence; a successful recovery run for an older enrolled release does not establish that this version was released. |
 | Tag, evidence, CI or image mismatch | Preserve latest and investigate. Do not remove checks or rewrite evidence to force acceptance. |
 | No stable release has evidence yet | Recovery skips without changing images or Releases. Historical Releases without evidence are excluded. |
+
+Tag CI reruns use the workflow and script from that tag's commit. Merging a
+release-script fix into `main` does not update older tag runs; recover their
+drafts using the corrected script and original CI evidence, without moving the tag
+or bypassing validation. Draft repair only attaches missing evidence while the
+Release is still a draft; it does not publish the draft or advance `latest`.
 
 To trigger recovery manually from `main`:
 
