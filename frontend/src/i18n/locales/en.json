@@ -24,6 +24,8 @@
     "deployment": {
       "pending": "Awaiting deployment or configuration sync",
       "installing": "Deploying agent",
+      "resuming": "Waiting to resume download",
+      "waiting_for_capacity": "Waiting for download capacity",
       "ready": "Agent ready",
       "failed": "Agent deployment failed",
       "setup_required": "Monitoring setup required"
@@ -56,6 +58,8 @@
     "reasons": {
       "hub_url_required": "Set the node-reachable Hub HTTPS address in system settings.",
       "deployment_failed": "Agent deployment failed. Check SSH connectivity, credentials and service permissions; deployment retries automatically.",
+      "agent_artifact_resuming": "Download progress is saved; deployment will continue from the saved bytes.",
+      "agent_artifact_busy": "The download service is busy; deployment will retry automatically.",
       "ssh_host_key_unverified": "The node host key is not trusted yet. Verify the fingerprint and trust it before deploying.",
       "ssh_host_key_mismatch": "The node host key changed. Verify the new fingerprint before retrying.",
       "ssh_authentication_failed": "SSH authentication failed. Check the credential and whether the account may log in.",

@@ -9,16 +9,21 @@ export function AgentMonitoringStatus({ status, compact = false }: { status?: Mo
   const { isAdmin } = useAuth();
   if (!status) return null;
   const waitingForSample = status.data === "stale" && !status.last_sample_at;
-  // Setup and the first report are pending states, not evidence of a failure.
+  const transferWait = status.deployment === "pending"
+    && (status.deployment_error === "agent_artifact_resuming" || status.deployment_error === "agent_artifact_busy");
+  const deploymentLabel = transferWait
+    ? (status.deployment_error === "agent_artifact_resuming" ? "resuming" : "waiting_for_capacity")
+    : status.deployment;
+  // Setup, transfer waits and the first report are pending states.
   const issue = status.connection === "unreachable" || status.connection === "reconnecting"
     || status.deployment === "failed" || status.collection === "partial" || status.collection === "failed"
     || (status.data === "stale" && !waitingForSample)
     || Object.keys(status.errors ?? {}).length > 0
-    || Boolean(status.deployment_error && status.deployment_error !== "hub_url_required");
+    || Boolean(status.deployment_error && status.deployment_error !== "hub_url_required" && !transferWait);
   return (
     <div className={`mt-3 text-xs ${issue ? "text-warning" : "text-muted-foreground"}`}>
       <div className="flex flex-wrap gap-x-3 gap-y-1" aria-live="polite">
-        {status.deployment !== "ready" && <span>{t(`agentMonitor.deployment.${status.deployment}`)}</span>}
+        {status.deployment !== "ready" && <span>{t(`agentMonitor.deployment.${deploymentLabel}`)}</span>}
         <span>{t("agentMonitor.connectionLabel")}: {t(`agentMonitor.connection.${status.connection}`)}</span>
         <span>{t("agentMonitor.collectionLabel")}: {t(`agentMonitor.collection.${status.collection}`)}</span>
         <span>{t("agentMonitor.dataLabel")}: {t(`agentMonitor.data.${waitingForSample ? "waiting" : status.data}`)}</span>

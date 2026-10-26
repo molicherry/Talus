@@ -32,6 +32,11 @@ var (
 	errArtifactPullBusy     = errors.New("artifact pull temporarily busy")
 )
 
+const (
+	reasonArtifactResuming = "agent_artifact_resuming"
+	reasonArtifactBusy     = "agent_artifact_busy"
+)
+
 func artifactCurlConfig(download artifactDownload, digest string) []byte {
 	quote := func(s string) string { return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) }
 	protocols := "=https"

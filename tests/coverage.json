@@ -1118,7 +1118,8 @@
             "symbol": "resident monitoring covers connection and initial sample states (desktop)"
           },
           "automation_status": "implemented",
-          "required": true
+          "required": true,
+          "verification": "Desktop/mobile compact and detailed statuses distinguish pending resume/capacity waits from active or failed deployments, show explanatory text without a transfer-only warning, and retain connection, collection and real deployment failure warnings."
         },
         {
           "implementation_id": "impl-04-06-4",
@@ -1128,7 +1129,8 @@
             "symbol": "resident monitoring covers connection and initial sample states (mobile)"
           },
           "automation_status": "implemented",
-          "required": true
+          "required": true,
+          "verification": "Desktop/mobile compact and detailed statuses distinguish pending resume/capacity waits from active or failed deployments, show explanatory text without a transfer-only warning, and retain connection, collection and real deployment failure warnings."
         }
       ]
     },
@@ -5441,7 +5443,29 @@
           },
           "automation_status": "implemented",
           "required": true,
-          "verification": "Repeated progressing or busy downloads retry after thirty seconds without growing the node failure count; persisted last attempts still enforce the restart minimum."
+          "verification": "Progressing downloads retain thirty-second retries; initial busy outcomes use the same short delay without growing the node failure count, and persisted last attempts enforce the restart minimum."
+        },
+        {
+          "implementation_id": "impl-08-09-busy-backoff",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_scheduler_test.go",
+            "symbol": "TestResidentSchedulerBacksOffRepeatedBusyAndResetsOnProgress"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The first five consecutive busy outcomes retry after thirty seconds, later outcomes use capped exponential jitter without counting node failures, and progress, changed desired state or success resets the capacity streak."
+        },
+        {
+          "implementation_id": "impl-08-09-pending-transfer-state",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_layout_migration_test.go",
+            "symbol": "TestResidentInstallJobPersistsTransientTransferWaitAndClearsOnSuccess"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Real SSH/SFTP jobs persist progressing and busy transfers as pending with separate diagnostics, preserve running fingerprints, release phase slots, retain pending status after repository reload, and clear the diagnostic after a successful retry."
         }
       ]
     }

@@ -13,10 +13,12 @@ import (
 
 const residentMaxInstallJobs = 16
 const residentTransferRetryDelay = 30 * time.Second
+const residentBusyShortRetries = 5
 
 type residentRetry struct {
 	key      string
 	failures int
+	busy     int
 	due      time.Time
 }
 
@@ -55,13 +57,23 @@ func (m *ResidentMonitor) scheduleInstall(ctx context.Context, n model.AgentNode
 				retry = residentRetry{key: key}
 			}
 			delay := residentTransferRetryDelay
-			if !errors.Is(err, errArtifactPullProgress) && !errors.Is(err, errArtifactPullBusy) {
+			switch {
+			case errors.Is(err, errArtifactPullProgress):
+				// New bytes break the capacity-only streak, even on a slow link.
+				retry.busy = 0
+			case errors.Is(err, errArtifactPullBusy):
+				retry.busy++
+				if retry.busy > residentBusyShortRetries {
+					delay = residentRetryDelay(retry.busy - residentBusyShortRetries)
+				}
+			default:
+				retry.busy = 0
 				retry.failures++
 				delay = residentRetryDelay(retry.failures)
 			}
 			retry.due = m.now().Add(delay)
 			m.installRetries[n.ServerID] = retry
-			slog.Info("resident agent retry scheduled", "server_id", n.ServerID, "failures", retry.failures, "retry_after_ms", retry.due.Sub(m.now()).Milliseconds())
+			slog.Info("resident agent retry scheduled", "server_id", n.ServerID, "failures", retry.failures, "busy_attempts", retry.busy, "retry_after_ms", retry.due.Sub(m.now()).Milliseconds())
 		}
 		delete(m.installJobs, n.ServerID)
 		close(done)

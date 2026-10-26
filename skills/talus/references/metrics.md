@@ -128,7 +128,7 @@ portion of the requested range as healthy.
 | `connection` | `online`, `reconnecting`, `unreachable`, or `unknown`: agent contact/connection state, not an SSH connectivity test |
 | `collection` | `healthy`, `partial`, `failed`, or `unknown`: validity of the latest collected sample |
 | `data` | `fresh`, `backfilling`, or `stale`: current persisted sample freshness and outstanding replay |
-| `deployment`, `deployment_error` | Installation state and diagnostic; `setup_required` with `hub_url_required` means the Hub needs `AGENT_HUB_URL` |
+| `deployment`, `deployment_error` | Installation state and diagnostic; `setup_required` with `hub_url_required` means the Hub needs `AGENT_HUB_URL`; `pending` with `agent_artifact_resuming` or `agent_artifact_busy` means waiting to resume or for download capacity, not a failed or active installation |
 | `last_contact_at`, `last_sample_at`, `last_persisted_at` | Separate contact, sample, and persistence timestamps, when present |
 | `errors` | Per-component collection/storage diagnostics, when present |
 | `pending_samples`, `dropped_samples`, `version` | Buffered backlog, dropped sample count, and agent version |
@@ -155,9 +155,14 @@ and a detached scheduled task performs activation and rollback.
 Talus does not automatically elevate an unprivileged login. Installation/repair
 has a twelve-minute budget after transfer admission. Transfer and activation each
 allow four concurrent jobs, with at most sixteen admitted jobs and one installer
-per node. Interrupted pulls that saved new bytes and HTTP 429/503 retry after
-thirty seconds while retaining progress; other failures use jittered exponential
-backoff from at least one minute to at most fifteen minutes. Internal artifact
+per node. Interrupted pulls that saved new bytes retry after thirty seconds and
+reset the consecutive busy count. HTTP 429/503 retry after thirty seconds for the
+first five consecutive busy outcomes, then use jittered exponential backoff from
+one minute to at most fifteen minutes. These transfer waits retain progress and
+do not increment the node failure count. Other failures have an independent
+one-to-fifteen-minute jittered backoff. Success or a changed desired
+version/configuration/connection revision resets both counters; counters are in
+memory and a Hub restart retains the persisted one-minute minimum. Internal artifact
 GET/HEAD requests use node credentials, not API keys, and do not establish agent
 monitoring presence.
 Deployment problems and missing Hub configuration need administrator attention,

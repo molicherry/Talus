@@ -24,6 +24,8 @@
     "deployment": {
       "pending": "等待部署或同步配置",
       "installing": "正在部署 Agent",
+      "resuming": "等待续传",
+      "waiting_for_capacity": "等待下载名额",
       "ready": "Agent 已就绪",
       "failed": "Agent 部署失败",
       "setup_required": "需要配置监控"
@@ -56,6 +58,8 @@
     "reasons": {
       "hub_url_required": "请在系统设置中填写节点能够访问的 Hub HTTPS 地址。",
       "deployment_failed": "Agent 部署失败。请检查 SSH 连接、凭据和服务管理权限；系统会自动重试。",
+      "agent_artifact_resuming": "下载进度已保留，系统会从已保存的字节继续下载。",
+      "agent_artifact_busy": "下载服务暂忙，系统会自动重试。",
       "ssh_host_key_unverified": "节点主机密钥尚未信任。请先核对指纹并确认信任后再部署。",
       "ssh_host_key_mismatch": "节点主机密钥已变化。请核对新指纹后再重试。",
       "ssh_authentication_failed": "SSH 认证失败，请检查凭据以及账号是否允许登录。",

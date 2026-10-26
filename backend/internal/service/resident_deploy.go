@@ -183,12 +183,16 @@ func (m *ResidentMonitor) installJob(ctx context.Context, n model.AgentNode, des
 	if err != nil {
 		state = "failed"
 		reason = deployFailureReason(err)
-		// Record what is actually running after a rollback, not what the failed
-		// attempt wanted. The next reconciliation retries anyway because a
-		// non-ready deployment is never skipped.
+		// Unfinished transfers and rollbacks retain the running fingerprints.
+		// Every non-ready deployment remains eligible for reconciliation.
 		desired = n.InstalledHash
 		configHash = n.ConfigHash
-		slog.Warn("resident agent installation failed", "server_id", n.ServerID, "reason", reason)
+		if errors.Is(err, errArtifactPullProgress) || errors.Is(err, errArtifactPullBusy) {
+			state = "pending"
+			slog.Info("resident agent installation waiting", "server_id", n.ServerID, "reason", reason)
+		} else {
+			slog.Warn("resident agent installation failed", "server_id", n.ServerID, "reason", reason)
+		}
 	}
 	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
@@ -421,6 +425,10 @@ func deployFailureReason(err error) string {
 		return app.Reason
 	}
 	switch {
+	case errors.Is(err, errArtifactPullProgress):
+		return reasonArtifactResuming
+	case errors.Is(err, errArtifactPullBusy):
+		return reasonArtifactBusy
 	case errors.Is(err, context.Canceled):
 		return "deployment_canceled"
 	case errors.Is(err, context.DeadlineExceeded):
