@@ -216,9 +216,8 @@ func (l *sshLease) upload(ctx context.Context, localPath, remotePath string, bud
 	if budget <= 0 {
 		budget = l.svc.execDefaultTimeout
 	}
-	if budget > maxExecTimeout {
-		budget = maxExecTimeout
-	}
+	// Transfers honor their own budget and the caller's parent deadline; the
+	// command execution ceiling must not silently shorten an artifact upload.
 	err, transportClosed := l.svc.copyFileWithPermissions(operation, l.h.Client, localPath, remotePath, budget, chmod)
 	l.end(transportClosed || isConnectionError(err), err)
 	return err
@@ -267,6 +266,8 @@ func (s *SSHService) copyFileWithPermissions(parent context.Context, client *ssh
 		// which sends one small Write at a time and waits a full round trip for
 		// every acknowledgement. The SFTP client's per-file request limit bounds
 		// concurrency, and its reader joins all outstanding writes before return.
+		// This requires a regular remote staging file with offset writes; FIFOs,
+		// devices and SFTP servers limited to sequential writes are unsupported.
 		count, err := remote.ReadFromWithConcurrency(source, 0)
 		if err != nil {
 			return err

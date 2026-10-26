@@ -22,11 +22,6 @@ import (
 	"gorm.io/gorm"
 )
 
-const (
-	residentArtifactUploadBudget = 5 * time.Minute
-	residentInstallBudget        = 10 * time.Minute
-)
-
 type residentJob struct {
 	cancel context.CancelFunc
 	hash   string
@@ -134,7 +129,7 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 					if !busy && m.removing[s.ID] == nil && epoch == m.installEpoch && len(m.installJobs) < 4 {
 						// Leave time for slow uploads, verification and activation,
 						// including the detached Windows task and its receipt.
-						jobCtx, stop := context.WithTimeout(ctx, residentInstallBudget)
+						jobCtx, stop := context.WithTimeout(ctx, agentInstallBudget)
 						jobCtx = context.WithValue(jobCtx, residentSettingsKey{}, desiredSettings)
 						done := make(chan struct{})
 						m.installJobs[s.ID] = residentJob{cancel: stop, hash: n.TokenHash, done: done}
@@ -322,7 +317,7 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 		return err
 	}
 	next := base + "/.next-" + id
-	if err = lease.Upload(ctx, filepath.Join(m.deployer.artifactsDir, artifact.File), next, residentArtifactUploadBudget); err != nil {
+	if err = lease.Upload(ctx, filepath.Join(m.deployer.artifactsDir, artifact.File), next, agentArtifactUploadBudget); err != nil {
 		return err
 	}
 	hash, err := m.deployer.remoteHash(ctx, lease, shellQuote(next))

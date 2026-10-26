@@ -10,7 +10,6 @@ import (
 	"github.com/vpsmanager/backend/internal/pkg/sshpool"
 )
 
-const agentDeploymentBudget = 3 * time.Minute
 const agentDeploymentConcurrency = 4
 
 type agentDeploymentJob struct {
@@ -44,7 +43,7 @@ type agentDeploymentQueue struct {
 func newAgentDeploymentQueue(s *AgentDeploymentService) *agentDeploymentQueue {
 	return &agentDeploymentQueue{
 		jobs: make(map[uint]*agentDeploymentJob), live: make(map[uint]bool), wake: make(chan struct{}, 1),
-		budget: agentDeploymentBudget, limit: agentDeploymentConcurrency, retry: 5 * time.Second,
+		budget: agentInstallBudget, limit: agentDeploymentConcurrency, retry: 5 * time.Second,
 		execute: s.ensureDeployed, logger: s.logger,
 		current: func(id uint, generation Generation) bool { return s.ssh.pool.IsCurrent(id, uint64(generation)) },
 	}

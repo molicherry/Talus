@@ -26,6 +26,13 @@ const agentPath = "/tmp/vpsmanager-agent"
 // deadline still caps the whole collection.
 const probeBudget = 5 * time.Second
 
+// Both deployment paths share transfer and admission budgets. Reserve time
+// beyond the binary upload for probing, configuration, activation and cleanup.
+const (
+	agentArtifactUploadBudget = 5 * time.Minute
+	agentInstallBudget        = agentArtifactUploadBudget + 7*time.Minute
+)
+
 // Failure reason classes for agent deployment. They
 // are distinct so a read-only or noexec target is not confused with a corrupt
 // upload.
@@ -103,7 +110,7 @@ func NewAgentDeploymentService(ssh *SSHService, artifactsDir string) *AgentDeplo
 		ssh:          ssh,
 		artifactsDir: artifactsDir,
 		probeBudget:  probeBudget,
-		uploadBudget: agentDeploymentBudget,
+		uploadBudget: agentArtifactUploadBudget,
 		logger:       slog.Default().With("component", "agent-deploy"),
 		telemetry:    newMonitorTelemetry(nil, nil),
 	}

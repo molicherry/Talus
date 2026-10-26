@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,6 +32,55 @@ type windowsProbeLease struct {
 
 func (l windowsProbeLease) Exec(_ context.Context, command string, _ time.Duration) (*ExecResult, error) {
 	return l.exec(command), nil
+}
+
+func TestWindowsAgentActivationReservesCompletionBudget(t *testing.T) {
+	for _, scenario := range []string{"slow-staging", "canceled", "ready", "launch-failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			remaining := 4 * time.Minute
+			if scenario == "slow-staging" {
+				remaining = 2 * time.Minute
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), remaining)
+			defer cancel()
+			if scenario == "canceled" {
+				cancel()
+			}
+			layout := agentwindows.Layout{Home: "C:/ProgramData", InstallID: "test", Attempt: "attempt"}
+			hash := strings.Repeat("a", 64)
+			commands := []string{agentwindows.Command(layout.Launch(hash)), agentwindows.Command(layout.Wait(agentwindows.ActivationWaitSeconds))}
+			calls := 0
+			lease := windowsProbeLease{exec: func(command string) *ExecResult {
+				if calls >= len(commands) || command != commands[calls] {
+					t.Fatal("activation did not launch then wait for its own receipt")
+				}
+				calls++
+				if scenario == "launch-failure" {
+					return &ExecResult{ExitCode: 1}
+				}
+				return &ExecResult{}
+			}}
+			err := activateWindowsAgent(ctx, lease, layout, hash)
+			switch scenario {
+			case "slow-staging":
+				if !errors.Is(err, context.DeadlineExceeded) || calls != 0 || deployFailureReason(err) != "deployment_timeout" {
+					t.Fatalf("launched a detached task without time for completion: calls=%d err=%v", calls, err)
+				}
+			case "canceled":
+				if !errors.Is(err, context.Canceled) || calls != 0 {
+					t.Fatalf("launched after cancellation: calls=%d err=%v", calls, err)
+				}
+			case "ready":
+				if err != nil || calls != 2 {
+					t.Fatalf("did not wait for the launched task: calls=%d err=%v", calls, err)
+				}
+			case "launch-failure":
+				if ReasonFromError(err) != reasonWindowsService || calls != 1 {
+					t.Fatalf("waited for an unlaunched task: calls=%d err=%v", calls, err)
+				}
+			}
+		})
+	}
 }
 
 func TestWindowsAgentProbe(t *testing.T) {

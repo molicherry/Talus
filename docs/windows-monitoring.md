@@ -102,8 +102,10 @@ receipt could be written, also check Task Scheduler's last result. The Hub does
 not keep polling deleted nodes after SSH disconnects or request cleanup ends.
 
 Activation has a 180-second task limit. The Hub waits 200 seconds for its receipt
-and allows another 10 seconds for SSH completion. Windows and unidentified-host
-deployment jobs have a ten-minute overall budget including uploads. External
+and allows another 10 seconds for SSH completion. Deployment jobs have a
+twelve-minute overall budget including uploads. Before launching activation, the
+Hub requires enough remaining time for launch, the full receipt wait, persistence
+and SSH cleanup; otherwise it retries without starting a detached task. External
 cancellation or connection loss can end the Hub wait earlier; the local task
 continues activation or rollback.
 

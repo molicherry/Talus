@@ -43,7 +43,7 @@ func TestAgentDeploymentQueueDeduplicatesBoundsConcurrencyAndJoins(t *testing.T)
 		for old := peak.Load(); n > old && !peak.CompareAndSwap(old, n); old = peak.Load() {
 		}
 		deadline, _ := ctx.Deadline()
-		if remaining := time.Until(deadline); remaining < 170*time.Second || remaining > 3*time.Minute {
+		if remaining := time.Until(deadline); remaining < agentInstallBudget-10*time.Second || remaining > agentInstallBudget {
 			t.Errorf("deployment admission budget = %s", remaining)
 		}
 		<-ctx.Done()

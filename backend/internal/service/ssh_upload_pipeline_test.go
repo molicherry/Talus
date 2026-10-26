@@ -97,8 +97,13 @@ func TestAgentUploadPipelinesUnacknowledgedWrites(t *testing.T) {
 					t.Fatal("pipelined upload did not complete")
 				}
 				if outcome == "success" {
-					if got := <-received; !bytes.Equal(got, payload) {
-						t.Fatal("pipelined upload changed artifact bytes")
+					select {
+					case got := <-received:
+						if !bytes.Equal(got, payload) {
+							t.Fatal("pipelined upload changed artifact bytes")
+						}
+					case <-ctx.Done():
+						t.Fatal("server did not confirm the completed artifact")
 					}
 				}
 				if err := lease.releaseAndWait(); err != nil {

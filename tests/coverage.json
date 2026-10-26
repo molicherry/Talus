@@ -5190,6 +5190,17 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-11-03-activation-budget",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_windows_deploy_test.go",
+            "symbol": "TestWindowsAgentActivationReservesCompletionBudget"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A short remaining deadline or canceled caller cannot launch detached activation; an admitted launch waits for its receipt, and a failed launch skips the wait."
         }
       ]
     },
