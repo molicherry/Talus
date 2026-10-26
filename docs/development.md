@@ -148,11 +148,11 @@ Install frontend dependencies first. The test role needs `CREATEDB` and permissi
 3. Keep product text in both locale files. Use the shared API client and query/session handling; preserve structured error reasons and account-change cleanup.
 4. Add or update meaningful behavior coverage for changed contracts and failure paths. Register acceptance changes in `tests/coverage.json`, then regenerate with `node tests/render-coverage.mjs`; never edit the generated Markdown directly.
 5. Update affected English/Chinese documentation together and run the selected checks. Review the diff for secrets, generated output and unrelated changes.
-6. Describe the problem, resulting behavior, compatibility implications and checks actually run in the PR. Version tags and publication follow the separate [release guide](releasing.md).
+6. Describe the problem, resulting behavior, compatibility implications and checks actually run in the PR. For user-visible changes, fill the template's English/Chinese release-note blocks, including upgrade steps when needed; CI collects them into the Release draft. Version tags, the block format and publication follow the separate [release guide](releasing.md#pull-request-notes).
 
 ## Documentation ownership
 
-README owns product onboarding; this guide owns contributor setup; architecture owns responsibility and data flow; test and release guides own their procedures. Link to these owners instead of copying their inventories. Commands, defaults and supported platforms must be checked against scripts and code. Mark historical design context explicitly, keeping current behavior in maintained guides.
+README owns product onboarding; this guide owns contributor setup; architecture owns responsibility, data flow and lasting safety contracts; test and release guides own their procedures. Link to these owners instead of copying their inventories. Commands, defaults and supported platforms must be checked against scripts and code. Completed implementation plans belong in PR/Git history; keep their enduring decisions in maintained guides. PRs hold release-note inputs; the GitHub Release draft is the place to consolidate and review them before publication.
 
 English and Chinese pages should cover the same workflows, commands and limitations and link to each other. The locale test checks translation keys, not Markdown translation completeness or factual correctness. CI currently skips documentation-only changes through path filters; no automatic bilingual-prose or general Markdown-link gate exists. Perform those reviews locally and do not claim them as existing CI checks.
 

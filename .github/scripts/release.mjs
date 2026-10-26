@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { releaseNotesFromPullRequests } from "./release-notes.mjs";
 import {
   assertReceipt, assertSuccessfulCI, stableReleases, parseTag, previousStable,
   promotionDecision, validateTag,
@@ -144,10 +145,11 @@ export async function draftRelease({ api, receipt, baseline }) {
       tag_name: receipt.tag, target_commitish: receipt.commit,
       ...(baseline ? { previous_tag_name: baseline } : {}), configuration_file_path: ".github/release.yml",
     });
+    const body = await releaseNotesFromPullRequests(api, generated.body);
     release = await api.request("POST", "releases", {
       tag_name: receipt.tag, target_commitish: receipt.commit, name: receipt.tag,
       draft: true, prerelease: kind === "rc", make_latest: "false",
-      body: `<!-- release-notes:en -->\n## English\n\n### Highlights\n- <!-- release:todo --> Describe the user-visible changes.\n\n### Upgrade notes\n<!-- release:todo --> Document migration, configuration and rollback steps, or remove this section.\n<!-- /release-notes:en -->\n\n<!-- release-notes:zh-CN -->\n## 简体中文\n\n### 更新亮点\n- <!-- release:todo --> 描述与英文版对应的用户可见变更。\n\n### 升级说明\n<!-- release:todo --> 说明迁移、配置、兼容性及回滚步骤；无需操作时删除本节。\n<!-- /release-notes:zh-CN -->\n\n${generated.body}`,
+      body,
     });
   }
   if (release.tag_name !== receipt.tag || release.prerelease !== (kind === "rc")) throw new Error("Existing Release does not match tag policy");

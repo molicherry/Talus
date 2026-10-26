@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { selectReleaseNotes } from "./.compiled-release-notes.mjs";
+import { releaseNotesFromPullRequests } from "../../.github/scripts/release-notes.mjs";
 
 const block = (locale, content) => `<!-- release-notes:${locale} -->\n${content}\n<!-- /release-notes:${locale} -->`;
 const english = "## English\n### Highlights\n- Improved SSH routes\n### Upgrade notes\n- Back up first.";
@@ -39,6 +40,23 @@ for (const malformed of [
   "<!-- release-notes:en -->\nEnglish\n<!-- /release-notes:zh-CN -->",
 ]) {
   assert.equal(selectReleaseNotes(malformed, "zh-CN"), malformed.trim(), "malformed boundaries must not hide release information");
+}
+
+const generated = "## What's Changed\n* SSH routes by @author in https://github.com/example/Talus/pull/1\n\n**Full Changelog**: /compare/old...new";
+const collected = await releaseNotesFromPullRequests({
+  repository: "example/Talus",
+  async request(method, path) {
+    assert.equal(method, "GET");
+    assert.equal(path, "pulls/1");
+    return { number: 1, merged_at: "2026-10-01T00:00:00Z", base: { repo: { full_name: "example/Talus" } }, body: bilingual };
+  },
+}, generated);
+assert.ok(selectReleaseNotes(collected, "en").includes(english));
+assert.ok(!selectReleaseNotes(collected, "en").includes(chinese));
+assert.ok(selectReleaseNotes(collected, "zh-CN").includes(chinese));
+assert.ok(!selectReleaseNotes(collected, "zh-CN").includes(english));
+for (const locale of ["en", "zh-CN"]) {
+  assert.equal(selectReleaseNotes(collected, locale).split("## What's Changed").length, 2, "collected draft keeps the shared changelog once");
 }
 
 console.log("Release note language selection, shared changelog, fallback, legacy notes and code fences passed.");

@@ -116,13 +116,16 @@ Final publication must emit `release.published`. Do not use Actions'
 
 ## Release notes
 
-The [upcoming release notes](release-notes-next.md) include the source-checkout
-compatibility note for the newly tracked root `AGENTS.md`. Carry it into the
-first Release containing that change.
-
 New Releases include English and Simplified Chinese descriptions with equivalent
-feature, fix, security and upgrade information. CI creates a bilingual draft;
-maintainers complete and review it. Translation is not automatic.
+feature, fix, security and upgrade information. PR descriptions hold the inputs;
+CI collects them into a bilingual GitHub Release draft, where maintainers
+consolidate, complete and review the notes. Translation is not automatic. Published
+Releases retain the version history; no separate upcoming-notes file is maintained.
+
+[PR #65](https://github.com/molicherry/Talus/pull/65) carries the source-checkout
+upgrade note for the newly tracked root `AGENTS.md`. The first Release containing
+that change must include its backup/move instructions. If that Release already
+has a draft, add the note there manually; draft recovery preserves reviewed text.
 
 ### Write and review
 
@@ -136,6 +139,48 @@ maintainers complete and review it. Translation is not automatic.
   filters labels. Stable/RC releases compare against the highest lower stable tag
   reachable from the release commit; a stable release never compares only with
   its last RC. Without a previous stable tag, GitHub generates the initial history.
+
+### Pull request notes
+
+For user-visible changes, fill both blocks in the
+[PR template](../.github/pull_request_template.md). Write short user-facing Markdown;
+include required migration/configuration actions and rollback limits in both
+languages when applicable. Only the marked text is copied, not the PR's technical
+summary or validation details. Example:
+
+```markdown
+<!-- release-notes:en -->
+- Keep navigation visible while scrolling.
+
+**Upgrade notes:** Describe required actions and rollback limits, if any.
+<!-- /release-notes:en -->
+
+<!-- release-notes:zh-CN -->
+- 滚动时保持导航可见。
+
+**升级说明：** 如有必要，说明操作步骤和回滚限制。
+<!-- /release-notes:zh-CN -->
+```
+
+- Put each marker on its own line, at most one block per language. Fill both
+  languages together; a malformed, duplicate or one-language-only note stops
+  creation of the new Release so it cannot silently lose upgrade instructions.
+- For purely internal changes, leave both blocks empty or remove both, and apply
+  the appropriate exclusion label. A change with user-facing upgrade requirements
+  must not be excluded as documentation/internal work.
+- The collector reads the repository's merged PR source links from GitHub's
+  generated `What's Changed` entries. This keeps the same release range and
+  [label exclusions](../.github/release.yml) as that list, including RC baselines.
+  API failures stop draft creation; they are not treated as empty PR notes.
+- An included legacy PR without marked notes gets a per-PR `release:todo` in each
+  language. Releases with no PR entries get general placeholders, including
+  changes committed directly. Complete them using the tag and commit history.
+- Every new draft retains a review `release:todo` even when all PRs supplied both
+  languages. Consolidate repetitive entries and check upgrade requirements before
+  removing the markers and publishing. PR descriptions remain the source inputs;
+  the Release draft owns the reviewed text.
+- Retries never refresh or overwrite an existing draft or published Release. If
+  source notes change after a draft is created, update that draft explicitly.
 
 ### Bilingual template
 

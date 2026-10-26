@@ -57,6 +57,19 @@ JWT token versions and API-key permission revisions coordinate authentication wi
 
 JSON handlers use the shared response/error envelope and stable reason codes. Downloads and service relay have their own binary or upstream responses. Usage history records bounded operation metadata and results; secret reveals have dedicated authorization, rate limiting and auditing. Secrets, command contents and file contents must not leak into ordinary listings or operation logs. Follow the existing handler/service path when adding a new operation.
 
+### API-key invariants
+
+The implemented permission-editing, rotation and migration work was reviewed in [PR #63](https://github.com/molicherry/Talus/pull/63). Its implementation plan remains in PR/Git history; preserve these current contracts when changing the feature:
+
+- Key management requires an administrator JWT, including service-layer authorization. An API key cannot manage keys, even with a historical wildcard scope. Server restrictions also apply to services bound to a server; unbound services and the credential directory are not automatically server-scoped.
+- Permission edits preserve the secret and authentication material. Omitted permission fields preserve their values; an empty server list explicitly means all servers, while empty scopes and explicit null fields are rejected. Deleted server IDs already in a restricted set may remain; never filter an unresolved set into an empty, unrestricted list. Rotation replaces credential material while preserving permissions, ownership and the permission-update timestamp.
+- Edits and rotation share a positive `permissions_revision`, checked under a row lock. The mutation and security audit commit together; audit failure rolls back. Column-specific writes preserve unrelated encryption and owner-backfill data. A commit with an unknown outcome fences new admissions until recovery confirms the database state; the client must refresh rather than blindly resubmit.
+- The API-key gate and terminal registry use key IDs and remain separate from JWT sessions. Actual permission changes, rotation and deletion revoke the key's existing and preparing terminals. Already admitted ordinary requests may finish. These are single-Hub guarantees; multiple Hubs would require cross-instance revocation coordination.
+- [Permission schema preparation](../backend/internal/repository/apikey_permissions.go) runs before AutoMigrate to distinguish an absent scopes column from existing empty permissions. Only an absent column receives the frozen legacy baseline; existing null/empty scopes are not filled from today's defaults. Malformed permission data stops startup. The old `services:read` backfill is retired without granting permissions again, including after restarts or restoration of its migration marker.
+- Permission preparation, ciphertext migration and owner backfill are independent. Legacy hash-only keys remain usable without recoverable plaintext; rotation creates a new recoverable secret. Database and master-key backups remain necessary for upgrade recovery.
+
+The [README API-key reference](../README.md#2-create-an-api-key) owns user-facing operations; the handler, service and repository own request and persistence behavior. Migration, transaction and terminal tests remain registered in [the acceptance inventory](../tests/coverage.md).
+
 ## Remote operations
 
 The SSH service resolves encrypted credentials, a verified host key and the current connection route. Pool leases manage admission and resource ownership across execution, terminal sessions, SFTP and deployment. Connection revisions prevent stale route/configuration work from being silently applied to a replacement connection.
