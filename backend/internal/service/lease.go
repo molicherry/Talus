@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"time"
@@ -264,7 +263,11 @@ func (s *SSHService) copyFileWithPermissions(parent context.Context, client *ssh
 				return err
 			}
 		}
-		count, err := io.CopyBuffer(remote, source, make([]byte, 32<<10))
+		// Request pipelining explicitly: io.CopyBuffer can select os.File.WriteTo,
+		// which sends one small Write at a time and waits a full round trip for
+		// every acknowledgement. The SFTP client's per-file request limit bounds
+		// concurrency, and its reader joins all outstanding writes before return.
+		count, err := remote.ReadFromWithConcurrency(source, 0)
 		if err != nil {
 			return err
 		}

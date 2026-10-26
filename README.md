@@ -593,7 +593,7 @@ Resident contact expires after 45 seconds; data becomes stale after three sampli
 
 ### Monitoring agent upgrades
 
-Resident monitoring does not schedule per-sample SSH commands. Installation/repair uses a separate budget: three minutes for a recorded Linux installation, or ten minutes for Windows or an unidentified platform, including uploads and activation waits. At most four deployments run concurrently, with one job per server. Failed deployments retry after at least one minute. Missing `AGENT_HUB_URL` is shown as setup required, with a link to System settings. Saving a new URL or interval queues node configuration updates; saving alone does not mean every node has adopted them. Existing metric history is retained.
+Resident monitoring does not schedule per-sample SSH commands. Installation/repair has a ten-minute overall budget on every platform, including uploads and activation waits. Agent binaries use bounded, pipelined SFTP writes and have a five-minute upload budget to accommodate high-latency or slow links. At most four deployments run concurrently, with one job per server. Failed deployments retry after at least one minute. Missing `AGENT_HUB_URL` is shown as setup required, with a link to System settings. Saving a new URL or interval queues node configuration updates; saving alone does not mean every node has adopted them. Existing metric history is retained.
 
 Artifacts and configuration are verified before activation. Compatible resident agents keep reporting while an update is staged. The new service must contact the Hub after restart; failed activation restores the previous executable, configuration and service unit where available.
 

@@ -1435,6 +1435,17 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Sequential Exec and Upload primitives retain one lease until its unique owner explicitly releases it."
+        },
+        {
+          "implementation_id": "impl-06-01-pipelined-writes",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_upload_pipeline_test.go",
+            "symbol": "TestAgentUploadPipelinesUnacknowledgedWrites"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Linux and Windows-private-directory uploads send multiple packets before acknowledgement, preserve artifact bytes, reject remote write failures, and reclaim their SSH slot after success, failure or cancellation."
         }
       ]
     },
