@@ -17,7 +17,7 @@ Talus is a single-user Go/React server manager with resident Linux and Windows m
 - Preserve secret redaction, explicit SSH host-key trust, connection revisions and cancellation/cleanup ownership. Do not weaken these to make a fixture pass.
 - Schema, encryption, API-key permissions and agent protocol changes need upgrade/restart coverage appropriate to their compatibility impact. Use isolated databases and controlled SSH peers.
 - Use the shared frontend API client and query/session helpers. Keep English and Chinese locale keys and interpolation variables aligned.
-- Update affected English/Chinese guide pairs in the same change. Keep current behavior in guides and historical rationale in clearly labeled design records. Link to the owning document instead of duplicating parameter or test inventories.
+- Update affected English/Chinese guide pairs in the same change. Keep current behavior and enduring decisions in maintained guides; retain completed implementation plans in PR/Git history. Link to the owning document instead of duplicating parameter or test inventories. PR descriptions and optional release-note blocks may use English or Chinese; one language is sufficient. Complete Release translations and publication review in the Release draft.
 - The shipped `skills/talus/` is guidance for operating a running instance, not the development workflow. Keep its references self-contained when API behavior changes.
 
 ## Verification and handoff

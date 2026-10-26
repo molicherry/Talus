@@ -11,6 +11,7 @@ import {
   promotionDecision, validateTag,
 } from "../.github/scripts/release-policy.mjs";
 import { draftRelease, GitHub, promoteLatest, publishImage, Registry } from "../.github/scripts/release.mjs";
+import { pullRequestNotes } from "../.github/scripts/release-notes.mjs";
 import { ensureReleaseLabels, RELEASE_LABELS } from "../.github/scripts/release-labels.mjs";
 
 const repository = "example/Talus", image = "ghcr.io/example/talus";
@@ -43,6 +44,8 @@ function apiFixture({ releases = [structuredClone(published)], evidence = struct
   const writes = [], calls = [];
   const api = {
     repository, releases, evidence, evidenceByRelease, run: structuredClone(successfulRun), writes, calls,
+    generatedBody: "## What's Changed\n* Feature by @author in https://github.com/example/Talus/pull/1\n\n**Full Changelog**: compare",
+    pulls: { 1: { number: 1, merged_at: "2026-10-01T00:00:00Z", base: { repo: { full_name: repository } }, body: "Legacy technical PR description" } },
     async list(path) {
       calls.push(["LIST", path]);
       if (path === "releases") return this.releases;
@@ -62,7 +65,12 @@ function apiFixture({ releases = [structuredClone(published)], evidence = struct
       if (method === "GET" && path === "releases/assets/9") return this.evidence;
       if (method === "GET" && /^releases\/assets\/\d+$/.test(path)) return this.evidenceByRelease[Number(path.split("/").at(-1)) - 9000];
       if (method === "GET" && path === `actions/runs/${receipt.runId}`) return this.run;
-      if (method === "POST" && path === "releases/generate-notes") return { body: "## What's Changed\n* Feature by @author in https://github.com/example/Talus/pull/1\n\n**Full Changelog**: compare" };
+      if (method === "GET" && /^pulls\/\d+$/.test(path)) {
+        const pull = this.pulls[path.split("/").at(-1)];
+        assert.ok(pull, `Unexpected PR lookup: ${path}`);
+        return pull;
+      }
+      if (method === "POST" && path === "releases/generate-notes") return { body: this.generatedBody };
       if (method === "POST" && path === "releases") {
         const result = { ...body, id: 2, html_url: "https://github.com/example/Talus/releases/tag/v0.12.0" };
         this.releases.push(result);
@@ -250,6 +258,141 @@ for (const kind of ["stable", "rc"]) test(`${kind} creates a draft and evidence 
   assert.equal(create.body.split("## What's Changed").length, 2, "shared changelog appears once");
   assert.equal(api.writes[0][2].previous_tag_name, "v0.11.0");
   assert.deepEqual(api.evidence, candidate);
+});
+
+function noteBlocks(en = "- Visible change.", zh = "- 用户可见变更。") {
+  return `<!-- release-notes:en -->\n${en}\n<!-- /release-notes:en -->\n\n<!-- release-notes:zh-CN -->\n${zh}\n<!-- /release-notes:zh-CN -->`;
+}
+
+test("new drafts collect marked bilingual PR text and upgrade steps without technical details", async () => {
+  const api = apiFixture({ releases: [], evidence: null });
+  api.pulls[1].body = `## Implementation\nInternal debugging and validation details.\n\n${noteBlocks(
+    "- Keep navigation visible.\n\n**Upgrade notes:** Back up AGENTS.md outside the checkout before pulling.",
+    "- 滚动时保持导航可见。\n\n**升级说明：** 拉取前将 AGENTS.md 备份到仓库之外。",
+  )}`;
+  await draftRelease({ api, receipt, baseline: "v0.11.0" });
+  const body = api.releases[0].body;
+  const notes = pullRequestNotes(body.slice(0, body.indexOf("## What's Changed")));
+  assert.match(notes.en, /navigation visible/);
+  assert.match(notes.en, /Back up AGENTS.md outside/);
+  assert.match(notes["zh-CN"], /备份到仓库之外/);
+  for (const locale of ["en", "zh-CN"]) {
+    assert.match(notes[locale], /release:todo/, "human review is required even with complete source notes");
+    assert.match(notes[locale], /\[#1\]\(https:\/\/github.com\/example\/Talus\/pull\/1\)/);
+  }
+  assert.doesNotMatch(body, /Internal debugging/);
+  assert.ok(body.endsWith(api.generatedBody));
+  assert.deepEqual(api.evidence, receipt);
+});
+
+test("the generated changelog owns PR selection; source links are deduplicated and foreign references ignored", async () => {
+  const api = apiFixture({ releases: [], evidence: null });
+  api.generatedBody = [
+    "## What's Changed",
+    "* Mentions https://github.com/example/Talus/pull/99 by @author in https://github.com/example/Talus/pull/1",
+    "* Another reference by @author in https://github.com/example/Talus/pull/1",
+    "* Foreign PR by @author in https://github.com/other/project/pull/2",
+    "**Full Changelog**: https://github.com/example/Talus/compare/v0.11.0...v0.12.0",
+  ].join("\n");
+  api.pulls[1].body = noteBlocks();
+  await draftRelease({ api, receipt });
+  assert.deepEqual(api.calls.filter(([, path]) => path.startsWith("pulls/")), [["GET", "pulls/1", undefined]]);
+  assert.equal(api.releases[0].body.split("### [#1]").length, 3, "one source entry per language");
+});
+
+test("legacy and empty PR notes retain per-PR bilingual placeholders", async () => {
+  for (const source of [undefined, null, "Legacy PR", noteBlocks("", "")]) {
+    const api = apiFixture({ releases: [], evidence: null });
+    api.pulls[1].body = source;
+    await draftRelease({ api, receipt });
+    const notes = pullRequestNotes(api.releases[0].body.slice(0, api.releases[0].body.indexOf("## What's Changed")));
+    assert.match(notes.en, /Add an English summary/);
+    assert.match(notes["zh-CN"], /补充此 PR/);
+    assert.match(notes.en, /\[#1\]/);
+    assert.match(notes["zh-CN"], /\[#1\]/);
+  }
+});
+
+test("single-language PR notes create a draft and defer missing translations to Release review", async () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const text = locale === "en" ? "- Back up the data before upgrading." : "- 升级前备份数据。";
+    const single = `<!-- release-notes:${locale} -->\n${text}\n<!-- /release-notes:${locale} -->`;
+    for (const body of [single, noteBlocks(locale === "en" ? text : "", locale === "zh-CN" ? text : "")]) {
+      const api = apiFixture({ releases: [], evidence: null });
+      api.pulls[1].body = body;
+      await draftRelease({ api, receipt });
+      const notes = pullRequestNotes(api.releases[0].body.slice(0, api.releases[0].body.indexOf("## What's Changed")));
+      assert.ok(notes[locale].includes(text), "retain the provided upgrade instructions");
+      const other = locale === "en" ? "zh-CN" : "en";
+      assert.match(notes[other], /release:todo/);
+      assert.ok(!notes[other].includes(text), "do not substitute untranslated text");
+      assert.ok(!notes[locale].includes(locale === "en" ? "Add an English summary" : "补充此 PR"));
+      assert.deepEqual(api.evidence, receipt);
+    }
+  }
+});
+
+test("initial releases or direct commits without generated PR entries still require bilingual review", async () => {
+  const api = apiFixture({ releases: [], evidence: null });
+  api.generatedBody = "## What's Changed\nDirect commit history\n\n**Full Changelog**: compare";
+  await draftRelease({ api, receipt });
+  assert.match(api.releases[0].body, /for this release/);
+  assert.match(api.releases[0].body, /本次发布/);
+  assert.ok(!api.calls.some(([, path]) => path.startsWith("pulls/")));
+  assert.ok(!Object.hasOwn(api.writes[0][2], "previous_tag_name"));
+});
+
+test("PR note parsing supports CRLF and surrounding whitespace without copying unrelated sections", () => {
+  const notes = pullRequestNotes(`Internal details\r\n${noteBlocks().replaceAll("\n", "\r\n")}\r\nValidation`);
+  assert.deepEqual(notes, { en: "- Visible change.", "zh-CN": "- 用户可见变更。" });
+  assert.deepEqual(pullRequestNotes("Legacy description"), { en: "", "zh-CN": "" });
+});
+
+test("release-note markers in code examples are content rather than PR language boundaries", () => {
+  for (const fence of ["```", "~~~~"]) {
+    const example = `${fence}markdown\n${noteBlocks()}\n${fence}`;
+    assert.deepEqual(pullRequestNotes(`${example}\n${noteBlocks()}`), { en: "- Visible change.", "zh-CN": "- 用户可见变更。" });
+    assert.equal(pullRequestNotes(noteBlocks(`- Summary\n${example}`)).en, `- Summary\n${example}`);
+  }
+});
+
+test("invalid PR markers abort new draft creation before Release or evidence writes", async () => {
+  const invalid = [
+    "<!-- /release-notes:en -->",
+    "<!-- release-notes:en -->\nUnclosed",
+    "<!-- release-notes:en -->\nEnglish\n<!-- /release-notes:zh-CN -->",
+    `${noteBlocks()}\n${noteBlocks()}`,
+    "<!-- release-notes:fr -->\nUnsupported\n<!-- /release-notes:fr -->",
+    "<!-- release-notes:en -->\n<!-- release-notes:zh-CN -->\nNested",
+    "Inline <!-- release-notes:en --> not on its own line",
+  ];
+  for (const body of invalid) {
+    const api = apiFixture({ releases: [], evidence: null });
+    api.pulls[1].body = body;
+    await assert.rejects(draftRelease({ api, receipt }), /PR #1:/);
+    assert.equal(api.releases.length, 0);
+    assert.equal(api.evidence, null);
+    assert.ok(!api.writes.some(([, path]) => path === "releases" || path.includes("/assets?")));
+  }
+});
+
+test("PR lookup failures and wrong source metadata cannot silently omit release notes", async () => {
+  for (const failure of ["api", "unmerged", "repository", "number"]) {
+    const api = apiFixture({ releases: [], evidence: null });
+    if (failure === "api") {
+      const request = api.request.bind(api);
+      api.request = async (...args) => {
+        if (args[1] === "pulls/1") throw new Error("GitHub HTTP 403");
+        return request(...args);
+      };
+    }
+    if (failure === "unmerged") api.pulls[1].merged_at = null;
+    if (failure === "repository") api.pulls[1].base.repo.full_name = "other/repo";
+    if (failure === "number") api.pulls[1].number = 2;
+    await assert.rejects(draftRelease({ api, receipt }), /403|merged PR/);
+    assert.equal(api.releases.length, 0);
+    assert.equal(api.evidence, null);
+  }
 });
 
 test("test tags never call the Release API", async () => {
