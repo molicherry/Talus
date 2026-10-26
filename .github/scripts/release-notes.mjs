@@ -30,7 +30,6 @@ export function pullRequestNotes(body = "") {
   }
   if (active) throw new Error("Unclosed PR release-notes block");
   for (const locale of locales) notes[locale] = (notes[locale] || []).join("\n").trim();
-  if (Boolean(notes.en) !== Boolean(notes["zh-CN"])) throw new Error("PR release notes require both English and Simplified Chinese");
   return notes;
 }
 

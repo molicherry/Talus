@@ -148,7 +148,7 @@ Install frontend dependencies first. The test role needs `CREATEDB` and permissi
 3. Keep product text in both locale files. Use the shared API client and query/session handling; preserve structured error reasons and account-change cleanup.
 4. Add or update meaningful behavior coverage for changed contracts and failure paths. Register acceptance changes in `tests/coverage.json`, then regenerate with `node tests/render-coverage.mjs`; never edit the generated Markdown directly.
 5. Update affected English/Chinese documentation together and run the selected checks. Review the diff for secrets, generated output and unrelated changes.
-6. Describe the problem, resulting behavior, compatibility implications and checks actually run in the PR. For user-visible changes, fill the template's English/Chinese release-note blocks, including upgrade steps when needed; CI collects them into the Release draft. Version tags, the block format and publication follow the separate [release guide](releasing.md#pull-request-notes).
+6. Describe the problem, resulting behavior, compatibility implications and checks actually run in the PR. English or Chinese is sufficient. Optionally add user-facing notes and upgrade steps in the template's corresponding language block; CI collects supplied notes into the Release draft, where maintainers complete translations. Version tags, the block format and publication follow the separate [release guide](releasing.md#pull-request-notes).
 
 ## Documentation ownership
 

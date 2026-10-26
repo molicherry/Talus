@@ -313,6 +313,25 @@ test("legacy and empty PR notes retain per-PR bilingual placeholders", async () 
   }
 });
 
+test("single-language PR notes create a draft and defer missing translations to Release review", async () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const text = locale === "en" ? "- Back up the data before upgrading." : "- 升级前备份数据。";
+    const single = `<!-- release-notes:${locale} -->\n${text}\n<!-- /release-notes:${locale} -->`;
+    for (const body of [single, noteBlocks(locale === "en" ? text : "", locale === "zh-CN" ? text : "")]) {
+      const api = apiFixture({ releases: [], evidence: null });
+      api.pulls[1].body = body;
+      await draftRelease({ api, receipt });
+      const notes = pullRequestNotes(api.releases[0].body.slice(0, api.releases[0].body.indexOf("## What's Changed")));
+      assert.ok(notes[locale].includes(text), "retain the provided upgrade instructions");
+      const other = locale === "en" ? "zh-CN" : "en";
+      assert.match(notes[other], /release:todo/);
+      assert.ok(!notes[other].includes(text), "do not substitute untranslated text");
+      assert.ok(!notes[locale].includes(locale === "en" ? "Add an English summary" : "补充此 PR"));
+      assert.deepEqual(api.evidence, receipt);
+    }
+  }
+});
+
 test("initial releases or direct commits without generated PR entries still require bilingual review", async () => {
   const api = apiFixture({ releases: [], evidence: null });
   api.generatedBody = "## What's Changed\nDirect commit history\n\n**Full Changelog**: compare";
@@ -337,12 +356,11 @@ test("release-note markers in code examples are content rather than PR language 
   }
 });
 
-test("invalid PR markers or missing translation abort new draft creation before Release or evidence writes", async () => {
+test("invalid PR markers abort new draft creation before Release or evidence writes", async () => {
   const invalid = [
     "<!-- /release-notes:en -->",
     "<!-- release-notes:en -->\nUnclosed",
-    "<!-- release-notes:en -->\nEnglish only\n<!-- /release-notes:en -->",
-    noteBlocks("", "只有中文"),
+    "<!-- release-notes:en -->\nEnglish\n<!-- /release-notes:zh-CN -->",
     `${noteBlocks()}\n${noteBlocks()}`,
     "<!-- release-notes:fr -->\nUnsupported\n<!-- /release-notes:fr -->",
     "<!-- release-notes:en -->\n<!-- release-notes:zh-CN -->\nNested",

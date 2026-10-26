@@ -59,4 +59,14 @@ for (const locale of ["en", "zh-CN"]) {
   assert.equal(selectReleaseNotes(collected, locale).split("## What's Changed").length, 2, "collected draft keeps the shared changelog once");
 }
 
+const englishOnly = await releaseNotesFromPullRequests({
+  repository: "example/Talus",
+  async request() {
+    return { number: 1, merged_at: "2026-10-01T00:00:00Z", base: { repo: { full_name: "example/Talus" } }, body: block("en", english) };
+  },
+}, generated);
+assert.ok(selectReleaseNotes(englishOnly, "en").includes(english));
+assert.match(selectReleaseNotes(englishOnly, "zh-CN"), /补充此 PR/);
+assert.ok(!selectReleaseNotes(englishOnly, "zh-CN").includes(english), "missing translation remains visible for Release review");
+
 console.log("Release note language selection, shared changelog, fallback, legacy notes and code fences passed.");

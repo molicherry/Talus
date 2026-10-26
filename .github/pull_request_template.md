@@ -8,9 +8,11 @@ List checks actually run and any relevant checks not run.
 
 ## Release notes
 
-<!-- For user-visible changes, fill BOTH blocks with short user-facing Markdown.
-Include upgrade/configuration steps and rollback limits when needed. These blocks
-are copied into the next Release draft for review; translation is not automatic.
+<!-- The PR may use English or Simplified Chinese; one language is sufficient.
+These release-note blocks are optional: fill either language with user-facing
+changes and any upgrade/configuration steps or rollback limits. Leave the unused
+block empty or remove it. The Release draft collects supplied notes; maintainers
+complete missing translations and review them before publishing.
 For purely internal changes, leave both empty or remove both and use an appropriate
 changelog exclusion label. See docs/releasing.md for the release-note contract. -->
 

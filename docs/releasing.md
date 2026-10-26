@@ -122,6 +122,10 @@ CI collects them into a bilingual GitHub Release draft, where maintainers
 consolidate, complete and review the notes. Translation is not automatic. Published
 Releases retain the version history; no separate upcoming-notes file is maintained.
 
+Automation prepares a draft, not publication. Maintainers may replace collected
+text with hand-written English and Chinese release notes; generated wording is
+not mandatory. Review and final publication remain manual.
+
 [PR #65](https://github.com/molicherry/Talus/pull/65) carries the source-checkout
 upgrade note for the newly tracked root `AGENTS.md`. The first Release containing
 that change must include its backup/move instructions. If that Release already
@@ -142,11 +146,13 @@ has a draft, add the note there manually; draft recovery preserves reviewed text
 
 ### Pull request notes
 
-For user-visible changes, fill both blocks in the
-[PR template](../.github/pull_request_template.md). Write short user-facing Markdown;
-include required migration/configuration actions and rollback limits in both
-languages when applicable. Only the marked text is copied, not the PR's technical
-summary or validation details. Example:
+PR descriptions may use English or Simplified Chinese; one language is sufficient.
+The release-note blocks in the [PR template](../.github/pull_request_template.md)
+are optional. Fill either language with short user-facing Markdown and any required
+migration/configuration actions and rollback limits. Only the marked text is copied,
+not the PR's technical summary or validation details. Maintainers complete missing
+translations in the Release draft. The following shows the supported languages;
+only one block is needed in a PR:
 
 ```markdown
 <!-- release-notes:en -->
@@ -162,9 +168,10 @@ summary or validation details. Example:
 <!-- /release-notes:zh-CN -->
 ```
 
-- Put each marker on its own line, at most one block per language. Fill both
-  languages together; a malformed, duplicate or one-language-only note stops
-  creation of the new Release so it cannot silently lose upgrade instructions.
+- Put each marker on its own line, at most one block per language. A single-language
+  note is accepted; the missing language receives a translation placeholder in the
+  Release draft. Malformed or duplicate markers still stop draft creation so they
+  cannot silently lose upgrade instructions.
 - For purely internal changes, leave both blocks empty or remove both, and apply
   the appropriate exclusion label. A change with user-facing upgrade requirements
   must not be excluded as documentation/internal work.
@@ -172,9 +179,10 @@ summary or validation details. Example:
   generated `What's Changed` entries. This keeps the same release range and
   [label exclusions](../.github/release.yml) as that list, including RC baselines.
   API failures stop draft creation; they are not treated as empty PR notes.
-- An included legacy PR without marked notes gets a per-PR `release:todo` in each
-  language. Releases with no PR entries get general placeholders, including
-  changes committed directly. Complete them using the tag and commit history.
+- An included PR without marked notes gets a per-PR `release:todo` in each
+  language; a single-language PR retains its text and gets a placeholder only for
+  the missing language. Releases with no PR entries get general placeholders,
+  including changes committed directly. Complete them using the tag and commit history.
 - Every new draft retains a review `release:todo` even when all PRs supplied both
   languages. Consolidate repetitive entries and check upgrade requirements before
   removing the markers and publishing. PR descriptions remain the source inputs;
