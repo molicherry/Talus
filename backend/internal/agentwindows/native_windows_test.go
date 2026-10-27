@@ -1,6 +1,7 @@
 package agentwindows
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,6 +51,8 @@ func TestWindowsNativeDeploymentUpgradeRollbackAndRemoval(t *testing.T) {
 	hash := func(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 	var mu sync.Mutex
 	var latest agentwire.Sample
+	var downloads atomic.Int32
+	var resumed atomic.Bool
 	token := strings.Repeat("a", 64)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/connect") {
@@ -57,6 +61,15 @@ func TestWindowsNativeDeploymentUpgradeRollbackAndRemoval(t *testing.T) {
 		}
 		if r.Header.Get("Authorization") != "Bearer "+token {
 			http.Error(w, "unauthorized", 401)
+			return
+		}
+		if r.URL.Path == "/artifact" {
+			downloads.Add(1)
+			if r.Header.Get("Range") == "bytes=12345-" {
+				resumed.Store(true)
+			}
+			w.Header().Set("ETag", `"`+hash(bin)+`"`)
+			http.ServeContent(w, r, "agent.exe", time.Time{}, bytes.NewReader(bin))
 			return
 		}
 		var req agentwire.Request
@@ -101,11 +114,27 @@ func TestWindowsNativeDeploymentUpgradeRollbackAndRemoval(t *testing.T) {
 		cfg := agentwire.Config{HubURL: url, Token: token, StateDir: l.Base() + "/outbox", IntervalSeconds: interval, AllowHTTP: true}
 		b, _ := json.Marshal(cfg)
 		activation := v.ActivationFile(hash(bin), hash(b))
-		for name, data := range map[string][]byte{"agent.exe": bin, "config.json": b, "activate.ps1": activation} {
+		for name, data := range map[string][]byte{"config.json": b, "activate.ps1": activation} {
 			if err := os.WriteFile(filepath.Join(v.Stage(), name), data, 0600); err != nil {
 				t.Fatal(err)
 			}
 		}
+		if interval == 1 {
+			if err := os.WriteFile(filepath.Join(v.Base(), "cache", hash(bin)+".part"), bin[:12345], 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		downloadConfig := filepath.Join(v.Stage(), "download.json")
+		downloadJSON, _ := json.Marshal(map[string]any{"url": hub.URL + "/artifact", "token": token, "allow_http": true})
+		if err := os.WriteFile(downloadConfig, downloadJSON, 0600); err != nil {
+			t.Fatal(err)
+		}
+		fetchScript := v.FetchFile(downloadConfig, hash(bin), int64(len(bin)), "pull", 300)
+		fetchPath := filepath.Join(v.Stage(), "fetch.ps1")
+		if err := os.WriteFile(fetchPath, fetchScript, 0600); err != nil {
+			t.Fatal(err)
+		}
+		mustRun(RunFetch(fetchPath, hash(fetchScript), 300))
 		// Launch returns before activation completes; SCM and Task Scheduler
 		// must finish installation independently of this PowerShell process.
 		mustRun(v.Launch(hash(activation)))
@@ -139,6 +168,9 @@ func TestWindowsNativeDeploymentUpgradeRollbackAndRemoval(t *testing.T) {
 	failed, _ := stage("http://127.0.0.1:1", 3)
 	if out, err := run(failed.Wait(ActivationWaitSeconds)); err == nil {
 		t.Fatalf("unreachable Hub accepted: %s", out)
+	}
+	if downloads.Load() != 1 || !resumed.Load() {
+		t.Fatal("initial HTTP resume or cached configuration-only upgrade failed")
 	}
 	actual, err := os.ReadFile(filepath.Join(l.Base(), "config.json"))
 	if err != nil || string(actual) != string(good) {

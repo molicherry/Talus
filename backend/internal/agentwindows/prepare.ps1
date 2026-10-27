@@ -3,6 +3,7 @@ Protect-Directory $root
 $lock=Lock-Install
 try {
   Protect-Directory $base
+  Protect-Directory (Join-Path $base 'cache')
   Protect-Directory (Join-Path $base 'staging')
   # Incomplete uploads and finished receipts cannot grow without bound. The
   # cutoff exceeds the activation task's hard limit; never remove a live stage.

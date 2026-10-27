@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -363,6 +364,8 @@ func TestDeployFailureReasonClassifiesSSHAndAgentFailures(t *testing.T) {
 		{"ssh auth", server.NewAppError(502, server.ReasonSSHAuth), server.ReasonSSHAuth},
 		{"deadline", context.DeadlineExceeded, "deployment_timeout"},
 		{"canceled", context.Canceled, "deployment_canceled"},
+		{"resuming", fmt.Errorf("transfer: %w", errArtifactPullProgress), reasonArtifactResuming},
+		{"busy", fmt.Errorf("transfer: %w", errArtifactPullBusy), reasonArtifactBusy},
 		{"unknown", errors.New("boom"), "deployment_failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -13,9 +13,10 @@ import (
 // uploadPeerFS serves real SFTP OPEN/WRITE/FSETSTAT/CLOSE requests. Tests inject
 // failures at protocol boundaries rather than emulating shell upload commands.
 type uploadPeerFS struct {
-	open   func(string) error
-	write  func()
-	finish func(string, []byte) error
+	open       func(string) error
+	write      func()
+	writeError func(int64) error
+	finish     func(string, []byte) error
 }
 
 func (fs *uploadPeerFS) Filewrite(r *sftp.Request) (io.WriterAt, error) {
@@ -24,7 +25,7 @@ func (fs *uploadPeerFS) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 			return nil, err
 		}
 	}
-	return &uploadPeerFile{path: r.Filepath, finish: fs.finish, write: fs.write}, nil
+	return &uploadPeerFile{path: r.Filepath, finish: fs.finish, write: fs.write, writeError: fs.writeError}, nil
 }
 func (fs *uploadPeerFS) Filecmd(r *sftp.Request) error {
 	if r.Method == "Setstat" {
@@ -34,18 +35,24 @@ func (fs *uploadPeerFS) Filecmd(r *sftp.Request) error {
 }
 
 type uploadPeerFile struct {
-	write    func()
-	mu       sync.Mutex
-	path     string
-	data     []byte
-	closed   bool
-	closeErr error
-	finish   func(string, []byte) error
+	write      func()
+	writeError func(int64) error
+	mu         sync.Mutex
+	path       string
+	data       []byte
+	closed     bool
+	closeErr   error
+	finish     func(string, []byte) error
 }
 
 func (f *uploadPeerFile) WriteAt(p []byte, offset int64) (int, error) {
 	if f.write != nil {
 		f.write()
+	}
+	if f.writeError != nil {
+		if err := f.writeError(offset); err != nil {
+			return 0, err
+		}
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()

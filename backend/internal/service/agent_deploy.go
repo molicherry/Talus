@@ -26,6 +26,13 @@ const agentPath = "/tmp/vpsmanager-agent"
 // deadline still caps the whole collection.
 const probeBudget = 5 * time.Second
 
+// Both deployment paths share transfer and admission budgets. Reserve time
+// beyond binary transfer for probing, configuration, activation and cleanup.
+const (
+	agentArtifactTransferBudget = 5 * time.Minute
+	agentInstallBudget          = agentArtifactTransferBudget + 7*time.Minute
+)
+
 // Failure reason classes for agent deployment. They
 // are distinct so a read-only or noexec target is not confused with a corrupt
 // upload.
@@ -89,6 +96,7 @@ type AgentDeploymentService struct {
 	execBudget       time.Duration
 	uploadBudget     time.Duration
 	trustedArtifacts trustedAgentArtifacts
+	bundleCache      agentBundleCache
 	// logger emits the agent.deploy correlation events: shared
 	// server_id with monitor.collect, never a metric label.
 	logger *slog.Logger
@@ -103,7 +111,7 @@ func NewAgentDeploymentService(ssh *SSHService, artifactsDir string) *AgentDeplo
 		ssh:          ssh,
 		artifactsDir: artifactsDir,
 		probeBudget:  probeBudget,
-		uploadBudget: agentDeploymentBudget,
+		uploadBudget: agentArtifactTransferBudget,
 		logger:       slog.Default().With("component", "agent-deploy"),
 		telemetry:    newMonitorTelemetry(nil, nil),
 	}
@@ -118,9 +126,9 @@ func (s *AgentDeploymentService) SetTelemetry(registry *telemetry.Registry, logg
 	}
 }
 
-// Manifest loads and validates the bundled artifact manifest.
+// Manifest validates the bundled manifest and reuses it until its file changes.
 func (s *AgentDeploymentService) Manifest() (*agentproto.Manifest, error) {
-	return agentproto.LoadManifest(s.artifactsDir)
+	return s.bundleCache.loadManifest(s.artifactsDir)
 }
 
 func (s *AgentDeploymentService) artifactFor(platform AgentPlatform) (agentproto.Artifact, error) {

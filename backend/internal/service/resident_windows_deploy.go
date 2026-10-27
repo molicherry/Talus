@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,6 +19,12 @@ import (
 )
 
 const reasonWindowsService = "agent_windows_service_unavailable"
+
+const (
+	windowsActivationLaunchBudget = 15 * time.Second
+	windowsActivationWaitBudget   = (agentwindows.ActivationWaitSeconds + 10) * time.Second
+	windowsInstallPersistBudget   = 3 * time.Second
+)
 
 func windowsAgentLayout(installID, home string) agentLayout {
 	l := agentwindows.Layout{Home: home, InstallID: installID}
@@ -109,7 +115,7 @@ func (m *ResidentMonitor) installWindows(ctx context.Context, n model.AgentNode,
 	activation := l.ActivationFile(artifact.SHA256, configHash)
 	// Windows OpenSSH does not offer POSIX chmod. Prepare has already restricted
 	// the staging directory to Administrators and SYSTEM, before secrets arrive.
-	if err = lease.uploadPrivateDirectory(ctx, filepath.Join(m.deployer.artifactsDir, artifact.File), "/"+l.Stage()+"/agent.exe", 2*time.Minute); err != nil {
+	if err = m.stageArtifact(ctx, lease, artifact, cfg, l.Base(), l.Base()+"/agent.exe", l.Stage()+"/agent.exe", &l); err != nil {
 		return err
 	}
 	if err = verifyWindowsFile(ctx, lease, l.Stage()+"/agent.exe", artifact.SHA256); err != nil {
@@ -138,21 +144,35 @@ func (m *ResidentMonitor) installWindows(ctx context.Context, n model.AgentNode,
 			return err
 		}
 	}
-	// Task Scheduler detaches activation from the SSH channel. A lost connection
-	// cannot interrupt the health check/rollback or leave a half-installed service.
-	if err = windowsExec(ctx, lease, l.Launch(repository.TokenHash(string(activation))), reasonWindowsService, 15*time.Second); err != nil {
+	if err = m.beginActivation(ctx); err != nil {
 		return err
 	}
-	if err = windowsExec(ctx, lease, l.Wait(agentwindows.ActivationWaitSeconds), ReasonAgentHealthCheckFailed, (agentwindows.ActivationWaitSeconds+10)*time.Second); err != nil {
+	if err = activateWindowsAgent(ctx, lease, l, repository.TokenHash(string(activation))); err != nil {
 		return err
 	}
-	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), windowsInstallPersistBudget)
 	err = m.repo.SetInstallPlatformLayout(storeCtx, n, target)
 	cancel()
 	if err != nil {
 		return err
 	}
 	return lease.releaseAndWait()
+}
+
+func activateWindowsAgent(ctx context.Context, lease Lease, l agentwindows.Layout, activationHash string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Task Scheduler outlives the SSH channel. Do not launch it when the
+	// installation deadline cannot cover its receipt, persistence and cleanup.
+	reserve := windowsActivationLaunchBudget + windowsActivationWaitBudget + windowsInstallPersistBudget + sshCleanupBudget
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < reserve {
+		return fmt.Errorf("insufficient time to launch Windows activation: %w", context.DeadlineExceeded)
+	}
+	if err := windowsExec(ctx, lease, l.Launch(activationHash), reasonWindowsService, windowsActivationLaunchBudget); err != nil {
+		return err
+	}
+	return windowsExec(ctx, lease, l.Wait(agentwindows.ActivationWaitSeconds), ReasonAgentHealthCheckFailed, windowsActivationWaitBudget)
 }
 
 func (m *ResidentMonitor) uninstallWindows(ctx context.Context, installID string, layout agentLayout, lease *sshLease) error {

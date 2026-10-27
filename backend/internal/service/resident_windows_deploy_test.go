@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,6 +32,55 @@ type windowsProbeLease struct {
 
 func (l windowsProbeLease) Exec(_ context.Context, command string, _ time.Duration) (*ExecResult, error) {
 	return l.exec(command), nil
+}
+
+func TestWindowsAgentActivationReservesCompletionBudget(t *testing.T) {
+	for _, scenario := range []string{"slow-staging", "canceled", "ready", "launch-failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			remaining := 4 * time.Minute
+			if scenario == "slow-staging" {
+				remaining = 2 * time.Minute
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), remaining)
+			defer cancel()
+			if scenario == "canceled" {
+				cancel()
+			}
+			layout := agentwindows.Layout{Home: "C:/ProgramData", InstallID: "test", Attempt: "attempt"}
+			hash := strings.Repeat("a", 64)
+			commands := []string{agentwindows.Command(layout.Launch(hash)), agentwindows.Command(layout.Wait(agentwindows.ActivationWaitSeconds))}
+			calls := 0
+			lease := windowsProbeLease{exec: func(command string) *ExecResult {
+				if calls >= len(commands) || command != commands[calls] {
+					t.Fatal("activation did not launch then wait for its own receipt")
+				}
+				calls++
+				if scenario == "launch-failure" {
+					return &ExecResult{ExitCode: 1}
+				}
+				return &ExecResult{}
+			}}
+			err := activateWindowsAgent(ctx, lease, layout, hash)
+			switch scenario {
+			case "slow-staging":
+				if !errors.Is(err, context.DeadlineExceeded) || calls != 0 || deployFailureReason(err) != "deployment_timeout" {
+					t.Fatalf("launched a detached task without time for completion: calls=%d err=%v", calls, err)
+				}
+			case "canceled":
+				if !errors.Is(err, context.Canceled) || calls != 0 {
+					t.Fatalf("launched after cancellation: calls=%d err=%v", calls, err)
+				}
+			case "ready":
+				if err != nil || calls != 2 {
+					t.Fatalf("did not wait for the launched task: calls=%d err=%v", calls, err)
+				}
+			case "launch-failure":
+				if ReasonFromError(err) != reasonWindowsService || calls != 1 {
+					t.Fatalf("waited for an unlaunched task: calls=%d err=%v", calls, err)
+				}
+			}
+		})
+	}
 }
 
 func TestWindowsAgentProbe(t *testing.T) {
@@ -171,6 +221,22 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 				}
 				script := decodeWindowsCommand(t, command)
 				switch {
+				case strings.Contains(script, "Download script hash mismatch"):
+					m := regexp.MustCompile(`\$script='([^']+)'`).FindStringSubmatch(script)
+					if len(m) != 2 {
+						t.Fatal("missing download payload path")
+					}
+					payload, ok := remote.file("/" + m[1])
+					if !ok {
+						t.Fatal("download script was not uploaded")
+					}
+					if strings.Contains(string(payload), "$mode='store'\n") {
+						fmt.Fprintln(ch, "TALUS_ARTIFACT_READY")
+					} else {
+						fmt.Fprintln(ch, "TALUS_PULL_UNAVAILABLE")
+						exitStatus(ch, 75)
+						return
+					}
 				case command == agentwindows.Command(agentwindows.Probe):
 					fmt.Fprint(ch, "TALUS_WINDOWS_V1\r\nAMD64\r\n")
 				case command == agentwindows.Command(agentwindows.Context):
@@ -196,7 +262,7 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 					}
 					fmt.Fprintln(ch, hash)
 				case strings.Contains(script, "Start-ScheduledTask -TaskName $task") && !strings.Contains(script, ".remove.ps1"):
-					if remote.count("sftp.upload ") != 3 {
+					if remote.count("sftp.upload ") != 6 {
 						t.Error("activation before complete uploads")
 					}
 					launched.Store(true)
@@ -237,13 +303,16 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 			dir := t.TempDir()
 			agentprototest.WriteArtifacts(t, dir, "windows-test")
 			monitor := NewResidentMonitor(agents, servers, NewAgentDeploymentService(sshSvc, dir), "https://hub.example", false, 5)
-			monitor.installJob(ctx, node, "desired", "config")
+			installErr := monitor.installJob(ctx, node, "desired", "config")
 			after, err := agents.Get(ctx, srv.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			switch scenario {
 			case "success", "remove-pending", "remove-failure", "remove-invalid":
+				if installErr != nil {
+					t.Fatalf("Windows installation failed: %v", installErr)
+				}
 				if after.Deployment != "ready" || after.InstallOS != "windows" || after.InstallHome == nil || *after.InstallHome != "C:/ProgramData" || len(after.PendingInstallLayouts) != 0 {
 					t.Fatalf("installation not persisted: %+v", after)
 				}
@@ -280,15 +349,15 @@ func TestWindowsAgentDeploymentPersistsLayoutAndVerifiesBeforeActivation(t *test
 					t.Fatalf("removal failure not propagated: %v", err)
 				}
 			case "hash-mismatch":
-				if after.DeployError != ReasonAgentHashMismatch || launched.Load() {
+				if ReasonFromError(installErr) != ReasonAgentHashMismatch || after.DeployError != ReasonAgentHashMismatch || launched.Load() {
 					t.Fatal("unverified executable activated")
 				}
 			case "health-failure":
-				if after.DeployError != ReasonAgentHealthCheckFailed || len(after.PendingInstallLayouts) != 1 || after.PendingInstallLayouts[0].OS != "windows" {
+				if ReasonFromError(installErr) != ReasonAgentHealthCheckFailed || after.DeployError != ReasonAgentHealthCheckFailed || len(after.PendingInstallLayouts) != 1 || after.PendingInstallLayouts[0].OS != "windows" {
 					t.Fatal("failed install lost cleanup layout")
 				}
 			case "no-admin":
-				if after.DeployError != reasonWindowsService || prepared.Load() || remote.count("sftp.upload ") != 0 {
+				if ReasonFromError(installErr) != reasonWindowsService || after.DeployError != reasonWindowsService || prepared.Load() || remote.count("sftp.upload ") != 0 {
 					t.Fatal("unprivileged account modified Windows host")
 				}
 			}

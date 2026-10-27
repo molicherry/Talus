@@ -21,6 +21,7 @@ type RouteConfig struct {
 	UpdateSettingsHandler        http.HandlerFunc
 	AgentHTTPHandler             http.HandlerFunc
 	AgentWebSocketHandler        http.HandlerFunc
+	AgentArtifactHandler         http.HandlerFunc
 	JWTService                   *token.JWTService
 	APIKeyAuth                   any
 	UserGate                     middleware.UserGate
@@ -119,13 +120,18 @@ func NewRouter(cfg RouteConfig) chi.Router {
 	// Health check
 	r.Get("/healthz", healthHandler)
 
-	// Public API routes (no authentication required)
+	// Routes outside administrator/API-key middleware. Agent handlers perform
+	// their own node-credential authentication.
 	r.Route("/api/v1", func(r chi.Router) {
 		if cfg.AgentHTTPHandler != nil {
 			r.Post("/agent/report", cfg.AgentHTTPHandler)
 		}
 		if cfg.AgentWebSocketHandler != nil {
 			r.Get("/agent/connect", cfg.AgentWebSocketHandler)
+		}
+		if cfg.AgentArtifactHandler != nil {
+			r.Get("/agent/artifacts/{sha256}", cfg.AgentArtifactHandler)
+			r.Head("/agent/artifacts/{sha256}", cfg.AgentArtifactHandler)
 		}
 		r.Get("/", versionHandler)
 		r.Get("/version", versionHandler)

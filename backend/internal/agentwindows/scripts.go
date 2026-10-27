@@ -21,6 +21,9 @@ var common string
 //go:embed prepare.ps1
 var prepare string
 
+//go:embed fetch.ps1
+var fetch string
+
 //go:embed activate.ps1
 var activate string
 
@@ -106,6 +109,18 @@ func (l Layout) vars() string {
 	return l.baseVars() + "$stage=" + Quote(l.Stage()) + "\n$task=" + Quote(l.Name()+"-Deploy-"+l.Attempt) + "\n"
 }
 func (l Layout) Prepare() string { return l.vars() + common + prepare }
+
+// FetchArtifact is a file payload; it can exceed cmd.exe's command-line limit.
+// RunFetch verifies the protected uploaded file before executing it.
+func (l Layout) FetchArtifact(config, digest string, size int64, mode string, seconds int) string {
+	return "param([int]$TransferSeconds=0)\n" + l.vars() + "$fetchConfig=" + Quote(config) + "\n$digest=" + Quote(digest) + "\n$mode=" + Quote(mode) + fmt.Sprintf("\n$size=%dL\n$seconds=%d\nif ($TransferSeconds -gt 0) { $seconds=[Math]::Min($seconds,$TransferSeconds) }\n", size, seconds) + common + fetch
+}
+func (l Layout) FetchFile(config, digest string, size int64, mode string, seconds int) []byte {
+	return []byte("\xef\xbb\xbf" + l.FetchArtifact(config, digest, size, mode, seconds))
+}
+func RunFetch(script, digest string, seconds int) string {
+	return systemModules + "$ErrorActionPreference='Stop'\n" + common + "\n$script=" + Quote(script) + "; Assert-Path $script; if ((Get-FileHash -Algorithm SHA256 -LiteralPath $script).Hash -ne " + Quote(digest) + ") { throw 'Download script hash mismatch' }; & $script -TransferSeconds " + fmt.Sprint(seconds) + "; exit $LASTEXITCODE"
+}
 func (l Layout) Activate(binaryHash, configHash string) string {
 	return l.vars() + "$binaryHash=" + Quote(binaryHash) + "\n$configHash=" + Quote(configHash) + "\n" + common + activate
 }

@@ -1118,7 +1118,8 @@
             "symbol": "resident monitoring covers connection and initial sample states (desktop)"
           },
           "automation_status": "implemented",
-          "required": true
+          "required": true,
+          "verification": "Desktop/mobile compact and detailed statuses distinguish pending resume/capacity waits from active or failed deployments, show explanatory text without a transfer-only warning, and retain connection, collection and real deployment failure warnings."
         },
         {
           "implementation_id": "impl-04-06-4",
@@ -1128,7 +1129,8 @@
             "symbol": "resident monitoring covers connection and initial sample states (mobile)"
           },
           "automation_status": "implemented",
-          "required": true
+          "required": true,
+          "verification": "Desktop/mobile compact and detailed statuses distinguish pending resume/capacity waits from active or failed deployments, show explanatory text without a transfer-only warning, and retain connection, collection and real deployment failure warnings."
         }
       ]
     },
@@ -1435,6 +1437,17 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Sequential Exec and Upload primitives retain one lease until its unique owner explicitly releases it."
+        },
+        {
+          "implementation_id": "impl-06-01-pipelined-writes",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/ssh_upload_pipeline_test.go",
+            "symbol": "TestAgentUploadPipelinesUnacknowledgedWrites"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Linux and Windows-private-directory uploads send multiple packets before acknowledgement, preserve artifact bytes, reject remote write failures, and reclaim their SSH slot after success, failure or cancellation."
         }
       ]
     },
@@ -5179,6 +5192,17 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-11-03-activation-budget",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_windows_deploy_test.go",
+            "symbol": "TestWindowsAgentActivationReservesCompletionBudget"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A short remaining deadline or canceled caller cannot launch detached activation; an admitted launch waits for its receipt, and a failed launch skips the wait."
         }
       ]
     },
@@ -5289,6 +5313,159 @@
           },
           "automation_status": "implemented",
           "required": true
+        }
+      ]
+    },
+    {
+      "case_id": "TC-08-09",
+      "requirement_ids": [
+        "REQ-08"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/71/scenario",
+      "scenario": "Download only authenticated immutable Agent artifacts, cache verification until file metadata changes, resume verified bytes with short progress/capacity retries, separate transfer and activation capacity, and back off node failures.",
+      "implementations": [
+        {
+          "implementation_id": "impl-08-09-http-ranges",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_http_test.go",
+            "symbol": "TestAgentArtifactHTTPAuthorizationRangesAndVersionPinning"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Only node credentials can download current manifest bytes; HEAD, Range and validators preserve immutable content, and changed bytes or unknown digests are refused."
+        },
+        {
+          "implementation_id": "impl-08-09-node-revocation",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_http_test.go",
+            "symbol": "TestAgentArtifactHTTPRevokesReplacedAndDeletedNodes"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Real database-backed node replacement and deletion revoke artifact access while a replacement credential can download the pinned artifact."
+        },
+        {
+          "implementation_id": "impl-08-09-pull-cache",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_transfer_test.go",
+            "symbol": "TestAgentArtifactPullResumesCachesAndRejectsCorruption"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The real Linux bootstrap resumes interrupted bytes, safely handles ignored Range, rejects corrupt content, classifies redirects and 429/503 without polluting progress, reports missing hash tools and reuses cached or installed artifacts."
+        },
+        {
+          "implementation_id": "impl-08-09-stage-capacity",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_scheduler_test.go",
+            "symbol": "TestResidentStagesSeparateTransferAndActivationCapacity"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Four activation waits coexist with four transfers; waiting for activation releases transfer capacity, and queued transfers honor cancellation."
+        },
+        {
+          "implementation_id": "impl-08-09-job-backoff",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_scheduler_test.go",
+            "symbol": "TestResidentSchedulerBoundsJobsBacksOffAndResetsDesiredState"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Bound pending jobs, deduplicate nodes, apply jittered exponential retry backoff and reset obsolete backoff after desired-state or route changes."
+        },
+        {
+          "implementation_id": "impl-08-09-windows-pull",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/agentwindows/fetch_test.go",
+            "symbol": "TestWindowsArtifactPullResumesAndReusesVerifiedCache"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "Execute the Windows download body on available PowerShell to verify resumption, ignored Range, checksum rejection, cache reuse, HTTP error classification and bounded reads that retain progress; native Windows acceptance covers real ACLs."
+        },
+        {
+          "implementation_id": "impl-08-09-bootstrap-fallback",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_bootstrap_test.go",
+            "symbol": "TestAgentArtifactBootstrapUsesPullAndFallsBackToSFTP"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The real SSH/SFTP bootstrap avoids binary uploads on HTTP success or transient progress/capacity outcomes, falls back for unavailable and redirected HTTP, reports missing hash tools, and caches binaries across configuration-only retries."
+        },
+        {
+          "implementation_id": "impl-08-09-verification-cache",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_cache_test.go",
+            "symbol": "TestAgentArtifactVerificationCachesAndInvalidatesFileMetadata"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Unchanged opened files are hashed once across repeated requests; inode replacement and same-size writes invalidate verification and reject corrupted bytes."
+        },
+        {
+          "implementation_id": "impl-08-09-manifest-cache",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_cache_test.go",
+            "symbol": "TestAgentArtifactManifestCacheInvalidatesAndReturnsOwnedCopies"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The cached manifest returns independent values and reloads after file changes, refusing invalid replacements."
+        },
+        {
+          "implementation_id": "impl-08-09-http-deadlines-capacity",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/agent_artifact_http_test.go",
+            "symbol": "TestAgentArtifactHTTPDeadlinesAndCapacity"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Unauthorized, missing, wrong-method and saturated artifact requests retain ordinary write deadlines; valid streams replace the deadline and capacity responses include Retry-After."
+        },
+        {
+          "implementation_id": "impl-08-09-transfer-short-retry",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_scheduler_test.go",
+            "symbol": "TestResidentSchedulerRetriesTransferProgressAndCapacityAfterThirtySeconds"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Progressing downloads retain thirty-second retries; initial busy outcomes use the same short delay without growing the node failure count, and persisted last attempts enforce the restart minimum."
+        },
+        {
+          "implementation_id": "impl-08-09-busy-backoff",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_scheduler_test.go",
+            "symbol": "TestResidentSchedulerBacksOffRepeatedBusyAndResetsOnProgress"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The first five consecutive busy outcomes retry after thirty seconds, later outcomes use capped exponential jitter without counting node failures, and progress, changed desired state or success resets the capacity streak."
+        },
+        {
+          "implementation_id": "impl-08-09-pending-transfer-state",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_layout_migration_test.go",
+            "symbol": "TestResidentInstallJobPersistsTransientTransferWaitAndClearsOnSuccess"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Real SSH/SFTP jobs persist progressing and busy transfers as pending with separate diagnostics, preserve running fingerprints, release phase slots, retain pending status after repository reload, and clear the diagnostic after a successful retry."
         }
       ]
     }

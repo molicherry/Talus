@@ -102,10 +102,25 @@ receipt could be written, also check Task Scheduler's last result. The Hub does
 not keep polling deleted nodes after SSH disconnects or request cleanup ends.
 
 Activation has a 180-second task limit. The Hub waits 200 seconds for its receipt
-and allows another 10 seconds for SSH completion. Windows and unidentified-host
-deployment jobs have a ten-minute overall budget including uploads. External
+and allows another 10 seconds for SSH completion. Deployment jobs have a
+twelve-minute overall budget including uploads. Before launching activation, the
+Hub requires enough remaining time for launch, the full receipt wait, persistence
+and SSH cleanup; otherwise it retries without starting a detached task. External
 cancellation or connection loss can end the Hub wait earlier; the local task
 continues activation or rollback.
+
+The bootstrap downloads binaries with the built-in HTTP client and reuses a
+digest-keyed cache under the installation directory. Partial downloads resume
+with Range/If-Range; cached and downloaded bytes are checked with SHA256. The
+cache inherits SYSTEM/Administrators-only ACLs. Download scripts are uploaded as
+UTF-8 files with a BOM and verified before execution, avoiding cmd.exe's command
+length limit; credentials stay in a separate protected file removed by the
+download script. An unavailable HTTP path can fall back to SFTP; HTTP 429/503
+and interrupted pulls with new bytes retain progress and retry after thirty
+seconds. Reads are bounded by both an idle limit and the remaining transfer
+budget so progress can be reported before SSH cancellation. See
+[Monitoring agent upgrades](../README.md#monitoring-agent-upgrades) for shared
+transfer, queue and retry rules.
 
 ## Changing operating system or ProgramData
 

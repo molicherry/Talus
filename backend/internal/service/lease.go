@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"time"
@@ -183,15 +182,28 @@ func (l *sshLease) end(unhealthy bool, err error) {
 // Exec and Upload preserve ownership across a deployment's sequential
 // primitives. Their caller must eventually Release or Discard the lease.
 func (l *sshLease) Exec(ctx context.Context, command string, budget time.Duration) (*ExecResult, error) {
-	operation, err := l.begin(ctx)
-	if err != nil {
-		return nil, err
-	}
 	if budget <= 0 {
 		budget = l.svc.execDefaultTimeout
 	}
 	if budget > maxExecTimeout {
 		budget = maxExecTimeout
+	}
+	return l.exec(ctx, command, budget)
+}
+
+// execTransfer supervises a bootstrap download with the transfer's own bounded
+// context instead of borrowing the unrelated interactive-command timeout cap.
+func (l *sshLease) execTransfer(ctx context.Context, command string, budget time.Duration) (*ExecResult, error) {
+	if budget <= 0 {
+		return nil, context.DeadlineExceeded
+	}
+	return l.exec(ctx, command, budget)
+}
+
+func (l *sshLease) exec(ctx context.Context, command string, budget time.Duration) (*ExecResult, error) {
+	operation, err := l.begin(ctx)
+	if err != nil {
+		return nil, err
 	}
 	result, err, transportClosed := l.svc.runCommand(operation, l.h.Client, command, budget)
 	l.end(transportClosed || isConnectionError(err), err)
@@ -217,9 +229,8 @@ func (l *sshLease) upload(ctx context.Context, localPath, remotePath string, bud
 	if budget <= 0 {
 		budget = l.svc.execDefaultTimeout
 	}
-	if budget > maxExecTimeout {
-		budget = maxExecTimeout
-	}
+	// Transfers honor their own budget and the caller's parent deadline; the
+	// command execution ceiling must not silently shorten an artifact upload.
 	err, transportClosed := l.svc.copyFileWithPermissions(operation, l.h.Client, localPath, remotePath, budget, chmod)
 	l.end(transportClosed || isConnectionError(err), err)
 	return err
@@ -264,7 +275,13 @@ func (s *SSHService) copyFileWithPermissions(parent context.Context, client *ssh
 				return err
 			}
 		}
-		count, err := io.CopyBuffer(remote, source, make([]byte, 32<<10))
+		// Request pipelining explicitly: io.CopyBuffer can select os.File.WriteTo,
+		// which sends one small Write at a time and waits a full round trip for
+		// every acknowledgement. The SFTP client's per-file request limit bounds
+		// concurrency, and its reader joins all outstanding writes before return.
+		// This requires a regular remote staging file with offset writes; FIFOs,
+		// devices and SFTP servers limited to sequential writes are unsupported.
+		count, err := remote.ReadFromWithConcurrency(source, 0)
 		if err != nil {
 			return err
 		}

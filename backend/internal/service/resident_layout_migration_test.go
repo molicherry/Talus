@@ -32,6 +32,7 @@ type residentMigrationRemote struct {
 	setups      atomic.Int32
 	activations atomic.Int32
 	retirements atomic.Int32
+	pullExit    atomic.Int32
 	mu          sync.RWMutex
 	onActivate  func(string, ssh.Channel)
 	onRetire    func(string, ssh.Channel)
@@ -54,6 +55,24 @@ func (r *residentMigrationRemote) handler(t *testing.T) func(string, ssh.Channel
 	inherited := r.files.handler()
 	return func(command string, ch ssh.Channel, closed <-chan struct{}) {
 		switch {
+		case strings.HasPrefix(command, "set -eu\ncache_dir="):
+			if strings.Contains(command, "mode='store'\n") {
+				fmt.Fprintln(ch, "TALUS_ARTIFACT_READY")
+				exitStatus(ch, 0)
+			} else {
+				code := r.pullExit.Load()
+				marker := "TALUS_PULL_UNAVAILABLE"
+				switch code {
+				case 76:
+					marker = "TALUS_PULL_INCOMPLETE"
+				case 79:
+					marker = "TALUS_PULL_BUSY"
+				default:
+					code = 75
+				}
+				fmt.Fprintln(ch, marker)
+				exitStatus(ch, uint32(code))
+			}
 		case strings.HasPrefix(command, "id -u;"):
 			home := r.home
 			if r.uid.Load() == 0 {
@@ -171,10 +190,13 @@ func newResidentMigrationFixture(t *testing.T, oldUID int, oldHome string, curre
 
 func (f residentMigrationFixture) install(t *testing.T, node model.AgentNode) model.AgentNode {
 	t.Helper()
-	f.monitor.installJob(context.Background(), node, "new-artifact", "new-config")
+	installErr := f.monitor.installJob(context.Background(), node, "new-artifact", "new-config")
 	after, err := f.agents.Get(f.ctx, node.ServerID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if (installErr == nil) != (after.Deployment == "ready") {
+		t.Fatalf("job result disagrees with persisted state: err=%v deployment=%q reason=%q", installErr, after.Deployment, after.DeployError)
 	}
 	return after
 }
@@ -220,6 +242,57 @@ func assertResidentMigrationReady(t *testing.T, node model.AgentNode, uid int, h
 	}
 	if len(node.PendingInstallLayouts) != 0 {
 		t.Fatalf("successful migration retained pending locations: %+v", node.PendingInstallLayouts)
+	}
+}
+
+func TestResidentInstallJobPersistsTransientTransferWaitAndClearsOnSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		code   int32
+		err    error
+		reason string
+	}{
+		{"resuming", 76, errArtifactPullProgress, reasonArtifactResuming},
+		{"busy", 79, errArtifactPullBusy, reasonArtifactBusy},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newResidentMigrationFixture(t, 1001, "/home/bob", 1001, "/home/bob")
+			f.remote.pullExit.Store(tc.code)
+			if err := f.monitor.installJob(context.Background(), f.node, "new-artifact", "new-config"); !errors.Is(err, tc.err) {
+				t.Fatalf("unexpected installation outcome: %v", err)
+			}
+			after, err := f.agents.Get(f.ctx, f.node.ServerID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.Deployment != "pending" || after.DeployError != tc.reason || after.InstalledHash != "old-artifact" || after.ConfigHash != "old-config" || f.remote.activations.Load() != 0 {
+				t.Fatalf("unfinished transfer was marked failed/installed or activated: state=%q reason=%q hashes=%q/%q activations=%d", after.Deployment, after.DeployError, after.InstalledHash, after.ConfigHash, f.remote.activations.Load())
+			}
+			if !residentInstallNeeded(after, "new-artifact", "new-config", time.Now(), time.Now()) {
+				t.Fatal("pending transfer suppressed its next attempt")
+			}
+			// Reload the persisted node as the reconciler does after Hub restart.
+			restarted := NewResidentMonitor(f.agents, f.monitor.servers, f.monitor.deployer, "https://hub.example", false, 5)
+			restarted.mu.Lock()
+			restarted.runtimeLocked(after)
+			restarted.mu.Unlock()
+			for _, m := range []*ResidentMonitor{f.monitor, restarted} {
+				status := m.Statuses(f.ctx, []uint{after.ServerID})[after.ServerID]
+				if status.Deployment != "pending" || status.DeploymentError != tc.reason {
+					t.Fatalf("status lost pending diagnostic: %+v", status)
+				}
+			}
+			if len(f.monitor.transferSlots) != 0 || len(f.monitor.activationSlots) != 0 {
+				t.Fatal("waiting transfer retained an active phase slot")
+			}
+			f.remote.pullExit.Store(0)
+			ready := f.install(t, after)
+			assertResidentMigrationReady(t, ready, 1001, "/home/bob")
+			status := f.monitor.Statuses(f.ctx, []uint{ready.ServerID})[ready.ServerID]
+			if status.DeploymentError != "" {
+				t.Fatalf("successful retry retained its wait diagnostic: %+v", status)
+			}
+		})
 	}
 }
 

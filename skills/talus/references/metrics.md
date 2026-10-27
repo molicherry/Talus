@@ -128,7 +128,7 @@ portion of the requested range as healthy.
 | `connection` | `online`, `reconnecting`, `unreachable`, or `unknown`: agent contact/connection state, not an SSH connectivity test |
 | `collection` | `healthy`, `partial`, `failed`, or `unknown`: validity of the latest collected sample |
 | `data` | `fresh`, `backfilling`, or `stale`: current persisted sample freshness and outstanding replay |
-| `deployment`, `deployment_error` | Installation state and diagnostic; `setup_required` with `hub_url_required` means the Hub needs `AGENT_HUB_URL` |
+| `deployment`, `deployment_error` | Installation state and diagnostic; `setup_required` with `hub_url_required` means the Hub needs `AGENT_HUB_URL`; `pending` with `agent_artifact_resuming` or `agent_artifact_busy` means waiting to resume or for download capacity, not a failed or active installation |
 | `last_contact_at`, `last_sample_at`, `last_persisted_at` | Separate contact, sample, and persistence timestamps, when present |
 | `errors` | Per-component collection/storage diagnostics, when present |
 | `pending_samples`, `dropped_samples`, `version` | Buffered backlog, dropped sample count, and agent version |
@@ -139,7 +139,10 @@ intervals, with a minimum of 15 seconds. Replayed history can fill gaps without
 making a disconnected node online; a recent storage timestamp alone does not prove
 the underlying sample is recent. Report missing/stale values explicitly.
 
-The Hub installs/repairs agents over the configured SSH/SFTP route. Nodes report
+The Hub supervises agent installation/repair over the configured SSH/SFTP route.
+Binaries are reused from verified node caches or pulled over HTTPS from the Hub,
+with SFTP fallback when HTTP is unavailable. Partial HTTP downloads can resume;
+configuration-only updates reuse matching binaries. Nodes report
 to the node-reachable HTTPS `AGENT_HUB_URL` over outbound WSS with HTTPS fallback.
 An administrator can configure this URL in **System settings → Monitoring** or
 through deployment environment variables. Linux installation requires running
@@ -150,7 +153,17 @@ agent runs as a native service; staging files use SYSTEM/Administrators ACLs,
 and a detached scheduled task performs activation and rollback.
 
 Talus does not automatically elevate an unprivileged login. Installation/repair
-has a three-minute budget for recorded Linux installations, or ten minutes for
-Windows or an unidentified platform, including uploads and activation waits.
+has a twelve-minute budget after transfer admission. Transfer and activation each
+allow four concurrent jobs, with at most sixteen admitted jobs and one installer
+per node. Interrupted pulls that saved new bytes retry after thirty seconds and
+reset the consecutive busy count. HTTP 429/503 retry after thirty seconds for the
+first five consecutive busy outcomes, then use jittered exponential backoff from
+one minute to at most fifteen minutes. These transfer waits retain progress and
+do not increment the node failure count. Other failures have an independent
+one-to-fifteen-minute jittered backoff. Success or a changed desired
+version/configuration/connection revision resets both counters; counters are in
+memory and a Hub restart retains the persisted one-minute minimum. Internal artifact
+GET/HEAD requests use node credentials, not API keys, and do not establish agent
+monitoring presence.
 Deployment problems and missing Hub configuration need administrator attention,
 not changes to the metric query or an assumption that the server is offline.

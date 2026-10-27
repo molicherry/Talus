@@ -747,6 +747,13 @@ try {
         { status: { ...base, connection: "unknown", collection: "unknown", last_sample_at: undefined, deployment: "setup_required", deployment_error: "hub_url_required" }, communication: "Awaiting contact", data: "Waiting for a sample", warning: false, setup: true },
         { status: { ...base, connection: "unknown", collection: "unknown", last_sample_at: undefined, deployment: "pending" }, communication: "Awaiting contact", data: "Waiting for a sample", warning: false, deploymentLabel: "Awaiting deployment or configuration sync" },
         { status: { ...base, connection: "unknown", collection: "unknown", last_sample_at: undefined, deployment: "installing" }, communication: "Awaiting contact", data: "Waiting for a sample", warning: false, deploymentLabel: "Deploying agent" },
+        { status: { ...base, connection: "online", data: "fresh", deployment: "pending", deployment_error: "agent_artifact_resuming" }, communication: "Healthy", data: "Fresh", warning: false, deploymentLabel: "Waiting to resume download", waitingTransfer: true, reasonText: "Download progress is saved; deployment will continue from the saved bytes." },
+        { status: { ...base, connection: "online", deployment: "pending", deployment_error: "agent_artifact_resuming" }, communication: "Healthy", data: "Updates delayed", warning: true, deploymentLabel: "Waiting to resume download", waitingTransfer: true },
+        { status: { ...base, connection: "unknown", collection: "unknown", last_sample_at: undefined, deployment: "pending", deployment_error: "agent_artifact_busy" }, communication: "Awaiting contact", data: "Waiting for a sample", warning: false, deploymentLabel: "Waiting for download capacity", waitingTransfer: true, reasonText: "The download service is busy; deployment will retry automatically." },
+        { status: { ...base, connection: "unreachable", data: "fresh", deployment: "pending", deployment_error: "agent_artifact_resuming" }, communication: "Contact lost", data: "Fresh", warning: true, disconnected: true, deploymentLabel: "Waiting to resume download", waitingTransfer: true },
+        { status: { ...base, connection: "online", collection: "failed", data: "fresh", deployment: "pending", deployment_error: "agent_artifact_busy" }, communication: "Healthy", data: "Fresh", warning: true, deploymentLabel: "Waiting for download capacity", waitingTransfer: true },
+        { status: { ...base, connection: "online", data: "fresh", deployment: "failed", deployment_error: "agent_artifact_busy" }, communication: "Healthy", data: "Fresh", warning: true, deploymentLabel: "Agent deployment failed" },
+        { status: { ...base, connection: "online", data: "fresh", deployment: "failed", deployment_error: "deployment_failed" }, communication: "Healthy", data: "Fresh", warning: true, deploymentLabel: "Agent deployment failed" },
         { status: { ...base, connection: "online", collection: "partial", errors: { spool: "write_failed", storage: "write_failed" } }, communication: "Healthy", data: "Updates delayed", warning: true, storage: true },
       ];
       for (const compact of [false, true]) {
@@ -777,6 +784,11 @@ try {
           assert.equal(await target.getByText(/Stored data cannot currently be confirmed/).count(), c.status.last_sample_at && c.status.data === "stale" ? 1 : 0);
           assert.equal(await target.getByText(/Last sample \(node clock\):/).count(), compact ? 0 : 1);
           if (c.deploymentLabel) await target.getByText(c.deploymentLabel, { exact: true }).waitFor();
+          if (c.reasonText) await target.getByText(c.reasonText, { exact: true }).waitFor();
+          if (c.waitingTransfer) {
+            assert.equal(await target.getByText("Agent deployment failed", { exact: true }).count(), 0);
+            assert.equal(await target.getByText("Deploying agent", { exact: true }).count(), 0);
+          }
           if (c.setup) await target.getByRole("link", { name: "Configure monitoring" }).waitFor();
           if (c.storage && !compact) {
             await target.getByText(/Local buffer: The agent could not reliably save/).waitFor();

@@ -29,7 +29,7 @@ type residentJob struct {
 }
 
 // Start reconciles desired installations, not sampling. A healthy resident agent
-// consumes no SSH sessions. Four independent installation leases are allowed.
+// consumes no SSH sessions. Transfer and activation capacity are independent.
 func (m *ResidentMonitor) Start(ctx context.Context) {
 	var wg sync.WaitGroup
 	defer func() {
@@ -121,37 +121,11 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 					if !residentInstallNeeded(n, desired, config, lastContact, m.now()) {
 						continue
 					}
-					if n.LastAttempt != nil && time.Since(*n.LastAttempt) < time.Minute {
-						continue
-					}
-					m.installJobsMu.Lock()
-					_, busy := m.installJobs[s.ID]
-					if !busy && m.removing[s.ID] == nil && epoch == m.installEpoch && len(m.installJobs) < 4 {
-						// Include upload time before the detached Windows activation
-						// task's three-minute limit and its completion receipt.
-						budget := 3 * time.Minute
-						if n.InstallOS != "linux" {
-							budget = 10 * time.Minute
-						}
-						jobCtx, stop := context.WithTimeout(ctx, budget)
-						jobCtx = context.WithValue(jobCtx, residentSettingsKey{}, desiredSettings)
-						done := make(chan struct{})
-						m.installJobs[s.ID] = residentJob{cancel: stop, hash: n.TokenHash, done: done}
-						wg.Add(1)
-						go func(n model.AgentNode) {
-							defer wg.Done()
-							defer stop()
-							defer func() {
-								m.installJobsMu.Lock()
-								delete(m.installJobs, n.ServerID)
-								close(done)
-								m.installJobsMu.Unlock()
-								m.NotifyTopologyChange()
-							}()
-							m.installJob(jobCtx, n, desired, config)
-						}(n)
-					}
-					m.installJobsMu.Unlock()
+					jobCtx := context.WithValue(ctx, residentSettingsKey{}, desiredSettings)
+					key := fmt.Sprintf("%s:%s:%d", desired, config, s.ConnectionRevision)
+					m.scheduleInstall(jobCtx, n, epoch, key, &wg, func(ctx context.Context) error {
+						return m.installJob(ctx, n, desired, config)
+					})
 				}
 				m.mu.Lock()
 				for id, v := range m.nodes {
@@ -167,6 +141,11 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 				for id, j := range m.installJobs {
 					if !live[id] {
 						j.cancel()
+					}
+				}
+				for id := range m.installRetries {
+					if !live[id] {
+						delete(m.installRetries, id)
 					}
 				}
 				m.installJobsMu.Unlock()
@@ -187,26 +166,39 @@ func (m *ResidentMonitor) Start(ctx context.Context) {
 	}
 }
 
-func (m *ResidentMonitor) installJob(ctx context.Context, n model.AgentNode, desired, configHash string) {
+func (m *ResidentMonitor) installJob(ctx context.Context, n model.AgentNode, desired, configHash string) error {
+	ctx, stages, err := m.beginInstall(ctx)
+	if err != nil {
+		return err
+	}
+	defer stages.finish()
+	// Queue time does not consume the installation's transfer/activation budget.
+	ctx, cancelInstall := context.WithTimeout(ctx, agentInstallBudget)
+	defer cancelInstall()
 	state, reason := "installing", ""
 	_ = m.repo.Deployment(ctx, n, state, reason, n.InstalledHash, n.ConfigHash)
 	m.setDeployment(n, state, reason)
-	err := m.install(ctx, n)
+	err = m.install(ctx, n)
 	state = "ready"
 	if err != nil {
 		state = "failed"
 		reason = deployFailureReason(err)
-		// Record what is actually running after a rollback, not what the failed
-		// attempt wanted. The next reconciliation retries anyway because a
-		// non-ready deployment is never skipped.
+		// Unfinished transfers and rollbacks retain the running fingerprints.
+		// Every non-ready deployment remains eligible for reconciliation.
 		desired = n.InstalledHash
 		configHash = n.ConfigHash
-		slog.Warn("resident agent installation failed", "server_id", n.ServerID, "reason", reason)
+		if errors.Is(err, errArtifactPullProgress) || errors.Is(err, errArtifactPullBusy) {
+			state = "pending"
+			slog.Info("resident agent installation waiting", "server_id", n.ServerID, "reason", reason)
+		} else {
+			slog.Warn("resident agent installation failed", "server_id", n.ServerID, "reason", reason)
+		}
 	}
 	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	_ = m.repo.Deployment(storeCtx, n, state, reason, desired, configHash)
 	m.setDeployment(n, state, reason)
+	return err
 }
 
 func (m *ResidentMonitor) setDeployment(n model.AgentNode, state, reason string) {
@@ -230,6 +222,9 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 		return err
 	}
 	defer lease.Release()
+	if stages, _ := ctx.Value(residentStagesKey{}).(*residentStages); stages != nil {
+		stages.lease = lease
+	}
 	platform, err := m.deployer.Probe(ctx, lease)
 	if err != nil {
 		return err
@@ -321,7 +316,7 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 		return err
 	}
 	next := base + "/.next-" + id
-	if err = lease.Upload(ctx, filepath.Join(m.deployer.artifactsDir, artifact.File), next, 2*time.Minute); err != nil {
+	if err = m.stageArtifact(ctx, lease, artifact, cfg, base, binary, next, nil); err != nil {
 		return err
 	}
 	hash, err := m.deployer.remoteHash(ctx, lease, shellQuote(next))
@@ -362,6 +357,9 @@ func (m *ResidentMonitor) install(ctx context.Context, n model.AgentNode) error 
 	}
 	// Keep the prior executable/configuration until the new service demonstrates
 	// authenticated contact with the Hub. Roll back locally even if SSH drops.
+	if err := m.beginActivation(ctx); err != nil {
+		return err
+	}
 	script := residentActivationScript(binary, config, unit, unitName, next, ctl, 20)
 	result, err = lease.Exec(ctx, script, 45*time.Second)
 	if err != nil {
@@ -427,6 +425,10 @@ func deployFailureReason(err error) string {
 		return app.Reason
 	}
 	switch {
+	case errors.Is(err, errArtifactPullProgress):
+		return reasonArtifactResuming
+	case errors.Is(err, errArtifactPullBusy):
+		return reasonArtifactBusy
 	case errors.Is(err, context.Canceled):
 		return "deployment_canceled"
 	case errors.Is(err, context.DeadlineExceeded):
