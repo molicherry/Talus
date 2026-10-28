@@ -236,7 +236,8 @@ func TestSSHConnectionTestReplacesCacheAndReturnsItsSlot(t *testing.T) {
 	closed := make(chan error, 1)
 	go func() { closed <- original.Wait() }()
 	select {
-	case <-closed:
+	case closeErr := <-closed:
+		t.Logf("previous connection closed: %v", closeErr)
 	case <-time.After(time.Second):
 		t.Fatal("test reused cached connection")
 	}

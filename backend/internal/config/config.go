@@ -21,6 +21,9 @@ type Config struct {
 	// Secrets
 	MasterKey string
 	JWTSecret string
+	// BootstrapToken is deployment-only and is never an editable system setting.
+	// Empty disables first-administrator setup without blocking existing logins.
+	BootstrapToken string
 
 	// Server
 	Port string
@@ -121,6 +124,12 @@ func (c *Config) Validate() error {
 // ValidateDeployment rejects only values that database settings cannot repair.
 // Settings-dependent and cross-field checks must run after merging overrides.
 func (c *Config) ValidateDeployment() error {
+	if c.BootstrapToken != "" && (len(c.BootstrapToken) < 32 || len(c.BootstrapToken) > 256) {
+		return invalidSetting("BOOTSTRAP_TOKEN", "must be empty or contain 32 to 256 bytes")
+	}
+	if c.BootstrapToken != "" && (c.BootstrapToken == c.JWTSecret || c.BootstrapToken == c.MasterKey) {
+		return invalidSetting("BOOTSTRAP_TOKEN", "must be independent from JWT_SECRET and VPSMANAGER_MASTER_KEY")
+	}
 	if c.settingsRecoveryParseError != nil {
 		return c.settingsRecoveryParseError
 	}
@@ -142,6 +151,7 @@ func Load() *Config {
 	cfg.DatabaseURL = requireEnv("DATABASE_URL")
 	cfg.MasterKey = requireEnv("VPSMANAGER_MASTER_KEY")
 	cfg.JWTSecret = requireEnv("JWT_SECRET")
+	cfg.BootstrapToken = os.Getenv("BOOTSTRAP_TOKEN")
 
 	// Optional with defaults
 	cfg.Port = getEnvOrDefault("PORT", "8080")

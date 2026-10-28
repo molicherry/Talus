@@ -30,7 +30,7 @@ func TestSettingsAPIAdminPersistenceAndRestart(t *testing.T) {
 	var login struct {
 		Token string `json:"token"`
 	}
-	first.request(t, "POST", "/api/v1/auth/login", map[string]string{"username": "settings-admin", "password": "settings-test-password"}, "", http.StatusOK, &login)
+	first.request(t, "POST", "/api/v1/auth/setup", map[string]string{"token": "isolated-startup-bootstrap-secret-32", "username": "settings-admin", "password": "settings-test-password"}, "", http.StatusOK, &login)
 	var view settingsResponse
 	first.request(t, "GET", "/api/v1/settings", nil, login.Token, http.StatusOK, &view)
 	if len(view.Settings) != 19 {

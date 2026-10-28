@@ -230,6 +230,7 @@ func main() {
 	userGate := gate.New(userRepo.TokenVersion, userRepo.LockedTokenVersion)
 	terminalRegistry := gate.NewRegistry()
 	authSvc := service.NewAuthService(userRepo, jwtSvc, db)
+	authSvc.SetBootstrapToken(cfg.BootstrapToken)
 	authSvc.SetUserGate(userGate)
 	authSvc.SetTerminalRegistry(terminalRegistry)
 	authHandler := handler.NewAuthHandler(authSvc)
@@ -488,6 +489,7 @@ func main() {
 		// Auth
 		LoginHandler:          authHandler.Login,
 		SetupHandler:          authHandler.Setup,
+		BootstrapHandler:      authHandler.Bootstrap,
 		ProfileHandler:        authHandler.Profile,
 		ChangePasswordHandler: authHandler.ChangePassword,
 		// Servers

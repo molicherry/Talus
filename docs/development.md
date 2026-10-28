@@ -10,7 +10,7 @@ Use Linux or WSL 2 with Bash for the commands below. Docker Compose provides the
 
 | Tool | Requirement / source |
 | --- | --- |
-| Go | Follow [backend/go.mod](../backend/go.mod), currently Go 1.25.0; allow toolchain downloads if dependencies require them |
+| Go | Follow [backend/go.mod](../backend/go.mod), currently Go 1.27.3; allow toolchain downloads if dependencies require them |
 | Node.js and npm | Use Node 24, matching CI and the Docker build; install frontend dependencies with `npm ci` |
 | Docker and Compose v2 | Database and complete-stack development; image acceptance also needs Docker |
 | Database | TimescaleDB on PostgreSQL 16, matching [docker-compose.yml](../docker-compose.yml); plain PostgreSQL lacks the required extension |
@@ -27,9 +27,10 @@ cd Talus
 cp .env.example .env
 openssl rand -hex 32
 openssl rand -hex 32
+openssl rand -hex 32
 ```
 
-Edit `.env`: choose `DB_PASSWORD` and put the two independently generated values in `VPSMANAGER_MASTER_KEY` and `JWT_SECRET`. Preserve these values while reusing the database. `.env` is ignored by Git; do not commit it. Leave `AGENT_HUB_URL` empty until you want to configure monitoring.
+Edit `.env`: choose `DB_PASSWORD` and put the two independently generated values in `VPSMANAGER_MASTER_KEY` and `JWT_SECRET`. For a fresh database, put the third independently generated value in `BOOTSTRAP_TOKEN` before starting Compose. Existing accounts need no bootstrap token. Preserve the master and JWT values while reusing the database. `.env` is ignored by Git; do not commit it. Leave `AGENT_HUB_URL` empty until you want to configure monitoring.
 
 ```bash
 docker compose up -d --build
@@ -43,7 +44,7 @@ curl --fail http://localhost:8080/healthz
 curl --fail http://localhost:8080/api/v1/version
 ```
 
-Open `http://localhost:8080`. On a fresh database the first login creates the administrator; use a password of at least eight characters. An empty dashboard is expected. Adding a real node also requires SSH credentials and explicit host-key confirmation; see the [setup instructions](../README.md#4-add-a-server).
+Open `http://localhost:8080`. For a fresh database, set the third independent random value as `BOOTSTRAP_TOKEN` in `.env` and enter it at `/setup` to create the administrator; use a password of at least eight characters. Remove the token and restart after initialization; existing accounts need no bootstrap token. Ordinary login only authenticates existing accounts. An empty dashboard is expected. Adding a real node also requires SSH credentials and explicit host-key confirmation; see the [setup instructions](../README.md#4-add-a-server).
 
 Compose builds the source but does not watch it. After code changes, rebuild the Hub with `docker compose up -d --no-deps --build hub`. `docker compose stop` preserves the database; do not use `down -v` on a database you intend to retain.
 

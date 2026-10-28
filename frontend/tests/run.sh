@@ -45,6 +45,7 @@ compile src/features/services/lib/credential-rows.ts credential-rows
 compile src/features/servers/lib/connection-config.ts connection-config
 compile src/features/terminal/lib/terminal-preferences.ts terminal-preferences
 compile src/features/terminal/lib/terminal-input.ts terminal-input
+compile src/features/terminal/lib/terminal-messages.ts terminal-messages
 compile src/features/terminal/lib/connection-status.ts connection-status
 compile src/features/updates/lib/release-notes.ts release-notes
 

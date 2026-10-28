@@ -95,7 +95,8 @@ func (s *SSHService) withSFTPClient(ctx context.Context, transport *ssh.Client, 
 			// file. Reserve half the grace for channel close afterwards.
 			timer := time.NewTimer(max(time.Until(deadlines.grace)/2, 0))
 			select {
-			case <-result:
+			case runErr = <-result:
+				// Join the transfer; cancellation takes precedence below.
 			case <-timer.C:
 			}
 			timer.Stop()

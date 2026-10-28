@@ -91,7 +91,11 @@ func TestSFTPResumeRejectsWrongIdentityRouteHashAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	ticket.ExpiresAt = time.Now().Add(-time.Hour).Unix()
-	_, err = svc.UploadStatus(ctx, 1, svc.signUpload(ticket))
+	expiredToken, err := svc.sealUpload(ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.UploadStatus(ctx, 1, expiredToken)
 	fileReason(t, err, "sftp_upload_expired")
 	_, err = svc.UploadChunk(ctx, 1, session.Token, 0, 3, strings.NewReader("bad"))
 	if err != nil {

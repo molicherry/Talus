@@ -159,8 +159,8 @@ func TestResidentAgentCommandTLSFallbackAndRestartReplay(t *testing.T) {
 			}
 		case <-time.After(5 * time.Second):
 			cancel()
-			<-done
-			t.Fatal("resident shutdown did not join workers")
+			waitErr := <-done
+			t.Fatalf("resident shutdown did not join workers: %v", waitErr)
 		}
 	}
 	until := func(check func() bool, what string) {

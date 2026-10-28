@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,7 +85,8 @@ func TestFirstAdminSetupBindsLegacyKeys(t *testing.T) {
 	jwtSvc := token.NewJWTService("test-secret", time.Hour)
 	svc := NewAuthService(repository.NewUserRepo(db), jwtSvc, db)
 	startAuthOwnerBackfill(t, db, svc)
-	signed, err := svc.Login(ctx, "first-admin", "test-password")
+	svc.SetBootstrapToken(strings.Repeat("a", 64))
+	signed, err := svc.Bootstrap(ctx, strings.Repeat("a", 64), "first-admin", "test-password")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +118,8 @@ func TestFirstAdminSetupCommitsDespiteFailedKeyBinding(t *testing.T) {
 	}
 	svc := NewAuthService(repository.NewUserRepo(db), token.NewJWTService("test-secret", time.Hour), db)
 	startAuthOwnerBackfill(t, db, svc, 20*time.Millisecond)
-	if _, err := svc.Login(ctx, "first-admin", "test-password"); err != nil {
+	svc.SetBootstrapToken(strings.Repeat("a", 64))
+	if _, err := svc.Bootstrap(ctx, strings.Repeat("a", 64), "first-admin", "test-password"); err != nil {
 		t.Fatalf("optional key assignment blocked setup: %v", err)
 	}
 	count, err := repository.NewUserRepo(db).Count(ctx)
@@ -164,12 +167,13 @@ func TestConcurrentFirstAdminSetupKeepsOneDefaultOwner(t *testing.T) {
 	}
 	svc := NewAuthService(repository.NewUserRepo(db), token.NewJWTService("test-secret", time.Hour), db)
 	startAuthOwnerBackfill(t, db, svc)
+	svc.SetBootstrapToken(strings.Repeat("a", 64))
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	for _, username := range []string{"first-admin-a", "first-admin-b"} {
 		go func() {
 			<-start
-			_, err := svc.createFirstUser(ctx, username, "test-password")
+			_, err := svc.Bootstrap(ctx, strings.Repeat("a", 64), username, "test-password")
 			results <- err
 		}()
 	}

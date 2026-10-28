@@ -158,6 +158,15 @@ SSH commands, terminals, file operations, or agent installation can proceed.
 For `GET /api/v1/servers/{id}/terminal`, a non-browser WebSocket client can send
 `X-API-Key` during the upgrade. Do not put the key in the URL.
 
+Authenticated terminal input/resize JSON messages must fit in 64 KiB after JSON
+escaping and UTF-8 encoding. Split large input into ordered messages while
+preserving Unicode characters; splitting a message into WebSocket frames does
+not avoid the limit. Browser clients authenticate in their first message, within
+10 seconds and 8 KiB; an API-key upgrade skips that authentication message.
+Login, initial setup and password-change JSON request bodies are also limited to
+8 KiB and return HTTP 413 when oversized. File-transfer endpoints retain their
+separate binary transfer limits.
+
 ### Manage or transfer files
 
 Use `/api/v1/servers/{id}/sftp` and read the bundled [File API](references/files.md)

@@ -11,6 +11,7 @@ import { setAuthToken } from "../../../lib/auth";
 import type { LoginResponse } from "../../../types/api";
 
 interface SetupErrors {
+  token?: string;
   username?: string;
   password?: string;
   confirm?: string;
@@ -21,6 +22,7 @@ export function SetupPage() {
   const navigate = useNavigate();
   const [checking, setChecking] = useState(true);
   const [setupNeeded, setSetupNeeded] = useState(false);
+  const [bootstrapToken, setBootstrapToken] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -42,9 +44,10 @@ export function SetupPage() {
   }, [navigate]);
 
   const setupMutation = useMutation({
-    mutationFn: (data: { username: string; password: string }) =>
-      apiClient.post<LoginResponse>("/api/v1/auth/login", data),
+    mutationFn: (data: { token: string; username: string; password: string }) =>
+      apiClient.post<LoginResponse>("/api/v1/auth/setup", data),
     onSuccess: (data) => {
+      setBootstrapToken("");
       setAuthToken(data.token);
       navigate("/", { replace: true });
     },
@@ -53,13 +56,15 @@ export function SetupPage() {
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const next: SetupErrors = {};
+    if (bootstrapToken.length < 32 || bootstrapToken.length > 256)
+      next.token = t("auth.bootstrapTokenRequired");
     if (username.length < 3) next.username = t("validation.usernameTooShort");
     // Keep in step with the backend, which requires 8–64 (handler/auth.go).
     if (password.length < 8) next.password = t("validation.passwordTooShort");
     if (password !== confirm) next.confirm = t("auth.passwordMismatch");
     setErrors(next);
-    if (next.username || next.password || next.confirm) return;
-    setupMutation.mutate({ username, password });
+    if (next.token || next.username || next.password || next.confirm) return;
+    setupMutation.mutate({ token: bootstrapToken, username, password });
   };
 
   const errorMessage = setupMutation.error ? translateApiError(setupMutation.error, t) : null;
@@ -96,6 +101,31 @@ export function SetupPage() {
                 {errorMessage}
               </div>
             )}
+
+            <div>
+              <label htmlFor="bootstrap-token" className="mb-1.5 block text-sm font-medium text-foreground">
+                {t("auth.bootstrapToken")}
+              </label>
+              <input
+                id="bootstrap-token"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                maxLength={256}
+                value={bootstrapToken}
+                onChange={(e) => {
+                  setBootstrapToken(e.target.value);
+                  if (errors.token) setErrors((prev) => ({ ...prev, token: undefined }));
+                }}
+                className="w-full rounded-lg border border-input bg-card px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20"
+                placeholder={t("auth.bootstrapTokenPlaceholder")}
+                aria-describedby="bootstrap-token-help"
+              />
+              <p id="bootstrap-token-help" className="mt-1.5 text-xs text-muted-foreground">
+                {t("auth.bootstrapTokenHelp")}
+              </p>
+              {errors.token && <p className="mt-1.5 text-xs text-danger">{errors.token}</p>}
+            </div>
 
             <div>
               <label

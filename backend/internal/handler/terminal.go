@@ -25,6 +25,8 @@ var upgrader = websocket.Upgrader{
 // authentication message after the WebSocket handshake.
 const authTimeout = 10 * time.Second
 
+const terminalAuthMaxBytes int64 = 8 << 10
+
 // TerminalHandler exposes the WebSocket terminal endpoint.
 type TerminalHandler struct {
 	terminalSvc *service.TerminalService
@@ -93,6 +95,9 @@ func (h *TerminalHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	// Bound the whole authentication message, including fragmented frames,
+	// before JSON decoding or JWT verification allocates client input.
+	conn.SetReadLimit(terminalAuthMaxBytes)
 	mw.ReportHTTPStatus(w, http.StatusSwitchingProtocols)
 	op.SetHTTPStatus(http.StatusSwitchingProtocols)
 	op.SetPhase("handshake")

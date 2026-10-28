@@ -3,7 +3,8 @@
 # Quick Start:
 #   1. cp .env.example .env  # fill in DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET
 #   2. docker compose up -d --build
-#   3. Access at http://localhost:8080 (first login creates the admin account)
+#   3. Access http://localhost:8080 and use BOOTSTRAP_TOKEN to create the admin.
+# Public deployments must use an HTTPS reverse proxy; the Hub port is loopback-only.
 #
 # Required secrets have no defaults — the stack refuses to start until
 # DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET are set (see .env.example).
@@ -37,11 +38,12 @@ services:
         # hash enables only the reload prompt; "dev" disables both checks.
         VERSION: ${VERSION:-dev}
     ports:
-      - "${PORT:-8080}:8080"
+      - "127.0.0.1:${PORT:-8080}:8080"
     environment:
       DATABASE_URL: postgres://vpsmanager:${DB_PASSWORD:?set DB_PASSWORD in .env}@db:5432/vpsmanager?sslmode=disable
       VPSMANAGER_MASTER_KEY: ${VPSMANAGER_MASTER_KEY:?set VPSMANAGER_MASTER_KEY in .env (openssl rand -hex 32)}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (openssl rand -hex 32)}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
       PORT: 8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: ${LOG_FORMAT:-json}

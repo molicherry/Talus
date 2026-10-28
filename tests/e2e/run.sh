@@ -33,6 +33,8 @@ HUB_PORT="${E2E_HUB_PORT:-$((20000 + RANDOM % 20000))}"
 # instance built from the same commit satisfy the readiness check while this run's Hub
 # fails to bind (R07).
 VERSION="e2e-$(git rev-parse --short HEAD 2>/dev/null || echo local)-$(date +%s)-$$"
+# Owned fixture proof, separate from JWT/master key; never consume a deployment token.
+E2E_BOOTSTRAP_TOKEN="owned-bootstrap-$VERSION"
 PIDS=()
 
 cleanup() {
@@ -91,6 +93,7 @@ PEER_ADDR="$(sed -n 's/^ADDR=//p' "$WORK/peer.out" | head -1)"
 
 echo "▶ starting the Hub on 127.0.0.1:$HUB_PORT"
 DATABASE_URL="$DB_URL" \
+	BOOTSTRAP_TOKEN="$E2E_BOOTSTRAP_TOKEN" \
 	JWT_SECRET="e2e-jwt-secret-0123456789abcdef" \
 	VPSMANAGER_MASTER_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" \
 	STATIC_DIR="$ROOT/frontend/dist" \
@@ -120,6 +123,7 @@ echo "▶ running the browser flow"
 # frontend's installed tree.
 ln -sfn ../../frontend/node_modules tests/e2e/node_modules
 HUB_URL="http://127.0.0.1:$HUB_PORT" \
+	BOOTSTRAP_TOKEN="$E2E_BOOTSTRAP_TOKEN" \
 	PEER_LOG="$WORK/peer.jsonl" \
 	PEER_PORT="${PEER_ADDR##*:}" \
 	PEER_HOST_PUBLIC_KEY="$WORK/peer_host_key.pub" \

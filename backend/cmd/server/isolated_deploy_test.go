@@ -52,7 +52,7 @@ func TestServerIsolatedServiceCatalogAndRelay(t *testing.T) {
 		Token string `json:"token"`
 	}
 	loginBody := map[string]string{"username": "isolated-admin", "password": "isolated-admin-test-password"}
-	hub.request(t, http.MethodPost, "/api/v1/auth/login", loginBody, "", http.StatusOK, &login)
+	hub.request(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{"token": "isolated-startup-bootstrap-secret-32", "username": loginBody["username"], "password": loginBody["password"]}, "", http.StatusOK, &login)
 	hub.request(t, http.MethodPost, "/api/v1/auth/login", loginBody, "", http.StatusOK, &login)
 	if login.Token == "" {
 		t.Fatal("bootstrap and login must return a session token")

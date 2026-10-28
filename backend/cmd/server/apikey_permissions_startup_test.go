@@ -19,7 +19,7 @@ func TestServerAPIKeyPermissionsUpgrade(t *testing.T) {
 	var login struct {
 		Token string `json:"token"`
 	}
-	first.request(t, http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "key-admin", "password": "synthetic-test-password"}, "", http.StatusOK, &login)
+	first.request(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{"token": "isolated-startup-bootstrap-secret-32", "username": "key-admin", "password": "synthetic-test-password"}, "", http.StatusOK, &login)
 	var created struct {
 		Key    string       `json:"key"`
 		APIKey model.APIKey `json:"api_key"`

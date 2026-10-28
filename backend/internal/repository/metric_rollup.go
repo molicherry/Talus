@@ -393,15 +393,30 @@ type chunkRange struct {
 // completeness guard and the physical reclamation stay consistent. Tables that are
 // not hypertables report no chunks and the caller falls back to row deletes.
 func dropPrunableChunks(tx *gorm.DB, plan PrunePlan) (int, error) {
+	// Check optional extension metadata without issuing a failing statement:
+	// PostgreSQL leaves the surrounding retention transaction aborted even if
+	// a missing-catalogue error is ignored by the application.
+	var hasCatalogue bool
+	if err := tx.Raw(`SELECT to_regclass('timescaledb_information.chunks') IS NOT NULL`).Scan(&hasCatalogue).Error; err != nil {
+		return 0, fmt.Errorf("locate metric chunk catalogue: %w", err)
+	}
+	if !hasCatalogue {
+		return 0, nil
+	}
 	var chunks []chunkRange
 	err := tx.Raw(`
 		SELECT chunk_name AS name, range_start, range_end
 		FROM timescaledb_information.chunks
-		WHERE hypertable_name = 'metrics' AND range_end <= ?
+		WHERE hypertable_schema = (
+			SELECT n.nspname
+			FROM pg_catalog.pg_class c
+			JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+			WHERE c.oid = to_regclass('metrics')
+		)
+		AND hypertable_name = 'metrics' AND range_end <= ?
 		ORDER BY range_start`, plan.Cutoff).Scan(&chunks).Error
 	if err != nil {
-		// A plain (non-TimescaleDB) database has no chunk catalogue.
-		return 0, nil
+		return 0, fmt.Errorf("list prunable metric chunks: %w", err)
 	}
 
 	var boundary time.Time

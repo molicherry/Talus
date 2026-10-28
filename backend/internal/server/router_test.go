@@ -308,10 +308,12 @@ func TestEveryAuthedRouteIsRegistered(t *testing.T) {
 		"GET /api/v1/version":     true,
 		"POST /api/v1/auth/login": true,
 		"GET /api/v1/auth/setup":  true,
+		"POST /api/v1/auth/setup": true,
 	}
 
 	noop := func(http.ResponseWriter, *http.Request) {}
 	router := NewRouter(RouteConfig{
+		BootstrapHandler:             noop,
 		ListUsageLogsHandler:         noop,
 		GetUsageLogHandler:           noop,
 		FilterUsageLogOptionsHandler: noop,

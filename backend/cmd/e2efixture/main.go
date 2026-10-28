@@ -40,6 +40,9 @@ type event struct {
 	Size [2]int    `json:"size,omitempty"` // cols, rows
 	Term string    `json:"term,omitempty"`
 	Data string    `json:"data,omitempty"`
+	// SSH reads may split a UTF-8 code point. Preserve raw input bytes for
+	// exact Unicode/order assertions instead of joining lossy JSON strings.
+	DataBytes []byte `json:"data_base64,omitempty"`
 	// Session identifies the SSH *connection*; Channel identifies one session channel
 	// inside it. A test that wants to prove a terminal was reclaimed must name the
 	// channel it opened, not just count connection events (F13).
@@ -310,7 +313,7 @@ func pump(channel ssh.Channel, rec *recorder, echo bool, session, channelID stri
 		n, err := reader.Read(buf)
 		if n > 0 {
 			text := string(buf[:n])
-			rec.record(event{Type: "input", Session: session, Channel: channelID, Data: text})
+			rec.record(event{Type: "input", Session: session, Channel: channelID, Data: text, DataBytes: buf[:n]})
 			if echo {
 				if _, writeErr := io.WriteString(channel, text); writeErr != nil {
 					return

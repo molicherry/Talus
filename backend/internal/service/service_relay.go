@@ -356,6 +356,25 @@ func (s *ServiceRelayService) RelayWithResult(ctx context.Context, serviceID uin
 		}
 		return RelayResult{Outcome: "rejected", Reason: server.ReasonServiceNotFound}, err
 	}
+	return s.RelaySnapshotWithResult(ctx, svc, input, w)
+}
+
+// RelaySnapshotWithResult relays using a configuration already loaded and
+// authorized by the caller. It never reloads the service: ServerID, BaseURL and
+// encrypted credentials must all come from the same authorized snapshot. The
+// relay budget remains the one frozen before the lookup and authorization.
+func (s *ServiceRelayService) RelaySnapshotWithResult(ctx context.Context, svc *model.Service, input RelayInput, w http.ResponseWriter) (RelayResult, error) {
+	ctx, cancel, err := s.RelayContext(ctx, input.Mode)
+	if err != nil {
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonInvalidRequest}, err
+	}
+	defer cancel()
+	if input.Method == "" {
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonMethodRequired}, server.NewAppError(http.StatusBadRequest, server.ReasonMethodRequired)
+	}
+	if svc == nil {
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonServiceNotFound}, server.NewAppError(http.StatusNotFound, server.ReasonServiceNotFound)
+	}
 	return s.relayFromService(ctx, svc, input, w)
 }
 

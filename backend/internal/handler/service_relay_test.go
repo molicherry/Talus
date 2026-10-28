@@ -132,11 +132,13 @@ func TestRelayHandlerFreezesBudgetBeforeResourceLookup(t *testing.T) {
 			rec := httptest.NewRecorder()
 			started := time.Now()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/services/%d/relay", resource.ID), strings.NewReader(fmt.Sprintf(`{"method":"GET","mode":%q}`, tc.mode))))
-			if rec.Code != 200 || rec.Body.String() != "ok" || len(deadlines) != 2 {
+			if rec.Code != 200 || rec.Body.String() != "ok" || len(deadlines) == 0 {
 				t.Fatalf("relay response=%d %q lookup deadlines=%v", rec.Code, rec.Body.String(), deadlines)
 			}
-			if !deadlines[0].Equal(deadlines[1]) {
-				t.Fatalf("lookup stages restarted deadline: %v", deadlines)
+			for _, deadline := range deadlines {
+				if !deadlines[0].Equal(deadline) {
+					t.Fatalf("lookup stages restarted deadline: %v", deadlines)
+				}
 			}
 			if elapsed := deadlines[0].Sub(started); elapsed < tc.budget || elapsed > tc.budget+time.Second {
 				t.Fatalf("mode %s froze unexpected budget %s", tc.mode, elapsed)

@@ -51,6 +51,10 @@ func TestServerEmptyDatabaseBootstrapAndRestart(t *testing.T) {
 	}
 	first.request(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
 		"username": "startup-admin", "password": "startup-old-password",
+	}, "", http.StatusUnauthorized, nil)
+	first.request(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{
+		"token":    "isolated-startup-bootstrap-secret-32",
+		"username": "startup-admin", "password": "startup-old-password",
 	}, "", http.StatusOK, &login)
 	oldToken := login.Token
 	if oldToken == "" {
@@ -150,6 +154,7 @@ func startupServerEnv(dsn, port string, extra map[string]string) map[string]stri
 		"DATABASE_URL":               dsn, "PORT": port,
 		"VPSMANAGER_MASTER_KEY": strings.Repeat("0", 64),
 		"JWT_SECRET":            "isolated-startup-regression-secret",
+		"BOOTSTRAP_TOKEN":       "isolated-startup-bootstrap-secret-32",
 		"LOG_FORMAT":            "json", "LOG_LEVEL": "info", "STATIC_DIR": "",
 		"MONITOR_INTERVAL": "60", "SSH_TIMEOUT": "10", "SSH_MAX_IDLE": "300",
 		"EXEC_TIMEOUT": "30", "EXEC_TIMEOUT_MAX": "300",

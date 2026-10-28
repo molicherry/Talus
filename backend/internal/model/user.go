@@ -1,6 +1,7 @@
 package model
 
-// User represents an application user with an auto-created first-admin pattern.
+// User represents an application user. The first administrator requires
+// deployment ownership proof through the dedicated setup flow.
 type User struct {
 	BaseModel
 	Username     string  `gorm:"uniqueIndex;size:64;not null" json:"username"`

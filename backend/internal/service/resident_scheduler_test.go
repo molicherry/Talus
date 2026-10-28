@@ -43,8 +43,8 @@ func TestResidentStagesSeparateTransferAndActivationCapacity(t *testing.T) {
 	waitFor(t, "release transfer slot before activation wait", func() bool { return len(m.transferSlots) == 3 })
 	_, extra := begin()
 	select {
-	case <-transitioned:
-		t.Fatal("activation exceeded its concurrency limit")
+	case err := <-transitioned:
+		t.Fatalf("activation exceeded its concurrency limit: %v", err)
 	default:
 	}
 	ctx, cancel := context.WithCancel(context.Background())

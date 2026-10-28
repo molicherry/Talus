@@ -36,6 +36,7 @@ type RouteConfig struct {
 	// Auth
 	LoginHandler          http.HandlerFunc
 	SetupHandler          http.HandlerFunc
+	BootstrapHandler      http.HandlerFunc
 	ProfileHandler        http.HandlerFunc
 	ChangePasswordHandler http.HandlerFunc
 
@@ -116,6 +117,7 @@ func NewRouter(cfg RouteConfig) chi.Router {
 	r.Use(middleware.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.CORS)
+	r.Use(middleware.SecurityHeaders)
 
 	// Health check
 	r.Get("/healthz", healthHandler)
@@ -146,6 +148,9 @@ func NewRouter(cfg RouteConfig) chi.Router {
 		r.Group(func(r chi.Router) {
 			r.Use(loginLimiter.Limit)
 			r.Post("/auth/login", cfg.LoginHandler)
+			if cfg.BootstrapHandler != nil {
+				r.Post("/auth/setup", cfg.BootstrapHandler)
+			}
 			r.Get("/auth/setup", cfg.SetupHandler)
 		})
 	})

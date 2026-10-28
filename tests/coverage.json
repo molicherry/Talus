@@ -2683,6 +2683,26 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-08-06-catalogue-scope",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_retention_catalog_test.go",
+            "symbol": "TestPruneMetricsScopesChunksToMetricsSchema"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-06-catalogue-failure",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_retention_catalog_test.go",
+            "symbol": "TestPruneMetricsFailsClosedOnChunkCatalogueError"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -5466,6 +5486,350 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Real SSH/SFTP jobs persist progressing and busy transfers as pending with separate diagnostics, preserve running fingerprints, release phase slots, retain pending status after repository reload, and clear the diagnostic after a successful retry."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-05-07",
+      "requirement_ids": [
+        "REQ-05"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/72/scenario",
+      "scenario": "Require a separate deployment proof before initial administrator creation, keep ordinary login from claiming an empty installation, serialize setup, and preserve initialized login after restart.",
+      "implementations": [
+        {
+          "implementation_id": "impl-05-07-config",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/bootstrap_test.go",
+            "symbol": "TestBootstrapTokenDeploymentValidation"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject malformed deployment setup proofs and keep setup disabled when no proof is configured."
+        },
+        {
+          "implementation_id": "impl-05-07-key-separation",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/config/bootstrap_test.go",
+            "symbol": "TestBootstrapTokenCannotReusePersistentSecrets"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject reusing JWT or master encryption keys as the deployment setup proof."
+        },
+        {
+          "implementation_id": "impl-05-07-handler",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/bootstrap_test.go",
+            "symbol": "TestBootstrapRejectsUnprovedAndOversizedRequests"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject missing and malformed proof, invalid credentials and over-budget setup JSON before service work."
+        },
+        {
+          "implementation_id": "impl-05-07-proof-first",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/auth_bootstrap_test.go",
+            "symbol": "TestBootstrapProofIsRequiredBeforeDatabaseAccess"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Reject absent, incorrect, disabled or malformed setup proof before database or password work."
+        },
+        {
+          "implementation_id": "impl-05-07-login",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/auth_bootstrap_test.go",
+            "symbol": "TestLoginNeverBootstrapsEmptyDatabase"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A normal login on an empty isolated database creates no account even when setup is enabled."
+        },
+        {
+          "implementation_id": "impl-05-07-restart",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/auth_bootstrap_test.go",
+            "symbol": "TestBootstrapOwnershipAndInitializedRestart"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Only proved setup creates one administrator; completed setup is refused and existing login survives restart without a setup proof."
+        },
+        {
+          "implementation_id": "impl-05-07-concurrent",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/auth_owner_backfill_test.go",
+            "symbol": "TestConcurrentFirstAdminSetupKeepsOneDefaultOwner"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Two proved setup callers race on an empty database; exactly one administrator is created and legacy key ownership binds to that account."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-05-08",
+      "requirement_ids": [
+        "REQ-05"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/73/scenario",
+      "scenario": "Bound login and password-change JSON parsing to 8 KiB before credential processing, reject trailing values and oversized suffixes, and preserve valid credential decoding.",
+      "implementations": [
+        {
+          "implementation_id": "impl-05-08-budget",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/auth_json_test.go",
+            "symbol": "TestAuthJSONParsingBudget"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Check exact-size, unknown-field and whitespace suffix boundaries for known and unknown body lengths; reject extra JSON or malformed suffixes."
+        },
+        {
+          "implementation_id": "impl-05-08-before-service",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/auth_json_test.go",
+            "symbol": "TestAuthHandlersRejectOversizeBeforeService"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Both login and password-change handlers return structured 413 without reaching password or database service work."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-05-09",
+      "requirement_ids": [
+        "REQ-05"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/74/scenario",
+      "scenario": "Reject oversized terminal authentication messages before JWT or SSH work, bound authenticated client messages for both terminal output protocols, and reclaim session capacity after rejection.",
+      "implementations": [
+        {
+          "implementation_id": "impl-05-09-auth-message",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/handler/terminal_limits_test.go",
+            "symbol": "TestTerminalAuthenticationMessageBudget"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "The real anonymous WebSocket route rejects oversized ordinary and fragmented authentication messages with close 1009 before an SSH service is available."
+        },
+        {
+          "implementation_id": "impl-05-09-session-message",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/terminal_limits_test.go",
+            "symbol": "TestTerminalSessionMessageBudget"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Both legacy and binary-output sessions limit incoming JSON messages, record transport failure, finish cleanup and release capacity even without a browser auth frame."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-05-10",
+      "requirement_ids": [
+        "REQ-05"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/75/scenario",
+      "scenario": "Provide HTTP frame-denial response headers before response commitment without introducing script or style restrictions that break the management SPA.",
+      "implementations": [
+        {
+          "implementation_id": "impl-05-10-frame-policy",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/server/middleware/securityheaders_test.go",
+            "symbol": "TestSecurityHeadersBeforeResponse"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Check CSP frame-ancestors none and X-Frame-Options DENY on committed responses for management entry paths and a missing asset."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-07-05",
+      "requirement_ids": [
+        "REQ-07"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/76/scenario",
+      "scenario": "Relay only from the same service configuration snapshot whose server scope was authorized, including concurrent administrator rebinding and unchanged administrator or global-service access semantics.",
+      "implementations": [
+        {
+          "implementation_id": "impl-07-05-rebind",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/handler/service_relay_scope_test.go",
+            "symbol": "TestRelayHandlerUsesAuthorizedSnapshotDuringRebind"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Pause a real handler after snapshot lookup, change URL, credential and server binding, then prove the denied upstream receives zero requests."
+        },
+        {
+          "implementation_id": "impl-07-05-scope-semantics",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/handler/service_relay_scope_test.go",
+            "symbol": "TestRelayHandlerPreservesServerScopeSemantics"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Retain allowed and denied API-key selectors, administrator access and the existing global-service semantics."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-06-12",
+      "requirement_ids": [
+        "REQ-06"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/77/scenario",
+      "scenario": "Keep resumable overwrite tickets confidential and bound to their owner, server and route while preserving file-version conflict checks and legacy uploads across an upgrade.",
+      "implementations": [
+        {
+          "implementation_id": "impl-06-12-ticket",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/sftp_ticket_test.go",
+            "symbol": "TestSFTPUploadTicketEncryptionAndBindings"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "New tickets use randomized authenticated encryption; reject tampering, key or principal/server changes, expired continuation and route changes while allowing restart with the persistent key."
+        },
+        {
+          "implementation_id": "impl-06-12-write-only",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/sftp_ticket_test.go",
+            "symbol": "TestSFTPOverwriteTicketHidesPreviousFromWriteOnlyKey"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A files:write-only key receives no readable old-file fingerprint while the encrypted ticket retains the overwrite conflict version."
+        },
+        {
+          "implementation_id": "impl-06-12-legacy-resume",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/sftp_ticket_test.go",
+            "symbol": "TestSFTPLegacyUploadContinuesAcrossUpgradeWithoutReissue"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "A legacy signed ticket can resume, complete idempotently and report completion after restart without being reissued or extending its expiry."
+        },
+        {
+          "implementation_id": "impl-06-12-legacy-cleanup",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/sftp_ticket_test.go",
+            "symbol": "TestSFTPLegacyExpiredTicketOnlyPermitsCleanup"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Expired legacy tickets cannot continue or complete transfers but still permit removal of their temporary upload."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-11",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/78/scenario",
+      "scenario": "Preserve large pasted terminal input in ordered JSON messages within the authenticated 64-KiB UTF-8 wire budget, including JSON escaping and Unicode boundaries.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-11-paste-budget",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-messages.test.mjs",
+            "symbol": "large pasted input preserves Unicode and escaped controls within the wire budget"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Join emitted input chunks to the original ASCII, Unicode, control, quote, backslash and lone-surrogate text; each serialized message fits the wire budget."
+        },
+        {
+          "implementation_id": "impl-09-11-small-input",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-messages.test.mjs",
+            "symbol": "small input keeps one message and empty input sends none"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Small input remains one message without adding empty input messages."
+        },
+        {
+          "implementation_id": "impl-09-11-rune-boundary",
+          "run_id": "frontend-node",
+          "implementation": {
+            "path": "frontend/tests/terminal-messages.test.mjs",
+            "symbol": "an astral character at a chunk boundary is never split"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Do not split a surrogate pair when the remaining message budget cannot hold the next astral character."
+        },
+        {
+          "implementation_id": "impl-09-11-real-paste",
+          "run_id": "e2e-core",
+          "implementation": {
+            "path": "tests/e2e/terminal.spec.mjs",
+            "symbol": "a large Unicode paste preserves every byte over the real terminal connection"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Send a large Unicode paste through the built browser UI, actual Hub WebSocket and controlled SSH PTY, then compare the received bytes exactly to establish order and encoding across input chunks."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-09-12",
+      "requirement_ids": [
+        "REQ-09"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/79/scenario",
+      "scenario": "Collect deployment proof for first setup without storing it in browser state that survives setup, and direct initialized installations to ordinary login.",
+      "implementations": [
+        {
+          "implementation_id": "impl-09-12-setup-proof-ui",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/bootstrap.browser.mjs",
+            "symbol": "fresh setup requires the deployment proof and keeps it out of browser storage"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Use the built SPA with a mock API to check setup proof submission, password input masking, absence from local/session storage and transition to an authenticated session."
+        },
+        {
+          "implementation_id": "impl-09-12-initialized-ui",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/bootstrap.browser.mjs",
+            "symbol": "initialized instances redirect setup to ordinary login"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Use the built SPA with a mock API to verify initialized instances do not display the setup proof flow."
         }
       ]
     }
