@@ -837,10 +837,10 @@ func residentRemovalAccountScript(l agentLayout, unitName string, manage, strict
 // Keep the lock inode after removal so an activation's rollback stays serialized.
 func residentLockScript(unit string, optional bool) string {
 	lock := shellQuote(unit + ".lock")
-	script := "if test -L " + lock + " || { test -e " + lock + " && ! test -f " + lock + "; }; then exit 1; fi\n" +
+	script := residentFlockWait + "\nif test -L " + lock + " || { test -e " + lock + " && ! test -f " + lock + "; }; then exit 1; fi\n" +
 		"exec 9<> " + lock + "\n" +
 		"if test -L " + lock + " || ! test -f " + lock + "; then exit 1; fi\n" +
-		"flock -w 10 9\n"
+		"talus_acquire_lock\n"
 	if optional {
 		return "if command -v flock >/dev/null 2>&1 && test -d " + shellQuote(path.Dir(unit)) + "; then\n" + script + "fi\n"
 	}

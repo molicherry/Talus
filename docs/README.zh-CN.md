@@ -20,6 +20,8 @@
 
 终端使用 `talus.terminal.v2` WebSocket 子协议，输出为 SSH 原始字节的二进制帧；认证、输入、窗口调整、状态及错误仍使用 JSON。调用方需按 UTF-8 字节流连续解码，不能逐帧单独转换。未指定子协议的旧客户端继续接收 JSON 输出，服务端会保留读取边界上不完整的 UTF-8 字符。
 
+登录、首次初始化和修改密码的 JSON 请求体上限为 8 KiB，包含空白和尾随字节；超限返回 HTTP 413。浏览器终端须在 10 秒内发送不超过 8 KiB 的认证消息。认证后，每条客户端 JSON 消息（包括 JSON 转义及 UTF-8 编码）上限为 64 KiB，浏览器和 API-key 客户端均受此限制。浏览器会将大段粘贴按顺序分成多条消息；其他客户端也须分块发送。将同一条 WebSocket 消息拆成多个帧不能绕过限制。这些限额不替代文件 API 的传输预算。
+
 会话就绪后，每 25 秒发送 WebSocket Ping 和 SSH keepalive。浏览器自动回复 Pong；SSH 探测超过 10 秒未收到响应，或 WebSocket 超过 35 秒未收到 Pong，会结束会话并丢弃连接。SSH 明确拒绝探测请求也视为连接存活。断开、取消或撤销会话时，会停止探测并等待相关工作退出。
 
 ```
@@ -63,6 +65,7 @@ cp .env.example .env
 DB_PASSWORD=<你的数据库密码>
 VPSMANAGER_MASTER_KEY=<使用 openssl rand -hex 32 生成>
 JWT_SECRET=<使用 openssl rand -hex 32 生成>
+BOOTSTRAP_TOKEN=<另用 openssl rand -hex 32 独立生成>
 ```
 
 首次登录后，进入 **系统设置 → 监控**，填写受管节点能够访问的 Hub HTTPS 地址。
@@ -82,7 +85,7 @@ docker compose up -d --build
 
 访问控制台：**http://localhost:8080**
 
-首次登录时，输入任意用户名和至少 8 位的密码，系统会自动创建管理员账户。
+新数据库请在 `/setup` 输入独立的 `BOOTSTRAP_TOKEN`、用户名和至少 8 位的密码创建管理员。普通登录不会创建账户；初始化令牌为空时关闭初始化，已有账户仍可正常登录。空库未配置令牌时，启动日志会明确告警，`/setup` 显示配置提示而不展示无法提交的表单。`GET /api/v1/auth/setup` 同时返回 `needed` 和 `bootstrap_enabled`。初始化发现与提交独立限流为每 IP 每分钟30次，不占用登录配额。初始化完成后从部署配置移除 `BOOTSTRAP_TOKEN` 并重启 Hub。不要复用 JWT 或凭据加密主密钥，也不要在 URL 中传递初始化令牌。
 
 ### 4. 添加服务器
 
@@ -123,7 +126,7 @@ docker compose up -d --build
 
 支持路径导航、上传下载、新建目录、改名或移动、删除文件或空目录。覆盖上传需要确认。新文件权限为 `0600`；替换文件保留原权限位，所有者为创建临时文件的 SSH 账号。覆盖要求服务器支持 `posix-rename@openssh.com`，不会通过先删除原文件来降级覆盖。新文件优先通过原子硬链接发布，否则使用 SFTP v3 的禁止覆盖重命名约定。
 
-上传按 1 MiB 分块，并校验整个文件的 SHA256。“取消”暂停上传，重新选择同一文件即可从服务器确认的实际偏移继续；“放弃未完成上传”删除临时文件，保留目标文件。当前标签页刷新后仍保留上传恢复信息；退出登录、会话过期或切换账号会清除这些信息。签名令牌有效期 24 小时，绑定用户或 API 密钥身份、服务器、SSH 路线、目标路径、大小和校验和。`JWT_SECRET`、凭据和连接配置不变时，Hub 重启后仍可恢复；令牌过期后，同一调用者仍可通过原路线清理临时文件。路线变化后遗留的临时文件可由具备删除权限的账号通过普通文件管理清理。
+上传按 1 MiB 分块，并校验整个文件的 SHA256。“取消”暂停上传，重新选择同一文件即可从服务器确认的实际偏移继续；“放弃未完成上传”删除临时文件，保留目标文件。当前标签页刷新后仍保留上传恢复信息；退出登录、会话过期或切换账号会清除这些信息。认证加密令牌有效期 24 小时，绑定用户或 API 密钥身份、服务器、SSH 路线、目标路径、大小和校验和。新 v2 票据隐藏旧文件摘要与元信息。既有 v1 签名票据仅兼容至其原到期时间，不重新签发或延期；已经暴露的信息无法撤回。`JWT_SECRET`、凭据和连接配置不变时，Hub 重启后仍可恢复；令牌过期后，同一调用者仍可通过原路线清理临时文件。路线变化后遗留的临时文件可由具备删除权限的账号通过普通文件管理清理。
 
 下载以 16 MiB 为块，通过 `Range`、`If-Range` 和 SHA256 ETag 校验版本与内容。文件面板保持打开时，可从上一个完整块继续；关闭面板或刷新页面会释放浏览器中暂存的数据，重新下载须从头开始。
 
@@ -326,7 +329,7 @@ API 密钥无法确认首次或变更后的主机指纹，须先由管理员在 
 | `GET /archive?path=…` | 远程目录 | 流式 ZIP 附件 |
 | `GET /text?path=…` | 远程文本文件 | `path`、`content`、`version` |
 | `PUT /text` | `{"path":"…","content":"…","version":"sha256:…"}` | 新内容和版本；版本过期返回 `409` |
-| `POST /uploads/start` | `{"path":"…","size":123,"sha256":"64 个十六进制字符","overwrite":false}` | 签名 `token`、`path`、`size`、`offset`、`sha256`、`expires_at` |
+| `POST /uploads/start` | `{"path":"…","size":123,"sha256":"64 个十六进制字符","overwrite":false}` | 加密 `token`、`path`、`size`、`offset`、`sha256`、`expires_at` |
 | `POST /uploads/status` | `{"token":"…"}` | 实际偏移及元数据；`completed:true` 可恢复丢失的完成确认 |
 | `PUT /uploads/chunk?offset=…&size=…` | 最多 1 MiB 原始字节，`X-Upload-Token` 请求头 | 已确认的远端偏移；偏移过期返回 `409` |
 | `POST /uploads/complete` | `{"token":"…"}` | 校验总大小和校验和后发布；完成确认丢失时可重试 |
@@ -385,6 +388,7 @@ curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin
 | `DATABASE_URL` | *(必填)* | Hub 数据库连接串，仓库 Compose 自动生成，仅部署配置 |
 | `VPSMANAGER_MASTER_KEY` | *(必填)* | 由密码学安全随机源生成的十六进制主密钥（至少 32 字节）；升级时须保持不变 |
 | `JWT_SECRET` | *(必填)* | JWT 签名密钥 |
+| `BOOTSTRAP_TOKEN` | *(空，关闭初始化)* | 独立随机的32–256字节初始化令牌，初始化后移除；已有账户无需令牌 |
 | `PORT` | `8080` | HTTP 服务端口 |
 | `LOG_LEVEL` | `info` | 日志级别：`debug`、`info`、`warn`、`error` |
 | `LOG_FORMAT` | `json` | 应用日志格式：`json` 或 `text` |
@@ -491,11 +495,12 @@ services:
   hub:
     image: ghcr.io/molicherry/talus:${TALUS_VERSION:-latest}
     ports:
-      - "${PORT:-8080}:8080"
+      - "127.0.0.1:${PORT:-8080}:8080"
     environment:
       DATABASE_URL: postgres://vpsmanager:${DB_PASSWORD:?请在 .env 中设置 DB_PASSWORD}@db:5432/vpsmanager?sslmode=disable
       VPSMANAGER_MASTER_KEY: ${VPSMANAGER_MASTER_KEY:?请在 .env 中设置 VPSMANAGER_MASTER_KEY}
       JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置 JWT_SECRET}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
       PORT: 8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: ${LOG_FORMAT:-json}
@@ -534,11 +539,14 @@ volumes:
 ```bash
 cp .env.example .env
 # 编辑 .env：填写 DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET；
+# 新数据库另用 openssl rand -hex 32 生成独立 BOOTSTRAP_TOKEN，在 /setup 输入。
 # AGENT_HUB_URL 可提前填写，也可登录后在系统设置配置。
 docker compose -f docker-compose.prod.yml up -d
 ```
 
 **升级到新版本：**
+
+已有账户的实例无需 `BOOTSTRAP_TOKEN`，升级时保留数据库、主密钥和 JWT 密钥。新数据库需在 `/setup` 使用独立初始化令牌，普通登录不再创建账户。Compose 端口现仅绑定回环地址；此前直接远程访问 HTTP 端口的部署，应在升级前配置 HTTPS 反向代理。
 
 ```bash
 docker compose -f docker-compose.prod.yml stop hub
@@ -548,6 +556,10 @@ docker compose -f docker-compose.prod.yml up -d --no-deps hub
 ```
 
 从尚未支持 JWT 撤销的版本首次升级时，须先停止全部旧 Hub 实例并结束旧 WebSocket 会话，再启动新版本，不能让两类版本并行服务。后续升级和回滚均须保留令牌版本校验与主动会话撤销。
+
+### HTTPS 与反向代理访问
+
+Compose 示例仅将 Hub 端口绑定到回环地址。远程管理和节点访问统一经过 HTTPS，限制绕过代理的 HTTP 直连。同一 Docker 网络中的代理可访问 `hub:8080`，无需发布 Hub 主机端口；代理到 Hub 若跨越不可信网络，也要加密。`AGENT_HUB_URL` 使用节点可达的 HTTPS 地址，公网部署不要开启 `AGENT_ALLOW_HTTP`。仅在直连已受限且可信代理覆盖转发头时开启 `TRUST_PROXY`。Hub 通过 HTTP `frame-ancestors` 和 `X-Frame-Options` 响应头禁止 iframe 嵌入，代理应保留这些策略。
 
 ### 反向代理超时
 

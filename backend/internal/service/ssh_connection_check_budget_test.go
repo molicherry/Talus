@@ -53,8 +53,8 @@ func TestConnectionTestBudgetIncludesInitialSnapshotRead(t *testing.T) {
 		}
 	case <-time.After(200 * time.Millisecond):
 		close(gated.gate)
-		<-result
-		t.Fatal("connection test ignored its 30ms budget while reading the initial snapshot")
+		waitErr := <-result
+		t.Fatalf("connection test ignored its 30ms budget while reading the initial snapshot: %v", waitErr)
 	}
 }
 

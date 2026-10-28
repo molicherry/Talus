@@ -41,3 +41,8 @@ export interface LoginRequest {
 export interface LoginResponse {
   token: string;
 }
+
+export interface SetupResponse {
+  needed: boolean;
+  bootstrap_enabled: boolean;
+}

@@ -176,7 +176,10 @@ func (h *ServiceHandler) Relay(w http.ResponseWriter, r *http.Request) {
 	op := usage.FromContext(r.Context())
 	op.SetMetadata("method", req.Method)
 	op.Begin()
-	result, relayErr := h.svc.RelayWithResult(r.Context(), id, service.RelayInput{
+	// Use precisely the configuration whose server scope was checked above.
+	// Reloading by ID here could consume a concurrent administrator update's
+	// different server, upstream URL and credentials without authorizing them.
+	result, relayErr := h.svc.RelaySnapshotWithResult(r.Context(), claims, svc, service.RelayInput{
 		Method:  req.Method,
 		Path:    req.Path,
 		Mode:    req.Mode,

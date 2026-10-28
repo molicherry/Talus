@@ -566,16 +566,20 @@ func (p *Pool) evict() {
 	}
 }
 func keepAliveProbe(client *ssh.Client) bool {
+	timer := time.NewTimer(probeTimeout)
+	defer timer.Stop()
 	done := make(chan error, 1)
 	go func() { _, _, err := client.SendRequest("keepalive@talus.local", true, nil); done <- err }()
+	var probeErr error
+	timedOut := false
 	select {
-	case err := <-done:
-		return err == nil
-	case <-time.After(probeTimeout):
+	case probeErr = <-done:
+	case <-timer.C:
+		timedOut = true
 		_ = client.Close()
-		<-done
-		return false
+		probeErr = <-done
 	}
+	return !timedOut && probeErr == nil
 }
 
 // QuotaObserver is notified whenever a borrow takes or returns a concurrency slot.

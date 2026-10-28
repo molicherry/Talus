@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/vpsmanager/backend/internal/server"
@@ -19,7 +18,8 @@ type LoginResponse struct {
 }
 
 type SetupResponse struct {
-	Needed bool `json:"needed"`
+	Needed           bool `json:"needed"`
+	BootstrapEnabled bool `json:"bootstrap_enabled"`
 }
 
 type ChangePasswordRequest struct {
@@ -47,13 +47,15 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, err)
 		return
 	}
-	server.WriteJSON(w, http.StatusOK, SetupResponse{Needed: needed})
+	server.WriteJSON(w, http.StatusOK, SetupResponse{
+		Needed: needed, BootstrapEnabled: h.authSvc.BootstrapEnabled(),
+	})
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
+	if err := decodeAuthJSON(w, r, &req); err != nil {
+		server.WriteError(w, r, err)
 		return
 	}
 
@@ -93,8 +95,8 @@ func (h *AuthHandler) Profile(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	var req ChangePasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
+	if err := decodeAuthJSON(w, r, &req); err != nil {
+		server.WriteError(w, r, err)
 		return
 	}
 

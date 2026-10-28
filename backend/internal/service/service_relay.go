@@ -17,8 +17,10 @@ import (
 
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/crypto"
+	"github.com/vpsmanager/backend/internal/pkg/token"
 	"github.com/vpsmanager/backend/internal/repository"
 	"github.com/vpsmanager/backend/internal/server"
+	mw "github.com/vpsmanager/backend/internal/server/middleware"
 	"gorm.io/gorm"
 )
 
@@ -293,8 +295,8 @@ func (s *ServiceRelayService) List(ctx context.Context, serverID *uint) ([]model
 }
 
 // Relay decrypts service credentials, substitutes placeholders, and proxies the request.
-func (s *ServiceRelayService) Relay(ctx context.Context, serviceID uint, input RelayInput, w http.ResponseWriter) error {
-	_, err := s.RelayWithResult(ctx, serviceID, input, w)
+func (s *ServiceRelayService) Relay(ctx context.Context, claims *token.Claims, serviceID uint, input RelayInput, w http.ResponseWriter) error {
+	_, err := s.RelayWithResult(ctx, claims, serviceID, input, w)
 	return err
 }
 
@@ -340,7 +342,10 @@ func (s *ServiceRelayService) RelayContext(ctx context.Context, mode string) (co
 	return context.WithValue(ctx, relayBudgetKey{}, mode), cancel, nil
 }
 
-func (s *ServiceRelayService) RelayWithResult(ctx context.Context, serviceID uint, input RelayInput, w http.ResponseWriter) (RelayResult, error) {
+func (s *ServiceRelayService) RelayWithResult(ctx context.Context, claims *token.Claims, serviceID uint, input RelayInput, w http.ResponseWriter) (RelayResult, error) {
+	if claims == nil {
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonUnauthorized}, server.ErrUnauthorized
+	}
 	ctx, cancel, err := s.RelayContext(ctx, input.Mode)
 	if err != nil {
 		return RelayResult{Outcome: "rejected", Reason: server.ReasonInvalidRequest}, err
@@ -355,6 +360,31 @@ func (s *ServiceRelayService) RelayWithResult(ctx context.Context, serviceID uin
 			return relayContextError(ctx.Err())
 		}
 		return RelayResult{Outcome: "rejected", Reason: server.ReasonServiceNotFound}, err
+	}
+	return s.RelaySnapshotWithResult(ctx, claims, svc, input, w)
+}
+
+// RelaySnapshotWithResult checks the authenticated caller against the exact
+// configuration it will use, before decrypting credentials or contacting the
+// upstream. It never reloads the service: ServerID, BaseURL and credentials all
+// belong to this authorized snapshot. The frozen relay budget is preserved.
+func (s *ServiceRelayService) RelaySnapshotWithResult(ctx context.Context, claims *token.Claims, svc *model.Service, input RelayInput, w http.ResponseWriter) (RelayResult, error) {
+	if claims == nil {
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonUnauthorized}, server.ErrUnauthorized
+	}
+	ctx, cancel, err := s.RelayContext(ctx, input.Mode)
+	if err != nil {
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonInvalidRequest}, err
+	}
+	defer cancel()
+	if input.Method == "" {
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonMethodRequired}, server.NewAppError(http.StatusBadRequest, server.ReasonMethodRequired)
+	}
+	if svc == nil {
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonServiceNotFound}, server.NewAppError(http.StatusNotFound, server.ReasonServiceNotFound)
+	}
+	if svc.ServerID != nil && !mw.CheckServerAccess(claims, *svc.ServerID) {
+		return RelayResult{Outcome: "rejected", Reason: server.ReasonAPIKeyServiceDenied}, server.NewAppError(http.StatusForbidden, server.ReasonAPIKeyServiceDenied)
 	}
 	return s.relayFromService(ctx, svc, input, w)
 }

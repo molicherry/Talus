@@ -163,6 +163,9 @@ type terminalCompletion struct {
 // StartSessionWithResult bounds the HTTP owner while a background owner retains
 // the exclusive lease and registry entry until every local worker really joins.
 func (s *TerminalService) StartSessionWithResult(ctx context.Context, serverID uint, wsConn *websocket.Conn) (TerminalResult, error) {
+	// Every authenticated entry, including API-key clients that have no auth
+	// frame, receives the same per-message budget. Browser paste is chunked.
+	wsConn.SetReadLimit(TerminalMessageMaxBytes)
 	completed := make(chan terminalCompletion, 1)
 	expired := make(chan terminalCompletion, 1)
 	go func() {

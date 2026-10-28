@@ -55,7 +55,12 @@ func (r *residentMigrationRemote) handler(t *testing.T) func(string, ssh.Channel
 	inherited := r.files.handler()
 	return func(command string, ch ssh.Channel, closed <-chan struct{}) {
 		switch {
-		case strings.HasPrefix(command, "set -eu\ncache_dir="):
+		// The cache command now starts with the shared lock helper. Identify
+		// its cache/config variables so the peer still applies the same controlled
+		// store success and transient pull failures after that prelude.
+		case strings.HasPrefix(command, "set -eu\n") &&
+			strings.Contains(command, "\ncache_dir=") &&
+			strings.Contains(command, "\nfetch_config="):
 			if strings.Contains(command, "mode='store'\n") {
 				fmt.Fprintln(ch, "TALUS_ARTIFACT_READY")
 				exitStatus(ch, 0)

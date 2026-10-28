@@ -4,6 +4,7 @@
 //
 // Prerequisites come from tests/e2e/run.sh:
 //   HUB_URL      the running Hub (serving both the API and the built SPA)
+//   BOOTSTRAP_TOKEN the owned fixture setup proof, separate from account credentials
 //   PEER_LOG     JSONL events recorded by cmd/e2efixture (the SSH peer)
 //   CLIENT_KEY   the private key whose public half the peer accepts
 //   PEER_HOST_PUBLIC_KEY the controlled peer's public host key for verification
@@ -21,11 +22,12 @@ const hubUrl = process.env.HUB_URL;
 const peerLog = process.env.PEER_LOG;
 const clientKey = process.env.CLIENT_KEY;
 const peerHostKey = process.env.PEER_HOST_PUBLIC_KEY;
+const bootstrapToken = process.env.BOOTSTRAP_TOKEN;
 const username = process.env.E2E_USERNAME ?? "e2e-admin";
 const password = process.env.E2E_PASSWORD ?? "e2e-password-1234";
 
-if (!hubUrl || !peerLog || !clientKey || !peerHostKey) {
-	console.error("terminal.spec.mjs requires HUB_URL, PEER_LOG, CLIENT_KEY and PEER_HOST_PUBLIC_KEY");
+if (!hubUrl || !peerLog || !clientKey || !peerHostKey || !bootstrapToken) {
+	console.error("terminal.spec.mjs requires HUB_URL, PEER_LOG, CLIENT_KEY, PEER_HOST_PUBLIC_KEY and BOOTSTRAP_TOKEN");
 	process.exit(2);
 }
 
@@ -129,6 +131,7 @@ const context = await browser.newContext({
 	viewport: { width: 1280, height: 900 },
 	locale: "en-US",
 });
+await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: hubUrl });
 const page = await context.newPage();
 page.setDefaultTimeout(20000);
 const pageErrors = [];
@@ -153,22 +156,27 @@ try {
 			await page.waitForURL((url) => url.pathname !== "/login", {
 				timeout: 20000,
 			});
-			if (new URL(page.url()).pathname === "/setup") {
-				await page.getByLabel("Username", { exact: true }).fill(username);
-				await page.getByLabel("Password", { exact: true }).fill(password);
-				await page
-					.getByLabel("Confirm Password", { exact: true })
-					.fill(password);
-				await page
-					.getByRole("button", { name: /create admin account/i })
-					.click();
-			} else {
-				// An existing database still has to authenticate: match the labels exactly,
-				// because the first-user form also carries a confirmation field.
-				await page.getByLabel("Username", { exact: true }).fill(username);
-				await page.getByLabel("Password", { exact: true }).fill(password);
-				await page.getByRole("button", { name: /sign in/i }).click();
+			assert.equal(new URL(page.url()).pathname, "/setup", "the owned fresh database must require setup");
+			// Ordinary login must not claim the first administrator, and possession
+			// of only the proposed account password must not satisfy ownership.
+			for (const [path, body, status] of [
+				["login", { username, password }, 401],
+				["setup", { username, password, token: "incorrect-fixture-proof-0123456789" }, 403],
+			]) {
+				const response = await fetch(`${hubUrl}/api/v1/auth/${path}`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(body),
+				});
+				assert.equal(response.status, status, "unproved first-admin setup must fail");
+				const rejected = await response.text();
+				assert.ok(!rejected.includes(bootstrapToken), "the proof must not appear in an error response");
 			}
+			await page.getByLabel("Setup token", { exact: true }).fill(bootstrapToken);
+			await page.getByLabel("Username", { exact: true }).fill(username);
+			await page.getByLabel("Password", { exact: true }).fill(password);
+			await page.getByLabel("Confirm Password", { exact: true }).fill(password);
+			await page.getByRole("button", { name: /create admin account/i }).click();
 			// The dashboard is only reachable with a session, so this proves the JWT works.
 			await until(
 				async () =>
@@ -181,6 +189,16 @@ try {
 
 	const token = await page.evaluate(() => localStorage.getItem("auth_token"));
 	assert.ok(token && token.length > 20, "the browser stored a JWT");
+	const persistedBrowserState = await page.evaluate(() => JSON.stringify({
+		local: { ...localStorage }, session: { ...sessionStorage },
+	}));
+	assert.ok(!persistedBrowserState.includes(bootstrapToken), "the setup proof must not be persisted in browser storage");
+	const repeatedSetup = await fetch(`${hubUrl}/api/v1/auth/setup`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ token: bootstrapToken, username, password }),
+	});
+	assert.equal(repeatedSetup.status, 409, "initialized setup must remain closed even with the correct proof");
 
 	// The terminal needs a target: a credential whose private key the peer accepts and
 	// a server row pointing at the peer's port.
@@ -286,6 +304,29 @@ try {
 					),
 				"the echoed output to render in the browser",
 			);
+		},
+	);
+
+	await step(
+		"a large Unicode paste preserves every byte over the real terminal connection",
+		async () => {
+			const before = await cursor();
+			// Over64KiB before JSON escaping: Chinese, surrogate pairs, quotes,
+			// backslashes and tabs exercise both Unicode boundaries and wire size.
+			const payload = 'large-paste-start|' + '中😀"\\\t'.repeat(8000) + '|large-paste-end';
+			const expected = Buffer.from(payload, "utf8");
+			assert.ok(expected.length > (64 << 10) && expected.length < (128 << 10));
+			const received = async () => Buffer.concat((await events()).slice(before)
+				.filter((event) => event.type === "input" && event.channel === firstShell.channel && event.session === firstShell.session)
+				.map((event) => Buffer.from(event.data_base64 ?? "", "base64")));
+			await page.evaluate((text) => navigator.clipboard.writeText(text), payload);
+			await page.getByRole("button", { name: "Paste from clipboard" }).click();
+			await until(async () => (await received()).length >= expected.length,
+				"the controlled SSH peer to receive the complete large paste");
+			const actual = await received();
+			assert.equal(actual.length, expected.length, "the paste must arrive once without truncation");
+			assert.ok(actual.equals(expected), "the SSH peer must receive the exact Unicode byte sequence in order");
+			assert.equal(await page.locator("[data-connection-status]").getAttribute("data-connection-status"), "connected");
 		},
 	);
 

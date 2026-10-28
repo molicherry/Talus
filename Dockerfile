@@ -3,7 +3,7 @@
 # that build with the Dockerfile's directory as context.
 # backend/Dockerfile is kept in sync for standalone backend-only builds.
 
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS go-builder
 ARG VERSION=dev
 ARG TARGETOS
 ARG TARGETARCH
@@ -35,7 +35,7 @@ RUN npm config set registry ${NPM_REGISTRY} && npm ci
 COPY frontend/ .
 RUN npm run build
 
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk add --no-cache openssh-client ca-certificates tzdata
 RUN adduser -D -H -s /sbin/nologin talus
 COPY --from=go-builder /hub /usr/local/bin/hub

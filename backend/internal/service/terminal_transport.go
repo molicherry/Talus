@@ -14,6 +14,10 @@ import (
 // the JSON protocol, including control frames on both versions.
 const TerminalBinaryProtocol = "talus.terminal.v2"
 
+// TerminalMessageMaxBytes bounds client JSON messages after authentication.
+// Keep the browser input chunk budget in terminal-messages.ts in sync.
+const TerminalMessageMaxBytes int64 = 64 << 10
+
 const (
 	terminalKeepaliveInterval = 25 * time.Second
 	terminalKeepaliveTimeout  = 10 * time.Second
@@ -111,26 +115,30 @@ func keepTerminalAlive(ctx context.Context, client *ssh.Client, writer *terminal
 			done <- err
 		}()
 		timer := time.NewTimer(timeout)
+		var requestErr error
+		stopAfterJoin := false
 		select {
-		case err := <-done:
+		case requestErr = <-done:
 			timer.Stop()
-			if ctx.Err() != nil {
-				return
-			}
-			if err != nil {
-				end("failed", "terminal_keepalive_failed", "ssh_error")
-				return
-			}
 		case <-timer.C:
 			if ctx.Err() == nil {
 				end("failed", "terminal_keepalive_timeout", "ssh_error")
 				force()
 			}
-			<-done
-			return
+			requestErr = <-done
+			stopAfterJoin = true
 		case <-ctx.Done():
 			timer.Stop()
-			<-done
+			requestErr = <-done
+			stopAfterJoin = true
+		}
+		// Timeout/cancellation already chose the session outcome. Join the
+		// request without replacing that outcome with its teardown error.
+		if stopAfterJoin || ctx.Err() != nil {
+			return
+		}
+		if requestErr != nil {
+			end("failed", "terminal_keepalive_failed", "ssh_error")
 			return
 		}
 	}

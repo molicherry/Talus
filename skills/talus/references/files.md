@@ -48,7 +48,7 @@ through a shell. Use `application/octet-stream` for upload/chunk bodies and
 | `GET /archive?path=...` | Remote directory | Streamed ZIP; includes empty directories, skips symbolic links |
 | `GET /text?path=...` | Existing text file | `path`, `content`, `version` |
 | `PUT /text` | `path`, edited `content`, original `version` | Saved text with its new version; stale version is `409 sftp_conflict` |
-| `POST /uploads/start` | `path`, `size`, `sha256`, `overwrite` | Signed `token`, `path`, `size`, `offset`, `sha256`, `expires_at` |
+| `POST /uploads/start` | `path`, `size`, `sha256`, `overwrite` | Opaque authenticated-encrypted `token`, `path`, `size`, `offset`, `sha256`, `expires_at` |
 | `POST /uploads/status` | `{"token":"..."}` | Upload metadata and actual `offset`; `completed:true` if already published |
 | `PUT /uploads/chunk?offset=...&size=...` | Raw bytes and `X-Upload-Token` | Upload metadata with confirmed `offset` |
 | `POST /uploads/complete` | `{"token":"..."}` | `{"success":true}` after checksum verification and publication |

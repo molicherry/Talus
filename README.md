@@ -63,6 +63,7 @@ cp .env.example .env
 DB_PASSWORD=<your-postgres-password>
 VPSMANAGER_MASTER_KEY=<openssl rand -hex 32>
 JWT_SECRET=<openssl rand -hex 32>
+BOOTSTRAP_TOKEN=<another independent openssl rand -hex 32>
 ```
 
 After first login, open **System settings → Monitoring** and enter the Hub HTTPS
@@ -84,7 +85,7 @@ docker compose up -d --build
 
 The dashboard is at **<http://localhost:8080>**.
 
-On first login, enter any username and a password of at least 8 characters — the first login automatically creates the admin account.
+For a fresh database, open `/setup` and enter the independent `BOOTSTRAP_TOKEN`, a username and a password of at least 8 characters. Ordinary login never creates an account. An empty or missing bootstrap token disables initialization; existing accounts still log in normally. With an empty database, startup warns explicitly and `/setup` shows how to configure `BOOTSTRAP_TOKEN` instead of an unusable form. `GET /api/v1/auth/setup` reports both `needed` and `bootstrap_enabled`. Setup discovery/submission have an independent 30 requests/IP/minute budget, unaffected by the login quota. Remove `BOOTSTRAP_TOKEN` from the deployment after setup and restart the Hub. Never reuse `JWT_SECRET` or `VPSMANAGER_MASTER_KEY` as that token, or send it in a URL.
 
 ### 4. Add a Server
 
@@ -136,7 +137,7 @@ The terminal, file panel and text editor follow the global light/dark/system the
 
 Open **Files** in the SSH toolbar. Desktop uses a split pane; phones switch between the terminal and files without reconnecting the terminal. Browse by path, upload or download files, create directories, rename/move entries, and delete files or empty directories. Upload replacement requires confirmation. New files use mode `0600`; replacement preserves the existing permission bits. The owner of a replacement file is the SSH account creating the temporary file.
 
-Uploads use 1 MiB chunks and a SHA256 checksum of the complete file. Cancel pauses a resumable upload. Re-select the same local file to continue; the backend supplies the actual remote offset. **Discard partial upload** removes its temporary file without deleting the destination. The current tab remembers the upload across page reloads; logout, session expiry or an account change clears its recovery information. Signed recovery tokens expire after 24 hours and bind the uploader identity, server, SSH route, destination, size and checksum. They remain usable after a Hub restart when `JWT_SECRET`, credentials and connection configuration remain unchanged. An expired token can still discard its own temporary file when the caller and SSH route match. Abandoned files whose route changed can be removed through normal file management by an account with delete permission.
+Uploads use 1 MiB chunks and a SHA256 checksum of the complete file. Cancel pauses a resumable upload. Re-select the same local file to continue; the backend supplies the actual remote offset. **Discard partial upload** removes its temporary file without deleting the destination. The current tab remembers the upload across page reloads; logout, session expiry or an account change clears its recovery information. Authenticated encrypted recovery tokens expire after 24 hours and bind the uploader identity, server, SSH route, destination, size and checksum. They remain usable after a Hub restart when `JWT_SECRET`, credentials and connection configuration remain unchanged. New v2 tickets conceal the previous file digest and metadata. Existing signed v1 tickets are accepted only until their original expiry and are never reissued or extended; their previously disclosed data cannot be withdrawn. An expired token can still discard its own temporary file when the caller and SSH route match. Abandoned files whose route changed can be removed through normal file management by an account with delete permission.
 
 Downloads use verified ranges. While the file panel stays open, a paused download can resume from the last complete 16 MiB chunk. Closing/reloading the panel releases those browser-held chunks; a new download then starts from the beginning. `If-Range` prevents mixing versions, and the browser verifies the completed download against its SHA256 ETag.
 
@@ -181,11 +182,12 @@ services:
   hub:
     image: ghcr.io/molicherry/talus:${TALUS_VERSION:-latest}
     ports:
-      - "${PORT:-8080}:8080"
+      - "127.0.0.1:${PORT:-8080}:8080"
     environment:
       DATABASE_URL: postgres://vpsmanager:${DB_PASSWORD:?set DB_PASSWORD in .env}@db:5432/vpsmanager?sslmode=disable
       VPSMANAGER_MASTER_KEY: ${VPSMANAGER_MASTER_KEY:?set VPSMANAGER_MASTER_KEY in .env}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
       PORT: 8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: ${LOG_FORMAT:-json}
@@ -226,6 +228,7 @@ Leave it empty if monitoring is not needed.
 ```bash
 cp .env.example .env
 # Edit .env: set DB_PASSWORD / VPSMANAGER_MASTER_KEY / JWT_SECRET;
+# for a fresh database also set an independent BOOTSTRAP_TOKEN.
 # optionally set AGENT_HUB_URL now, or configure it in System settings after login.
 docker compose -f docker-compose.prod.yml up -d
 ```
@@ -243,6 +246,10 @@ When upgrading from a version without JWT revocation, stop every old Hub instanc
 and its WebSocket sessions before starting this version. Do not run those old
 and new versions together. Subsequent upgrades and rollbacks must retain token
 version checks and active session revocation.
+
+### HTTPS and reverse-proxy access
+
+The Compose examples bind the Hub port to loopback. Use HTTPS for remote management and node access; restrict direct HTTP access to the local proxy. A proxy in the same Docker network can use `hub:8080` without publishing the Hub host port. Encrypt the proxy-to-Hub segment too if it crosses an untrusted network. Set `AGENT_HUB_URL` to the node-reachable HTTPS URL; do not enable `AGENT_ALLOW_HTTP` for public deployments. Enable `TRUST_PROXY` only when direct access is restricted and a trusted proxy overwrites forwarded headers. The Hub refuses iframe embedding with HTTP `frame-ancestors` and `X-Frame-Options` headers; preserve these at the proxy.
 
 ### Reverse-proxy timeouts
 
@@ -272,6 +279,15 @@ output uses binary frames containing the original SSH bytes, while authenticatio
 input, resize, connection status and errors remain JSON. Decode binary output as
 a UTF-8 stream across frame boundaries. Clients that omit the subprotocol retain
 the JSON output format; incomplete UTF-8 characters are carried between reads.
+
+Login, initial setup and password-change JSON bodies are limited to 8 KiB,
+including whitespace and trailing bytes; an oversized body returns HTTP 413.
+Browser terminal authentication must arrive within 10 seconds and fit in an
+8-KiB WebSocket message. After authentication, client JSON messages are limited
+to 64 KiB, including JSON escaping and UTF-8 encoding, for both browser and
+API-key clients. The browser splits large pasted input into ordered messages;
+other clients must do the same. Fragmenting one WebSocket message does not
+bypass its limit. These limits do not replace the File API's transfer budgets.
 
 Ready terminal sessions send WebSocket Ping and SSH `keepalive@openssh.com`
 requests every 25 seconds. Browsers answer Ping automatically. An SSH request
@@ -485,7 +501,7 @@ All paths below are relative to `/api/v1/servers/{id}/sftp`. Send remote paths i
 | `GET /archive?path=…` | Remote directory | Streamed ZIP attachment |
 | `GET /text?path=…` | Remote text file | `path`, `content`, `version` |
 | `PUT /text` | `{"path":"…","content":"…","version":"sha256:…"}` | Saved text and new version; stale version is `409` |
-| `POST /uploads/start` | `{"path":"…","size":123,"sha256":"64 hex digits","overwrite":false}` | Signed `token`, `path`, `size`, `offset`, `sha256`, `expires_at` |
+| `POST /uploads/start` | `{"path":"…","size":123,"sha256":"64 hex digits","overwrite":false}` | Opaque authenticated-encrypted `token`, `path`, `size`, `offset`, `sha256`, `expires_at` |
 | `POST /uploads/status` | `{"token":"…"}` | Actual offset and metadata; `completed:true` recovers a lost final acknowledgement |
 | `PUT /uploads/chunk?offset=…&size=…` | Raw bytes, at most 1 MiB; `X-Upload-Token` header | Confirmed remote offset; stale offset is `409` |
 | `POST /uploads/complete` | `{"token":"…"}` | Verifies total size/checksum and publishes; safe to retry after a lost acknowledgement |
@@ -562,6 +578,7 @@ Compose and production examples pass all 19 settings.
 | `DATABASE_URL` | *(required)* | Hub database connection string; generated by bundled Compose; deployment only |
 | `VPSMANAGER_MASTER_KEY` | *(required)* | Cryptographically random hex master key (32+ bytes); preserve across upgrades |
 | `JWT_SECRET` | *(required)* | JWT signing secret |
+| `BOOTSTRAP_TOKEN` | *(empty: setup disabled)* | Independent random 32–256 byte initialization proof; remove after setup. Existing accounts need no token |
 | `PORT` | `8080` | HTTP server port |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `json` | Application log format: `json` or `text` |
@@ -612,6 +629,8 @@ During installation or migration of a managed node, installation locations are s
 On Linux, cross-account user cleanup runs entirely as the installation owner and requires `runuser`; if that account cannot be resolved or switched to, its files remain and cleanup reports a failure. Lock files are never truncated, and symbolic links or non-regular locks are rejected. HOME aliases pointing to the same directory keep the active installation and its outbox. Moving the same account to a different physical HOME is rejected before remote files change; migrate that account's installation manually first. Windows installations are machine-wide and do not move when SSH administrators change.
 
 ### Docker upgrades and encrypted data
+
+Existing initialized instances need no `BOOTSTRAP_TOKEN`; preserve their database, master key and JWT secret. Fresh databases now require a separate bootstrap token at `/setup`, rather than account creation through ordinary login. The Compose host port is now loopback-only: configure the HTTPS proxy before upgrading a deployment that previously used a remote HTTP port directly.
 
 Keep the existing database volume and the original `.env`, especially `VPSMANAGER_MASTER_KEY`. Stop the old Hub before replacing it; upgrades assume a single Hub and a brief maintenance window. A database advisory lock serializes migration by new Hubs, but cannot stop an older binary from writing.
 

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -38,6 +40,7 @@ type AuthService struct {
 	ownerBackfillTrigger func()
 	gate                 userGate
 	terminalRegistry     *gate.Registry
+	bootstrapTokenHash   *[sha256.Size]byte
 }
 
 // SetOwnerBackfillTrigger connects optional background work to successful
@@ -77,20 +80,56 @@ func (s *AuthService) NeedsSetup(ctx context.Context) (bool, error) {
 	return count == 0, nil
 }
 
-// Login authenticates a user or bootstraps the first admin account.
-// If no users exist, the first Login call auto-creates an admin.
-// Returns a signed JWT on success.
+// SetBootstrapToken configures the independent, deployment-only ownership proof.
+// Missing or invalid configuration disables setup; existing-user login still works.
+// Call only during startup, before accepting requests. Retain only its hash here.
+func (s *AuthService) SetBootstrapToken(value string) {
+	s.bootstrapTokenHash = nil
+	if len(value) >= 32 && len(value) <= 256 {
+		hash := sha256.Sum256([]byte(value))
+		s.bootstrapTokenHash = &hash
+	}
+}
+
+// BootstrapEnabled reports whether deployment ownership proof is configured.
+// It does not disclose the proof or whether an administrator already exists.
+func (s *AuthService) BootstrapEnabled() bool {
+	return s.bootstrapTokenHash != nil
+}
+
+// VerifyBootstrapProof admits ownership before exposing credential validation
+// feedback. It performs no database work and is reused by the service entrypoint.
+func (s *AuthService) VerifyBootstrapProof(proof string) error {
+	if len(proof) < 32 || len(proof) > 256 || !s.BootstrapEnabled() {
+		return server.ErrForbidden
+	}
+	provided := sha256.Sum256([]byte(proof))
+	if subtle.ConstantTimeCompare(provided[:], s.bootstrapTokenHash[:]) != 1 {
+		return server.ErrForbidden
+	}
+	return nil
+}
+
+// Login authenticates an existing user. It never creates an administrator.
 func (s *AuthService) Login(ctx context.Context, username, password string) (string, error) {
+	return s.authenticateExisting(ctx, username, password)
+}
+
+// Bootstrap creates the first administrator only for a caller who proves
+// deployment ownership. The database lock below makes the empty check and
+// creation atomic across Hub instances. Initialized instances cannot be claimed.
+func (s *AuthService) Bootstrap(ctx context.Context, proof, username, password string) (string, error) {
+	if err := s.VerifyBootstrapProof(proof); err != nil {
+		return "", err
+	}
 	count, err := s.userRepo.Count(ctx)
 	if err != nil {
-		return "", fmt.Errorf("login: %w", err)
+		return "", fmt.Errorf("bootstrap: %w", err)
 	}
-
-	if count == 0 {
-		return s.createFirstUser(ctx, username, password)
+	if count != 0 {
+		return "", server.ErrConflict
 	}
-
-	return s.authenticateExisting(ctx, username, password)
+	return s.createFirstUser(ctx, username, password)
 }
 
 // createFirstUser serializes initial administrator creation across instances.
@@ -98,7 +137,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (str
 func (s *AuthService) createFirstUser(ctx context.Context, username, password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return "", fmt.Errorf("login: bcrypt: %w", server.ErrInternal)
+		return "", fmt.Errorf("bootstrap: bcrypt: %w", server.ErrInternal)
 	}
 
 	user := &model.User{
@@ -126,10 +165,10 @@ func (s *AuthService) createFirstUser(ctx context.Context, username, password st
 
 	if err != nil {
 		if errors.Is(err, errFirstUserTaken) {
-			// Another request created the first user; fall back to normal authentication.
-			return s.authenticateExisting(ctx, username, password)
+			// Setup is one-shot, even when racing callers chose the same credentials.
+			return "", server.ErrConflict
 		}
-		return "", fmt.Errorf("login: %w", err)
+		return "", fmt.Errorf("bootstrap: %w", err)
 	}
 
 	if s.ownerBackfillTrigger != nil {

@@ -18,7 +18,7 @@ for file in "$cache" "$part" "$lock" "$next"; do
   if test -e "$file"; then test -f "$file" || exit 1; fi
 done
 exec 9<>"$lock"
-flock -x -w 10 9 || exit 1
+talus_acquire_lock || exit 1
 # At most one complete artifact and one partial artifact per installation.
 for file in "$cache_dir"/*; do
   test -e "$file" || continue

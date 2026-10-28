@@ -12,6 +12,7 @@ import {
   stepFontSize,
 } from "../lib/terminal-preferences";
 import { classifyPaste } from "../lib/terminal-input";
+import { terminalInputChunks } from "../lib/terminal-messages";
 import { terminalTheme } from "../lib/terminal-theme";
 import { createTerminalSocket, sendTerminalMessage } from "../socket";
 
@@ -412,7 +413,9 @@ export function useTerminal(serverId: number): UseTerminalReturn {
 
     term.onData((data: string) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        sendTerminalMessage(wsRef.current, { type: "input", data });
+        for (const chunk of terminalInputChunks(data)) {
+          sendTerminalMessage(wsRef.current, { type: "input", data: chunk });
+        }
       }
     });
 

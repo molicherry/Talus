@@ -15,6 +15,10 @@ import (
 	"github.com/vpsmanager/backend/internal/usage"
 )
 
+// SetupRequestsPerMinute reserves a separate, bounded budget for bootstrap and
+// discovery so failed ordinary logins cannot consume the initialization quota.
+const SetupRequestsPerMinute = 30
+
 // RouteConfig holds all HTTP handler functions that the router needs to mount.
 type RouteConfig struct {
 	GetSettingsHandler           http.HandlerFunc
@@ -31,11 +35,13 @@ type RouteConfig struct {
 	FilterUsageLogOptionsHandler http.HandlerFunc
 	RevealLimiter                *middleware.RateLimiter
 	LoginLimiter                 *middleware.IPRateLimiter
+	SetupLimiter                 *middleware.IPRateLimiter
 	CheckUpdatesHandler          http.HandlerFunc
 
 	// Auth
 	LoginHandler          http.HandlerFunc
 	SetupHandler          http.HandlerFunc
+	BootstrapHandler      http.HandlerFunc
 	ProfileHandler        http.HandlerFunc
 	ChangePasswordHandler http.HandlerFunc
 
@@ -116,6 +122,7 @@ func NewRouter(cfg RouteConfig) chi.Router {
 	r.Use(middleware.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.CORS)
+	r.Use(middleware.SecurityHeaders)
 
 	// Health check
 	r.Get("/healthz", healthHandler)
@@ -136,9 +143,9 @@ func NewRouter(cfg RouteConfig) chi.Router {
 		r.Get("/", versionHandler)
 		r.Get("/version", versionHandler)
 
-		// Rate-limit unauthenticated auth endpoints per client IP to slow
-		// brute-force login attempts. Fall back to a conservative default when
-		// no limiter is wired (e.g. tests).
+		// Keep ordinary login attempts separate from setup and discovery: a
+		// login flood must not consume an owner's first-initialization budget.
+		// Both pools remain bounded per IP and use the configured proxy policy.
 		loginLimiter := cfg.LoginLimiter
 		if loginLimiter == nil {
 			loginLimiter = middleware.NewIPRateLimiter(time.Minute, 10, false)
@@ -146,6 +153,16 @@ func NewRouter(cfg RouteConfig) chi.Router {
 		r.Group(func(r chi.Router) {
 			r.Use(loginLimiter.Limit)
 			r.Post("/auth/login", cfg.LoginHandler)
+		})
+		setupLimiter := cfg.SetupLimiter
+		if setupLimiter == nil {
+			setupLimiter = middleware.NewIPRateLimiter(time.Minute, SetupRequestsPerMinute, false)
+		}
+		r.Group(func(r chi.Router) {
+			r.Use(setupLimiter.Limit)
+			if cfg.BootstrapHandler != nil {
+				r.Post("/auth/setup", cfg.BootstrapHandler)
+			}
 			r.Get("/auth/setup", cfg.SetupHandler)
 		})
 	})

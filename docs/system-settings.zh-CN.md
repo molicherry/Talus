@@ -60,6 +60,7 @@ Agent 地址保存成功只说明配置已持久化，不代表目标节点可�
 | `DATABASE_URL` | 必填 | Hub 环境：数据库连接串。仓库 Compose 根据 `DB_PASSWORD` 自动生成 |
 | `VPSMANAGER_MASTER_KEY` | 必填 | Hub 环境/密钥管理：凭据加密主密钥。数据库迁移、恢复时保持原密钥 |
 | `JWT_SECRET` | 必填 | Hub 环境/密钥管理：JWT 签名及相关会话凭据 |
+| `BOOTSTRAP_TOKEN` | 空，关闭初始化 | 独立随机的32–256字节令牌；不得复用 JWT 或主密钥。初始化后移除并重启，已有账户不受影响 |
 | `PORT` | `8080` | 独立进程为监听端口；仓库 Compose 的 `.env` 值控制宿主机端口映射，Hub 容器内部仍为 8080 |
 | `AGENT_ARTIFACTS_DIR` | `/usr/local/bin` | Hub 环境与挂载：Agent manifest 及 Linux amd64/arm64、Windows amd64 程序目录；三个平台均须提供，启动校验 |
 | `TRUST_PROXY` | `false` | Hub 环境：仅在可信反向代理覆盖 X-Forwarded-For 时开启，影响登录 IP 识别 |

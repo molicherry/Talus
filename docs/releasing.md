@@ -133,6 +133,9 @@ has a draft, add the note there manually; draft recovery preserves reviewed text
 
 ### Write and review
 
+- Put breaking access changes first in each language, before feature/fix lists.
+  In particular, a loopback-only management bind must warn users to configure
+  their HTTPS proxy before upgrading; do not leave that requirement only in a guide.
 - Include user-visible features, fixes, security and compatibility changes.
   Exclude pure tests, CI, coverage and internal refactoring.
 - Explain required migration/configuration actions, rollback support and its cost

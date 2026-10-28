@@ -24,7 +24,7 @@ func TestServerAutomaticallyUpgradesEncryptedData(t *testing.T) {
 	var login struct {
 		Token string `json:"token"`
 	}
-	first.request(t, http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "upgrade-admin", "password": "upgrade-password"}, "", http.StatusOK, &login)
+	first.request(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{"token": "isolated-startup-bootstrap-secret-32", "username": "upgrade-admin", "password": "upgrade-password"}, "", http.StatusOK, &login)
 	var credential, service struct {
 		ID uint `json:"id"`
 	}

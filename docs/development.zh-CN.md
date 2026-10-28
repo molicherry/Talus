@@ -10,7 +10,7 @@
 
 | 工具 | 要求与来源 |
 | --- | --- |
-| Go | 以 [backend/go.mod](../backend/go.mod) 为准，当前为 Go 1.25.0；依赖需要时允许下载工具链 |
+| Go | 以 [backend/go.mod](../backend/go.mod) 为准，当前为 Go 1.27.3；依赖需要时允许下载工具链 |
 | Node.js 与 npm | 使用与 CI、Docker 构建一致的 Node 24；通过 `npm ci` 安装前端依赖 |
 | Docker 与 Compose v2 | 用于数据库及完整环境；镜像验收也需要 Docker |
 | 数据库 | 与 [docker-compose.yml](../docker-compose.yml) 一致的 PostgreSQL 16 + TimescaleDB；普通 PostgreSQL 缺少必需扩展 |
@@ -27,9 +27,12 @@ cd Talus
 cp .env.example .env
 openssl rand -hex 32
 openssl rand -hex 32
+openssl rand -hex 32
 ```
 
 编辑 `.env`：设置 `DB_PASSWORD`，将两次独立生成的值分别填入 `VPSMANAGER_MASTER_KEY` 和 `JWT_SECRET`。复用数据库时应保留这些值。`.env` 已被 Git 忽略，不要提交。尚不需要监控时保持 `AGENT_HUB_URL` 为空。
+
+新数据库须在启动 Compose 前将第三个独立随机值填入 `.env` 的 `BOOTSTRAP_TOKEN`；已有账户无需初始化令牌。
 
 ```bash
 docker compose up -d --build
@@ -43,7 +46,7 @@ curl --fail http://localhost:8080/healthz
 curl --fail http://localhost:8080/api/v1/version
 ```
 
-打开 `http://localhost:8080`。新数据库首次登录会创建管理员，密码至少八个字符；空仪表盘是正常结果。添加真实节点还需要 SSH 凭据和明确的主机指纹确认，见[添加服务器](README.zh-CN.md#4-添加服务器)。
+打开 `http://localhost:8080`。新数据库须另生成独立的 `BOOTSTRAP_TOKEN` 写入 `.env`，在 `/setup` 输入该令牌创建管理员，密码至少八个字符。初始化后移除令牌并重启；已有账户无需令牌。普通登录不创建账户；空仪表盘是正常结果。添加真实节点还需要 SSH 凭据和明确的主机指纹确认，见[添加服务器](README.zh-CN.md#4-添加服务器)。
 
 Compose 会构建源码，但不会监听文件变化。修改后执行 `docker compose up -d --no-deps --build hub` 重建 Hub。`docker compose stop` 保留数据库；需要保留数据时不要执行 `down -v`。
 

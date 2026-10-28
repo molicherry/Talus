@@ -1,5 +1,6 @@
 // SFTP file panel browser acceptance with the real application and binary XHR.
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
 
 import { nameSuite, recordCase, writeReport } from "./lib/case-report.mjs";
 import { spawn } from "node:child_process";
@@ -418,7 +419,7 @@ try {
   });
   await test("directory upload preserves nested paths and directory download saves a ZIP", async ({ page, goto }) => {
     const { mkdtemp, mkdir, writeFile, rm, readFile } = await import("node:fs/promises");
-    const folder = await mkdtemp("/tmp/talus-sftp-folder-");
+    const folder = await mkdtemp(`${tmpdir()}/talus-sftp-folder-`);
     try {
       await mkdir(`${folder}/nested`); await writeFile(`${folder}/nested/中文.bin`, Buffer.from([0, 255, 1]));
       const scenario = await fileScenario(page); await openFiles(page, goto);

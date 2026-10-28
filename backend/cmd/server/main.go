@@ -230,6 +230,17 @@ func main() {
 	userGate := gate.New(userRepo.TokenVersion, userRepo.LockedTokenVersion)
 	terminalRegistry := gate.NewRegistry()
 	authSvc := service.NewAuthService(userRepo, jwtSvc, db)
+	authSvc.SetBootstrapToken(cfg.BootstrapToken)
+	setupCtx, cancelSetupCheck := context.WithTimeout(context.Background(), 5*time.Second)
+	needsSetup, setupErr := authSvc.NeedsSetup(setupCtx)
+	cancelSetupCheck()
+	if setupErr != nil {
+		slog.Error("failed to determine administrator setup state; startup stopped", "error", setupErr)
+		os.Exit(1)
+	}
+	if needsSetup && !authSvc.BootstrapEnabled() {
+		slog.Warn("administrator setup is disabled: BOOTSTRAP_TOKEN is not configured; configure an independent token and restart the Hub", "reason", "bootstrap_token_missing")
+	}
 	authSvc.SetUserGate(userGate)
 	authSvc.SetTerminalRegistry(terminalRegistry)
 	authHandler := handler.NewAuthHandler(authSvc)
@@ -469,6 +480,7 @@ func main() {
 	settingsHandler := handler.NewSystemSettingsHandler(settingsSvc, usageRepo)
 	loginLimiter := mw.NewIPRateLimiter(time.Minute, cfg.LoginRateLimit, cfg.TrustProxy)
 	loginLimiter.SetRuntimeConfig(runtimeConfig)
+	setupLimiter := mw.NewIPRateLimiter(time.Minute, server.SetupRequestsPerMinute, cfg.TrustProxy)
 	router := server.NewRouter(server.RouteConfig{
 		GetSettingsHandler:           settingsHandler.Get,
 		UpdateSettingsHandler:        settingsHandler.Update,
@@ -484,10 +496,12 @@ func main() {
 		FilterUsageLogOptionsHandler: usageFilterOptionsHandler.List,
 		RevealLimiter:                mw.NewRateLimiter(1*time.Minute, 5),
 		LoginLimiter:                 loginLimiter,
+		SetupLimiter:                 setupLimiter,
 		CheckUpdatesHandler:          handler.NewUpdateHandler(updateChecker),
 		// Auth
 		LoginHandler:          authHandler.Login,
 		SetupHandler:          authHandler.Setup,
+		BootstrapHandler:      authHandler.Bootstrap,
 		ProfileHandler:        authHandler.Profile,
 		ChangePasswordHandler: authHandler.ChangePassword,
 		// Servers

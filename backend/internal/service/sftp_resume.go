@@ -2,7 +2,11 @@ package service
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hkdf"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -23,6 +27,8 @@ import (
 
 const MaxSFTPChunkBytes int64 = 1 << 20
 const sftpUploadLifetime = 24 * time.Hour
+const sftpUploadTicketVersion = 2
+const sftpUploadTicketPurpose = "talus/sftp/upload-ticket/v2"
 
 type sftpRouteContextKey struct{}
 type sftpWireContextKey struct{}
@@ -75,12 +81,37 @@ type SFTPUpload struct {
 	Completed bool      `json:"completed,omitempty"`
 }
 
-func (s *SFTPService) signUpload(ticket *sftpUploadTicket) string {
-	data, _ := json.Marshal(ticket)
-	mac := hmac.New(sha256.New, s.secret)
-	mac.Write([]byte("talus-sftp-upload-v1\x00"))
-	mac.Write(data)
-	return base64.RawURLEncoding.EncodeToString(data) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+func (s *SFTPService) uploadCipher() (cipher.AEAD, error) {
+	// The persistent signing secret also authenticates legacy tickets. Derive a
+	// separate key for encryption rather than reusing it across protocols.
+	key, err := hkdf.Key(sha256.New, s.secret, nil, sftpUploadTicketPurpose, 32)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
+}
+
+// sealUpload keeps Previous confidential from write-only callers. A signed
+// plaintext ticket would reveal the destination's old digest and metadata.
+func (s *SFTPService) sealUpload(ticket *sftpUploadTicket) (string, error) {
+	data, err := json.Marshal(ticket)
+	if err != nil {
+		return "", err
+	}
+	aead, err := s.uploadCipher()
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	encrypted := aead.Seal(nonce, nonce, data, []byte(sftpUploadTicketPurpose))
+	return "v2." + base64.RawURLEncoding.EncodeToString(encrypted), nil
 }
 func (s *SFTPService) readUpload(ctx context.Context, id uint, token string, allowExpired ...bool) (*sftpUploadTicket, error) {
 	if len(token) > 16384 {
@@ -90,19 +121,42 @@ func (s *SFTPService) readUpload(ctx context.Context, id uint, token string, all
 	if len(parts) != 2 {
 		return nil, SFTPError("sftp_invalid_upload")
 	}
-	data, e1 := base64.RawURLEncoding.DecodeString(parts[0])
-	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
-	if e1 != nil || e2 != nil {
-		return nil, SFTPError("sftp_invalid_upload")
-	}
-	mac := hmac.New(sha256.New, s.secret)
-	mac.Write([]byte("talus-sftp-upload-v1\x00"))
-	mac.Write(data)
-	if !hmac.Equal(sig, mac.Sum(nil)) {
-		return nil, SFTPError("sftp_invalid_upload")
+	var data []byte
+	version := sftpUploadTicketVersion
+	if parts[0] == "v2" {
+		encrypted, err := base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil {
+			return nil, SFTPError("sftp_invalid_upload")
+		}
+		aead, err := s.uploadCipher()
+		if err != nil || len(encrypted) < aead.NonceSize()+aead.Overhead() {
+			return nil, SFTPError("sftp_invalid_upload")
+		}
+		data, err = aead.Open(nil, encrypted[:aead.NonceSize()], encrypted[aead.NonceSize():], []byte(sftpUploadTicketPurpose))
+		if err != nil {
+			return nil, SFTPError("sftp_invalid_upload")
+		}
+	} else {
+		// Decode-only compatibility for uploads started before the upgrade. These
+		// tickets retain their signed 24-hour expiry and are never reissued or
+		// extended. Status/chunk responses do not expose Previous. Expired
+		// tickets remain valid only for the existing cancellation cleanup path.
+		version = 1
+		var err error
+		data, err = base64.RawURLEncoding.DecodeString(parts[0])
+		sig, sigErr := base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil || sigErr != nil {
+			return nil, SFTPError("sftp_invalid_upload")
+		}
+		mac := hmac.New(sha256.New, s.secret)
+		mac.Write([]byte("talus-sftp-upload-v1\x00"))
+		mac.Write(data)
+		if !hmac.Equal(sig, mac.Sum(nil)) {
+			return nil, SFTPError("sftp_invalid_upload")
+		}
 	}
 	var ticket sftpUploadTicket
-	if json.Unmarshal(data, &ticket) != nil || ticket.Version != 1 || ticket.ServerID != id || ticket.Size < 0 || ticket.Size > MaxSFTPFileBytes {
+	if json.Unmarshal(data, &ticket) != nil || ticket.Version != version || ticket.ServerID != id || ticket.Size < 0 || ticket.Size > MaxSFTPFileBytes {
 		return nil, SFTPError("sftp_invalid_upload")
 	}
 	owner, err := sftpOwner(ctx)
@@ -179,7 +233,7 @@ func (s *SFTPService) StartUpload(ctx context.Context, id uint, destination stri
 		if err != nil {
 			return err
 		}
-		ticket := &sftpUploadTicket{Version: 1, Owner: owner, ServerID: id, Route: sftpRouteFingerprint(ctx), Destination: destination, Temporary: path.Join(parent, ".talus-upload-"+randomFileSuffix()), Size: size, SHA256: strings.ToLower(digest), ExpiresAt: time.Now().Add(sftpUploadLifetime).Unix()}
+		ticket := &sftpUploadTicket{Version: sftpUploadTicketVersion, Owner: owner, ServerID: id, Route: sftpRouteFingerprint(ctx), Destination: destination, Temporary: path.Join(parent, ".talus-upload-"+randomFileSuffix()), Size: size, SHA256: strings.ToLower(digest), ExpiresAt: time.Now().Add(sftpUploadLifetime).Unix()}
 		if previous != nil {
 			hash, err := hashRemoteFile(c, destination, MaxSFTPFileBytes)
 			if err != nil {
@@ -187,7 +241,10 @@ func (s *SFTPService) StartUpload(ctx context.Context, id uint, destination stri
 			}
 			ticket.Previous = &sftpFileVersion{Size: previous.Size(), Mode: uint32(previous.Mode()), Modified: previous.ModTime().Unix(), SHA256: hash}
 		}
-		token := s.signUpload(ticket)
+		token, err := s.sealUpload(ticket)
+		if err != nil {
+			return err
+		}
 		if len(token) > 16384 {
 			return SFTPError("sftp_invalid_path")
 		}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
+	"github.com/vpsmanager/backend/internal/pkg/token"
 	"github.com/vpsmanager/backend/internal/repository"
 	"gorm.io/gorm"
 )
@@ -37,7 +38,7 @@ func TestRelayLookupUsesFrozenBudget(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := svc.RelayWithResult(context.Background(), 1, RelayInput{Method: "GET"}, httptest.NewRecorder())
+	result, err := svc.RelayWithResult(context.Background(), &token.Claims{UserID: 1, Role: "admin"}, 1, RelayInput{Method: "GET"}, httptest.NewRecorder())
 	if !lookupEntered || err == nil || result.Outcome != "timeout" || result.Reason != "relay_budget_exceeded" {
 		t.Fatalf("lookup result = %+v, error = %v, entered = %v", result, err, lookupEntered)
 	}
