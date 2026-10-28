@@ -566,13 +566,15 @@ func (p *Pool) evict() {
 	}
 }
 func keepAliveProbe(client *ssh.Client) bool {
+	timer := time.NewTimer(probeTimeout)
+	defer timer.Stop()
 	done := make(chan error, 1)
 	go func() { _, _, err := client.SendRequest("keepalive@talus.local", true, nil); done <- err }()
 	var probeErr error
 	timedOut := false
 	select {
 	case probeErr = <-done:
-	case <-time.After(probeTimeout):
+	case <-timer.C:
 		timedOut = true
 		_ = client.Close()
 		probeErr = <-done

@@ -5486,6 +5486,26 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Real SSH/SFTP jobs persist progressing and busy transfers as pending with separate diagnostics, preserve running fingerprints, release phase slots, retain pending status after repository reload, and clear the diagnostic after a successful retry."
+        },
+        {
+          "implementation_id": "impl-08-09-minimal-flock",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_flock_test.go",
+            "symbol": "TestResidentAndArtifactLocksSupportMinimalFlock"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-08-09-bounded-flock",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/resident_flock_test.go",
+            "symbol": "TestResidentFlockWaitIsBoundedAndFailsClosed"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -5573,6 +5593,66 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Two proved setup callers race on an empty database; exactly one administrator is created and legacy key ownership binds to that account."
+        },
+        {
+          "implementation_id": "impl-05-07-availability",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/auth_bootstrap_test.go",
+            "symbol": "TestBootstrapAvailabilityAndProofValidation"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-05-07-status",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/handler/bootstrap_test.go",
+            "symbol": "TestSetupStatusReportsBootstrapAvailability"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-05-07-disabled-startup",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/cmd/server/bootstrap_startup_test.go",
+            "symbol": "TestServerDiagnosesDisabledBootstrap"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-05-07-quota-independent",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/server/setup_limiter_test.go",
+            "symbol": "TestSetupRateLimitIsIndependentFromLogin"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-05-07-quota-fallback",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/server/setup_limiter_test.go",
+            "symbol": "TestSetupRateLimitFallbackIsBoundedAndIndependent"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-05-07-quota-proxy",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/server/setup_limiter_test.go",
+            "symbol": "TestSetupRateLimitUsesConfiguredProxyPolicy"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -5690,6 +5770,46 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Retain allowed and denied API-key selectors, administrator access and the existing global-service semantics."
+        },
+        {
+          "implementation_id": "impl-07-05-deny-native",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_authorization_test.go",
+            "symbol": "TestRelaySnapshotRejectsUnauthorizedBeforeCredentials"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-07-05-allow-native",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_authorization_test.go",
+            "symbol": "TestRelaySnapshotPreservesAuthorizedServerSemantics"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-07-05-require-identity",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_authorization_test.go",
+            "symbol": "TestRelayByIDRequiresIdentityBeforeLookup"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-07-05-by-id",
+          "run_id": "go-race",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_authorization_test.go",
+            "symbol": "TestRelayByIDAppliesSnapshotAuthorization"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },
@@ -5830,6 +5950,16 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Use the built SPA with a mock API to verify initialized instances do not display the setup proof flow."
+        },
+        {
+          "implementation_id": "impl-09-12-disabled",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/bootstrap.browser.mjs",
+            "symbol": "disabled bootstrap explains deployment configuration without offering a form"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     }

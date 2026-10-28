@@ -27,7 +27,7 @@ async function until(check, description) {
   }
   throw new Error(`Timed out: ${description}`);
 }
-async function fixture(browser, initialized = false) {
+async function fixture(browser, initialized = false, bootstrapEnabled = true) {
   const context = await browser.newContext({ locale: "en-US" });
   await context.addInitScript(() => localStorage.setItem("i18nextLng", "en"));
   const state = { initialized, attempts: [], errors: [] };
@@ -37,7 +37,7 @@ async function fixture(browser, initialized = false) {
     const method = request.method();
     const reply = (data, status = 200) => route.fulfill({ status,
       contentType: "application/json", body: JSON.stringify(status >= 400 ? data : { data }) });
-    if (path === "/api/v1/auth/setup" && method === "GET") return reply({ needed: !state.initialized });
+    if (path === "/api/v1/auth/setup" && method === "GET") return reply({ needed: !state.initialized, bootstrap_enabled: bootstrapEnabled });
     if (path === "/api/v1/auth/setup" && method === "POST") {
       const body = request.postDataJSON();
       state.attempts.push({ path, body });
@@ -67,6 +67,23 @@ try {
   }, "the built SPA preview");
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE || undefined,
     args: JSON.parse(process.env.CHROMIUM_ARGS ?? "[]") });
+  {
+    const { context, page, state } = await fixture(browser, false, false);
+    const name = "disabled bootstrap explains deployment configuration without offering a form";
+    try {
+      await page.goto(`${base}/login`);
+      await page.waitForURL("**/setup");
+      await page.getByRole("alert").getByText("Administrator setup is disabled", { exact: true }).waitFor();
+      assert.match(await page.getByRole("alert").innerText(), /BOOTSTRAP_TOKEN/);
+      assert.equal(await page.locator("form").count(), 0);
+      assert.equal(await page.getByRole("button", { name: "Create Admin Account", exact: true }).count(), 0);
+      assert.equal(await page.getByLabel("Setup token", { exact: true }).count(), 0);
+      assert.equal(state.attempts.length, 0);
+      assert.deepEqual(state.errors, []);
+      recordCase(name);
+      console.log(`ok: ${name}`);
+    } finally { await context.close(); }
+  }
   {
     const { context, page, state } = await fixture(browser);
     const name = "fresh setup requires the deployment proof and keeps it out of browser storage";
@@ -103,7 +120,7 @@ try {
     } finally { await context.close(); }
   }
   {
-    const { context, page, state } = await fixture(browser, true);
+    const { context, page, state } = await fixture(browser, true, false);
     const name = "initialized instances redirect setup to ordinary login";
     try {
       await page.goto(`${base}/setup`);

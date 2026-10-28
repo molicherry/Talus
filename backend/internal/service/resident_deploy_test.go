@@ -233,7 +233,7 @@ func TestResidentUninstallWaitsForActivationRollback(t *testing.T) {
 	// Before waiting normally, prove uninstall reached the lock while rollback
 	// still owns it. This makes the conflicting execution order deterministic.
 	write(filepath.Join(dir, "flock"), "#!/bin/sh\n"+
-		"if test \"${UNINSTALL:-}\" = 1; then\n"+
+		"if test \"${UNINSTALL:-}\" = 1 && test ! -e "+shellQuote(waiting)+"; then\n"+
 		"  if "+shellQuote(realFlock)+" -n 9; then exit 42; fi\n"+
 		"  touch "+shellQuote(waiting)+"\nfi\nexec "+shellQuote(realFlock)+" \"$@\"\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -326,6 +326,7 @@ func TestResidentScriptsFailClosedWithoutInstallationLock(t *testing.T) {
 				binary: "old binary", config: "old config", unit: "old unit",
 				next: "new binary", next + ".config": "new config", next + ".unit": "new unit",
 				filepath.Join(dir, "flock"): "#!/bin/sh\nexit 1\n",
+				filepath.Join(dir, "sleep"): "#!/bin/sh\nexit 0\n",
 				ctl:                         "#!/bin/sh\ntouch " + shellQuote(called) + "\n",
 			} {
 				if err := os.WriteFile(path, []byte(body), 0700); err != nil {

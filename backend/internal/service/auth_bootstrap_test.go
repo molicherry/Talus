@@ -33,6 +33,22 @@ func TestBootstrapProofIsRequiredBeforeDatabaseAccess(t *testing.T) {
 	}
 }
 
+func TestBootstrapAvailabilityAndProofValidation(t *testing.T) {
+	svc := NewAuthService(nil, nil, nil)
+	for _, size := range []int{0, 31, 32, 256, 257} {
+		proof := strings.Repeat("a", size)
+		svc.SetBootstrapToken(proof)
+		enabled := size >= 32 && size <= 256
+		if svc.BootstrapEnabled() != enabled {
+			t.Fatalf("configuration size=%d enabled=%v", size, svc.BootstrapEnabled())
+		}
+		err := svc.VerifyBootstrapProof(proof)
+		if enabled && err != nil || !enabled && !errors.Is(err, server.ErrForbidden) {
+			t.Fatalf("configuration size=%d proof error=%v", size, err)
+		}
+	}
+}
+
 func TestLoginNeverBootstrapsEmptyDatabase(t *testing.T) {
 	db := authOwnerTestDB(t)
 	repo := repository.NewUserRepo(db)

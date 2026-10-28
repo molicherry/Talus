@@ -85,7 +85,7 @@ docker compose up -d --build
 
 The dashboard is at **<http://localhost:8080>**.
 
-For a fresh database, open `/setup` and enter the independent `BOOTSTRAP_TOKEN`, a username and a password of at least 8 characters. Ordinary login never creates an account. An empty or missing bootstrap token disables initialization; existing accounts still log in normally. Remove `BOOTSTRAP_TOKEN` from the deployment after setup and restart the Hub. Never reuse `JWT_SECRET` or `VPSMANAGER_MASTER_KEY` as that token, or send it in a URL.
+For a fresh database, open `/setup` and enter the independent `BOOTSTRAP_TOKEN`, a username and a password of at least 8 characters. Ordinary login never creates an account. An empty or missing bootstrap token disables initialization; existing accounts still log in normally. With an empty database, startup warns explicitly and `/setup` shows how to configure `BOOTSTRAP_TOKEN` instead of an unusable form. `GET /api/v1/auth/setup` reports both `needed` and `bootstrap_enabled`. Setup discovery/submission have an independent 30 requests/IP/minute budget, unaffected by the login quota. Remove `BOOTSTRAP_TOKEN` from the deployment after setup and restart the Hub. Never reuse `JWT_SECRET` or `VPSMANAGER_MASTER_KEY` as that token, or send it in a URL.
 
 ### 4. Add a Server
 
@@ -631,7 +631,6 @@ On Linux, cross-account user cleanup runs entirely as the installation owner and
 ### Docker upgrades and encrypted data
 
 Existing initialized instances need no `BOOTSTRAP_TOKEN`; preserve their database, master key and JWT secret. Fresh databases now require a separate bootstrap token at `/setup`, rather than account creation through ordinary login. The Compose host port is now loopback-only: configure the HTTPS proxy before upgrading a deployment that previously used a remote HTTP port directly.
-
 
 Keep the existing database volume and the original `.env`, especially `VPSMANAGER_MASTER_KEY`. Stop the old Hub before replacing it; upgrades assume a single Hub and a brief maintenance window. A database advisory lock serializes migration by new Hubs, but cannot stop an older binary from writing.
 

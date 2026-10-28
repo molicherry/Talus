@@ -7,6 +7,7 @@ import { Button } from "../../../components/ui/button";
 import { apiClient } from "../../../lib/api-client";
 import { Logo } from "../../../components/ui/logo";
 import { useLogin } from "../hooks/use-login";
+import type { SetupResponse } from "../../../types/api";
 
 interface LoginErrors {
   username?: string;
@@ -24,7 +25,7 @@ export function LoginPage() {
   useEffect(() => {
     // Via the api client so a split deployment honours VITE_API_BASE_URL.
     apiClient
-      .get<{ needed: boolean }>("/api/v1/auth/setup")
+      .get<SetupResponse>("/api/v1/auth/setup")
       .then((d) => {
         if (d?.needed) navigate("/setup", { replace: true });
       })

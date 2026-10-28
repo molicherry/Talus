@@ -85,7 +85,7 @@ docker compose up -d --build
 
 访问控制台：**http://localhost:8080**
 
-新数据库请在 `/setup` 输入独立的 `BOOTSTRAP_TOKEN`、用户名和至少 8 位的密码创建管理员。普通登录不会创建账户；初始化令牌为空时关闭初始化，已有账户仍可正常登录。初始化完成后从部署配置移除 `BOOTSTRAP_TOKEN` 并重启 Hub。不要复用 JWT 或凭据加密主密钥，也不要在 URL 中传递初始化令牌。
+新数据库请在 `/setup` 输入独立的 `BOOTSTRAP_TOKEN`、用户名和至少 8 位的密码创建管理员。普通登录不会创建账户；初始化令牌为空时关闭初始化，已有账户仍可正常登录。空库未配置令牌时，启动日志会明确告警，`/setup` 显示配置提示而不展示无法提交的表单。`GET /api/v1/auth/setup` 同时返回 `needed` 和 `bootstrap_enabled`。初始化发现与提交独立限流为每 IP 每分钟30次，不占用登录配额。初始化完成后从部署配置移除 `BOOTSTRAP_TOKEN` 并重启 Hub。不要复用 JWT 或凭据加密主密钥，也不要在 URL 中传递初始化令牌。
 
 ### 4. 添加服务器
 
@@ -547,7 +547,6 @@ docker compose -f docker-compose.prod.yml up -d
 **升级到新版本：**
 
 已有账户的实例无需 `BOOTSTRAP_TOKEN`，升级时保留数据库、主密钥和 JWT 密钥。新数据库需在 `/setup` 使用独立初始化令牌，普通登录不再创建账户。Compose 端口现仅绑定回环地址；此前直接远程访问 HTTP 端口的部署，应在升级前配置 HTTPS 反向代理。
-
 
 ```bash
 docker compose -f docker-compose.prod.yml stop hub

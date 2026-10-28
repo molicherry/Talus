@@ -8,7 +8,7 @@ import { Button } from "../../../components/ui/button";
 import { Logo } from "../../../components/ui/logo";
 import { apiClient } from "../../../lib/api-client";
 import { setAuthToken } from "../../../lib/auth";
-import type { LoginResponse } from "../../../types/api";
+import type { LoginResponse, SetupResponse } from "../../../types/api";
 
 interface SetupErrors {
   token?: string;
@@ -22,6 +22,7 @@ export function SetupPage() {
   const navigate = useNavigate();
   const [checking, setChecking] = useState(true);
   const [setupNeeded, setSetupNeeded] = useState(false);
+  const [bootstrapEnabled, setBootstrapEnabled] = useState(false);
   const [bootstrapToken, setBootstrapToken] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -31,12 +32,14 @@ export function SetupPage() {
   useEffect(() => {
     // Via the api client so a split deployment honours VITE_API_BASE_URL.
     apiClient
-      .get<{ needed: boolean }>("/api/v1/auth/setup")
+      .get<SetupResponse>("/api/v1/auth/setup")
       .then((data) => {
         if (!data?.needed) {
           navigate("/login", { replace: true });
         } else {
           setSetupNeeded(true);
+          // Missing support is fail-closed, including a mixed-version backend.
+          setBootstrapEnabled(data.bootstrap_enabled === true);
         }
       })
       .catch(() => navigate("/login", { replace: true }))
@@ -55,6 +58,7 @@ export function SetupPage() {
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!bootstrapEnabled) return;
     const next: SetupErrors = {};
     if (bootstrapToken.length < 32 || bootstrapToken.length > 256)
       next.token = t("auth.bootstrapTokenRequired");
@@ -95,7 +99,12 @@ export function SetupPage() {
             <p className="mt-1 text-sm text-muted-foreground">{t("auth.setupSubtitle")}</p>
           </div>
 
-          <form onSubmit={onSubmit} className="space-y-4" noValidate>
+          {!bootstrapEnabled ? (
+            <div role="alert" className="rounded-lg border border-warning/30 bg-warning-subtle px-4 py-3 text-sm text-foreground">
+              <h2 className="font-medium">{t("auth.bootstrapDisabledTitle")}</h2>
+              <p className="mt-2 text-muted-foreground">{t("auth.bootstrapDisabledHelp")}</p>
+            </div>
+          ) : <form onSubmit={onSubmit} className="space-y-4" noValidate>
             {errorMessage && (
               <div className="rounded-lg border border-danger/20 bg-danger-subtle px-4 py-3 text-sm text-danger">
                 {errorMessage}
@@ -200,7 +209,7 @@ export function SetupPage() {
               {setupMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               {setupMutation.isPending ? t("common.creating") : t("auth.createAccount")}
             </Button>
-          </form>
+          </form>}
         </div>
       )}
     </div>

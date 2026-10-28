@@ -14,11 +14,17 @@ type BootstrapRequest struct {
 	Password string `json:"password"`
 }
 
-// Bootstrap handles POST /api/v1/auth/setup. The router applies the same
-// unauthenticated attempt limiter as login; decoding also has its own byte cap.
+// Bootstrap handles POST /api/v1/auth/setup. The router limits unauthenticated
+// setup attempts; decoding also has its own byte cap.
 func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	var req BootstrapRequest
 	if err := decodeAuthJSON(w, r, &req); err != nil {
+		server.WriteError(w, r, err)
+		return
+	}
+	// Length alone is not proof: even a plausible but incorrect deployment
+	// token must be rejected before returning field-level credential feedback.
+	if err := h.authSvc.VerifyBootstrapProof(req.Token); err != nil {
 		server.WriteError(w, r, err)
 		return
 	}
@@ -31,10 +37,6 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(details) > 0 {
 		server.WriteError(w, r, server.NewValidationError(details))
-		return
-	}
-	if len(req.Token) < 32 || len(req.Token) > 256 {
-		server.WriteError(w, r, server.ErrForbidden)
 		return
 	}
 	signed, err := h.authSvc.Bootstrap(r.Context(), req.Token, req.Username, req.Password)

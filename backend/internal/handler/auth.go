@@ -18,7 +18,8 @@ type LoginResponse struct {
 }
 
 type SetupResponse struct {
-	Needed bool `json:"needed"`
+	Needed           bool `json:"needed"`
+	BootstrapEnabled bool `json:"bootstrap_enabled"`
 }
 
 type ChangePasswordRequest struct {
@@ -46,7 +47,9 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, r, err)
 		return
 	}
-	server.WriteJSON(w, http.StatusOK, SetupResponse{Needed: needed})
+	server.WriteJSON(w, http.StatusOK, SetupResponse{
+		Needed: needed, BootstrapEnabled: h.authSvc.BootstrapEnabled(),
+	})
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {

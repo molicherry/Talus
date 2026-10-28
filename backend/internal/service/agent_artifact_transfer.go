@@ -67,7 +67,7 @@ func uploadResidentBytes(ctx context.Context, lease *sshLease, data []byte, remo
 
 func linuxArtifactCommand(base, current, next, config, mode string, artifact agentproto.Artifact, seconds int) string {
 	q := shellQuote
-	return "set -eu\ncache_dir=" + q(base+"/cache") + "\ncurrent=" + q(current) + "\nnext=" + q(next) + "\nfetch_config=" + q(config) + "\nmode=" + q(mode) + "\ndigest=" + q(artifact.SHA256) + "\nsize=" + strconv.FormatInt(artifact.Size, 10) + "\nseconds=" + strconv.Itoa(seconds) + "\n" + linuxArtifactFetch
+	return "set -eu\n" + residentFlockWait + "\ncache_dir=" + q(base+"/cache") + "\ncurrent=" + q(current) + "\nnext=" + q(next) + "\nfetch_config=" + q(config) + "\nmode=" + q(mode) + "\ndigest=" + q(artifact.SHA256) + "\nsize=" + strconv.FormatInt(artifact.Size, 10) + "\nseconds=" + strconv.Itoa(seconds) + "\n" + linuxArtifactFetch
 }
 
 // stageArtifact first reuses verified cached/installed bytes, then attempts an

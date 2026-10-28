@@ -131,7 +131,9 @@ func TestRelayHandlerFreezesBudgetBeforeResourceLookup(t *testing.T) {
 			router.Post("/api/v1/services/{id}/relay", h.Relay)
 			rec := httptest.NewRecorder()
 			started := time.Now()
-			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/services/%d/relay", resource.ID), strings.NewReader(fmt.Sprintf(`{"method":"GET","mode":%q}`, tc.mode))))
+			req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/services/%d/relay", resource.ID), strings.NewReader(fmt.Sprintf(`{"method":"GET","mode":%q}`, tc.mode)))
+			req = req.WithContext(mw.WithUserClaims(req.Context(), &token.Claims{UserID: 7, Role: "admin"}))
+			router.ServeHTTP(rec, req)
 			if rec.Code != 200 || rec.Body.String() != "ok" || len(deadlines) == 0 {
 				t.Fatalf("relay response=%d %q lookup deadlines=%v", rec.Code, rec.Body.String(), deadlines)
 			}
@@ -152,7 +154,9 @@ func TestRelayHandlerRejectsInvalidModeBeforeLookup(t *testing.T) {
 	router := chi.NewRouter()
 	router.Post("/api/v1/services/{id}/relay", h.Relay)
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/services/1/relay", strings.NewReader(`{"method":"GET","mode":"unlimited"}`)))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/services/1/relay", strings.NewReader(`{"method":"GET","mode":"unlimited"}`))
+	req = req.WithContext(mw.WithUserClaims(req.Context(), &token.Claims{UserID: 7, Role: "admin"}))
+	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid mode status = %d", rec.Code)
 	}
@@ -178,6 +182,7 @@ func TestRelayHandlerLookupTimeoutReturnsGatewayTimeout(t *testing.T) {
 	router.Post("/api/v1/services/{id}/relay", h.Relay)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
+	ctx = mw.WithUserClaims(ctx, &token.Claims{UserID: 7, Role: "admin"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/services/1/relay", strings.NewReader(`{"method":"GET"}`)).WithContext(ctx)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
