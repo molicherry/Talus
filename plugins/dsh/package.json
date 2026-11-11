@@ -1,0 +1,55 @@
+{
+  "name": "dsh-plugin-talus",
+  "version": "0.1.0",
+  "description": "Manage Talus servers, monitoring, files, and registered services from DeepSeek Harness.",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "locale",
+    "skills",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "keywords": ["dsh-plugin", "deepseek-harness", "talus"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/molicherry/Talus.git",
+    "directory": "plugins/dsh"
+  },
+  "engines": {
+    "node": ">=24.9.0",
+    "dsh": "~0.2.2-rc.1"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-skill": "~0.2.2-rc.1",
+    "@deepseek-ai/dsh-skill-filesystem": "~0.2.2-rc.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-skill": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-skill-filesystem": "0.2.2-rc.1",
+    "yaml": "2.9.0"
+  },
+  "scripts": {
+    "sync-skills": "node scripts/sync-skills.mjs",
+    "check-skills": "node scripts/sync-skills.mjs --check",
+    "test": "npm run check-skills && node --test tests/*.test.mjs"
+  }
+}

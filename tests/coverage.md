@@ -2,7 +2,7 @@
 
 > Generated from `tests/coverage.json` by `tests/render-coverage.mjs`. Do not edit by hand.
 
-Cases: 80 · Runs: 15 · Schema: 1
+Cases: 81 · Runs: 16 · Schema: 1
 
 ## Runs
 
@@ -23,6 +23,7 @@ Cases: 80 · Runs: 15 · Schema: 1
 | image-agents | integration | shell | `.` | `bash tests/verify-agent-images.sh` | 1800s |
 | api-key-permissions | integration | go-test | `backend` | `go test ./internal/gate ./internal/repository ./internal/service ./internal/handler ./internal/usage ./cmd/server -run APIKeyPermission|APIKeyRotation|UpdateWithBudget -count=1` | 600s |
 | windows-native | integration | go-test | `backend` | `go test -count=1 ./internal/agentclient ./internal/agentwire ./internal/agentwindows` | 720s |
+| dsh-plugin | integration | node-test | `plugins/dsh` | `bash -c node scripts/sync-skills.mjs --check && node --test --test-reporter=../../tests/lib/node-test-report.mjs tests/plugin.test.mjs` | 120s |
 
 ## Gates (pre-registered required runs)
 
@@ -506,6 +507,7 @@ Cases: 80 · Runs: 15 · Schema: 1
 | TC-09-12 | REQ-09 | implemented | ui-charts | `frontend/tests/bootstrap.browser.mjs:fresh setup requires the deployment proof and keeps it out of browser storage` | yes | Collect deployment proof for first setup without storing it in browser state that survives setup, and direct initialized installations to ordinary login. | Use the built SPA with a mock API to check setup proof submission, password input masking, absence from local/session storage and transition to an authenticated session. |
 | TC-09-12 | REQ-09 | implemented | ui-charts | `frontend/tests/bootstrap.browser.mjs:initialized instances redirect setup to ordinary login` | yes | Collect deployment proof for first setup without storing it in browser state that survives setup, and direct initialized installations to ordinary login. | Use the built SPA with a mock API to verify initialized instances do not display the setup proof flow. |
 | TC-09-12 | REQ-09 | implemented | ui-charts | `frontend/tests/bootstrap.browser.mjs:disabled bootstrap explains deployment configuration without offering a form` | yes | Collect deployment proof for first setup without storing it in browser state that survives setup, and direct initialized installations to ordinary login. | Collect deployment proof for first setup without storing it in browser state that survives setup, and direct initialized installations to ordinary login. |
+| TC-01-04 | REQ-01 | implemented | dsh-plugin | `plugins/dsh/tests/plugin.test.mjs:packed bundle loads through DSH, preserves other skills, and unloads cleanly` | no | Package the portable Talus skill as an optional DeepSeek Harness bundle that loads its own resources, preserves existing skills and unloads cleanly. | Run npm ci and npm test in plugins/dsh with Node 24.9+ and tar. The isolated npm archive is loaded with the real DSH skill registry and filesystem provider; no live Talus instance or model API is used. |
 
 ## Scan exemptions
 

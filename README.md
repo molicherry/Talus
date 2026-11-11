@@ -381,6 +381,21 @@ After installation, reload skills or start a new session as your tool requires.
 To update, replace the complete `talus/` directory with the new version and reload;
 keep instance configuration in the AI environment so updates preserve it.
 
+#### DeepSeek Harness (dsh)
+
+The [Talus plugin for DeepSeek Harness](plugins/dsh/README.md) bundles the complete
+skill for dsh's plugin manager. With Node.js 24.9.0+ and DSH 0.2.2-rc.1, run from
+this repository's root:
+
+```bash
+dsh plugin --profile web add ./plugins/dsh
+```
+
+Configure `TALUS_URL` and `TALUS_API_KEY` in dsh's execution environment as below,
+then restart the target profile. The plugin guide covers Desktop/headless
+profiles, standalone installation, and updates. DSH's plugin API is in preview;
+the package declares compatibility with `~0.2.2-rc.1`.
+
 ### 4. Configure the AI environment
 
 Set these variables in the environment that executes the AI's HTTP requests:

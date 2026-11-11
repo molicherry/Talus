@@ -219,6 +219,20 @@ talus/
 安装完成后，按 AI 工具要求重新加载技能或开启新会话。更新时替换完整 `talus/` 目录并
 重新加载；实例配置保存在 AI 运行环境中，使更新 skill 时能够保留配置。
 
+#### DeepSeek Harness（dsh）
+
+[Talus 的 DeepSeek Harness 插件](../plugins/dsh/README.zh-CN.md)已打包完整 skill，
+可由 dsh 插件管理器直接安装。使用 Node.js 24.9.0+ 和 DSH 0.2.2-rc.1，
+在本仓库根目录运行：
+
+```bash
+dsh plugin --profile web add ./plugins/dsh
+```
+
+按下文在 dsh 执行环境中配置 `TALUS_URL`、`TALUS_API_KEY`，再重启目标 profile。
+插件指南包含 Desktop/headless profile、独立安装和更新方式。DSH 插件 API 仍为
+预览版本；本插件声明的兼容范围为 `~0.2.2-rc.1`。
+
 ### 4. 配置 AI 运行环境
 
 在 **AI 执行 HTTP 请求的环境**中设置：

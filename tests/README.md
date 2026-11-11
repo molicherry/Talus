@@ -87,6 +87,13 @@ written back into `automation_status`.
 
 ## Suites
 
+The optional DeepSeek Harness plugin is indexed as the `dsh-plugin` integration
+run and is independent of the main application's M1–M5 gates. Install its pinned
+dependencies with `npm ci` in `plugins/dsh`, then run `npm test` there; Node.js
+24.9+, npm, and `tar` are required. This packs the plugin and loads the extracted
+archive through the real Cordis and DSH skill services without a model request
+or a live Talus instance. See the [plugin guide](../plugins/dsh/README.md).
+
 | Suite | Needs | Notes |
 | --- | --- | --- |
 | `fast` | Go toolchain, Node | Adapter static check, coverage validation, Go unit tests, frontend Node tests |
