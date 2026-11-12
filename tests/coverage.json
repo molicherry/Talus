@@ -5999,6 +5999,38 @@
           "verification": "Run npm ci and npm test in plugins/dsh with Node 24.9+ and tar. The isolated npm archive is loaded with the real DSH skill registry and filesystem provider; no live Talus instance or model API is used."
         }
       ]
+    },
+    {
+      "case_id": "TC-01-05",
+      "requirement_ids": [
+        "REQ-01"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/81/scenario",
+      "scenario": "Apply live Talus URL and API key settings to authenticated shell requests, redact secrets on settings reads and remove environment contributions when the plugin is disabled.",
+      "implementations": [
+        {
+          "implementation_id": "impl-01-07",
+          "run_id": "dsh-plugin",
+          "implementation": {
+            "path": "plugins/dsh/tests/plugin.test.mjs",
+            "symbol": "settings reads redact the API key and config validates HTTP URLs"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "Use the real DSH secret redactor and Cordis schema resolution to check masked reads and rejection of unsupported URLs or newline-bearing API keys."
+        },
+        {
+          "implementation_id": "impl-01-08",
+          "run_id": "dsh-plugin",
+          "implementation": {
+            "path": "plugins/dsh/tests/plugin.test.mjs",
+            "symbol": "UI config reaches real HTTP requests and updates without a reload"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "Update live configuration through a real Cordis fiber, execute curl against a local HTTP server using the real DSH shell environment registry, verify URL and credential changes plus environment fallback, and preserve the process environment."
+        }
+      ]
     }
   ],
   "scan_exemptions": [

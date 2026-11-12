@@ -15,24 +15,6 @@
 - 具备任务所需作用域的 Talus API 密钥，以及 dsh 可调用的 `curl` 或等效 HTTP
   工具。权限说明见随包提供的[权限指南](skills/talus/SKILL.md#authentication-and-permissions)。
 
-## 配置执行环境
-
-将 `TALUS_URL` 设为实例基础地址，不包含 `/api/v1`。未设置时 skill 使用
-`http://localhost:8080`；其中 `localhost` 指运行 dsh 的环境。
-在 **Talus Web UI → API Keys** 获取 `TALUS_API_KEY`。通过 Bash 启动时可这样设置：
-
-```bash
-export TALUS_URL='https://talus.example.com'
-read -r -s -p 'Talus API key: ' TALUS_API_KEY
-printf '\n'
-export TALUS_API_KEY
-```
-
-从同一环境启动 dsh，使执行请求的工具继承这些变量。需要持久配置，或使用 Desktop、
-远程执行时，请在实际执行请求的进程环境或密钥设置中配置，再重启进程。
-已运行的 Desktop 应用不会继承之后在终端导出的变量。Talus 服务端部署的 `.env`
-不会自动配置 dsh。不要将 API 密钥写入插件文件或粘贴到聊天中。
-
 ## 安装
 
 在 Talus 仓库根目录执行，安装到 Web profile：
@@ -48,9 +30,42 @@ dsh plugin --profile web add ./plugins/dsh
 完全退出后用 `--profile desktop` 安装，再重新启动。安装到 `web` 不会同时安装到
 其他 profile。
 
+## 在插件页配置
+
+打开 dsh 的 **插件页 → Talus**，填写实例基础地址，例如
+`https://talus.example.com`，不包含 `/api/v1`，再填写从
+**Talus Web UI → API Keys** 获取的 API 密钥并保存。
+保存后即对后续请求生效，无需重新安装插件或重启 dsh。
+
+API 密钥使用密码输入框，已保存的密钥不会回填。留空表示保留原密钥；使用
+**清除已保存的 API key** 按钮，再点击保存可将其移除。每个字段优先使用插件中保存的值，
+未配置时回退到执行环境中的 `TALUS_URL` 或 `TALUS_API_KEY`；地址最终默认使用
+`http://localhost:8080`。清除已保存密钥后，如果环境中仍有 `TALUS_API_KEY`，
+将回退使用该值。`localhost` 指运行 dsh 的环境。
+
+DSH 原生配置编辑器将设置保存在当前 profile 的私有 `cordis.patch.yml`（权限
+`0600`）中，远程读取设置时对密钥脱敏；这不是额外加密的密钥库。
+
+### 无界面或已有环境变量配置
+
+插件中未配置的字段继续支持原有环境变量。通过 Bash 启动时可这样设置：
+
+```bash
+export TALUS_URL='https://talus.example.com'
+read -r -s -p 'Talus API key: ' TALUS_API_KEY
+printf '\n'
+export TALUS_API_KEY
+```
+
+从同一环境启动 dsh，使其继承这些变量。已运行的 Desktop 应用不会继承之后在终端
+导出的变量；需要按预期环境重新启动，或直接使用插件表单。Talus 服务端部署的
+`.env` 不会自动配置 dsh。不要将 API 密钥写入插件源码或粘贴到聊天中。
+
+## 验证
+
 确认可用技能中包含 `talus`，然后输入：
 
-> 使用 talus skill 和已配置的环境变量，通过真实 API 请求列出我的服务器，报告名称和
+> 使用 talus skill 和我已保存的配置，通过真实 API 请求列出我的服务器，报告名称和
 > 状态，不要显示 API 密钥。
 
 此任务需要 `servers:read`。仅用于服务访问的密钥，可以改为要求列出已注册服务并读取
@@ -66,11 +81,13 @@ dsh plugin --profile web add ./plugins/dsh
 ```
 
 以上路径以 Talus 仓库根目录为工作目录；独立副本请使用绝对路径。将命令中的 `web`
-统一替换为实际 profile。卸载时只执行 `remove` 命令。实例配置仍保存在执行环境中。
+统一替换为实际 profile。卸载时只执行 `remove` 命令。重新安装后检查插件设置，
+必要时重新填写。旧安装需要执行一次此更新流程才能获得配置表单；之后修改配置只需保存。
 
 ## 维护和分发
 
-仓库的 `skills/talus/` 是维护源。在 Talus 源码仓库内进入本插件目录，更新随包副本并
+仓库的 `skills/talus/` 是维护源。同步脚本复制原文件，并为包内 skill 添加 dsh 配置
+说明，通用 skill 源文件保持不变。在 Talus 源码仓库内进入本插件目录，更新随包副本并
 执行检查：
 
 ```bash

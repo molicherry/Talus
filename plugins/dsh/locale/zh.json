@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Talus",
-    "description": "通过内置 talus 技能管理 Talus 服务器、监控、文件及已注册服务。"
+    "description": "通过内置 talus 技能管理 Talus 服务器、监控、文件及已注册服务。",
+    "detail": "docs/DETAIL.zh-CN.md"
   }
 }

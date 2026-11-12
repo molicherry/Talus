@@ -2,7 +2,7 @@
 
 > Generated from `tests/coverage.json` by `tests/render-coverage.mjs`. Do not edit by hand.
 
-Cases: 81 · Runs: 16 · Schema: 1
+Cases: 82 · Runs: 16 · Schema: 1
 
 ## Runs
 
@@ -508,6 +508,8 @@ Cases: 81 · Runs: 16 · Schema: 1
 | TC-09-12 | REQ-09 | implemented | ui-charts | `frontend/tests/bootstrap.browser.mjs:initialized instances redirect setup to ordinary login` | yes | Collect deployment proof for first setup without storing it in browser state that survives setup, and direct initialized installations to ordinary login. | Use the built SPA with a mock API to verify initialized instances do not display the setup proof flow. |
 | TC-09-12 | REQ-09 | implemented | ui-charts | `frontend/tests/bootstrap.browser.mjs:disabled bootstrap explains deployment configuration without offering a form` | yes | Collect deployment proof for first setup without storing it in browser state that survives setup, and direct initialized installations to ordinary login. | Collect deployment proof for first setup without storing it in browser state that survives setup, and direct initialized installations to ordinary login. |
 | TC-01-04 | REQ-01 | implemented | dsh-plugin | `plugins/dsh/tests/plugin.test.mjs:packed bundle loads through DSH, preserves other skills, and unloads cleanly` | no | Package the portable Talus skill as an optional DeepSeek Harness bundle that loads its own resources, preserves existing skills and unloads cleanly. | Run npm ci and npm test in plugins/dsh with Node 24.9+ and tar. The isolated npm archive is loaded with the real DSH skill registry and filesystem provider; no live Talus instance or model API is used. |
+| TC-01-05 | REQ-01 | implemented | dsh-plugin | `plugins/dsh/tests/plugin.test.mjs:settings reads redact the API key and config validates HTTP URLs` | no | Apply live Talus URL and API key settings to authenticated shell requests, redact secrets on settings reads and remove environment contributions when the plugin is disabled. | Use the real DSH secret redactor and Cordis schema resolution to check masked reads and rejection of unsupported URLs or newline-bearing API keys. |
+| TC-01-05 | REQ-01 | implemented | dsh-plugin | `plugins/dsh/tests/plugin.test.mjs:UI config reaches real HTTP requests and updates without a reload` | no | Apply live Talus URL and API key settings to authenticated shell requests, redact secrets on settings reads and remove environment contributions when the plugin is disabled. | Update live configuration through a real Cordis fiber, execute curl against a local HTTP server using the real DSH shell environment registry, verify URL and credential changes plus environment fallback, and preserve the process environment. |
 
 ## Scan exemptions
 

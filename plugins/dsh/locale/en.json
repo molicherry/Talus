@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Talus",
-    "description": "Manage Talus servers, monitoring, files, and registered services through the bundled talus skill."
+    "description": "Manage Talus servers, monitoring, files, and registered services through the bundled talus skill.",
+    "detail": "docs/DETAIL.md"
   }
 }

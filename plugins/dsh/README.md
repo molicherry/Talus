@@ -16,25 +16,6 @@ need the Talus source repository.
 - A Talus API key with scopes for the intended tasks, and `curl` or an equivalent
   HTTP tool available to dsh. See the bundled [permission guide](skills/talus/SKILL.md#authentication-and-permissions).
 
-## Configure the execution environment
-
-Set `TALUS_URL` to the instance base URL, without `/api/v1`. If unset, the skill
-uses `http://localhost:8080`; `localhost` refers to the environment running dsh.
-Obtain `TALUS_API_KEY` from **Talus Web UI → API Keys**. For a Bash launch:
-
-```bash
-export TALUS_URL='https://talus.example.com'
-read -r -s -p 'Talus API key: ' TALUS_API_KEY
-printf '\n'
-export TALUS_API_KEY
-```
-
-Start dsh from that environment so its request tools inherit the variables.
-For persistent, Desktop, or remote execution, configure the environment or secret
-settings of the process that actually runs requests, then restart it. An already
-running Desktop app does not inherit later shell exports. The Talus server's
-deployment `.env` does not configure dsh. Keep API keys out of plugin files and chat.
-
 ## Install
 
 From the Talus repository root, install into the Web profile:
@@ -51,9 +32,47 @@ Use `--profile headless` for a headless profile. For Desktop, launch Desktop onc
 to initialize its profile, fully quit it, then install with `--profile desktop`
 and relaunch. Installing into `web` does not install into the other profiles.
 
+## Configure in the plugin page
+
+Open **Plugins → Talus** in dsh. Enter the instance base URL, such as
+`https://talus.example.com`, without `/api/v1`, and the API key from
+**Talus Web UI → API Keys**, then save. Saved settings apply to subsequent
+requests without reinstalling the plugin or restarting dsh.
+
+The API key uses a password field and is never filled back into the form. Leave
+it blank to retain the saved key, or choose **Clear saved API key** and then save
+to remove it.
+Each field uses the plugin's saved value first, then `TALUS_URL` or
+`TALUS_API_KEY` from the execution environment; the URL ultimately defaults to
+`http://localhost:8080`. Clearing the saved key restores the environment fallback
+if `TALUS_API_KEY` is set. `localhost` refers to the environment running dsh.
+
+DSH's native configuration editor stores these settings in the current profile's
+private `cordis.patch.yml` (mode `0600`), redacts the key in remote settings reads,
+and does not provide an additionally encrypted vault.
+
+### Environment variables for headless or existing setups
+
+For fields not configured in the plugin, the original environment variables
+remain supported. For a Bash launch:
+
+```bash
+export TALUS_URL='https://talus.example.com'
+read -r -s -p 'Talus API key: ' TALUS_API_KEY
+printf '\n'
+export TALUS_API_KEY
+```
+
+Start dsh from that environment so it inherits the variables. An already running
+Desktop app does not inherit later shell exports; restart it with the intended
+environment or use the plugin form. The Talus server's deployment `.env` does not
+configure dsh. Do not put API keys in the plugin source or paste them into chat.
+
+## Verify
+
 Confirm that the available skills include `talus`, then ask:
 
-> Use the talus skill and the configured environment to list my servers. Make a
+> Use the talus skill and my saved configuration to list my servers. Make a
 > real API request, report their names and status, and do not display the API key.
 
 This task requires `servers:read`. For a service-only key, ask to list registered
@@ -72,12 +91,16 @@ dsh plugin --profile web add ./plugins/dsh
 
 These paths assume the Talus repository root; use an absolute path for a standalone
 copy. Replace `web` with your profile throughout. To uninstall, run only the
-`remove` command. Instance configuration stays in the execution environment.
+`remove` command. After reinstalling, check the plugin settings and re-enter them
+if needed. An older installation needs this update once to gain the configuration
+form; subsequent settings changes only need saving.
 
 ## Maintain and distribute
 
-The repository's `skills/talus/` is the maintained source. From this plugin
-directory inside a Talus checkout, refresh the bundled copy and check it:
+The repository's `skills/talus/` is the maintained source. The sync script copies
+it and adds dsh configuration instructions to the bundled skill, keeping the
+portable source unchanged. From this plugin directory inside a Talus checkout,
+refresh the bundled copy and check it:
 
 ```bash
 npm ci

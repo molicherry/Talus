@@ -229,8 +229,9 @@ talus/
 dsh plugin --profile web add ./plugins/dsh
 ```
 
-按下文在 dsh 执行环境中配置 `TALUS_URL`、`TALUS_API_KEY`，再重启目标 profile。
-插件指南包含 Desktop/headless profile、独立安装和更新方式。DSH 插件 API 仍为
+安装后重启目标 profile，在 **插件页 → Talus** 直接填写 Talus 地址和 API 密钥。
+保存后即对后续请求生效，无需重新安装或重启。插件中未配置的字段仍可使用下文的
+环境变量。插件指南包含 Desktop/headless profile 和更新方式。DSH 插件 API 仍为
 预览版本；本插件声明的兼容范围为 `~0.2.2-rc.1`。
 
 ### 4. 配置 AI 运行环境

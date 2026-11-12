@@ -92,7 +92,9 @@ run and is independent of the main application's M1–M5 gates. Install its pinn
 dependencies with `npm ci` in `plugins/dsh`, then run `npm test` there; Node.js
 24.9+, npm, and `tar` are required. This packs the plugin and loads the extracted
 archive through the real Cordis and DSH skill services without a model request
-or a live Talus instance. See the [plugin guide](../plugins/dsh/README.md).
+or a live Talus instance. The separate **DSH plugin** CI job also runs these
+checks, including live configuration, secret redaction and authenticated requests
+against a local test HTTP server. See the [plugin guide](../plugins/dsh/README.md).
 
 | Suite | Needs | Notes |
 | --- | --- | --- |

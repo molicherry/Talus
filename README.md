@@ -391,10 +391,12 @@ this repository's root:
 dsh plugin --profile web add ./plugins/dsh
 ```
 
-Configure `TALUS_URL` and `TALUS_API_KEY` in dsh's execution environment as below,
-then restart the target profile. The plugin guide covers Desktop/headless
-profiles, standalone installation, and updates. DSH's plugin API is in preview;
-the package declares compatibility with `~0.2.2-rc.1`.
+Restart the target profile after installation, then open **Plugins → Talus** to
+enter the Talus URL and API key. Saved settings apply to subsequent requests
+without reinstalling or restarting. Environment variables below remain a
+fallback for fields not configured in the plugin. The plugin guide covers
+Desktop/headless profiles and updates. DSH's plugin API is in preview; the
+package declares compatibility with `~0.2.2-rc.1`.
 
 ### 4. Configure the AI environment
 

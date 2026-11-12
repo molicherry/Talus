@@ -170,6 +170,24 @@ jobs:
         run: npm run test:ui:built
         working-directory: frontend
 
+  dsh-plugin:
+    name: DSH plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: plugins/dsh/package-lock.json
+      - name: Install plugin test dependencies
+        working-directory: plugins/dsh
+        run: npm ci --ignore-scripts
+      - name: Packaged skill, configuration and authenticated requests
+        working-directory: plugins/dsh
+        run: npm test
+
   unified:
     name: Unified test entry (tests/run.sh)
     runs-on: ubuntu-latest
@@ -405,7 +423,7 @@ jobs:
   publish-image:
     name: Publish immutable version image
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [release-policy, security, backend, frontend, unified, docker, windows-agent]
+    needs: [release-policy, security, backend, frontend, dsh-plugin, unified, docker, windows-agent]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
