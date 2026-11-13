@@ -1112,6 +1112,16 @@
           },
           "automation_status": "implemented",
           "required": true
+        },
+        {
+          "implementation_id": "impl-04-05i",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_budget_test.go",
+            "symbol": "TestRawSampleProbeStopsAtLimit"
+          },
+          "automation_status": "implemented",
+          "required": true
         }
       ]
     },

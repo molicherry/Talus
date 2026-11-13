@@ -127,6 +127,22 @@ func TestRawSampleBudgetBoundary(t *testing.T) {
 	}
 }
 
+// An overflowing probe reports only its bounded candidate count, even when the
+// window contains more rows. A scalar COUNT must keep the inner LIMIT intact.
+func TestRawSampleProbeStopsAtLimit(t *testing.T) {
+	repo, db := budgetTestRepo(t)
+	to := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	from := to.Add(-9 * 24 * time.Hour)
+	seedRawSeries(t, db, 3, to.Add(-time.Minute), MaxRawSamples+100)
+	samples, overBudget, err := repo.probeRawSamples(context.Background(), 3, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if samples != MaxRawSamples+1 || !overBudget {
+		t.Fatalf("probe = %d samples, over budget %v; want %d/true", samples, overBudget, MaxRawSamples+1)
+	}
+}
+
 // TestExpiredDeadlineIsReportedAsTimeout pins the shared 2s deadline mapping.
 func TestExpiredDeadlineIsReportedAsTimeout(t *testing.T) {
 	repo, _ := budgetTestRepo(t)

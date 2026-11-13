@@ -255,15 +255,20 @@ func (r *MetricRepo) QueryWithBudget(ctx context.Context, req QueryRequest) (*Qu
 	return result, nil
 }
 
-// probeRawSamples reads at most 12,001 candidate keys, so an over-budget range is
-// detected without an unbounded COUNT or a full scan.
+// probeRawSamples counts at most 12,001 candidate keys in a bounded subquery.
+// Only the scalar count crosses the driver boundary; decoding thousands of
+// timestamps is unnecessary when the planner needs only their bounded count.
 func (r *MetricRepo) probeRawSamples(ctx context.Context, serverID uint, from, to time.Time) (int, bool, error) {
 	// The planned raw input is the window plus the single predecessor row the rate
 	// calculation reads, so one extra row is counted against the budget.
-	var keys []time.Time
+	var samples int
 	err := r.db.WithContext(ctx).Raw(
-		`SELECT time FROM metrics WHERE server_id = ? AND time >= ? AND time < ? ORDER BY time LIMIT ?`,
-		serverID, from, to, rawProbeLimit).Scan(&keys).Error
+		`SELECT COUNT(*) FROM (
+			SELECT time FROM metrics
+			WHERE server_id = ? AND time >= ? AND time < ?
+			ORDER BY time LIMIT ?
+		) AS candidate_keys`,
+		serverID, from, to, rawProbeLimit).Scan(&samples).Error
 	if err != nil {
 		return 0, false, classifyBudgetError(fmt.Errorf("probe raw samples: %w", err))
 	}
@@ -275,7 +280,7 @@ func (r *MetricRepo) probeRawSamples(ctx context.Context, serverID uint, from, t
 		serverID, from).Scan(&hasPredecessor).Error; err != nil {
 		return 0, false, classifyBudgetError(fmt.Errorf("probe raw predecessor: %w", err))
 	}
-	planned := len(keys)
+	planned := samples
 	if hasPredecessor {
 		planned++
 	}
