@@ -184,9 +184,11 @@ jobs:
       - name: Install plugin test dependencies
         working-directory: plugins/dsh
         run: npm ci --ignore-scripts
-      - name: Packaged skill, configuration and authenticated requests
+      - name: Packaged skill and host-managed credentials
         working-directory: plugins/dsh
         run: npm test
+      - name: Private HTTPS broker and file transfers
+        run: node --test tests/talus-private-client.test.mjs
 
   unified:
     name: Unified test entry (tests/run.sh)

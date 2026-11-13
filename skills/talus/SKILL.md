@@ -20,25 +20,49 @@ fallback. Monitoring requires node access to the Hub, with no additional inbound
 port on the node. Windows monitoring support does not establish full Windows
 compatibility for the browser terminal or file browser.
 
-Keep this entire `talus/` directory when installing the skill. Detailed contracts
+Keep this entire `talus/` directory, including `scripts/`, when installing the skill.
+The request helper requires Node.js 24 or later. Detailed contracts
 are bundled in [File API](references/files.md) and [Monitoring API](references/metrics.md);
 they do not require a checkout of the application repository.
 
 ## Quick Start
 
-Use the configured environment automatically. If `TALUS_API_KEY` is missing,
-ask the user to configure it in the environment. Use `http://localhost:8080`
-when `TALUS_URL` is unset; if that is not their instance, obtain the correct URL.
-`TALUS_URL` is the instance base URL, without `/api/v1`.
+Send requests through the host's credential broker using the bundled
+`scripts/request.mjs` helper. The host owner configures the HTTPS instance URL
+and API key outside the AI session, starts `scripts/broker.mjs`, and supplies only
+the broker descriptor path as `TALUS_BROKER`. Set `TALUS_REQUEST` to the
+absolute path of this skill's `scripts/request.mjs`. These variables contain
+paths, not credentials. The helper reads the owner-only descriptor's local
+capability token; do not print or publish its contents. If the broker is missing
+or unavailable, ask the user
+to configure or restart it; do not read, create, or inspect the host's private
+credential file, settings, environment, or authentication headers.
 
 ```bash
-TALUS_URL="${TALUS_URL:-http://localhost:8080}"
-: "${TALUS_API_KEY:?Configure TALUS_API_KEY in the environment}"
-
-curl --silent --show-error --fail-with-body \
-  "${TALUS_URL%/}/api/v1/servers" \
-  -H "X-API-Key: $TALUS_API_KEY"
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method GET --path /api/v1/servers
 ```
+
+The helper communicates locally over the broker's private Unix-domain socket or
+Windows named pipe. The broker adds `X-API-Key` only to the configured Talus HTTPS
+destination, validates TLS certificates, and never follows redirects. Do not
+switch to a direct HTTP client, disable TLS verification, or request the API key
+when a request fails. This workflow leaves the existing Talus authentication
+protocol unchanged; HTTPS protects the header in transit.
+
+Use paths under `/api/v1/`, not absolute URLs. The helper accepts `--json` or
+`--json-file` for a business request body, `--data-file` for raw bytes, repeated
+`--query KEY=VALUE` and `--header NAME=VALUE`, and `--output` /
+`--headers-output` for response files. Use `--output` for binary or large text/JSON
+responses; standard output is limited to 1 MiB. `--headers-output` records
+`{"status":...,"headers":{...}}` with filtered, lowercase response header names.
+It can read the descriptor path from
+`TALUS_BROKER` when `--broker` is omitted. Supply only business headers; the
+host owns Talus authentication. Do not expose request authentication headers or
+include credentials in prompts, shell variables, command arguments, or reports.
+The helper's default deadline is 30 seconds; `--timeout-ms` accepts up to
+300000 milliseconds. Set a suitable client deadline for longer Exec, Relay,
+or file operations; it does not extend the Talus endpoint's own budget.
 
 Normal JSON responses use `{"data": ...}`. Talus errors use
 `{"error":{"code":403,"reason":"forbidden","message":"..."}}`, with optional
@@ -49,7 +73,8 @@ Do not print API keys or include them in URLs, generated reports, or debug trace
 
 ## Authentication and permissions
 
-Send `X-API-Key` on every management API request. Scopes and `server_ids` are
+The host broker sends `X-API-Key` on management API requests; the model and helper
+do not receive the key. Scopes and `server_ids` are
 independent checks: omitted/empty `server_ids` allows all servers; `[1,3]` allows
 only those servers. Services associated with a server also enforce that restriction.
 
@@ -135,10 +160,9 @@ errors. See the [monitoring status reference](references/metrics.md#monitoring-s
 Resolve the target server first. For example, after selecting server ID 1:
 
 ```bash
-curl --silent --show-error --fail-with-body \
-  "${TALUS_URL%/}/api/v1/servers/1/exec" \
-  -H "X-API-Key: $TALUS_API_KEY" -H 'Content-Type: application/json' \
-  --data '{"command":"whoami","timeout":60}'
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method POST --path /api/v1/servers/1/exec \
+  --json '{"command":"whoami","timeout":60}' --timeout-ms 65000
 ```
 
 Response (abridged): `{"data":{"stdout":"deploy\n","stderr":"","exit_code":0}}`.
@@ -155,8 +179,11 @@ If `ssh_host_key_unverified` or `ssh_host_key_mismatch` is returned, an administ
 must verify the fingerprint independently and confirm it in the Web UI before
 SSH commands, terminals, file operations, or agent installation can proceed.
 
-For `GET /api/v1/servers/{id}/terminal`, a non-browser WebSocket client can send
-`X-API-Key` during the upgrade. Do not put the key in the URL.
+The request helper handles HTTP APIs, not the WebSocket terminal at
+`GET /api/v1/servers/{id}/terminal`. Use the Talus Web UI for an interactive
+terminal. Existing host-managed WebSocket clients may authenticate with
+`X-API-Key` during the upgrade; this is not a reason to give the key to the model
+or place it in a URL.
 
 Authenticated terminal input/resize JSON messages must fit in 64 KiB after JSON
 escaping and UTF-8 encoding. Split large input into ordered messages while
@@ -218,7 +245,17 @@ Example Relay body for a service whose guide specifies bearer authentication:
 }
 ```
 
-Send that JSON with `Content-Type: application/json` and `X-API-Key` to Talus.
+Send that business JSON through the broker, for example after saving it as
+`relay-request.json`:
+
+```bash
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method POST --path /api/v1/services/1/relay --json-file relay-request.json
+```
+
+Use the actual service ID. The helper sets JSON content type and the host supplies
+Talus authentication; Relay's nested `headers` remain the service's business
+headers, with placeholders resolved by Talus.
 The Hub calls the service's `base_url` directly; assigning a service to a server
 does not create an SSH tunnel. Stored credentials replace `{{key}}` placeholders
 in the target URL, header names/values, and body. Set authentication headers as
@@ -284,14 +321,17 @@ be revealed again in the Web UI when a recoverable value is stored; API keys
 themselves cannot call reveal endpoints. Legacy keys without a stored value
 cannot be revealed, but an administrator can rotate them to a new recoverable
 value. Rotation immediately invalidates the old value and closes its terminal
-sessions; configure the new value in callers. Metadata/list endpoints do not
+sessions; have the host owner update the broker or plugin credential store.
+Metadata/list endpoints do not
 return stored secret values.
 
 ## Troubleshooting
 
 | Result | Next step |
 | --- | --- |
-| 401 | Check the configured key, instance URL, and whether the key was revoked; do not print the key. |
+| Broker unavailable | Ask the host owner to configure/restart it and supply the descriptor path. Do not inspect private credentials. |
+| HTTP URL or TLS certificate rejected | Have the host owner configure HTTPS and a valid trusted certificate; never disable certificate validation. |
+| 401 | Ask the host owner to check the configured instance and key or whether it was revoked; do not retrieve the key. |
 | 403 | Check Web UI/admin restrictions first, then the endpoint's scope, then `server_ids`. For Relay, distinguish a Talus refusal from an upstream 403. |
 | `ssh_host_key_unverified` / `ssh_host_key_mismatch` | Have an administrator verify and confirm the fingerprint in the Web UI. |
 | `connection_config_changed` | Reload server detail and reconcile the intended update with the current revision. |
@@ -306,4 +346,5 @@ If a key lacks a required scope or server ID, ask an administrator to edit that
 key's permissions and server scope in the Web UI. The key value remains unchanged,
 so the caller keeps its existing configuration. Permission changes close existing
 terminal sessions; reconnect using the updated permissions. Rotate the key only
-when its secret value needs replacement, then update the caller's configuration.
+when its secret value needs replacement, then have the host owner update the
+broker or plugin credential store.

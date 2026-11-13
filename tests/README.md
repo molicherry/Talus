@@ -93,8 +93,12 @@ dependencies with `npm ci` in `plugins/dsh`, then run `npm test` there; Node.js
 24.9+, npm, and `tar` are required. This packs the plugin and loads the extracted
 archive through the real Cordis and DSH skill services without a model request
 or a live Talus instance. The separate **DSH plugin** CI job also runs these
-checks, including live configuration, secret redaction and authenticated requests
-against a local test HTTP server. See the [plugin guide](../plugins/dsh/README.md).
+checks, including native credential updates, legacy-secret cleanup and requests
+against a local HTTPS server with a trusted test CA. It also runs the portable
+skill's `node --test tests/talus-private-client.test.mjs` suite (the optional
+`talus-private-client` integration run), covering private IPC, TLS enforcement,
+bounded transfers and cancellation. These tests additionally require `openssl`.
+See the [plugin guide](../plugins/dsh/README.md).
 
 | Suite | Needs | Notes |
 | --- | --- | --- |

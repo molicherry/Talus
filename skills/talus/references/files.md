@@ -1,7 +1,14 @@
 # File API
 
-All routes below are relative to `/api/v1/servers/{id}/sftp`. Send `X-API-Key`
-on every request, including upload recovery calls. Every operation checks
+All routes below are relative to `/api/v1/servers/{id}/sftp`. Use the Node 24
+request helper configured by the [main skill](../SKILL.md): `TALUS_REQUEST` is
+its script path and `TALUS_BROKER` is the broker descriptor path provided for the
+AI to use. The helper consumes this owner-only descriptor, which contains a local
+capability token; do not print or copy its contents. The Talus API key stays in
+the host broker, which adds `X-API-Key` to its configured Talus HTTPS address,
+including upload recovery calls, and does not follow redirects. Do not read or
+create the host's private credential configuration or pass the API key in shell
+variables, arguments, or headers. Every operation checks
 `server_ids`, uses the configured SSH route and account, and requires an enabled
 SFTP subsystem. An administrator must confirm first-use/changed SSH host keys
 in the Web UI. File operations do not fall back to shell commands.
@@ -30,9 +37,16 @@ file API scopes. File scopes also do not grant permissions beyond the SSH accoun
 - Each binary transfer request has a 10-minute budget and 30-second read/write idle limits.
   Serialize operations per server when `429 sftp_busy` is returned.
 
-URL-encode query paths. Paths are literal filesystem paths: do not expand them
-through a shell. Use `application/octet-stream` for upload/chunk bodies and
-`application/json` for JSON bodies.
+The CLI has a separate 30-second deadline by default. For a longer transfer, set
+`--timeout-ms 300000` (five minutes, the maximum). The request ends when either
+the client deadline or a backend budget expires; a timeout does not establish
+whether a mutation took effect. Inspect the destination or resumable-upload
+status before retrying a write.
+
+Use the helper's `--query KEY=VALUE` options to URL-encode query paths. Paths are
+literal filesystem paths: do not expand them through a shell. Use
+`application/octet-stream` for upload/chunk bodies and `application/json` for
+JSON bodies.
 
 ## Endpoints
 
@@ -61,24 +75,25 @@ symlinks as regular files. Removal can remove a link itself.
 
 ## Browse and upload examples
 
-Use the configured `TALUS_URL` and `TALUS_API_KEY` from the main skill. Select the
+Use the configured helper and broker paths from the main skill. Select the
 server first and set its ID; example remote paths must match the user's target.
 
 ```bash
 TALUS_SERVER_ID=1
 
-curl --silent --show-error --fail-with-body --get \
-  "${TALUS_URL%/}/api/v1/servers/$TALUS_SERVER_ID/sftp/entries" \
-  -H "X-API-Key: $TALUS_API_KEY" --data-urlencode 'path=/home/deploy'
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" --method GET \
+  --path "/api/v1/servers/$TALUS_SERVER_ID/sftp/entries" \
+  --query 'path=/home/deploy'
 ```
 
 Upload an existing local `data.bin`, preserving an existing remote destination:
 
 ```bash
-curl --silent --show-error --fail-with-body \
-  "${TALUS_URL%/}/api/v1/servers/$TALUS_SERVER_ID/sftp/upload?path=%2Fhome%2Fdeploy%2Fdata.bin&overwrite=false" \
-  -H "X-API-Key: $TALUS_API_KEY" -H 'Content-Type: application/octet-stream' \
-  --data-binary @data.bin
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" --method POST \
+  --path "/api/v1/servers/$TALUS_SERVER_ID/sftp/upload" \
+  --query 'path=/home/deploy/data.bin' --query 'overwrite=false' \
+  --header 'Content-Type=application/octet-stream' --data-file data.bin \
+  --timeout-ms 300000
 ```
 
 Do not convert file bytes to JSON or base64. A `409 sftp_exists` calls for a
@@ -92,7 +107,9 @@ decision about the intended destination, not an automatic overwrite retry.
    the edited content, and the original version. Use a JSON encoder so quotes,
    backslashes, and newlines in the text remain valid; do not interpolate raw text
    into a shell-built JSON string.
-3. `PUT /text` with that body and `Content-Type: application/json`.
+3. `PUT /text` with that body and `Content-Type: application/json`. Pass a locally
+   serialized business request with `--json-file edited-text.json`; do not use a
+   credential configuration file as the request body.
 4. On `409 sftp_conflict`, preserve the draft, fetch the latest remote text, and
    reconcile the changes. Use the new version only after reconciliation. On
    success, keep the returned new version for the next edit.
@@ -105,9 +122,11 @@ decision about the intended destination, not an automatic overwrite retry.
 2. Keep `data.token` private and retain it for recovery. Tokens bind the caller
    identity, server, SSH route, destination, size, checksum, and expiry.
 3. Send bytes beginning at the confirmed offset using
-   `PUT /uploads/chunk?offset=<offset>&size=<chunk bytes>` with both `X-API-Key`
-   and `X-Upload-Token`. Each chunk is at most 1 MiB. If Content-Length is set,
-   it must match `size`. Advance from the returned offset.
+   `PUT /uploads/chunk?offset=<offset>&size=<chunk bytes>` with `X-Upload-Token`;
+   the broker supplies the Talus authentication header. The upload token is a
+   transfer token, not the Talus API key, and can be supplied with the helper's
+   `--header` option. Each chunk is at most 1 MiB. If Content-Length is set, it
+   must match `size`. Advance from the returned offset.
 4. After a timeout, disconnect, or offset conflict, call
    `POST /uploads/status {"token":"..."}` before sending more bytes. Some bytes
    may already have arrived; continue from the returned offset, not a guessed one.
@@ -129,18 +148,20 @@ destination has not changed since the upload began.
 Download into a temporary local file and save the response headers:
 
 ```bash
-curl --silent --show-error --fail --get \
-  "${TALUS_URL%/}/api/v1/servers/$TALUS_SERVER_ID/sftp/download" \
-  -H "X-API-Key: $TALUS_API_KEY" --data-urlencode 'path=/home/deploy/data.bin' \
-  --dump-header download.headers --output data.bin.part
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" --method GET \
+  --path "/api/v1/servers/$TALUS_SERVER_ID/sftp/download" \
+  --query 'path=/home/deploy/data.bin' \
+  --headers-output download.headers --output data.bin.part --timeout-ms 300000
 ```
 
-Check curl's exit status before considering the file complete. The ETag is a
+Check the helper's exit status before considering the file complete. The ETag is a
 quoted `sha256:<hex digest>` for the full file. Save it for content verification
-and recovery.
+and recovery. The headers file is JSON with `status` and `headers`; read the
+ETag from `headers.etag`, and the range from `headers["content-range"]`.
 
-To resume, send `Range: bytes=<saved byte count>-` and `If-Range: <saved ETag>`.
-Save the new body separately until its status is known:
+To resume, supply `--header 'Range=bytes=<saved byte count>-'` and
+`--header 'If-Range=<saved ETag>'`. Save the new body separately and retain its
+response headers until its HTTP status is known:
 
 - On `206`, verify `Content-Range` begins at the requested offset and the ETag
   matches, then append the received bytes.

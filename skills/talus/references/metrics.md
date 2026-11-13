@@ -1,8 +1,15 @@
 # Monitoring API
 
-Use `X-API-Key` with `metrics:read` and access to the target `server_id` for
-`GET /api/v1/servers/{id}/metrics`. Server detail/status requests separately
-require `servers:read`.
+Use the Node 24 request helper configured by the [main skill](../SKILL.md):
+`TALUS_REQUEST` is its script path and `TALUS_BROKER` is the broker descriptor path
+provided for the AI to use. The helper consumes this owner-only descriptor,
+which contains a local capability token; do not print or copy its contents.
+The Talus API key stays in the host broker, which adds `X-API-Key` only for its
+configured Talus HTTPS address and does not follow redirects. Do not read or create the host's
+private credential configuration or put an API key in shell variables, arguments,
+or headers. The configured key needs `metrics:read` and access to the target
+`server_id` for `GET /api/v1/servers/{id}/metrics`. Server detail/status requests
+separately require `servers:read`.
 
 ## Query parameters
 
@@ -22,15 +29,15 @@ interval is strict unless `allow_coarsen` is enabled. Always read the returned
 Example for the last hour, after selecting server ID 1:
 
 ```bash
-curl --silent --show-error --fail-with-body --get \
-  "${TALUS_URL%/}/api/v1/servers/1/metrics" \
-  -H "X-API-Key: $TALUS_API_KEY" \
-  --data-urlencode 'interval=auto' --data-urlencode 'stat=avg'
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" --method GET \
+  --path /api/v1/servers/1/metrics \
+  --query 'interval=auto' --query 'stat=avg'
 ```
 
-For a historical range, add `from` and `to` using `--data-urlencode`, especially
-when a timestamp includes a positive timezone offset. Use the user's intended
-time range rather than copying fixed dates from an example.
+For a historical range, add `--query 'from=<timestamp>'` and
+`--query 'to=<timestamp>'`. The helper URL-encodes values, including positive
+timezone offsets. Use the user's intended time range rather than copying fixed
+dates from an example.
 
 ## Response
 

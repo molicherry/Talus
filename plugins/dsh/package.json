@@ -14,6 +14,7 @@
   },
   "files": [
     "index.js",
+    "credentials.mjs",
     "client.js",
     "cordis.patch.yml",
     "locale",
@@ -23,7 +24,11 @@
     "README.zh-CN.md",
     "LICENSE"
   ],
-  "keywords": ["dsh-plugin", "deepseek-harness", "talus"],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "talus"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/molicherry/Talus.git",
@@ -49,19 +54,26 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-credentials": "~0.2.2-rc.1",
+    "@deepseek-ai/dsh-settings": "~0.2.2-rc.1",
+    "@deepseek-ai/dsh-shell-env": "~0.2.2-rc.1",
     "@deepseek-ai/dsh-skill": "~0.2.2-rc.1",
     "@deepseek-ai/dsh-skill-filesystem": "~0.2.2-rc.1",
-    "@deepseek-ai/dsh-shell-env": "~0.2.2-rc.1"
+    "@deepseek-ai/dsh-tools": "~0.2.2-rc.1"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "~3.19.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/cordis-plugin-loader": "1.1.0",
+    "@deepseek-ai/dsh-credentials": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-settings": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-shell-env": "0.2.2-rc.1",
     "@deepseek-ai/dsh-skill": "0.2.2-rc.1",
     "@deepseek-ai/dsh-skill-filesystem": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-shell-env": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-settings": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
     "yaml": "2.9.0"
   },
   "scripts": {

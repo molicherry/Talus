@@ -288,11 +288,28 @@
       "command": [
         "bash",
         "-c",
-        "node scripts/sync-skills.mjs --check && node --test --test-reporter=../../tests/lib/node-test-report.mjs tests/plugin.test.mjs"
+        "node scripts/sync-skills.mjs --check && node --test --test-reporter=../../tests/lib/node-test-report.mjs tests/*.test.mjs"
       ],
       "timeout_seconds": 120,
       "environment": {
         "profile": "local-dsh-plugin",
+        "requires": []
+      }
+    },
+    {
+      "run_id": "talus-private-client",
+      "suite": "integration",
+      "runner": "node-test",
+      "cwd": ".",
+      "command": [
+        "node",
+        "--test",
+        "--test-reporter=./tests/lib/node-test-report.mjs",
+        "tests/talus-private-client.test.mjs"
+      ],
+      "timeout_seconds": 120,
+      "environment": {
+        "profile": "local-private-broker",
         "requires": []
       }
     }
@@ -6006,29 +6023,61 @@
         "REQ-01"
       ],
       "spec_ref": "tests/coverage.json#/cases/81/scenario",
-      "scenario": "Apply live Talus URL and API key settings to authenticated shell requests, redact secrets on settings reads and remove environment contributions when the plugin is disabled.",
+      "scenario": "Use native destination-bound credentials for live Talus HTTPS requests without exposing the API key through shell variables or arguments; preserve legacy redaction, revision-safe cleanup and unload ownership.",
       "implementations": [
         {
           "implementation_id": "impl-01-07",
           "run_id": "dsh-plugin",
           "implementation": {
             "path": "plugins/dsh/tests/plugin.test.mjs",
-            "symbol": "settings reads redact the API key and config validates HTTP URLs"
+            "symbol": "settings reads redact the legacy API key and config validates URLs"
           },
           "automation_status": "implemented",
           "required": false,
-          "verification": "Use the real DSH secret redactor and Cordis schema resolution to check masked reads and rejection of unsupported URLs or newline-bearing API keys."
+          "verification": "Use the real DSH secret redactor and Cordis schema resolution to preserve legacy secret masking and reject unsupported URLs or newline-bearing API keys. Legacy HTTP values can load for editing but cannot authorize requests."
         },
         {
           "implementation_id": "impl-01-08",
           "run_id": "dsh-plugin",
           "implementation": {
             "path": "plugins/dsh/tests/plugin.test.mjs",
-            "symbol": "UI config reaches real HTTP requests and updates without a reload"
+            "symbol": "native credentials reach HTTPS requests without entering the shell and rotate live"
           },
           "automation_status": "implemented",
           "required": false,
-          "verification": "Update live configuration through a real Cordis fiber, execute curl against a local HTTP server using the real DSH shell environment registry, verify URL and credential changes plus environment fallback, and preserve the process environment."
+          "verification": "Use real Cordis, DSH credentials, settings and tool services with a trusted local HTTPS fixture. Verify ignored legacy/environment keys, native key rotation and target binding, no secret in shell metadata/arguments, broker file transfers and revision-safe legacy cleanup."
+        },
+        {
+          "implementation_id": "impl-01-10",
+          "run_id": "dsh-plugin",
+          "implementation": {
+            "path": "plugins/dsh/tests/client.test.mjs",
+            "symbol": "browser credential bridge uses DSH context injection and native argument signatures"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "Load the actual browser artifact with real Cordis dependency enforcement, invoke its injected credential bridge, and verify native argument counts and status-only reads. This catches a missing root remote service declaration before browser installation."
+        }
+      ]
+    },
+    {
+      "case_id": "TC-01-06",
+      "requirement_ids": [
+        "REQ-01"
+      ],
+      "spec_ref": "tests/coverage.json#/cases/82/scenario",
+      "scenario": "Keep portable skill authentication in a private host broker, enforce verified HTTPS and destination/path/header restrictions, and perform bounded cancellable binary transfers without giving the API key to the shell client.",
+      "implementations": [
+        {
+          "implementation_id": "impl-01-09",
+          "run_id": "talus-private-client",
+          "implementation": {
+            "path": "tests/talus-private-client.test.mjs",
+            "symbol": "private Talus client keeps credentials in the HTTPS host and transfers files over private IPC"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "Run node --test tests/talus-private-client.test.mjs with Node 24+ and openssl. Controlled HTTPS servers and an ephemeral test CA exercise TLS, redirects, request validation, capability-protected IPC, limits, cancellation, host configuration and atomic file outputs; no live Talus instance or real credential is used."
         }
       ]
     }

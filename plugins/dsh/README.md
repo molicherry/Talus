@@ -3,18 +3,19 @@
 English | [简体中文](README.zh-CN.md)
 
 `dsh-plugin-talus` 0.1.0 bundles the [Talus skill](skills/talus/SKILL.md) for
-DeepSeek Harness (dsh). It uses dsh's official filesystem skill provider to load
-server management, SSH execution, monitoring, SFTP, and service relay guidance.
-The complete skill and its references are included; an installed plugin does not
-need the Talus source repository.
+DeepSeek Harness (dsh), with a host request tool and credential broker. It supports
+server management, SSH execution, monitoring, SFTP, and service relay. The complete
+skill, helpers, and references are included; installation does not require the
+rest of the Talus source repository.
 
 ## Requirements
 
 - Node.js 24.9.0 or later and DSH 0.2.2-rc.1. The package's `engines.dsh` range is
   `~0.2.2-rc.1`; dsh's plugin API is still in preview.
-- A running Talus instance reachable from dsh's execution environment.
-- A Talus API key with scopes for the intended tasks, and `curl` or an equivalent
-  HTTP tool available to dsh. See the bundled [permission guide](skills/talus/SKILL.md#authentication-and-permissions).
+- A running Talus instance reachable from the dsh host over HTTPS, with a trusted
+  TLS certificate. HTTP URLs and certificate-validation bypasses are not supported.
+- A Talus API key with scopes for the intended tasks. See the bundled
+  [permission guide](skills/talus/SKILL.md#authentication-and-permissions).
 
 ## Install
 
@@ -34,46 +35,61 @@ and relaunch. Installing into `web` does not install into the other profiles.
 
 ## Configure in the plugin page
 
-Open **Plugins → Talus** in dsh. Enter the instance base URL, such as
+Open **Plugins → Talus**. Enter the HTTPS instance base URL, such as
 `https://talus.example.com`, without `/api/v1`, and the API key from
-**Talus Web UI → API Keys**, then save. Saved settings apply to subsequent
-requests without reinstalling the plugin or restarting dsh.
+**Talus Web UI → API Keys**, then save. Changes apply to later requests without
+reinstalling the plugin or restarting dsh. The plugin starts its host broker
+itself; do not manually launch the standalone broker.
 
-The API key uses a password field and is never filled back into the form. Leave
-it blank to retain the saved key, or choose **Clear saved API key** and then save
-to remove it.
-Each field uses the plugin's saved value first, then `TALUS_URL` or
-`TALUS_API_KEY` from the execution environment; the URL ultimately defaults to
-`http://localhost:8080`. Clearing the saved key restores the environment fallback
-if `TALUS_API_KEY` is set. `localhost` refers to the environment running dsh.
+The password field never displays the saved key. Leave it blank to keep the
+credential for the same URL, or choose **Clear saved API key** and save to remove
+it. Credentials are bound to the configured URL: changing the target requires
+entering a key for that target, so the old key is not sent to a different instance.
+There is no API-key environment fallback. Do not paste the key into chat, put it
+in the workspace, or export it to the model's shell.
 
-DSH's native configuration editor stores these settings in the current profile's
-private `cordis.patch.yml` (mode `0600`), redacts the key in remote settings reads,
-and does not provide an additionally encrypted vault.
+The model uses `talus_request` with a required `path` and optional `method`,
+`json`, `headers`, and `timeout_ms`. It returns `status`, `headers`, and a string
+`body`; text/JSON request and response bodies are limited to 1 MiB. The deadline
+defaults to 30000 ms and can be set up to 300000 ms. The host obtains the saved
+key and adds the existing `X-API-Key` header only to the configured HTTPS
+destination. TLS protects the header in transit; redirects are not followed.
+No new signing protocol or
+Talus backend authentication change is required.
 
-### Environment variables for headless or existing setups
+All binary uploads and downloads use the bundled Node helper's `--data-file`
+and `--output` options; the host tool does not accept local file paths. The helper
+connects through a local Unix-domain socket or Windows named pipe and also
+handles larger JSON/text bodies. Shell tools receive only
+`DSH_TALUS_BROKER` and `DSH_TALUS_HELPER` paths, never an injected API key. The
+skill maps these paths to `TALUS_BROKER` and `TALUS_REQUEST` for each shell call.
 
-For fields not configured in the plugin, the original environment variables
-remain supported. For a Bash launch:
+## Credential storage and migration
 
-```bash
-export TALUS_URL='https://talus.example.com'
-read -r -s -p 'Talus API key: ' TALUS_API_KEY
-printf '\n'
-export TALUS_API_KEY
-```
+The key is saved through dsh's credentials service. After upgrading an older
+installation, enter the API key in the plugin form once: legacy configuration
+keys and API-key environment variables are ignored. Saving stores the entered
+key in the credentials service and clears the legacy configuration field.
+The default `credentials-local` provider uses local owner-only files
+(`0600` on Unix); it is not an OS-encrypted keychain or a strong boundary between
+processes running as the same user. This plugin avoids handing the key to the
+model, its shell environment, or command arguments. If the model can freely read
+that user's credential directory, stronger isolation needs an OS keychain-backed
+provider or separate OS accounts and permissions.
 
-Start dsh from that environment so it inherits the variables. An already running
-Desktop app does not inherit later shell exports; restart it with the intended
-environment or use the plugin form. The Talus server's deployment `.env` does not
-configure dsh. Do not put API keys in the plugin source or paste them into chat.
+For an existing HTTP instance, configure HTTPS before saving its URL here. An old
+HTTP setting may remain visible for editing, but all requests reject it.
+`TALUS_URL` / `TALUS_API_KEY` and direct authenticated `curl` calls belong to the
+older external-client workflow; this plugin and its skill no longer use them.
+Configure the plugin's host credentials even when using a headless profile.
+The Talus deployment `.env` does not configure this plugin.
 
 ## Verify
 
 Confirm that the available skills include `talus`, then ask:
 
-> Use the talus skill and my saved configuration to list my servers. Make a
-> real API request, report their names and status, and do not display the API key.
+> Use the talus skill and talus_request to list my servers. Make a real request
+> and report their names and status.
 
 This task requires `servers:read`. For a service-only key, ask to list registered
 services and read a service's usage guide instead. Installation and skill loading
@@ -92,8 +108,8 @@ dsh plugin --profile web add ./plugins/dsh
 These paths assume the Talus repository root; use an absolute path for a standalone
 copy. Replace `web` with your profile throughout. To uninstall, run only the
 `remove` command. After reinstalling, check the plugin settings and re-enter them
-if needed. An older installation needs this update once to gain the configuration
-form; subsequent settings changes only need saving.
+if needed. An older installation needs this update to gain the host broker and
+must have its key entered once in the form; later changes only need saving.
 
 ## Maintain and distribute
 
@@ -110,8 +126,8 @@ npm test
 npm pack
 ```
 
-`npm test` exercises registration and skill loading with Cordis and dsh's real
-filesystem skill provider; it does not connect to a Talus instance. `npm pack`
+`npm test` checks the plugin; it does not validate your deployed Talus instance.
+`npm pack`
 creates `dsh-plugin-talus-0.1.0.tgz`; this package has not been published to npm.
 Install the archive directly (replace the example with its absolute path):
 

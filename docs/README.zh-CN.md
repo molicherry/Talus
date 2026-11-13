@@ -157,8 +157,9 @@ SSH 工作区的文件面板、二进制传输、进度与取消、临时文件�
 ## AI 集成
 
 Talus 附带一个可移植的 [agent skill](../skills/talus/SKILL.md)，通过 REST API 完成
-服务器管理、SSH 命令、监控查询、SFTP 和已注册服务调用。AI 运行环境需要能够读取
-skill，并使用终端中的 `curl` 或等效 HTTP 工具发送请求。MCP 为可选接入方式。
+服务器管理、SSH 命令、监控查询、SFTP 和已注册服务调用。skill 通过 Node.js 24
+请求助手连接宿主凭据代理；宿主在 HTTPS 内发送原有 `X-API-Key` 头，模型只接收
+业务结果，不接收密钥。MCP 为可选接入方式。
 
 ### 1. 准备 Talus 实例
 
@@ -166,8 +167,10 @@ skill，并使用终端中的 `curl` 或等效 HTTP 工具发送请求。MCP 为
 管理员登录；已有实例可直接使用。添加需要交给 AI 操作的服务器及凭据，并在 Web UI
 确认 SSH 主机指纹。需要调用外部服务时，在 **服务** 中登记服务、凭据和使用指南。
 
-选择 **AI 实际运行环境能够访问**的 Talus 地址。`localhost` 指向执行请求的环境；
-云端任务或容器中的 `localhost` 通常无法访问你电脑上的 Talus 实例。
+为 Talus 提供**宿主代理可以访问的 HTTPS 地址**，并使用该宿主信任的证书。已有 HTTP
+部署需先配置 TLS，例如通过反向代理，再使用此 skill 或 dsh 插件。代理不跟随重定向，
+也不会跳过证书校验。AI 执行环境还须能够连接本地代理的 socket；远程或云端 worker
+需要其执行环境内的代理，不能直接使用你电脑上的本地 socket。
 
 ### 2. 创建 API 密钥
 
@@ -189,8 +192,8 @@ skill，并使用终端中的 `curl` 或等效 HTTP 工具发送请求。MCP 为
 创建凭据或服务、确认主机指纹等操作仍需 Web UI，详见
 [skill 权限说明](../skills/talus/SKILL.md#authentication-and-permissions)。
 
-将此页面提供的 API 密钥原文用于 `TALUS_API_KEY`。它与管理员密码、SSH 凭据及
-Hub 的 `JWT_SECRET` 是不同的配置。
+只将此页面提供的 API 密钥填写到宿主代理配置或 dsh 插件凭据表单中。它与管理员密码、
+SSH 凭据及 Hub 的 `JWT_SECRET` 是不同的配置。不要将密钥粘贴到 AI 对话中。
 
 管理员可以在 **API Keys → 编辑权限** 中修改现有密钥的操作权限和服务器范围，调用方继续使用原密钥。密钥管理（含列表、创建、删除和查看原文）统一要求管理员 JWT；API Key 不能自行修改权限。
 
@@ -202,100 +205,111 @@ Hub 的 `JWT_SECRET` 是不同的配置。
 
 ### 3. 安装完整 skill
 
-从本仓库或下载的源码压缩包中取得 `skills/talus/`。按照所用 AI 工具的技能加载机制，
-导入整个 `talus` 目录，或放入其支持的 skills 目录。具体目录位置和重新加载方式
-以该工具自身的文档为准。安装后的结构应为：
+从本仓库或下载的源码压缩包中取得 `skills/talus/`，按 AI 工具的技能加载机制安装
+整个目录：
 
 ```text
 talus/
 ├── SKILL.md
-└── references/
-    ├── files.md
-    └── metrics.md
+├── references/
+│   ├── files.md
+│   └── metrics.md
+└── scripts/
+    ├── broker.mjs
+    ├── request.mjs
+    └── …
 ```
 
-安装位置必须能被 AI 会话读取；只安装在 Talus 服务器上，不会自动提供给另一个环境中
-运行的 AI。保留 `SKILL.md` 同级的 `references/`，安装后不需要保留应用仓库的其余文件。
-安装完成后，按 AI 工具要求重新加载技能或开启新会话。更新时替换完整 `talus/` 目录并
-重新加载；实例配置保存在 AI 运行环境中，使更新 skill 时能够保留配置。
+保留全部配套脚本和参考文档。安装后的 skill 需要 Node.js 24 或更高版本，不依赖
+应用仓库的其余文件。安装后重新加载技能或开启新会话；更新整个目录时，将宿主凭据
+保存在该目录之外。
 
 #### DeepSeek Harness（dsh）
 
-[Talus 的 DeepSeek Harness 插件](../plugins/dsh/README.zh-CN.md)已打包完整 skill，
-可由 dsh 插件管理器直接安装。使用 Node.js 24.9.0+ 和 DSH 0.2.2-rc.1，
-在本仓库根目录运行：
+[Talus 的 DeepSeek Harness 插件](../plugins/dsh/README.zh-CN.md)内置宿主代理。
+使用 Node.js 24.9.0+ 和 DSH 0.2.2-rc.1，在仓库根目录运行：
 
 ```bash
 dsh plugin --profile web add ./plugins/dsh
 ```
 
-安装后重启目标 profile，在 **插件页 → Talus** 直接填写 Talus 地址和 API 密钥。
-保存后即对后续请求生效，无需重新安装或重启。插件中未配置的字段仍可使用下文的
-环境变量。插件指南包含 Desktop/headless profile 和更新方式。DSH 插件 API 仍为
-预览版本；本插件声明的兼容范围为 `~0.2.2-rc.1`。
+安装后重启目标 profile，在 **插件页 → Talus** 填写 HTTPS 地址和 API 密钥并保存。
+密钥由 dsh credentials 服务持有；模型使用 `talus_request`，二进制传输使用随包助手。
+保存后即对后续请求生效，无需重新安装或重启。dsh 用户无需手动启动代理。
+DSH 插件 API 仍为预览版本；本插件声明的兼容范围为 `~0.2.2-rc.1`。
 
-### 4. 配置 AI 运行环境
+### 4. 为其他 AI 工具配置宿主代理
 
-在 **AI 执行 HTTP 请求的环境**中设置：
-
-| 变量 | 填写内容 |
-| --- | --- |
-| `TALUS_URL` | 可访问的 Talus 基础地址，例如 `https://talus.example.com`，不含 `/api/v1`；默认 `http://localhost:8080` |
-| `TALUS_API_KEY` | 上一步创建的 API 密钥原文 |
-
-通过 Bash 终端启动 AI 时，可先替换示例地址，再通过隐藏输入提示填写密钥：
+由**用户或宿主管理员在 AI 会话之外的可信宿主终端**中使用 Node.js 24 配置。
+选择 AI 无法访问的工作区外私有路径，执行：
 
 ```bash
-export TALUS_URL='https://talus.example.com'
-read -r -s -p 'Talus API key: ' TALUS_API_KEY
-printf '\n'
-export TALUS_API_KEY
+node /absolute/path/to/talus/scripts/broker.mjs configure \
+  --url https://talus.example.com --config /private/talus.json
 ```
 
-在这个终端中执行下方验证命令，然后从同一终端启动 AI，使其继承这些变量。
-`export` 只作用于当前终端和之后启动的子进程；已启动的桌面应用以及远程、云端会话
-不会自动继承。此类环境应通过其运行环境变量或密钥配置功能设置，再按要求重启或重新
-加载。需要持久配置时，也应使用运行环境提供的配置机制。
+在隐藏输入提示中填写 API 密钥。命令写入仅所属用户可读写的 JSON 文件（Unix 权限
+`0600`），密钥不经过命令行参数或环境变量。也可由用户私下创建同样权限的 JSON
+文件，包含字符串字段 `url`、`apiKey`。不要让模型执行凭据配置命令，或创建、读取、
+填写此文件。然后在宿主启动代理：
 
-Hub 部署用的 `.env` 不会自动配置 AI。`AGENT_HUB_URL` 配置在 Hub 上，供受管节点
-访问；`TALUS_URL` 配置在 AI 环境中，供 AI 访问。不要将 API 密钥写入 skill 文件或贴到聊天中。
+```bash
+node /absolute/path/to/talus/scripts/broker.mjs --config /private/talus.json
+```
+
+保持该宿主进程运行。它会输出一个可提供给 AI 的**描述文件路径**。该文件仅限所属用户
+访问，包含本地连接信息和代理访问令牌，不包含 Talus API 密钥；不要公开其内容。
+只将该路径和请求助手的位置提供给 AI 执行环境：
+
+```bash
+export TALUS_BROKER='/path/printed/by/the/broker'
+export TALUS_REQUEST='/absolute/path/to/talus/scripts/request.mjs'
+```
+
+请求经本地 Unix-domain socket 或 Windows named pipe 交给代理；代理只向已配置的
+Talus HTTPS 目标添加认证头。AI 进程可以继承上述路径变量，私有配置文件及其内容
+保留在宿主。修改独立代理凭据时，由用户在可信终端重新执行 `configure` 命令；
+后续请求会读取更新后的文件。如果重启代理，使用新输出的描述文件路径。
+
+`TALUS_URL`、`TALUS_API_KEY` 仍是旧外部客户端可能使用的约定；此 skill 和 dsh 插件
+不再读取或导出它们。Talus 后端保持原有 API key 认证，不引入签名协议。
+Hub 部署 `.env` 与供节点访问的 `AGENT_HUB_URL` 不负责代理配置。仅限所属用户的文件
+权限不等于加密，也不构成同用户进程间的强隔离：如果模型能以宿主同一用户任意执行代码、
+读取凭据目录，要实现更强边界仍需 OS keychain 存储或分账号、权限隔离。
 
 ### 5. 验证连接和 skill 加载
 
-先从 AI 的执行环境访问无需鉴权的版本接口，确认返回 HTTP 200 和 Talus 版本信息：
+在 AI 执行环境中，只使用代理和助手路径：
 
 ```bash
-curl --silent --show-error --fail-with-body "${TALUS_URL%/}/api/v1/version"
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method GET --path /api/v1/version
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method GET --path /api/v1/servers
 ```
 
-再验证密钥和 `servers:read` 权限：
+服务器列表需要 `servers:read`，返回 `{"data":[...]}`；`{"data":[]}` 也是有效结果。
+仅服务权限的密钥可用 `/api/v1/services` 验证 `services:read`。在 dsh 中，让模型通过
+`talus_request` 发出相同请求即可，提示中无需提供密钥或手动配置代理路径。
 
-```bash
-curl --silent --show-error --fail-with-body \
-  "${TALUS_URL%/}/api/v1/servers" -H "X-API-Key: $TALUS_API_KEY"
-```
+确认 AI 会话已加载 `talus`，再输入：
 
-预期返回 HTTP 200 和 `{"data":[...]}`；`{"data":[]}` 也是有效的空结果。
-如果密钥仅用于服务、未授予 `servers:read`，可改用 `/api/v1/services` 验证
-`services:read`。这一步验证 API 可用，还不能证明 skill 已加载。
+> 使用 talus skill 和宿主请求工具，实际请求并列出我的服务器，报告名称和状态。
 
-确认 AI 会话已通过其技能机制加载 `talus`，再输入：
-
-> 使用 talus skill 和已配置的环境变量，通过真实 API 请求列出我的服务器，报告名称和状态，不要显示 API 密钥。
-
-服务专用密钥可改为要求列出已注册服务并读取所选服务的使用指南。确认 AI 读取了 skill
-并实际发出了请求；只回答调用方法或示例代码，不算验证完成。
+服务专用密钥可改为要求列出服务并读取某个服务的使用指南。确认 AI 实际发出了请求；
+只描述 API 调用方法不代表连接可用。
 
 ### 6. 常见问题
 
 | 现象 | 检查方法 |
 | --- | --- |
-| 找不到 skill 或参考文档 | 确认完整 `talus/` 目录在 AI 环境中可读，且当前会话已加载。 |
-| AI 读不到 URL 或密钥 | 检查实际执行进程的环境变量或密钥配置，并重启/重新加载；验证时不要打印密钥。 |
-| 连接被拒绝、域名解析失败或超时 | 从 AI 环境检查地址、端口和网络访问，确认 `localhost` 指向预期主机。 |
-| TLS 证书错误 | 修正证书或配置运行环境信任的 CA。 |
-| 401 | 检查实例地址、密钥原文以及密钥是否已撤销。 |
-| 403 | 检查作用域、服务器限制及是否属于 Web UI 专用操作；能列出服务不代表拥有 `services:relay`。 |
+| 找不到 skill、助手或参考文档 | 安装完整 `talus/` 目录，并在当前会话中加载。 |
+| 代理不可用 | 请宿主用户启动代理并提供当前描述文件路径；不要检查私有凭据。 |
+| dsh 缺少凭据 | 在 **插件页 → Talus** 填写，不要粘贴到聊天中。 |
+| HTTP 地址或 TLS 证书被拒绝 | 部署 HTTPS 并修正证书或宿主信任配置；不要关闭校验。 |
+| 连接被拒绝、域名解析失败或超时 | 从代理宿主检查到所配置 HTTPS 地址的网络。 |
+| 401 | 请宿主用户检查实例配置，以及密钥是否已撤销。 |
+| 403 | 检查作用域、服务器限制及 Web UI 专用操作；能列出服务不代表拥有 `services:relay`。 |
 | SSH 主机指纹未确认或发生变化 | 在 Web UI 核对并确认主机指纹。 |
 | 监控无数据或数据过期 | 检查节点可访问的 `AGENT_HUB_URL`、Agent 部署条件，以及连接、采集、数据状态。 |
 
@@ -358,19 +372,23 @@ API 密钥无法确认首次或变更后的主机指纹，须先由管理员在 
 
 #### 文件 API 示例
 
+按上文配置代理后：
+
 ```bash
-# 列出目录。
-curl --get "$TALUS_URL/api/v1/servers/1/sftp/entries" \
-  -H "X-API-Key: $TALUS_API_KEY" --data-urlencode 'path=/home/deploy'
+# 使用 files:read 列出目录。
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method GET --path /api/v1/servers/1/sftp/entries --query 'path=/home/deploy'
 
-# 上传原始二进制；默认保留已存在的目标文件。
-curl -X POST "$TALUS_URL/api/v1/servers/1/sftp/upload?path=%2Fhome%2Fdeploy%2Fdata.bin" \
-  -H "X-API-Key: $TALUS_API_KEY" -H 'Content-Type: application/octet-stream' \
-  --data-binary @data.bin
+# 使用 files:write 上传原始二进制；默认保留已存在的目标文件。
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method POST --path /api/v1/servers/1/sftp/upload \
+  --query 'path=/home/deploy/data.bin' \
+  --header 'Content-Type=application/octet-stream' --data-file data.bin
 
-# 下载；续传时保存并使用 ETag / If-Range，以免混入不同版本。
-curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin" \
-  -H "X-API-Key: $TALUS_API_KEY" -o data.bin
+# 使用 files:read 下载；保存 ETag 以供后续 If-Range 续传。
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method GET --path /api/v1/servers/1/sftp/download \
+  --query 'path=/home/deploy/data.bin' --output data.bin --headers-output data.headers
 ```
 
 ### 示例提示词
