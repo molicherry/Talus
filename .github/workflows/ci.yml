@@ -3,8 +3,9 @@ name: CI
 on:
   pull_request:
     branches: [main]
-    # Documentation cannot break the build. Path filters are not evaluated for
-    # pushes of tags (GitHub Actions docs), so releases still run in full.
+    # Documentation does not require the full build. The independent
+    # dsh-skill-sync workflow checks the bundled skill even on docs-only PRs.
+    # Path filters are not evaluated for tag pushes, so releases run in full.
     #
     # `main` has no required status checks today. If it ever gains any, a
     # path-filtered skip leaves this workflow Pending and blocks the merge,
@@ -173,12 +174,12 @@ jobs:
   dsh-plugin:
     name: DSH plugin
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 24.9.0
           cache: npm
           cache-dependency-path: plugins/dsh/package-lock.json
       - name: Install plugin test dependencies
@@ -188,7 +189,14 @@ jobs:
         working-directory: plugins/dsh
         run: npm test
       - name: Private HTTPS broker and file transfers
-        run: node --test tests/talus-private-client.test.mjs
+        run: node --test --test-reporter=./tests/lib/node-test-report.mjs tests/talus-private-client.test.mjs
+
+      - name: Install the official DSH test host
+        run: npm install --prefix "$RUNNER_TEMP/dsh-cli" --ignore-scripts --no-save @deepseek-ai/dsh@0.2.2-rc.1 pnpm@10.34.9
+
+      - name: Install and start the plugin in clean DSH profiles
+        working-directory: plugins/dsh
+        run: PATH="$RUNNER_TEMP/dsh-cli/node_modules/.bin:$PATH" node scripts/install-smoke.mjs
 
   unified:
     name: Unified test entry (tests/run.sh)

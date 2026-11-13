@@ -22,12 +22,22 @@ rest of the Talus source repository.
 From the Talus repository root, install into the Web profile:
 
 ```bash
+npm ci --ignore-scripts --prefix ./plugins/dsh
 dsh plugin --profile web add ./plugins/dsh
 ```
 
 For an independent copy of this plugin directory, use its absolute path instead
-of `./plugins/dsh`. The third-party plugin interface also accepts a local absolute
-directory. Restart the selected profile after installation.
+of `./plugins/dsh`. A directory installation links the directory and does not
+install its dependencies: run `npm ci --ignore-scripts` in a source checkout
+first, or `npm install --omit=dev --ignore-scripts` in an extracted package
+directory without a lockfile. The third-party plugin interface also accepts a
+local absolute directory. Restart the selected profile after installation.
+
+Some DSH SDK packages declare additional host services as peers, so pnpm may
+still report indirect peer warnings. Verify the Talus component is running in
+the selected profile; warnings alone do not confirm that it loaded. Keep the
+bundled entry id `talus` unchanged if editing the profile patch: the settings
+panel uses that id.
 
 Use `--profile headless` for a headless profile. For Desktop, launch Desktop once
 to initialize its profile, fully quit it, then install with `--profile desktop`
@@ -35,7 +45,9 @@ and relaunch. Installing into `web` does not install into the other profiles.
 
 ## Configure in the plugin page
 
-Open **Plugins → Talus**. Enter the HTTPS instance base URL, such as
+Open dsh over HTTPS or at `localhost` / a loopback address. An HTTP page on a
+non-loopback host is not a secure browser context and cannot save credentials;
+use HTTPS for remote access. Then open **Plugins → Talus**. Enter the HTTPS instance base URL, such as
 `https://talus.example.com`, without `/api/v1`, and the API key from
 **Talus Web UI → API Keys**, then save. Changes apply to later requests without
 reinstalling the plugin or restarting dsh. The plugin starts its host broker
@@ -60,7 +72,9 @@ Talus backend authentication change is required.
 All binary uploads and downloads use the bundled Node helper's `--data-file`
 and `--output` options; the host tool does not accept local file paths. The helper
 connects through a local Unix-domain socket or Windows named pipe and also
-handles larger JSON/text bodies. Shell tools receive only
+handles larger JSON/text bodies. On Windows, the named pipe and descriptor rely
+on inherited Windows ACLs; the plugin does not set or verify a dedicated pipe
+ACL. Restrict the account and temporary directory to trusted users. Shell tools receive only
 `DSH_TALUS_BROKER` and `DSH_TALUS_HELPER` paths, never an injected API key. The
 skill maps these paths to `TALUS_BROKER` and `TALUS_REQUEST` for each shell call.
 
@@ -70,8 +84,8 @@ The key is saved through dsh's credentials service. After upgrading an older
 installation, enter the API key in the plugin form once: legacy configuration
 keys and API-key environment variables are ignored. Saving stores the entered
 key in the credentials service and clears the legacy configuration field.
-The default `credentials-local` provider uses local owner-only files
-(`0600` on Unix); it is not an OS-encrypted keychain or a strong boundary between
+The default `credentials-local` provider uses local files (`0600` on Unix);
+Windows access depends on the files' ACLs. It is not an OS-encrypted keychain or a strong boundary between
 processes running as the same user. This plugin avoids handing the key to the
 model, its shell environment, or command arguments. If the model can freely read
 that user's credential directory, stronger isolation needs an OS keychain-backed
@@ -119,7 +133,7 @@ portable source unchanged. From this plugin directory inside a Talus checkout,
 refresh the bundled copy and check it:
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 npm run sync-skills
 npm run check-skills
 npm test
@@ -135,8 +149,9 @@ Install the archive directly (replace the example with its absolute path):
 dsh plugin --profile web add /absolute/path/dsh-plugin-talus-0.1.0.tgz
 ```
 
-You can also extract it and install the resulting `package/` directory by its
-absolute path. The archive includes the skill,
+The archive installation installs its runtime dependencies. You can also extract
+it, run `npm install --omit=dev --ignore-scripts` inside the resulting `package/`
+directory, then install that directory by its absolute path. The archive includes the skill,
 [file reference](skills/talus/references/files.md), and
 [monitoring reference](skills/talus/references/metrics.md).
 

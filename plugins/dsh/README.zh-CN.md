@@ -21,11 +21,18 @@ SSH 命令、监控、SFTP 和服务代理调用。完整 skill、助手脚本�
 在 Talus 仓库根目录执行，安装到 Web profile：
 
 ```bash
+npm ci --ignore-scripts --prefix ./plugins/dsh
 dsh plugin --profile web add ./plugins/dsh
 ```
 
 若使用独立复制的插件目录，将 `./plugins/dsh` 替换为该目录的绝对路径。
+目录安装只链接目录，不会安装它的依赖：源码目录须先执行 `npm ci --ignore-scripts`；
+没有 lockfile 的解压包目录须先执行 `npm install --omit=dev --ignore-scripts`。
 第三方插件界面也支持选择本地绝对目录。安装完成后重启目标 profile。
+
+部分 DSH SDK 包还会将其他宿主服务声明为 peer，因此 pnpm 可能仍显示间接 peer
+警告。请确认目标 profile 中的 Talus 组件处于运行状态；警告本身不能证明加载成功。
+如手动编辑 profile patch，请保留插件自带的 `talus` 条目 id，设置页面依赖此 id。
 
 无界面运行使用 `--profile headless`。Desktop 需要先启动一次以初始化 profile，
 完全退出后用 `--profile desktop` 安装，再重新启动。安装到 `web` 不会同时安装到
@@ -33,7 +40,8 @@ dsh plugin --profile web add ./plugins/dsh
 
 ## 在插件页配置
 
-打开 **插件页 → Talus**，填写 HTTPS 实例基础地址，例如
+通过 HTTPS 或 `localhost` / 回环地址打开 dsh 页面。非回环主机上的 HTTP 页面不是
+安全浏览器上下文，无法保存凭据；远程访问请使用 HTTPS。然后打开 **插件页 → Talus**，填写 HTTPS 实例基础地址，例如
 `https://talus.example.com`，不包含 `/api/v1`，再填写从
 **Talus Web UI → API Keys** 获取的 API 密钥并保存。修改对后续请求立即生效，
 无需重新安装或重启。插件自动启动宿主代理，无需手动运行独立代理。
@@ -51,7 +59,9 @@ TLS 保护传输中的认证头；代理不跟随重定向。不引入签名协�
 
 所有二进制上传、下载分别使用随包 Node 助手的 `--data-file`、`--output`；宿主工具
 不接收本地文件路径。助手通过本地 Unix-domain socket 或 Windows named pipe 连接
-代理，也用于较大的 JSON/文本请求或响应。shell 工具只获得
+代理，也用于较大的 JSON/文本请求或响应。Windows 命名管道和描述文件依赖继承的
+Windows ACL；插件不会单独设置或验证管道 ACL，应限制账户和临时目录的访问权限。
+shell 工具只获得
 `DSH_TALUS_BROKER`、`DSH_TALUS_HELPER` 路径，插件不会
 注入 API 密钥。skill 在每次 shell 调用中将它们映射为 `TALUS_BROKER`、`TALUS_REQUEST`。
 
@@ -59,8 +69,8 @@ TLS 保护传输中的认证头；代理不跟随重定向。不引入签名协�
 
 密钥通过 dsh credentials 服务保存。旧安装升级后，请在插件表单重新输入一次 API 密钥；
 旧配置中的密钥及密钥环境变量均不会被使用。保存时将输入的密钥写入 credentials 服务，
-并清除旧配置字段。默认 `credentials-local` 使用仅所属用户可访问的本地文件（Unix 权限
-`0600`），不是操作系统加密钥匙串，也不能强隔离同一用户下的进程。本插件避免将密钥
+并清除旧配置字段。默认 `credentials-local` 使用本地文件（Unix 权限 `0600`；Windows
+访问权限取决于文件 ACL），不是操作系统加密钥匙串，也不能强隔离同一用户下的进程。本插件避免将密钥
 主动下发给模型、shell 环境或命令行参数。如果模型能任意读取该用户的凭据目录，
 更强隔离仍需 OS keychain 凭据提供器，或分账号和操作系统权限边界。
 
@@ -99,7 +109,7 @@ dsh plugin --profile web add ./plugins/dsh
 执行检查：
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 npm run sync-skills
 npm run check-skills
 npm test
@@ -113,7 +123,8 @@ npm pack
 dsh plugin --profile web add /absolute/path/dsh-plugin-talus-0.1.0.tgz
 ```
 
-也可以解压后，用 `package/` 目录的绝对路径安装。
+直接安装压缩包会安装运行时依赖。也可以解压后，先在 `package/` 目录执行
+`npm install --omit=dev --ignore-scripts`，再用该目录的绝对路径安装。
 包内包含 skill、[文件操作参考](skills/talus/references/files.md)和
 [监控参考](skills/talus/references/metrics.md)。
 

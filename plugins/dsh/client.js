@@ -9,7 +9,7 @@ window.__ModuleLoader__.load({
       key: 'API key', keyHint: 'Enter the address first, then its key. Saved keys are never filled back in. Leave blank to keep a key already saved for this address; editing the address clears any unsaved key.',
       save: 'Save', saving: 'Saving…', saved: 'Configuration saved. New requests use it immediately.',
       cleared: 'The saved key was cleared. Configure an HTTPS address and its key before making requests.',
-      clear: 'Clear saved API key', clearPending: 'The key for the address above will be cleared when you save.',
+      clear: 'Clear saved API key', clearPending: 'Clear selected. Saving will request removal of the key for the address above.',
       reload: 'Discard edits', loading: 'Loading configuration…',
       keyChecking: 'Checking the saved key for this address…',
       keyConfigured: 'A key is saved for this address.', keyMissing: 'No key is saved for this address.',
@@ -18,6 +18,9 @@ window.__ModuleLoader__.load({
       legacyKey: 'An old key remains in plugin settings. It is not used for requests; enter and save the key here to move to the native credential store.',
       unavailable: 'Enable the Talus plugin to configure it.', readOnly: 'This profile does not allow configuration changes.',
       failed: 'Could not finish saving. Your edits are preserved. Discard edits to load the current configuration, then try again.',
+      failedKeyPresent: 'Could not finish saving. At the last check, a key was configured for the address above. Your edits are preserved; discard them to load the latest configuration.',
+      failedKeyMissing: 'Could not finish saving. At the last check, no key was configured for the address above. Your edits are preserved; discard them to load the latest configuration.',
+      failedKeyUnknown: 'Could not finish saving or check the key status. Your edits are preserved; discard them to load the latest configuration, then check the key before retrying.',
       missingKey: 'Enter an API key for this address before saving. A key for another address is not reused.',
       invalidUrl: 'Enter an HTTPS base URL without credentials, a query, a fragment, or /api/v1.',
       invalidKey: 'The API key must not contain line breaks.',
@@ -30,7 +33,7 @@ window.__ModuleLoader__.load({
       key: 'API key', keyHint: '请先填写地址，再填写对应密钥。已保存的密钥不会回填，留空保留此地址已有的密钥；修改地址会清空尚未保存的密钥。',
       save: '保存', saving: '保存中…', saved: '配置已保存，后续请求立即生效。',
       cleared: '已清除保存的密钥。发起请求前，请配置 HTTPS 地址及对应密钥。',
-      clear: '清除已保存的 API key', clearPending: '点击保存后，将清除上方地址对应的密钥。',
+      clear: '清除已保存的 API key', clearPending: '已选择清除；保存时将请求移除上方地址对应的密钥。',
       reload: '放弃修改', loading: '正在加载配置…',
       keyChecking: '正在检查此地址的密钥状态…',
       keyConfigured: '此地址已保存密钥。', keyMissing: '此地址尚未保存密钥。',
@@ -39,6 +42,9 @@ window.__ModuleLoader__.load({
       legacyKey: '旧插件设置中仍有密钥，旧值不会用于请求；请在此重新输入并保存，以转入原生凭据库。',
       unavailable: '请先启用 Talus 插件再进行配置。', readOnly: '当前 profile 不允许修改配置。',
       failed: '未能完成保存，已保留输入。可放弃修改以读取当前配置，再重新填写并保存。',
+      failedKeyPresent: '未能完成保存。上次检查时，上方地址已配置密钥。输入已保留；可放弃修改以读取最新配置。',
+      failedKeyMissing: '未能完成保存。上次检查时，上方地址未配置密钥。输入已保留；可放弃修改以读取最新配置。',
+      failedKeyUnknown: '未能完成保存，也无法检查密钥状态。输入已保留；请放弃修改以读取最新配置，并在重试前检查密钥。',
       missingKey: '请先填写此地址的 API key；不会复用其他地址的密钥。',
       invalidUrl: '请填写 HTTPS 基础地址，不包含账号密码、查询参数、片段或 /api/v1。',
       invalidKey: 'API key 不能包含换行。',
@@ -161,8 +167,24 @@ window.__ModuleLoader__.load({
         const key = apiKey.trim();
         savingNow.current = true;
         setSaving(true); setMessage('');
+        let ref;
+        // Credentials and public settings use separate stores. If either call
+        // fails, inspect the target again: even a rejected write may have
+        // committed before its response was lost.
+        async function reportFailure() {
+          if (signal.aborted) return;
+          if (!ref) { setMessage('failed'); return; }
+          try {
+            const view = await credentials.describe(ref, signal);
+            aborted(signal);
+            setCredential({ status: 'ready', address, ref, ...view });
+            setMessage(view.configured ? 'failedKeyPresent' : 'failedKeyMissing');
+          } catch {
+            if (!signal.aborted) setMessage('failedKeyUnknown');
+          }
+        }
         try {
-          const ref = await credentialReference(address);
+          ref = await credentialReference(address);
           aborted(signal);
           const current = await credentials.describe(ref, signal);
           if (key || clearKey) {
@@ -185,9 +207,9 @@ window.__ModuleLoader__.load({
           if (accepted) {
             setApiKey(''); setClearKey(false); setDirty(false);
             setMessage(clearKey && !key ? 'cleared' : 'saved');
-          } else setMessage('failed');
+          } else await reportFailure();
         } catch {
-          if (!signal.aborted) setMessage('failed');
+          await reportFailure();
         } finally {
           savingNow.current = false;
           if (!signal.aborted) {

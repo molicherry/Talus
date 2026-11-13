@@ -230,10 +230,13 @@ talus/
 使用 Node.js 24.9.0+ 和 DSH 0.2.2-rc.1，在仓库根目录运行：
 
 ```bash
+npm ci --ignore-scripts --prefix ./plugins/dsh
 dsh plugin --profile web add ./plugins/dsh
 ```
 
-安装后重启目标 profile，在 **插件页 → Talus** 填写 HTTPS 地址和 API 密钥并保存。
+目录安装只链接目录，不会安装依赖；解压目录与 `.tgz` 的安装方法见
+[插件安装说明](../plugins/dsh/README.zh-CN.md#安装)。安装后重启目标 profile，
+通过 HTTPS 或 localhost 打开 dsh 页面，在 **插件页 → Talus** 填写 HTTPS 地址和 API 密钥并保存。
 密钥由 dsh credentials 服务持有；模型使用 `talus_request`，二进制传输使用随包助手。
 保存后即对后续请求生效，无需重新安装或重启。dsh 用户无需手动启动代理。
 DSH 插件 API 仍为预览版本；本插件声明的兼容范围为 `~0.2.2-rc.1`。
@@ -250,7 +253,10 @@ node /absolute/path/to/talus/scripts/broker.mjs configure \
 
 在隐藏输入提示中填写 API 密钥。命令写入仅所属用户可读写的 JSON 文件（Unix 权限
 `0600`），密钥不经过命令行参数或环境变量。也可由用户私下创建同样权限的 JSON
-文件，包含字符串字段 `url`、`apiKey`。不要让模型执行凭据配置命令，或创建、读取、
+文件，且仅包含字符串字段 `url`、`apiKey`。配置必须是大小不超过 64 KiB 的普通文件，
+文件及其所有上级路径均不能是符号链接。密钥须非空，仅支持不含空格的可见 ASCII
+字符（`!` 至 `~`）；隐藏输入会忽略其他字符。交互配置要求输入和标准错误均为 TTY。
+在 Unix 上文件必须属于当前用户且仅该用户可访问。不要让模型执行凭据配置命令，或创建、读取、
 填写此文件。然后在宿主启动代理：
 
 ```bash
@@ -267,7 +273,9 @@ export TALUS_REQUEST='/absolute/path/to/talus/scripts/request.mjs'
 ```
 
 请求经本地 Unix-domain socket 或 Windows named pipe 交给代理；代理只向已配置的
-Talus HTTPS 目标添加认证头。AI 进程可以继承上述路径变量，私有配置文件及其内容
+Talus HTTPS 目标添加认证头。Windows 管道及文件权限取决于继承的 ACL；此代理不单独
+设置或验证管道 ACL，应将 Windows 账户和私有目录限制给可信用户。本地 IPC 和权限测试
+运行在 Linux，未验证 Windows 管道的 ACL 边界。AI 进程可以继承上述路径变量，私有配置文件及其内容
 保留在宿主。修改独立代理凭据时，由用户在可信终端重新执行 `configure` 命令；
 后续请求会读取更新后的文件。如果重启代理，使用新输出的描述文件路径。
 
@@ -306,6 +314,7 @@ node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
 | 找不到 skill、助手或参考文档 | 安装完整 `talus/` 目录，并在当前会话中加载。 |
 | 代理不可用 | 请宿主用户启动代理并提供当前描述文件路径；不要检查私有凭据。 |
 | dsh 缺少凭据 | 在 **插件页 → Talus** 填写，不要粘贴到聊天中。 |
+| dsh 页面无法保存凭据 | 通过 HTTPS 或 localhost 打开 dsh；非回环主机上的 HTTP 页面不是安全浏览器上下文。 |
 | HTTP 地址或 TLS 证书被拒绝 | 部署 HTTPS 并修正证书或宿主信任配置；不要关闭校验。 |
 | 连接被拒绝、域名解析失败或超时 | 从代理宿主检查到所配置 HTTPS 地址的网络。 |
 | 401 | 请宿主用户检查实例配置，以及密钥是否已撤销。 |

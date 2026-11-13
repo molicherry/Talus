@@ -37,13 +37,15 @@ function untilAborted(operation, signal) {
 export async function apply(ctx, config) {
   const lifetime = new AbortController();
   const ns = ctx.fiber.entry?.options.id ?? 'talus';
-  let clearing;
+  let clearing = Promise.resolve();
 
   // Never copy an old key: native references have no compare-and-set, so copying
   // could overwrite a concurrent UI save. Erase it only after native setup.
   async function clearLegacy(url) {
-    if (clearing) return clearing;
-    clearing = (async () => {
+    // Serialize cleanup attempts so a second address gets its own attempt after
+    // a stale first write finishes. Each attempt rechecks the captured address:
+    // the credential lookup and a previous cleanup may both have awaited.
+    const next = clearing.then(async () => {
       const legacy = config.apiKey?.get();
       if (!legacy || config.url.get().trim() !== url) return;
       const view = ctx.settings.describe().find(row => row.ns === ns);
@@ -53,8 +55,9 @@ export async function apply(ctx, config) {
         : { op: 'unset', path: ['apiKey'] };
       try { await ctx.settings.mutate(ns, [op], view.revision); }
       catch { /* A stale revision or read-only profile must preserve newer edits. */ }
-    })().finally(() => { clearing = undefined; });
-    return clearing;
+    });
+    clearing = next.catch(() => {});
+    return next;
   }
 
   async function resolveConfig({ signal = lifetime.signal } = {}) {

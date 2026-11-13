@@ -286,11 +286,10 @@
       "runner": "node-test",
       "cwd": "plugins/dsh",
       "command": [
-        "bash",
-        "-c",
-        "node scripts/sync-skills.mjs --check && node --test --test-reporter=../../tests/lib/node-test-report.mjs tests/*.test.mjs"
+        "npm",
+        "test"
       ],
-      "timeout_seconds": 120,
+      "timeout_seconds": 600,
       "environment": {
         "profile": "local-dsh-plugin",
         "requires": []
@@ -310,6 +309,21 @@
       "timeout_seconds": 120,
       "environment": {
         "profile": "local-private-broker",
+        "requires": []
+      }
+    },
+    {
+      "run_id": "dsh-install-smoke",
+      "suite": "integration",
+      "runner": "shell",
+      "cwd": "plugins/dsh",
+      "command": [
+        "node",
+        "scripts/install-smoke.mjs"
+      ],
+      "timeout_seconds": 600,
+      "environment": {
+        "profile": "local-dsh-install",
         "requires": []
       }
     }
@@ -1119,6 +1133,16 @@
           "implementation": {
             "path": "backend/internal/repository/metric_budget_test.go",
             "symbol": "TestRawSampleProbeStopsAtLimit"
+          },
+          "automation_status": "implemented",
+          "required": true
+        },
+        {
+          "implementation_id": "impl-04-05j",
+          "run_id": "migrate-hardening",
+          "implementation": {
+            "path": "backend/internal/repository/metric_probe_plan_test.go",
+            "symbol": "TestRawSampleProbePlanKeepsLimitAndUsesTimeIndex"
           },
           "automation_status": "implemented",
           "required": true
@@ -6023,7 +6047,40 @@
           },
           "automation_status": "implemented",
           "required": false,
-          "verification": "Run npm ci and npm test in plugins/dsh with Node 24.9+ and tar. The isolated npm archive is loaded with the real DSH skill registry and filesystem provider; no live Talus instance or model API is used."
+          "verification": "Run npm ci --ignore-scripts and npm test in plugins/dsh with Node 24.9+ and tar. The isolated npm archive is loaded with the real DSH skill registry and filesystem provider; no live Talus instance or model API is used."
+        },
+        {
+          "implementation_id": "impl-01-11",
+          "run_id": "dsh-install-smoke",
+          "implementation": {
+            "path": "plugins/dsh/scripts/install-smoke.mjs",
+            "symbol": "clean DSH profile installation"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "With Node.js 24.9+, the pinned official DSH CLI and pnpm on PATH, install the packed bundle and local directory into separate clean profiles, start the real DSH host, and verify the plugin activates without missing dependencies."
+        },
+        {
+          "implementation_id": "impl-01-13",
+          "run_id": "dsh-plugin",
+          "implementation": {
+            "path": "plugins/dsh/tests/sync-skills.test.mjs",
+            "symbol": "bundled skill replaces portable setup and fails closed on source drift"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "Generate a bundled skill from isolated fixtures and verify exclusive setup sections, shared content, source drift detection, and required markers."
+        },
+        {
+          "implementation_id": "impl-01-14",
+          "run_id": "coverage-tools",
+          "implementation": {
+            "path": "tests/coverage-tools.test.mjs",
+            "symbol": "DSH skill drift check remains enabled for documentation-only pull requests"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "Check that the independent skill-sync workflow includes pull requests without path filters and runs the generated-skill drift check."
         }
       ]
     },
@@ -6067,6 +6124,17 @@
           "automation_status": "implemented",
           "required": false,
           "verification": "Load the actual browser artifact with real Cordis dependency enforcement, invoke its injected credential bridge, and verify native argument counts and status-only reads. This catches a missing root remote service declaration before browser installation."
+        },
+        {
+          "implementation_id": "impl-01-12",
+          "run_id": "dsh-plugin",
+          "implementation": {
+            "path": "plugins/dsh/tests/client-conflict.test.mjs",
+            "symbol": "credential changes are reported accurately after a conflicting URL save"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "Exercise the actual browser component and native credential bridge across URL revision conflicts, lost replies, clear operations, and unavailable credential status."
         }
       ]
     },

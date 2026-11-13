@@ -27,19 +27,29 @@ async function files(directory, prefix = '') {
 function bundled(file, contents) {
   if (file !== 'SKILL.md') return contents;
   const skill = contents.toString('utf8');
+  const start = '<!-- talus:portable-setup:start -->';
+  const end = '<!-- talus:portable-setup:end -->';
   assert.ok(skill.includes('## Quick Start\n'), 'The Talus skill Quick Start heading is missing');
-  return Buffer.from(skill.replace('## Quick Start\n', `## Quick Start\n\n${setup.trim()}\n`)
-    .replace('ask the user to configure it in the environment.',
-      'ask the user to configure it in the Talus plugin page.'));
+  assert.equal(skill.split(start).length, 2, 'The portable setup start marker must occur exactly once');
+  assert.equal(skill.split(end).length, 2, 'The portable setup end marker must occur exactly once');
+  const heading = skill.indexOf('## Quick Start\n');
+  const first = skill.indexOf(start), last = skill.indexOf(end);
+  const nextHeading = skill.indexOf('\n## ', heading + '## Quick Start\n'.length);
+  assert.ok(first > heading && last > first && (nextHeading === -1 || last < nextHeading),
+    'The portable setup markers must be ordered inside Quick Start');
+  return Buffer.from(skill.slice(0, first) + setup.trim() + skill.slice(last + end.length));
 }
 
 // Verify the source before replacing the generated copy, including symlinks.
 const sourceFiles = await files(source);
 await readFile(sourceLicense);
+// Validate and construct the replacement before removing the existing bundle.
+const bundledSkill = bundled('SKILL.md', await readFile(join(source, 'SKILL.md')));
 if (check) {
   assert.deepEqual(await files(target), sourceFiles, 'Bundled skill file list differs; run npm run sync-skills');
   for (const file of sourceFiles) {
-    assert.deepEqual(await readFile(join(target, file)), bundled(file, await readFile(join(source, file))),
+    const expected = file === 'SKILL.md' ? bundledSkill : await readFile(join(source, file));
+    assert.deepEqual(await readFile(join(target, file)), expected,
       `${file} differs; run npm run sync-skills`);
   }
   assert.deepEqual(await readFile(targetLicense), await readFile(sourceLicense),
@@ -49,8 +59,7 @@ if (check) {
   await rm(target, { recursive: true, force: true });
   await mkdir(target, { recursive: true });
   await cp(source, target, { recursive: true });
-  await writeFile(join(target, 'SKILL.md'),
-    bundled('SKILL.md', await readFile(join(source, 'SKILL.md'))));
+  await writeFile(join(target, 'SKILL.md'), bundledSkill);
   await cp(sourceLicense, targetLicense);
   console.log('Synced the complete Talus skill and license.');
 }

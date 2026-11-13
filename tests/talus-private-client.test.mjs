@@ -145,9 +145,14 @@ test('private Talus client keeps credentials in the HTTPS host and transfers fil
       '/api/v1/%2e%2e/secret', '/api/v1/a%2fb', '/api/v1/a\\b', '/api/v1/echo#fragment']) {
       assert.throws(() => resolveApiUrl(baseUrl, path));
     }
-    for (const name of ['Authorization', 'Proxy-Authorization', 'X-API-Key', 'Host', 'Content-Length', 'Expect', 'Keep-Alive', 'X-Talus-Broker-Token']) {
+    for (const name of ['Authorization', 'Proxy-Authorization', 'X-API-Key', 'Cookie', 'Host', 'Content-Length', 'Expect', 'Keep-Alive', 'X-Talus-Broker-Token']) {
       await assert.rejects(call({ headers: { [name]: 'forbidden' } }), { code: 'AUTH_HEADER_FORBIDDEN' });
     }
+    // Relay's nested business headers are request data, not Talus auth headers.
+    const nested = await call({ method: 'POST', json: { headers: { Cookie: 'service-session=fixture' } } });
+    const payload = await nested.json();
+    assert.deepEqual(JSON.parse(Buffer.from(payload.body, 'base64')), { headers: { Cookie: 'service-session=fixture' } });
+    assert.equal(seen.at(-1).headers.cookie, undefined);
   });
 
   await t.test('does not follow redirects and bounds response reads, cancellation, and credential output', async () => {
@@ -195,6 +200,7 @@ test('private Talus client keeps credentials in the HTTPS host and transfers fil
     assert.equal(head.headers['content-length'], String(binary.length));
     assert.equal(head.body.length, 0);
     assert.equal((await localRequest(descriptor, { headers: { authorization: 'forbidden' } })).status, 400);
+    assert.equal((await localRequest(descriptor, { headers: { cookie: 'session=forbidden' } })).status, 400);
     assert.equal((await localRequest(descriptor, { path: '/api/v1/%2e%2e/secret' })).status, 400);
   });
 
@@ -236,7 +242,7 @@ test('private Talus client keeps credentials in the HTTPS host and transfers fil
     assert.equal(timedOut.code, 124, timedOut.stderr);
     const binaryStdout = await cli([...common, '--path', '/api/v1/bytes']);
     assert.equal(binaryStdout.code, 1);
-    for (const args of [['--api-key', 'forbidden'], ['--config', 'forbidden'], ['--header', 'X-API-Key=forbidden']]) {
+    for (const args of [['--api-key', 'forbidden'], ['--config', 'forbidden'], ['--header', 'X-API-Key=forbidden'], ['--header', 'Cookie=session=forbidden']]) {
       assert.equal((await cli([...common, '--path', '/api/v1/echo', ...args])).code, 1);
     }
     const viaPathEnv = await cli(['--path', '/api/v1/echo'], { TALUS_BROKER: broker.descriptorPath });

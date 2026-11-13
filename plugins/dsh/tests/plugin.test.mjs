@@ -100,7 +100,7 @@ test('packed bundle loads through DSH, preserves other skills, and unloads clean
   const installed = join(scratch, 'package');
   const manifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'));
   const patch = parse(await readFile(join(installed, manifest.dsh.bundle.patch), 'utf8'));
-  assert.equal(manifest.dsh.manifestVersion, 1);
+  assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml');
   assert.equal(patch[0].insert[0].name, manifest.name);
   const plugin = await import(pathToFileURL(join(installed, manifest.main)));
   const customRoot = join(scratch, 'existing-skills');
@@ -279,6 +279,31 @@ test('packed bundle loads through DSH, preserves other skills, and unloads clean
     const beforeConflictRequest = requests.length;
     await assert.rejects(execute({ path: '/api/v1/servers' }), /key|credential|configur/i);
     assert.equal(requests.length, beforeConflictRequest);
+
+    // A second address must still get a cleanup attempt if it is configured
+    // while a stale cleanup for the first address is waiting to commit.
+    const queuedFirst = `${address}/queued-first`, queuedSecond = `${address}/queued-second`;
+    await update({ url: queuedFirst, apiKey: 'queued-old-first-key' });
+    let releaseCleanup, enteredCleanup;
+    const waitingCleanup = new Promise(resolve => { releaseCleanup = resolve; });
+    const cleanupStarted = new Promise(resolve => { enteredCleanup = resolve; });
+    t.after(() => releaseCleanup());
+    ctx.configEditor.beforeEdit = async () => {
+      ctx.configEditor.beforeEdit = undefined;
+      enteredCleanup();
+      await waitingCleanup;
+    };
+    await ctx.credentials.set(reference(queuedFirst), 'queued-native-first-key');
+    await Promise.race([cleanupStarted, new Promise((_, reject) => {
+      const timer = setTimeout(() => reject(new Error('legacy cleanup did not start')), 5000);
+      timer.unref();
+    })]);
+    await update({ url: queuedSecond, apiKey: 'queued-old-second-key' });
+    await ctx.credentials.set(reference(queuedSecond), 'queued-native-second-key');
+    await new Promise(resolve => setImmediate(resolve));
+    releaseCleanup();
+    await eventually(() => assert.ok(!entry.options.config?.apiKey, 'the second address must not lose its cleanup'));
+    assert.equal(entry.options.config.url, queuedSecond);
 
     // Snapshot the destination before asynchronously resolving its key: a live
     // URL change cannot pair the old key with the newly configured destination.

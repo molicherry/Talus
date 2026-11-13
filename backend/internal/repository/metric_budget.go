@@ -255,19 +255,22 @@ func (r *MetricRepo) QueryWithBudget(ctx context.Context, req QueryRequest) (*Qu
 	return result, nil
 }
 
-// probeRawSamples counts at most 12,001 candidate keys in a bounded subquery.
-// Only the scalar count crosses the driver boundary; decoding thousands of
-// timestamps is unnecessary when the planner needs only their bounded count.
+// rawSampleProbeSQL caps the qualifying rows returned to the count at 12,001.
+// The database may examine more rows to apply the server and time filters; the
+// amount of scanning depends on the selected plan, indexes, and time window.
+const rawSampleProbeSQL = `SELECT COUNT(*) FROM (
+	SELECT time FROM metrics
+	WHERE server_id = ? AND time >= ? AND time < ?
+	LIMIT ?
+) AS candidate_keys`
+
+// probeRawSamples sends only a bounded scalar count across the driver boundary;
+// it does not need to transfer and decode the individual sample timestamps.
 func (r *MetricRepo) probeRawSamples(ctx context.Context, serverID uint, from, to time.Time) (int, bool, error) {
 	// The planned raw input is the window plus the single predecessor row the rate
 	// calculation reads, so one extra row is counted against the budget.
 	var samples int
-	err := r.db.WithContext(ctx).Raw(
-		`SELECT COUNT(*) FROM (
-			SELECT time FROM metrics
-			WHERE server_id = ? AND time >= ? AND time < ?
-			ORDER BY time LIMIT ?
-		) AS candidate_keys`,
+	err := r.db.WithContext(ctx).Raw(rawSampleProbeSQL,
 		serverID, from, to, rawProbeLimit).Scan(&samples).Error
 	if err != nil {
 		return 0, false, classifyBudgetError(fmt.Errorf("probe raw samples: %w", err))

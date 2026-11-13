@@ -5,7 +5,7 @@ export const DEFAULT_TIMEOUT_MS = 30_000;
 const METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const FORBIDDEN_HEADERS = new Set([
-  'authorization', 'proxy-authorization', 'x-api-key', 'host', 'content-length',
+  'authorization', 'proxy-authorization', 'x-api-key', 'cookie', 'host', 'content-length',
   'transfer-encoding', 'connection', 'upgrade', 'proxy-connection', 'trailer', 'te',
   'expect', 'keep-alive',
 ]);

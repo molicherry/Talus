@@ -1,4 +1,4 @@
-填写当前 profile 所用 Talus 的 **HTTPS** 基础地址和 API key，然后点击**保存**。
+通过 HTTPS 或 localhost 打开 dsh 页面以保存凭据。填写当前 profile 所用 Talus 的 **HTTPS** 基础地址和 API key，然后点击**保存**。
 修改对后续请求立即生效。
 
 密钥由 dsh credentials 服务保存，不下发给模型或其 shell。同一地址下留空保留原密钥；

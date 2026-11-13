@@ -1,5 +1,5 @@
-In DeepSeek Harness, configure **Plugins → Talus → HTTPS URL / API key** and
-save. The plugin owns the host credential broker and stores the key through the
+In DeepSeek Harness, open the dsh page over HTTPS or localhost, configure
+**Plugins → Talus → HTTPS URL / API key**, and save. The plugin owns the host credential broker and stores the key through the
 DSH credentials service. If configuration is missing, ask the user to fill the
 plugin form; never request the key in chat or read private credential storage.
 Do not launch a second broker or configure a key environment variable.
@@ -42,5 +42,5 @@ For PowerShell, set `$env:TALUS_BROKER = $env:DSH_TALUS_BROKER` and
 `$env:TALUS_REQUEST = $env:DSH_TALUS_HELPER` in that invocation, then run
 `node $env:TALUS_REQUEST --broker $env:TALUS_BROKER ...`. These values contain
 paths, not the API key. Do not search for credentials if the broker is unavailable;
-ask the user to check the plugin settings. The generic Quick Start below applies
-to this helper and its host broker.
+ask the user to check the plugin settings. The helper details below apply to this
+automatically managed host broker.

@@ -12,7 +12,7 @@ const MAX_STDOUT_BYTES = 1024 * 1024;
 const MAX_ERROR_BYTES = 8192;
 const MAX_DESCRIPTOR_BYTES = 16384;
 const FORBIDDEN_HEADERS = new Set([
-  'authorization', 'proxy-authorization', 'x-api-key', 'host', 'connection',
+  'authorization', 'proxy-authorization', 'x-api-key', 'cookie', 'host', 'connection',
   'proxy-connection', 'content-length', 'transfer-encoding', 'trailer', 'te',
   'upgrade', 'expect',
 ]);

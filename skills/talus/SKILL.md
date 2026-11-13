@@ -27,6 +27,7 @@ they do not require a checkout of the application repository.
 
 ## Quick Start
 
+<!-- talus:portable-setup:start -->
 Send requests through the host's credential broker using the bundled
 `scripts/request.mjs` helper. The host owner configures the HTTPS instance URL
 and API key outside the AI session, starts `scripts/broker.mjs`, and supplies only
@@ -42,6 +43,7 @@ credential file, settings, environment, or authentication headers.
 node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
   --method GET --path /api/v1/servers
 ```
+<!-- talus:portable-setup:end -->
 
 The helper communicates locally over the broker's private Unix-domain socket or
 Windows named pipe. The broker adds `X-API-Key` only to the configured Talus HTTPS

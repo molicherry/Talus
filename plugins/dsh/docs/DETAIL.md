@@ -1,4 +1,4 @@
-Connect this profile to Talus by entering its **HTTPS** base URL and API key,
+Open dsh over HTTPS or localhost to save credentials. Connect this profile to Talus by entering its **HTTPS** base URL and API key,
 then selecting **Save**. Changes apply to later requests immediately.
 
 The key is stored by dsh's credentials service, not supplied to the model or its

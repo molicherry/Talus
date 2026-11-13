@@ -114,7 +114,7 @@ export async function createBroker({ resolveConfig, directory, maxBodyBytes = MA
     const outgoing = {};
     for (const [name, value] of Object.entries(req.headers)) {
       if (name === TOKEN_HEADER || name === TIMEOUT_HEADER || TRANSPORT_HEADERS.has(name)) continue;
-      if (name === 'authorization' || name === 'proxy-authorization' || name === 'x-api-key' || name.startsWith('x-talus-') || typeof value !== 'string') {
+      if (name === 'authorization' || name === 'proxy-authorization' || name === 'x-api-key' || name === 'cookie' || name.startsWith('x-talus-') || typeof value !== 'string') {
         req.resume();
         return publicError(res, 400, 'AUTH_HEADER_FORBIDDEN', 'Authentication headers belong to the Talus host.');
       }

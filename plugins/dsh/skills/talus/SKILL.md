@@ -27,8 +27,8 @@ they do not require a checkout of the application repository.
 
 ## Quick Start
 
-In DeepSeek Harness, configure **Plugins → Talus → HTTPS URL / API key** and
-save. The plugin owns the host credential broker and stores the key through the
+In DeepSeek Harness, open the dsh page over HTTPS or localhost, configure
+**Plugins → Talus → HTTPS URL / API key**, and save. The plugin owns the host credential broker and stores the key through the
 DSH credentials service. If configuration is missing, ask the user to fill the
 plugin form; never request the key in chat or read private credential storage.
 Do not launch a second broker or configure a key environment variable.
@@ -71,24 +71,8 @@ For PowerShell, set `$env:TALUS_BROKER = $env:DSH_TALUS_BROKER` and
 `$env:TALUS_REQUEST = $env:DSH_TALUS_HELPER` in that invocation, then run
 `node $env:TALUS_REQUEST --broker $env:TALUS_BROKER ...`. These values contain
 paths, not the API key. Do not search for credentials if the broker is unavailable;
-ask the user to check the plugin settings. The generic Quick Start below applies
-to this helper and its host broker.
-
-Send requests through the host's credential broker using the bundled
-`scripts/request.mjs` helper. The host owner configures the HTTPS instance URL
-and API key outside the AI session, starts `scripts/broker.mjs`, and supplies only
-the broker descriptor path as `TALUS_BROKER`. Set `TALUS_REQUEST` to the
-absolute path of this skill's `scripts/request.mjs`. These variables contain
-paths, not credentials. The helper reads the owner-only descriptor's local
-capability token; do not print or publish its contents. If the broker is missing
-or unavailable, ask the user
-to configure or restart it; do not read, create, or inspect the host's private
-credential file, settings, environment, or authentication headers.
-
-```bash
-node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
-  --method GET --path /api/v1/servers
-```
+ask the user to check the plugin settings. The helper details below apply to this
+automatically managed host broker.
 
 The helper communicates locally over the broker's private Unix-domain socket or
 Windows named pipe. The broker adds `X-API-Key` only to the configured Talus HTTPS

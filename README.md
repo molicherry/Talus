@@ -392,10 +392,14 @@ The [Talus plugin for DeepSeek Harness](plugins/dsh/README.md) includes its own
 host broker. With Node.js 24.9.0+ and DSH 0.2.2-rc.1, run from the repository root:
 
 ```bash
+npm ci --ignore-scripts --prefix ./plugins/dsh
 dsh plugin --profile web add ./plugins/dsh
 ```
 
-Restart the target profile after installation, then open **Plugins → Talus** and
+Directory installation links the directory; it does not install dependencies.
+See the [plugin install guide](plugins/dsh/README.md#install) for extracted
+directories and `.tgz` packages. Restart the target profile after installation,
+open dsh over HTTPS or localhost, then open **Plugins → Talus** and
 save the HTTPS URL and API key. The key is held by dsh's credentials service;
 the model uses `talus_request`, while binary transfers use the bundled helper.
 Saved settings apply to later requests without reinstalling or restarting.
@@ -416,7 +420,12 @@ node /absolute/path/to/talus/scripts/broker.mjs configure \
 Enter the API key at the hidden prompt. The command writes an owner-only JSON
 file (`0600` on Unix); the key is not passed in arguments or environment
 variables. Alternatively, the user may privately create an owner-only JSON file
-with `url` and `apiKey` string fields. Do not ask the model to run credential
+with only `url` and `apiKey` string fields. The file must be a regular file of
+at most 64 KiB, and neither it nor any ancestor may be a symlink. The API key
+must be non-empty visible ASCII (`!` through `~`, with no spaces); the hidden
+prompt ignores other characters. Interactive configuration requires a TTY for
+both input and standard error. On Unix the file must be owned by the current
+user and accessible only to that user. Do not ask the model to run credential
 setup or to create, read, or fill this file. Start the broker on the host:
 
 ```bash
@@ -434,7 +443,11 @@ export TALUS_REQUEST='/absolute/path/to/talus/scripts/request.mjs'
 ```
 
 Requests cross a local Unix-domain socket or Windows named pipe. The broker
-adds the key only to requests for the configured Talus HTTPS destination. These
+adds the key only to requests for the configured Talus HTTPS destination.
+Windows pipe and file access controls depend on inherited ACLs; this broker does
+not set or verify a dedicated pipe ACL. Restrict the Windows account and private
+directory to trusted users. The local IPC and permission tests run on Linux; the
+Windows pipe ACL boundary has not been verified by those tests. These
 path variables can be inherited by the AI process; the private configuration
 file and its contents must remain with the host. To change standalone broker
 credentials, the user reruns the trusted-terminal `configure` command; subsequent
@@ -480,6 +493,7 @@ not verify a working connection.
 | Skill, helper, or reference missing | Install the complete `talus/` directory and load it in the current session. |
 | Broker unavailable | Have the host owner start it and supply the current descriptor path; do not inspect private credentials. |
 | Missing dsh credential | Fill it in **Plugins → Talus**; do not paste it into chat. |
+| dsh page cannot save credentials | Open the dsh page over HTTPS or localhost; an HTTP page on a non-loopback host is not a secure browser context. |
 | HTTP URL or TLS certificate rejected | Deploy HTTPS and correct the certificate or host trust store; never disable validation. |
 | Connection refused, DNS failure, or timeout | Check connectivity from the broker host to the configured HTTPS address. |
 | 401 | Have the host owner check the configured instance and whether its key was revoked. |
