@@ -111,14 +111,27 @@ test('private Talus client keeps credentials in the HTTPS host and transfers fil
     assert.equal(seen.at(-1).headers['x-api-key'], secret);
     assert.equal(seen.at(-1).headers['x-talus-broker-token'], undefined);
     assert.equal(seen.at(-1).headers['x-talus-signature'], undefined);
-    const previous = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-    try {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-      await assert.rejects(call({}), { code: 'UNSAFE_TLS_CONFIGURATION' });
-    } finally {
-      if (previous === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previous;
-    }
+    // Isolate this deliberately unsafe environment from the test runner. The
+    // child stubs fetch, so a broken guard cannot send even a test credential.
+    const probe = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', `
+        import assert from 'node:assert/strict';
+        const { request } = await import(process.argv[1]);
+        let called = false;
+        globalThis.fetch = () => { called = true; throw new Error('Unexpected network request'); };
+        await assert.rejects(request({ baseUrl: 'https://127.0.0.1:1', apiKey: 'test-key',
+          path: '/api/v1/echo' }), { code: 'UNSAFE_TLS_CONFIGURATION' });
+        assert.equal(called, false);
+      `, new URL('../skills/talus/scripts/private-client.mjs', import.meta.url).href], {
+        env: { NODE_TLS_REJECT_UNAUTHORIZED: '0', ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      const stderr = [];
+      child.stderr.on('data', chunk => stderr.push(chunk));
+      child.once('error', reject);
+      child.once('close', code => resolve({ code, stderr: Buffer.concat(stderr).toString() }));
+    });
+    assert.equal(probe.code, 0, probe.stderr);
   });
 
   await t.test('rejects HTTP, alternate targets, traversal, and caller authentication', async () => {
