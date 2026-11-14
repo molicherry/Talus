@@ -9,6 +9,14 @@ import { inspectGoResults } from "./go-results.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
+test("DSH skill drift check remains enabled for documentation-only pull requests", () => {
+  const workflow = readFileSync(join(HERE, "../.github/workflows/dsh-skill-sync.yml"), "utf8");
+  const triggers = workflow.split(/^jobs:/m)[0];
+  assert.match(triggers, /^\s{2}pull_request:\s*$/m);
+  assert.doesNotMatch(triggers, /^\s+paths(?:-ignore)?:/m);
+  assert.match(workflow, /node plugins\/dsh\/scripts\/sync-skills\.mjs --check/);
+});
+
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "talus-coverage-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

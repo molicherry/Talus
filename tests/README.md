@@ -87,6 +87,24 @@ written back into `automation_status`.
 
 ## Suites
 
+The optional DeepSeek Harness plugin is indexed as the `dsh-plugin` integration
+run and is independent of the main application's M1–M5 gates. Install its pinned
+dependencies with `npm ci --ignore-scripts` in `plugins/dsh`, then run `npm test` there; Node.js
+24.9+, npm, and `tar` are required. This packs the plugin and loads the extracted
+archive through the real Cordis and DSH skill services without a model request
+or a live Talus instance. The separate **DSH plugin** CI job also runs these
+checks, including native credential updates, legacy-secret cleanup and requests
+against a local HTTPS server with a trusted test CA. It also runs the portable
+skill's `node --test tests/talus-private-client.test.mjs` suite (the optional
+`talus-private-client` integration run), covering private IPC, TLS enforcement,
+bounded transfers and cancellation. These tests additionally require `openssl`.
+The same job installs the pinned official DSH CLI and pnpm in a separate scratch
+directory and runs `node scripts/install-smoke.mjs` in `plugins/dsh` with those
+tools on `PATH`. This `dsh-install-smoke` run exercises package and local-directory
+installs in clean profiles. The separate **DSH skill sync** workflow checks the
+generated skill and license on every pull request, including documentation-only
+changes. See the [plugin guide](../plugins/dsh/README.md).
+
 | Suite | Needs | Notes |
 | --- | --- | --- |
 | `fast` | Go toolchain, Node | Adapter static check, coverage validation, Go unit tests, frontend Node tests |

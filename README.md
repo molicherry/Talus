@@ -311,8 +311,9 @@ The workflow is informed by [EdgeSSH](https://github.com/aozorae/EdgeSSH): a fil
 
 Talus ships with a portable [agent skill](skills/talus/SKILL.md) for server
 management, SSH commands, monitoring, SFTP, and registered service requests over
-REST. The AI environment must be able to read the skill and send HTTP requests,
-using a terminal with `curl` or an equivalent HTTP tool. MCP is optional.
+REST. The skill uses a Node.js 24 request helper and a host-managed credential
+broker. The host sends the existing `X-API-Key` header over HTTPS; the model
+receives business results without receiving the key. MCP is optional.
 
 ### 1. Prepare the Talus instance
 
@@ -323,9 +324,12 @@ Add the servers/credentials you want the AI to use and confirm their SSH host
 fingerprints in the Web UI. For service access, register the service, its
 credentials, and a usage guide in **Services**.
 
-Choose a Talus URL reachable from the environment where the AI actually runs.
-`localhost` refers to that environment: a cloud worker or container does not
-reach your computer's Talus instance through its own `localhost`.
+Expose Talus at an HTTPS URL reachable from the broker host, with a certificate
+trusted by that host. Existing HTTP deployments need TLS, for example at a
+reverse proxy, before using this skill or the dsh plugin. The broker does not
+follow redirects or disable certificate verification. The AI runtime must be
+able to reach the local broker socket; a remote/cloud worker needs a broker
+in its execution environment, not a socket on your computer.
 
 ### 2. Create an API key
 
@@ -348,8 +352,9 @@ No server restriction means access to all servers. Some operations, including
 credential/service creation and host-key confirmation, still require the Web UI;
 see the [skill's permission rules](skills/talus/SKILL.md#authentication-and-permissions).
 
-Use the API key value from this page as `TALUS_API_KEY`. It is separate from the
-administrator password, SSH credentials, and the Hub's `JWT_SECRET`.
+Give this API key only to the host broker configuration or the dsh plugin
+credential form. It is separate from the administrator password, SSH
+credentials, and the Hub's `JWT_SECRET`. Do not paste it into an AI conversation.
 
 Administrators can edit an existing key in **API Keys → Edit permissions**. The original key stays valid; scopes and server access are updated in place. Key management (including list, create, delete and reveal) now requires an administrator JWT. API keys cannot modify themselves.
 
@@ -362,96 +367,139 @@ Upgrades preserve explicit legacy policies and hash-only keys without reissuing 
 ### 3. Install the complete skill
 
 Obtain `skills/talus/` from this repository or its downloaded source archive.
-Import the whole `talus` directory using your AI tool's skill-loading mechanism,
-or place it in a supported skills directory. Follow that tool's documentation
-for its directory location and reload behavior. The installed structure is:
+Install the entire directory using your AI tool's skill-loading mechanism:
 
 ```text
 talus/
 ├── SKILL.md
-└── references/
-    ├── files.md
-    └── metrics.md
+├── references/
+│   ├── files.md
+│   └── metrics.md
+└── scripts/
+    ├── broker.mjs
+    ├── request.mjs
+    └── …
 ```
 
-Install it where the AI session can read it; installing only on the Talus server
-does not make it available to a separately running AI. Keep `references/` alongside
-`SKILL.md`. The installed skill does not need the rest of the repository.
-After installation, reload skills or start a new session as your tool requires.
-To update, replace the complete `talus/` directory with the new version and reload;
-keep instance configuration in the AI environment so updates preserve it.
+Keep all supporting scripts and references. The installed skill needs Node.js
+24 or later, but not the rest of the application repository. Reload the skill
+or start a new session after installation. Keep host credentials outside this
+directory when replacing it for an update.
 
-### 4. Configure the AI environment
+#### DeepSeek Harness (dsh)
 
-Set these variables in the environment that executes the AI's HTTP requests:
-
-| Variable | Value |
-| --- | --- |
-| `TALUS_URL` | Reachable Talus base URL, such as `https://talus.example.com`, without `/api/v1`; defaults to `http://localhost:8080` |
-| `TALUS_API_KEY` | The API key created above |
-
-For an AI launched from a Bash terminal, replace the example URL, then enter the
-key at the hidden prompt:
+The [Talus plugin for DeepSeek Harness](plugins/dsh/README.md) includes its own
+host broker. With Node.js 24.9.0+ and DSH 0.2.2-rc.1, run from the repository root:
 
 ```bash
-export TALUS_URL='https://talus.example.com'
-read -r -s -p 'Talus API key: ' TALUS_API_KEY
-printf '\n'
-export TALUS_API_KEY
+npm ci --ignore-scripts --prefix ./plugins/dsh
+dsh plugin --profile web add ./plugins/dsh
 ```
 
-Run the verification commands below in this terminal, then launch the AI from
-the same terminal so it inherits the variables. These exports last only for
-this shell and subsequently started child processes. Existing desktop processes
-and remote/cloud sessions do not inherit them automatically; configure those
-through their runtime environment/secret settings, then restart or reload as
-required. Use those settings for persistent configuration as well.
+Directory installation links the directory; it does not install dependencies.
+See the [plugin install guide](plugins/dsh/README.md#install) for extracted
+directories and `.tgz` packages. Restart the target profile after installation,
+open dsh over HTTPS or localhost, then open **Plugins → Talus** and
+save the HTTPS URL and API key. The key is held by dsh's credentials service;
+the model uses `talus_request`, while binary transfers use the bundled helper.
+Saved settings apply to later requests without reinstalling or restarting.
+No manual broker startup is required for dsh. Its plugin API is in preview;
+the package declares compatibility with `~0.2.2-rc.1`.
 
-The Hub's deployment `.env` does not automatically configure the AI. `AGENT_HUB_URL`
-belongs to the Hub and must be reachable from monitored nodes; `TALUS_URL` belongs
-to the AI environment and must be reachable from there. Do not put the API key
-inside the skill files or paste it into chat.
+### 4. Configure the host broker for other AI tools
+
+The **user or host administrator** runs this setup in a trusted host terminal,
+outside the AI session, using Node.js 24. Choose a private configuration path
+outside the AI's accessible workspace:
+
+```bash
+node /absolute/path/to/talus/scripts/broker.mjs configure \
+  --url https://talus.example.com --config /private/talus.json
+```
+
+Enter the API key at the hidden prompt. The command writes an owner-only JSON
+file (`0600` on Unix); the key is not passed in arguments or environment
+variables. Alternatively, the user may privately create an owner-only JSON file
+with only `url` and `apiKey` string fields. The file must be a regular file of
+at most 64 KiB, and neither it nor any ancestor may be a symlink. The API key
+must be non-empty visible ASCII (`!` through `~`, with no spaces); the hidden
+prompt ignores other characters. Interactive configuration requires a TTY for
+both input and standard error. On Unix the file must be owned by the current
+user and accessible only to that user. Do not ask the model to run credential
+setup or to create, read, or fill this file. Start the broker on the host:
+
+```bash
+node /absolute/path/to/talus/scripts/broker.mjs --config /private/talus.json
+```
+
+Keep that host process running. It prints a **descriptor file path** that can be
+given to the AI. The owner-only descriptor contains local connection information
+and a broker capability token, not the Talus API key; do not publish its contents.
+Supply only its path and the helper location to the AI runtime:
+
+```bash
+export TALUS_BROKER='/path/printed/by/the/broker'
+export TALUS_REQUEST='/absolute/path/to/talus/scripts/request.mjs'
+```
+
+Requests cross a local Unix-domain socket or Windows named pipe. The broker
+adds the key only to requests for the configured Talus HTTPS destination.
+Windows pipe and file access controls depend on inherited ACLs; this broker does
+not set or verify a dedicated pipe ACL. Restrict the Windows account and private
+directory to trusted users. The local IPC and permission tests run on Linux; the
+Windows pipe ACL boundary has not been verified by those tests. These
+path variables can be inherited by the AI process; the private configuration
+file and its contents must remain with the host. To change standalone broker
+credentials, the user reruns the trusted-terminal `configure` command; subsequent
+requests read the updated file. If the broker restarts, use its new descriptor.
+
+`TALUS_URL` and `TALUS_API_KEY` remain conventions used by older external clients;
+this skill and the dsh plugin no longer read or export them. Talus's backend
+still uses its existing API-key authentication, without a new signing protocol.
+The Hub deployment `.env` and node-facing `AGENT_HUB_URL` do not configure the
+broker. Owner-only files are not encryption or a strong same-user boundary:
+if the model can run arbitrary code as the host user and read its credential
+directories, use OS keychain-backed storage or separate accounts/permissions
+for stronger isolation.
 
 ### 5. Verify the connection and skill loading
 
-From the AI's execution environment, first check the unauthenticated version
-endpoint. HTTP 200 with Talus version information confirms the address is reachable:
+From the AI execution environment, use only the broker/helper paths:
 
 ```bash
-curl --silent --show-error --fail-with-body "${TALUS_URL%/}/api/v1/version"
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method GET --path /api/v1/version
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method GET --path /api/v1/servers
 ```
 
-Next, verify authentication and `servers:read`:
+The server listing needs `servers:read` and returns `{"data":[...]}`;
+`{"data":[]}` is valid. For a service-only key, use `/api/v1/services` with
+`services:read`. In dsh, ask the model to make the same requests with
+`talus_request`; no key or manual broker paths are needed in the prompt.
 
-```bash
-curl --silent --show-error --fail-with-body \
-  "${TALUS_URL%/}/api/v1/servers" -H "X-API-Key: $TALUS_API_KEY"
-```
+Confirm the AI session has loaded `talus`, then ask:
 
-Expect HTTP 200 and `{"data":[...]}`; `{"data":[]}` is a valid empty result.
-If the key intentionally lacks `servers:read`, use `/api/v1/services` with
-`services:read` instead. This verifies API access; it does not establish skill loading.
+> Use the talus skill and the host request tool to list my servers. Make a real request and report their names and status.
 
-Confirm the AI session has loaded `talus` through its skill mechanism, then ask:
-
-> Use the talus skill and the configured environment to list my servers. Make a real API request, report their names and status, and do not display the API key.
-
-For a service-only key, ask it to list registered services and read the selected
-service's usage guide instead. Confirm the AI reads the skill and makes the
-request; an answer describing how to make a request is not a completed check.
+For a service-only key, ask it to list services and read a selected service's
+usage guide. Confirm that it performs the request; describing an API call does
+not verify a working connection.
 
 ### 6. Troubleshoot
 
 | Symptom | Check |
 | --- | --- |
-| Skill not found or reference missing | The entire `talus/` directory must be readable in the AI environment and loaded by the current session. |
-| URL/key missing in the AI | Check the executing process's environment or secret settings; configure there and restart/reload. Do not print the key to verify it. |
-| Connection refused, DNS failure, or timeout | Test from the AI environment; check the URL, port, network access, and whether `localhost` points to the intended host. |
-| TLS certificate failure | Correct the certificate or configure the runtime's trusted CA. |
-| 401 | Check the instance, key value, and whether the key was revoked. |
-| 403 | Check required scopes, server restrictions, and Web UI-only operations. A successful service listing does not grant `services:relay`. |
+| Skill, helper, or reference missing | Install the complete `talus/` directory and load it in the current session. |
+| Broker unavailable | Have the host owner start it and supply the current descriptor path; do not inspect private credentials. |
+| Missing dsh credential | Fill it in **Plugins → Talus**; do not paste it into chat. |
+| dsh page cannot save credentials | Open the dsh page over HTTPS or localhost; an HTTP page on a non-loopback host is not a secure browser context. |
+| HTTP URL or TLS certificate rejected | Deploy HTTPS and correct the certificate or host trust store; never disable validation. |
+| Connection refused, DNS failure, or timeout | Check connectivity from the broker host to the configured HTTPS address. |
+| 401 | Have the host owner check the configured instance and whether its key was revoked. |
+| 403 | Check scopes, server restrictions, and Web UI-only operations. Service listing does not grant `services:relay`. |
 | SSH host key unverified/changed | Verify and confirm the fingerprint in the Web UI. |
-| Monitoring missing or stale | Check the node-reachable `AGENT_HUB_URL`, agent deployment prerequisites, and the separate connection/collection/data states. |
+| Monitoring missing or stale | Check the node-reachable `AGENT_HUB_URL`, agent prerequisites, and separate connection/collection/data states. |
 
 ### Services: prefer Talus relay for registered services
 
@@ -515,20 +563,23 @@ Usage logs record the operation, caller, server, outcome, route and bounded byte
 
 #### File API examples
 
+With the broker configured as described above:
+
 ```bash
-# Browse with a file-read API key.
-curl --get "$TALUS_URL/api/v1/servers/1/sftp/entries" \
-  -H "X-API-Key: $TALUS_API_KEY" --data-urlencode 'path=/home/deploy'
+# Browse with files:read.
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method GET --path /api/v1/servers/1/sftp/entries --query 'path=/home/deploy'
 
-# One-shot binary upload. An existing destination is preserved by default.
-curl -X POST "$TALUS_URL/api/v1/servers/1/sftp/upload?path=%2Fhome%2Fdeploy%2Fdata.bin" \
-  -H "X-API-Key: $TALUS_API_KEY" -H 'Content-Type: application/octet-stream' \
-  --data-binary @data.bin
+# Upload raw bytes with files:write; preserve existing destinations by default.
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method POST --path /api/v1/servers/1/sftp/upload \
+  --query 'path=/home/deploy/data.bin' \
+  --header 'Content-Type=application/octet-stream' --data-file data.bin
 
-# Download or resume with a file-read key. Retain/use the ETag with If-Range
-# when the remote file might change between requests.
-curl "$TALUS_URL/api/v1/servers/1/sftp/download?path=%2Fhome%2Fdeploy%2Fdata.bin" \
-  -H "X-API-Key: $TALUS_API_KEY" -o data.bin
+# Download with files:read; retain the ETag for later If-Range resumption.
+node "$TALUS_REQUEST" --broker "$TALUS_BROKER" \
+  --method GET --path /api/v1/servers/1/sftp/download \
+  --query 'path=/home/deploy/data.bin' --output data.bin --headers-output data.headers
 ```
 
 ### Example prompts
