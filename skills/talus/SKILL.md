@@ -264,12 +264,14 @@ in the target URL, header names/values, and body. Set authentication headers as
 the guide specifies; Talus does not infer the target's authentication scheme.
 
 - Relay joins the service base path and request path, expands their `{{key}}`
-  placeholders, then normalizes dot segments and URL-encodes the path. Use raw
-  credential values in paths. A slash separates segments, and literal `?` and
-  `#` in a path value become `%3F` and `%23`.
-- A non-empty request query overrides the base URL's query. Relay substitutes
-  placeholders directly in the selected query string. Supply query values with
-  the encoding the upstream service expects.
+  placeholders, then normalizes dot segments and collapses consecutive slashes
+  before URL-encoding the path. Use raw credential values in paths. A slash
+  separates segments, and literal `?` and `#` in a path value become `%3F` and
+  `%23`.
+- A non-empty request query overrides the base URL's query. Relay inserts
+  stored credential values verbatim into placeholders in the selected query
+  string. Any URL encoding needed for a query placeholder must be part of the
+  stored value.
 - For a target expecting a JSON object/array, pass that value directly as `body`;
   a pre-serialized JSON string is forwarded as a quoted string. Set the upstream
   `Content-Type` inside `headers` when required. Omit `body` for bodyless requests.
