@@ -11,7 +11,40 @@ import (
 	"time"
 
 	"github.com/vpsmanager/backend/internal/model"
+	"github.com/vpsmanager/backend/internal/pkg/crypto"
 )
+
+func TestRelayCredentialInUpstreamRequestURI(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.RequestURI)
+	}))
+	defer upstream.Close()
+
+	svc := NewServiceRelayService(nil, connectionTestKey(t))
+	config := CreateServiceInput{
+		Name:        "upstream",
+		BaseURL:     upstream.URL + "/api",
+		Credentials: map[string]string{"BACKEND_PATH": "v1/private jobs", "TOKEN": "abc"},
+	}
+	encrypted, _, salt, err := svc.validateAndEncryptCredentials(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := &model.Service{
+		BaseURL:              config.BaseURL,
+		EncryptedCredentials: encrypted,
+		CryptoVersion:        crypto.VersionCurrent,
+		Salt:                 salt,
+	}
+	input := RelayInput{Method: http.MethodGet, Path: "/{{BACKEND_PATH}}?token={{TOKEN}}"}
+	writer := httptest.NewRecorder()
+	if _, err := svc.relayFromService(context.Background(), resource, input, writer); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := writer.Body.String(), "/api/v1/private%20jobs?token=abc"; got != want {
+		t.Errorf("upstream RequestURI = %q, want %q", got, want)
+	}
+}
 
 func TestRelayUpstreamErrorKeepsPassthroughAndRecordsFailure(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

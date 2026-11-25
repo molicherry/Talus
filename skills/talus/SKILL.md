@@ -263,9 +263,13 @@ does not create an SSH tunnel. Stored credentials replace `{{key}}` placeholders
 in the target URL, header names/values, and body. Set authentication headers as
 the guide specifies; Talus does not infer the target's authentication scheme.
 
-- `path` is appended to the service base path, with dot segments normalized;
-  its supplied non-empty query string is preserved. Follow the service's own parameter format and
-  URL-encode values. Do not assume every service uses the same tRPC/query wrapper.
+- Relay joins the service base path and request path, expands their `{{key}}`
+  placeholders, then normalizes dot segments and URL-encodes the path. Use raw
+  credential values in paths. A slash separates segments, and literal `?` and
+  `#` in a path value become `%3F` and `%23`.
+- A non-empty request query overrides the base URL's query. Relay substitutes
+  placeholders directly in the selected query string. Supply query values with
+  the encoding the upstream service expects.
 - For a target expecting a JSON object/array, pass that value directly as `body`;
   a pre-serialized JSON string is forwarded as a quoted string. Set the upstream
   `Content-Type` inside `headers` when required. Omit `body` for bodyless requests.

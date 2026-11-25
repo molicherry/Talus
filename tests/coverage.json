@@ -450,6 +450,17 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Run an isolated Hub against an owned temporary database and local upstream; verify scoped service discovery, usage guides, credential injection and Relay modes without external deployment records."
+        },
+        {
+          "implementation_id": "impl-01-02-TestRelayCredentialInUpstreamRequestURI",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_result_test.go",
+            "symbol": "TestRelayCredentialInUpstreamRequestURI"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Check the path and query received by a local HTTP upstream after Relay expands stored credentials."
         }
       ]
     },

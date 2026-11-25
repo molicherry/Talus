@@ -32,6 +32,11 @@ func TestExcerpt(t *testing.T) {
 }
 
 func TestBuildTargetURL(t *testing.T) {
+	credentials := map[string]string{
+		"BACKEND_PATH": "v1/tmp/../jobs/",
+		"LABEL":        "a b?#%",
+		"TOKEN":        "x%2By",
+	}
 	cases := []struct {
 		name    string
 		baseURL string
@@ -56,10 +61,15 @@ func TestBuildTargetURL(t *testing.T) {
 		{"trailing slash preserved", "https://svc.example.com", "/api/x/", "https://svc.example.com/api/x/"},
 		{"encoded dots not treated as segments (URL-escaped, same as JoinPath)", "https://svc.example.com", "/api/%2E%2E/admin", "https://svc.example.com/api/%252E%252E/admin"},
 		{"dot segment with query kept", "https://svc.example.com", "/api/../admin?a=1", "https://svc.example.com/admin?a=1"},
+		{"path credential with multiple segments", "https://svc.example.com/root", "/{{BACKEND_PATH}}", "https://svc.example.com/root/v1/jobs/"},
+		{"reserved characters in path credential", "https://svc.example.com", "/prefix-{{LABEL}}/end", "https://svc.example.com/prefix-a%20b%3F%23%25/end"},
+		{"credentials in base path and query", "https://svc.example.com/{{BACKEND_PATH}}?token={{TOKEN}}", "/list", "https://svc.example.com/v1/jobs/list?token=x%2By"},
+		{"request query with repeated keys and escapes", "https://svc.example.com?base={{TOKEN}}", "/list?k=%2f&k={{TOKEN}}", "https://svc.example.com/list?k=%2f&k=x%2By"},
+		{"unknown path credential", "https://svc.example.com", "/{{MISSING}}", "https://svc.example.com/%7B%7BMISSING%7D%7D"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := buildTargetURL(c.baseURL, c.path)
+			got, err := buildTargetURL(c.baseURL, c.path, credentials)
 			if err != nil {
 				t.Fatalf("buildTargetURL(%q, %q) error: %v", c.baseURL, c.path, err)
 			}
@@ -71,7 +81,7 @@ func TestBuildTargetURL(t *testing.T) {
 }
 
 func TestBuildTargetURLInvalidBase(t *testing.T) {
-	if _, err := buildTargetURL("://bad", "/api"); err == nil {
+	if _, err := buildTargetURL("://bad", "/api", nil); err == nil {
 		t.Error("expected error for invalid base URL")
 	}
 }

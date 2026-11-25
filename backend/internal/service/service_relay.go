@@ -439,18 +439,11 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 		creds[k] = string(plain)
 	}
 
-	// Build target URL. Preserves any query string in the relay path —
-	// url.JoinPath escapes '?' into %3F and silently drops query parameters,
-	// which broke parameterized requests (e.g. Dokploy tRPC endpoints that pass
-	// all arguments via ?input=...).
-	targetURL, err := buildTargetURL(svc.BaseURL, input.Path)
+	targetURL, err := buildTargetURL(svc.BaseURL, input.Path, creds)
 	if err != nil {
 		result.Outcome, result.Reason = "rejected", server.ReasonInvalidRelayPath
 		return result, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRelayPath)
 	}
-
-	// Substitute placeholders in path.
-	targetURL = substitute(targetURL, creds)
 
 	// Build request.
 	var bodyReader io.Reader
@@ -644,47 +637,23 @@ func substitute(input string, credentials map[string]string) string {
 	return input
 }
 
-// buildTargetURL joins a service base URL with a relay path, preserving any
-// query string embedded in the path.
-//
-// url.JoinPath escapes '?' into %3F, silently dropping query parameters —
-// services like Dokploy (tRPC over HTTP) pass every argument via ?input=...,
-// so the escaped form made parameterized requests unusable through relay.
-// This builds the URL manually so ?query survives.
-func buildTargetURL(baseURL, path string) (string, error) {
+// buildTargetURL expands credentials in the joined path before URL.String escapes it.
+func buildTargetURL(baseURL, path string, credentials map[string]string) (string, error) {
 	base, err := url.Parse(baseURL)
 	if err != nil {
 		return "", err
 	}
 
-	relPath := path
-	rawQuery := ""
-	if i := strings.Index(path, "?"); i >= 0 {
-		relPath = path[:i]
-		rawQuery = path[i+1:]
-	}
-
-	basePath := strings.TrimSuffix(base.Path, "/")
-	rel := strings.TrimPrefix(relPath, "/")
-	switch {
-	case basePath == "" && rel == "":
-		base.Path = "/"
-	case rel == "":
-		base.Path = basePath + "/"
-	default:
-		base.Path = basePath + "/" + rel
-	}
-
-	// Normalize dot segments (./, ../) the way url.JoinPath did, so relay
-	// paths behave identically to the pre-query-fix behavior. Preserve a
-	// trailing slash if the caller sent one.
-	base.Path = cleanRelayPath(base.Path)
+	relPath, rawQuery, _ := strings.Cut(path, "?")
+	joinedPath := strings.TrimSuffix(base.Path, "/") + "/" + strings.TrimPrefix(relPath, "/")
+	base.Path = cleanRelayPath(substitute(joinedPath, credentials))
 
 	// Only override the base URL's own query when the relay path carries one;
 	// otherwise keep the base URL's query string.
 	if rawQuery != "" {
 		base.RawQuery = rawQuery
 	}
+	base.RawQuery = substitute(base.RawQuery, credentials)
 	return base.String(), nil
 }
 

@@ -123,6 +123,8 @@ proxy routes: older binaries do not understand them and would connect directly.
 3. Optionally assign the service to a server for management and authorization scope — the relay calls the service base URL directly from the Hub; there is **no** SSH tunnel
 4. Use the relay API to proxy requests through Talus — credentials are injected automatically, `{{key}}` placeholders are substituted. An omitted `mode` is a normal 30s request; pass `"mode": "bounded_stream"` for an explicit up-to-300s stream (30s header wait, 30s no-progress idle limit; the mode is not forwarded upstream)
 
+Path placeholders accept unescaped text. With `BACKEND_PATH` set to `v1/my orders`, a relay path of `/{{BACKEND_PATH}}?limit=10` appends `/v1/my%20orders?limit=10` to the service's base path.
+
 ### 6. View Usage Logs
 
 Administrators can open **Usage Logs** for filtered operation history and details. Logs cover resource changes, sensitive reveals, SSH exec, service relay and terminal sessions, without recording secrets, commands or stream content. API keys cannot query this history.
