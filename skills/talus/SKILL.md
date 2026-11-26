@@ -262,6 +262,8 @@ The Hub calls the service's `base_url` directly; assigning a service to a server
 does not create an SSH tunnel. Stored credentials replace `{{key}}` placeholders
 in the target URL, header names/values, and body. Set authentication headers as
 the guide specifies; Talus does not infer the target's authentication scheme.
+Creating or updating a service requires an absolute HTTP or HTTPS `base_url`
+with a host.
 
 - Relay joins the service base path and request path, expands their `{{key}}`
   placeholders, then normalizes dot segments and collapses consecutive slashes
@@ -275,9 +277,10 @@ the guide specifies; Talus does not infer the target's authentication scheme.
   path and query. For example, store `PATH_VALUE=a+b` and `QUERY_VALUE=a%2Bb`
   for `/x/{{PATH_VALUE}}?v={{QUERY_VALUE}}`. Use `%23` for a literal `#` in the
   query. A literal `#` starts a fragment that the HTTP client omits.
-- Unmatched placeholders remain as text. Relay percent-encodes their braces in
-  the path and leaves them literal in the query. Nested placeholders have no
-  defined expansion order. Store the final credential values directly.
+- Relay matches placeholders in each original input once. Placeholder syntax
+  inside a stored credential value stays literal. Unmatched placeholders remain
+  as text. Relay percent-encodes their braces in the path and leaves them literal
+  in the query.
 - For a target expecting a JSON object/array, pass that value directly as `body`;
   a pre-serialized JSON string is forwarded as a quoted string. Set the upstream
   `Content-Type` inside `headers` when required. Omit `body` for bodyless requests.
@@ -347,7 +350,7 @@ return stored secret values.
 | HTTP URL or TLS certificate rejected | Have the host owner configure HTTPS and a valid trusted certificate; never disable certificate validation. |
 | 401 | Ask the host owner to check the configured instance and key or whether it was revoked; do not retrieve the key. |
 | 403 | Check Web UI/admin restrictions first, then the endpoint's scope, then `server_ids`. For Relay, distinguish a Talus refusal from an upstream 403. |
-| `invalid_relay_path` | Have the service administrator check the stored `base_url`. Relay reports this reason when it cannot parse the configured URL. |
+| `invalid_relay_path` | Have the service administrator correct and save the `base_url` of an older service if Relay cannot parse its stored URL. |
 | `ssh_host_key_unverified` / `ssh_host_key_mismatch` | Have an administrator verify and confirm the fingerprint in the Web UI. |
 | `connection_config_changed` | Reload server detail and reconcile the intended update with the current revision. |
 | `sftp_conflict` or `sftp_exists` | Preserve the draft/source and inspect remote state; do not automatically overwrite. |

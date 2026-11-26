@@ -286,6 +286,7 @@
     "forbidden": "You do not have permission to do that",
     "host_key_changed": "The pending host key changed again — re-verify the new fingerprint before trusting it",
     "internal_error": "Internal server error",
+    "invalid_base_url": "Enter an absolute HTTP or HTTPS URL with a host",
     "invalid_credential_id": "Invalid credential id",
     "invalid_credentials": "Invalid username or password",
     "invalid_cursor": "The page cursor is invalid. Refresh to continue.",

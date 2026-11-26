@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -114,8 +116,11 @@ func (s *ServiceRelayService) validateAndEncryptCredentials(input CreateServiceI
 	if input.BaseURL == "" {
 		return nil, nil, nil, fmt.Errorf("base_url is required")
 	}
-	if !strings.HasPrefix(input.BaseURL, "http://") && !strings.HasPrefix(input.BaseURL, "https://") {
-		return nil, nil, nil, fmt.Errorf("base_url must start with http:// or https://")
+	baseURL, err := url.Parse(input.BaseURL)
+	if err != nil || (baseURL.Scheme != "http" && baseURL.Scheme != "https") || baseURL.Hostname() == "" {
+		return nil, nil, nil, server.NewValidationError([]server.ErrorDetail{
+			server.NewErrorDetail("base_url", server.ReasonInvalidBaseURL, nil),
+		})
 	}
 	if len(input.Credentials) == 0 {
 		return nil, nil, nil, fmt.Errorf("at least one credential is required")
@@ -439,7 +444,8 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 		creds[k] = string(plain)
 	}
 
-	targetURL, err := buildTargetURL(svc.BaseURL, input.Path, creds)
+	replacer := newRelayCredentialReplacer(creds)
+	targetURL, err := buildTargetURL(svc.BaseURL, input.Path, replacer)
 	if err != nil {
 		result.Outcome, result.Reason = "rejected", server.ReasonInvalidRelayPath
 		return result, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRelayPath)
@@ -448,7 +454,7 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 	// Build request.
 	var bodyReader io.Reader
 	if input.Body != nil && string(input.Body) != "null" {
-		bodyStr := substitute(string(input.Body), creds)
+		bodyStr := replacer.Replace(string(input.Body))
 		bodyReader = bytes.NewReader([]byte(bodyStr))
 	}
 
@@ -461,7 +467,7 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 	// Set headers with placeholder substitution.
 	if input.Headers != nil {
 		for k, v := range input.Headers {
-			req.Header.Set(substitute(k, creds), substitute(v, creds))
+			req.Header.Set(replacer.Replace(k), replacer.Replace(v))
 		}
 	}
 
@@ -629,37 +635,41 @@ func (s *ServiceRelayService) relayFromService(ctx context.Context, svc *model.S
 	return result, nil
 }
 
-// substitute replaces all {{key}} placeholders in the input string.
-func substitute(input string, credentials map[string]string) string {
-	for k, v := range credentials {
-		input = strings.ReplaceAll(input, "{{"+k+"}}", v)
+// newRelayCredentialReplacer matches placeholders in the original input once.
+func newRelayCredentialReplacer(credentials map[string]string) *strings.Replacer {
+	keys := slices.Sorted(maps.Keys(credentials))
+	pairs := make([]string, 0, 2*len(keys))
+	// When one placeholder is a prefix of another, try the longer match first.
+	for _, key := range slices.Backward(keys) {
+		pairs = append(pairs, "{{"+key+"}}", credentials[key])
 	}
-	return input
+	return strings.NewReplacer(pairs...)
 }
 
 // buildTargetURL expands credentials in the joined path before URL.String escapes it.
-func buildTargetURL(baseURL, path string, credentials map[string]string) (string, error) {
+func buildTargetURL(baseURL, path string, replacer *strings.Replacer) (string, error) {
 	base, err := url.Parse(baseURL)
 	if err != nil {
 		return "", err
 	}
 
+	// Split the query first. url.JoinPath would escape the '?' in a relay
+	// path as %3F, putting parameters such as Dokploy's tRPC input in the path.
 	relPath, rawQuery, _ := strings.Cut(path, "?")
 	joinedPath := strings.TrimSuffix(base.Path, "/") + "/" + strings.TrimPrefix(relPath, "/")
-	base.Path = cleanRelayPath(substitute(joinedPath, credentials))
+	base.Path = cleanRelayPath(replacer.Replace(joinedPath))
 
 	// Only override the base URL's own query when the relay path carries one;
 	// otherwise keep the base URL's query string.
 	if rawQuery != "" {
 		base.RawQuery = rawQuery
 	}
-	base.RawQuery = substitute(base.RawQuery, credentials)
+	base.RawQuery = replacer.Replace(base.RawQuery)
 	return base.String(), nil
 }
 
-// cleanRelayPath removes dot segments from a path while preserving an
-// explicit trailing slash. Encoded dots (%2E) are untouched — cleaning only
-// applies to literal '.'/'..' segments.
+// cleanRelayPath resolves literal "." and ".." segments and collapses
+// consecutive slashes while preserving an explicit trailing slash.
 func cleanRelayPath(p string) string {
 	if p == "" || p == "/" {
 		return p

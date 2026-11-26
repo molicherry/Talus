@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/vpsmanager/backend/internal/server"
 )
 
 // TestServerIsolatedServiceCatalogAndRelay exercises the deployed Hub entrypoint
@@ -90,19 +92,46 @@ func TestServerIsolatedServiceCatalogAndRelay(t *testing.T) {
 	keyHeaders := map[string]string{"X-API-Key": apiKey.Key}
 	servicePath := fmt.Sprintf("/api/v1/services/%d", service.ID)
 
+	t.Run("create and update reject malformed base URLs", func(t *testing.T) {
+		for _, baseURL := range []string{"https://exa mple.com", "https://[::1", "http://", "http://:80", "ftp://svc.example.com"} {
+			body := map[string]any{
+				"name": "invalid-base-url", "base_url": baseURL,
+				"credentials": map[string]string{"token": credential},
+			}
+			for _, request := range []struct{ method, path string }{
+				{http.MethodPost, "/api/v1/services"},
+				{http.MethodPut, servicePath},
+			} {
+				result := isolatedHubRequest(t, hub, request.method, request.path, body, jwtHeaders, http.StatusUnprocessableEntity)
+				var response struct {
+					Error server.ValidationError `json:"error"`
+				}
+				if err := json.Unmarshal(result, &response); err != nil {
+					t.Fatal(err)
+				}
+				details := response.Error.Details
+				if response.Error.Reason != server.ReasonValidationFailed || len(details) != 1 ||
+					details[0].Field != "base_url" || details[0].Reason != server.ReasonInvalidBaseURL {
+					t.Fatalf("%s with base_url %q returned unexpected validation error: %s", request.method, baseURL, result)
+				}
+			}
+		}
+	})
+
 	t.Run("scoped key discovers safe catalog and full guide", func(t *testing.T) {
 		listResponse := isolatedHubRequest(t, hub, http.MethodGet, "/api/v1/services", nil, keyHeaders, http.StatusOK)
 		assertIsolatedCatalogHasNoSecrets(t, listResponse, credential)
 		var listed []struct {
 			ID                uint   `json:"id"`
 			Name              string `json:"name"`
+			BaseURL           string `json:"base_url"`
 			Description       string `json:"description"`
 			UsageGuide        string `json:"usage_guide"`
 			UsageGuideExcerpt string `json:"usage_guide_excerpt"`
 		}
 		decodeIsolatedHubData(t, listResponse, &listed)
 		if len(listed) != 1 || listed[0].ID != service.ID || listed[0].Name != "isolated-acceptance" ||
-			listed[0].Description != description {
+			listed[0].BaseURL != upstream.URL || listed[0].Description != description {
 			t.Fatalf("catalog does not identify the created service: %+v", listed)
 		}
 		if listed[0].UsageGuide != "" || listed[0].UsageGuideExcerpt == "" ||

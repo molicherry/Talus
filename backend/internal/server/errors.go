@@ -100,6 +100,7 @@ const (
 	ReasonLength         = "length"
 	ReasonMaxLength      = "max_length"
 	ReasonAtLeastOne     = "at_least_one_required"
+	ReasonInvalidBaseURL = "invalid_base_url"
 	ReasonPasswordAuth   = "password_required_for_auth_type"
 	ReasonPrivateKeyAuth = "private_key_required_for_auth_type"
 )
@@ -191,6 +192,7 @@ var reasonMessages = map[string]string{
 	ReasonLength:         "must be between {{min}} and {{max}} characters",
 	ReasonMaxLength:      "must be at most {{max}} characters",
 	ReasonAtLeastOne:     "at least one {{field}} is required",
+	ReasonInvalidBaseURL: "base URL must be an absolute HTTP or HTTPS URL with a host",
 	ReasonPasswordAuth:   "password is required for auth_type 'password'",
 	ReasonPrivateKeyAuth: "private_key is required for auth_type 'private_key'",
 }

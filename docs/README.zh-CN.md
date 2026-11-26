@@ -108,12 +108,14 @@ docker compose up -d --build
 ### 5. 代理外部服务
 
 1. 进入 **Services**（服务）→ **Add Service**（添加服务）
-2. 填写名称、显示名称、基础 URL（如 `http://localhost:3000`）和凭据（键值对）
+2. 填写名称、显示名称和凭据键值对。基础 URL 须为带主机的绝对 HTTP 或 HTTPS URL，例如 `http://localhost:3000`。
 3. 可选：将服务关联到某台服务器，用于管理和授权范围；Hub 直接请求服务的基础 URL，不使用 SSH 隧道
 4. 使用 relay API 通过 Talus 代理请求——凭据自动注入，`{{key}}` 占位符自动替换。不传 `mode` 时总预算为 30 秒；显式传入 `"mode": "bounded_stream"` 可启用最长 300 秒的流式请求，响应头等待和无进展空闲上限均为 30 秒，`mode` 不转发给上游
 
 路径占位符的值使用未转义的路径片段。Relay 将斜杠视为路径分隔符，处理 `.` 和 `..` 路径段并合并连续斜杠，再对展开后的路径做 URL 编码。
 例如，将 `BACKEND_PATH` 设为 `v1/my orders`，请求路径 `/{{BACKEND_PATH}}?limit=10` 会在服务的基础路径后追加 `/v1/my%20orders?limit=10`。
+
+查询占位符会原样插入存储的值。将查询串所需的编码存入凭据，例如用 `%23` 表示字面量 `#`。未转义的 `#` 会开始一个片段，HTTP 客户端会省略该片段。同一值在路径和查询串中需要不同形式时，使用独立的凭据条目。例如，给 `/x/{{PATH_VALUE}}?v={{QUERY_VALUE}}` 配置 `PATH_VALUE=a+b` 和 `QUERY_VALUE=a%2Bb`。
 
 ### 6. 查看使用日志
 

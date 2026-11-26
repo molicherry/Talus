@@ -33,12 +33,16 @@ func TestExcerpt(t *testing.T) {
 
 func TestBuildTargetURL(t *testing.T) {
 	credentials := map[string]string{
-		"BACKEND_PATH": "v1/tmp/../jobs/",
+		"BACKEND_PATH": "v1//tmp/../jobs/",
 		"LABEL":        "a b?#%",
 		"TOKEN":        "x%2By",
 		"PATH_VALUE":   "a+b",
 		"QUERY_VALUE":  "a%2Bb",
+		"FIRST":        "{{SECOND}}",
+		"SECOND":       "{{FIRST}}",
+		"FIRST}}long":  "specific",
 	}
+	replacer := newRelayCredentialReplacer(credentials)
 	cases := []struct {
 		name    string
 		baseURL string
@@ -70,10 +74,12 @@ func TestBuildTargetURL(t *testing.T) {
 		{"separate path and query credentials", "https://svc.example.com", "/x/{{PATH_VALUE}}?v={{QUERY_VALUE}}", "https://svc.example.com/x/a+b?v=a%2Bb"},
 		{"percent escape in path credential", "https://svc.example.com", "/x/{{QUERY_VALUE}}", "https://svc.example.com/x/a%252Bb"},
 		{"unknown credential in path and query", "https://svc.example.com", "/{{MISSING}}?v={{MISSING}}", "https://svc.example.com/%7B%7BMISSING%7D%7D?v={{MISSING}}"},
+		{"replace credentials once in path and query", "https://svc.example.com", "/{{FIRST}}/{{SECOND}}?first={{FIRST}}&second={{SECOND}}", "https://svc.example.com/%7B%7BSECOND%7D%7D/%7B%7BFIRST%7D%7D?first={{SECOND}}&second={{FIRST}}"},
+		{"prefer the longer matching placeholder", "https://svc.example.com", "/{{FIRST}}long}}", "https://svc.example.com/specific"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := buildTargetURL(c.baseURL, c.path, credentials)
+			got, err := buildTargetURL(c.baseURL, c.path, replacer)
 			if err != nil {
 				t.Fatalf("buildTargetURL(%q, %q) error: %v", c.baseURL, c.path, err)
 			}
@@ -86,7 +92,7 @@ func TestBuildTargetURL(t *testing.T) {
 
 func TestBuildTargetURLCollapsesConsecutiveSlashes(t *testing.T) {
 	const host = "https://svc.example.com"
-	credentials := map[string]string{"BACKEND_PATH": "a//b"}
+	replacer := newRelayCredentialReplacer(map[string]string{"BACKEND_PATH": "a//b"})
 	cases := []struct {
 		name    string
 		baseURL string
@@ -99,7 +105,7 @@ func TestBuildTargetURLCollapsesConsecutiveSlashes(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := buildTargetURL(c.baseURL, c.path, credentials)
+			got, err := buildTargetURL(c.baseURL, c.path, replacer)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -111,7 +117,7 @@ func TestBuildTargetURLCollapsesConsecutiveSlashes(t *testing.T) {
 }
 
 func TestBuildTargetURLInvalidBase(t *testing.T) {
-	if _, err := buildTargetURL("://bad", "/api", nil); err == nil {
+	if _, err := buildTargetURL("://bad", "/api", strings.NewReplacer()); err == nil {
 		t.Error("expected error for invalid base URL")
 	}
 }

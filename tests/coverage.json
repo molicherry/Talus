@@ -449,7 +449,7 @@
           },
           "automation_status": "implemented",
           "required": true,
-          "verification": "Run an isolated Hub against an owned temporary database and local upstream; verify scoped service discovery, usage guides, credential injection and Relay modes without external deployment records."
+          "verification": "Run an isolated Hub against an owned temporary database and local upstream. Verify that create and update reject malformed base URLs. Check scoped service discovery, usage guides, credential injection and Relay modes."
         },
         {
           "implementation_id": "impl-01-02-TestRelayCredentialInUpstreamRequestURI",
@@ -461,6 +461,17 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Check the path and query received by a local HTTP upstream after Relay expands stored credentials."
+        },
+        {
+          "implementation_id": "impl-01-02-TestBuildTargetURL",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_test.go",
+            "symbol": "TestBuildTargetURL"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Verify single-pass placeholder replacement before path escaping, distinct path and query encoding, dot-segment and slash normalization, and preservation of unmatched placeholders."
         },
         {
           "implementation_id": "impl-01-02-TestBuildTargetURLCollapsesConsecutiveSlashes",

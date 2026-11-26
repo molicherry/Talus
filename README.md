@@ -119,12 +119,14 @@ proxy routes: older binaries do not understand them and would connect directly.
 ### 5. Proxy a Service
 
 1. Go to **Services** → **Add Service**
-2. Fill in name, display name, base URL (e.g. `http://localhost:3000`), and credentials (key-value pairs)
+2. Fill in the name, display name, and credential key-value pairs. Set the base URL to an absolute HTTP or HTTPS URL with a host, such as `http://localhost:3000`.
 3. Optionally assign the service to a server for management and authorization scope — the relay calls the service base URL directly from the Hub; there is **no** SSH tunnel
 4. Use the relay API to proxy requests through Talus — credentials are injected automatically, `{{key}}` placeholders are substituted. An omitted `mode` is a normal 30s request; pass `"mode": "bounded_stream"` for an explicit up-to-300s stream (30s header wait, 30s no-progress idle limit; the mode is not forwarded upstream)
 
 Use unescaped path fragments for path placeholder values. Relay treats slashes as path separators, resolves `.` and `..` segments, and collapses consecutive slashes before URL-encoding the expanded path.
 With `BACKEND_PATH` set to `v1/my orders`, a relay path of `/{{BACKEND_PATH}}?limit=10` appends `/v1/my%20orders?limit=10` to the service's base path.
+
+Query placeholders insert stored values verbatim. Store any required query encoding with the credential, such as `%23` for a literal `#`. An unescaped `#` starts a fragment that the HTTP client omits. If the same value needs different forms in the path and query, use separate credential entries. For example, use `PATH_VALUE=a+b` and `QUERY_VALUE=a%2Bb` with `/x/{{PATH_VALUE}}?v={{QUERY_VALUE}}`.
 
 ### 6. View Usage Logs
 
