@@ -461,6 +461,17 @@
           "automation_status": "implemented",
           "required": true,
           "verification": "Check the path and query received by a local HTTP upstream after Relay expands stored credentials."
+        },
+        {
+          "implementation_id": "impl-01-02-TestBuildTargetURLCollapsesConsecutiveSlashes",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_test.go",
+            "symbol": "TestBuildTargetURLCollapsesConsecutiveSlashes"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Collapse consecutive slashes in the base path, request path and expanded path credential values."
         }
       ]
     },

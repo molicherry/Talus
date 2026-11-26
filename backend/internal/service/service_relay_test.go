@@ -36,6 +36,8 @@ func TestBuildTargetURL(t *testing.T) {
 		"BACKEND_PATH": "v1/tmp/../jobs/",
 		"LABEL":        "a b?#%",
 		"TOKEN":        "x%2By",
+		"PATH_VALUE":   "a+b",
+		"QUERY_VALUE":  "a%2Bb",
 	}
 	cases := []struct {
 		name    string
@@ -65,7 +67,9 @@ func TestBuildTargetURL(t *testing.T) {
 		{"reserved characters in path credential", "https://svc.example.com", "/prefix-{{LABEL}}/end", "https://svc.example.com/prefix-a%20b%3F%23%25/end"},
 		{"credentials in base path and query", "https://svc.example.com/{{BACKEND_PATH}}?token={{TOKEN}}", "/list", "https://svc.example.com/v1/jobs/list?token=x%2By"},
 		{"request query with repeated keys and escapes", "https://svc.example.com?base={{TOKEN}}", "/list?k=%2f&k={{TOKEN}}", "https://svc.example.com/list?k=%2f&k=x%2By"},
-		{"unknown path credential", "https://svc.example.com", "/{{MISSING}}", "https://svc.example.com/%7B%7BMISSING%7D%7D"},
+		{"separate path and query credentials", "https://svc.example.com", "/x/{{PATH_VALUE}}?v={{QUERY_VALUE}}", "https://svc.example.com/x/a+b?v=a%2Bb"},
+		{"percent escape in path credential", "https://svc.example.com", "/x/{{QUERY_VALUE}}", "https://svc.example.com/x/a%252Bb"},
+		{"unknown credential in path and query", "https://svc.example.com", "/{{MISSING}}?v={{MISSING}}", "https://svc.example.com/%7B%7BMISSING%7D%7D?v={{MISSING}}"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -75,6 +79,32 @@ func TestBuildTargetURL(t *testing.T) {
 			}
 			if got != c.want {
 				t.Errorf("buildTargetURL(%q, %q) = %q, want %q", c.baseURL, c.path, got, c.want)
+			}
+		})
+	}
+}
+
+func TestBuildTargetURLCollapsesConsecutiveSlashes(t *testing.T) {
+	const host = "https://svc.example.com"
+	credentials := map[string]string{"BACKEND_PATH": "a//b"}
+	cases := []struct {
+		name    string
+		baseURL string
+		path    string
+		want    string
+	}{
+		{"base path", host + "//dbl", "/x", host + "/dbl/x"},
+		{"request path", host, "/x//a/b", host + "/x/a/b"},
+		{"credential value", host, "/x/{{BACKEND_PATH}}", host + "/x/a/b"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := buildTargetURL(c.baseURL, c.path, credentials)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != c.want {
+				t.Errorf("target URL = %q, want %q", got, c.want)
 			}
 		})
 	}
