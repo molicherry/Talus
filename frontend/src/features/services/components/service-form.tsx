@@ -158,7 +158,10 @@ export function ServiceForm({ service }: ServiceFormProps) {
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="max-w-lg space-y-6">
       {errors.root?.server?.message && (
-        <div className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger">
+        <div
+          role="alert"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger"
+        >
           {errors.root.server.message}
         </div>
       )}

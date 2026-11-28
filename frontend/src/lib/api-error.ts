@@ -43,7 +43,9 @@ export function translateApiError(
  */
 export function apiFieldErrorList(err: unknown, t: TranslateFn): Record<string, string[]> {
   if (!(err instanceof ApiClientError)) return {};
-  const out: Record<string, string[]> = {};
+  // Null prototype: a field literally named "toString" must allocate its own
+  // list, not resolve to the inherited method and fail on push.
+  const out = Object.create(null) as Record<string, string[]>;
   for (const detail of err.details ?? []) {
     const label = i18n.has(`fields.${detail.field}`) ? t(`fields.${detail.field}`) : detail.field;
     const key = reasonKey(detail.reason);
@@ -61,7 +63,7 @@ export function apiFieldErrorList(err: unknown, t: TranslateFn): Record<string, 
  * details are joined into one string.
  */
 export function apiFieldErrors(err: unknown, t: TranslateFn): Record<string, string> {
-  const out: Record<string, string> = {};
+  const out = Object.create(null) as Record<string, string>;
   for (const [field, messages] of Object.entries(apiFieldErrorList(err, t))) {
     out[field] = messages.join(" ");
   }

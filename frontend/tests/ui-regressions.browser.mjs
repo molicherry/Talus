@@ -1163,6 +1163,83 @@ try {
     assert.equal(state.services[0].description, "updated description");
   });
 
+  await test("service editor shows every message for a field with several errors", async ({
+    page, state, goto,
+  }) => {
+    state.custom = async ({ method, path, reply }) => {
+      if (method === "PUT" && path === "/api/v1/services/1") {
+        await reply({
+          error: {
+            code: 422,
+            reason: "validation_failed",
+            message: "validation failed",
+            details: [
+              {
+                field: "credentials",
+                reason: "credential_value_required",
+                message: 'credential "token" requires a value',
+                params: { key: "token" },
+              },
+              {
+                field: "credentials",
+                reason: "credential_value_required",
+                message: 'credential "token2" requires a value',
+                params: { key: "token2" },
+              },
+            ],
+          },
+        }, 422);
+        return true;
+      }
+    };
+
+    await goto("/services/1/edit");
+    await page.getByRole("button", { name: "Update Service", exact: true }).click();
+    const alert = page.getByRole("alert").filter({ hasText: "token2" });
+    await alert.waitFor();
+    // The UI renders the localized reason, not the server's English message.
+    const text = (await alert.textContent()) ?? "";
+    assert.ok(text.includes("\u201Ctoken\u201D"), `alert is missing the first field error: ${text}`);
+    assert.ok(text.includes("\u201Ctoken2\u201D"), `alert is missing the second field error: ${text}`);
+  });
+
+  await test("service editor keeps the server reason when the URL changes during the request", async ({
+    page, state, goto,
+  }) => {
+    const pending = gate();
+    state.custom = async ({ method, path, reply }) => {
+      if (method === "PUT" && path === "/api/v1/services/1") {
+        await pending.promise;
+        await reply({
+          error: {
+            code: 422,
+            reason: "validation_failed",
+            message: "validation failed",
+            details: [{
+              field: "base_url",
+              reason: "invalid_base_url",
+              message: "base URL must be an absolute HTTP or HTTPS URL with a host",
+            }],
+          },
+        }, 422);
+        return true;
+      }
+    };
+
+    await goto("/services/1/edit");
+    const url = page.getByLabel("Base URL", { exact: true });
+    await valueIs(url, "https://example.test");
+    await page.getByRole("button", { name: "Update Service", exact: true }).click();
+    await url.fill("https://edited-during-request.test");
+    pending.release();
+
+    const alert = page.getByRole("alert").filter({ hasText: "absolute HTTP or HTTPS" });
+    await alert.waitFor();
+    // The edited input is not the value the server rejected, so it must stay valid.
+    assert.equal(await url.getAttribute("aria-invalid"), "false");
+    await valueIs(url, "https://edited-during-request.test");
+  });
+
   await test("new credential rows remain independent and visibility follows row identity", async ({
     page,
     goto,

@@ -474,6 +474,28 @@
           "verification": "Edit a description on a service with an invalid stored base URL, check the localized error at its input, correct the URL and save both edits."
         },
         {
+          "implementation_id": "impl-01-02-service-editor-field-error-list",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "service editor shows every message for a field with several errors"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "Return two field errors for the same credential field and check the alert banner carries both localized messages."
+        },
+        {
+          "implementation_id": "impl-01-02-service-editor-url-changed-in-flight",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "service editor keeps the server reason when the URL changes during the request"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "Edit the base URL while a save is in flight and check the alert banner keeps the server reason without marking the edited input invalid."
+        },
+        {
           "implementation_id": "impl-01-02-TestRelayCredentialInUpstreamRequestURI",
           "run_id": "go-unit",
           "implementation": {
