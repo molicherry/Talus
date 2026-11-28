@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -203,13 +205,19 @@ var reasonMessages = map[string]string{
 
 // interpolate expands placeholders in the message template once so parameter
 // values such as a credential key named "{{field}}" remain literal.
+//
+// Names are registered longest-first. strings.Replacer resolves a position by
+// registration order, so when one placeholder's pattern is a prefix of another's
+// (a parameter named "key" next to one named "key}}suffix") the shorter match
+// would otherwise win and map iteration order would decide the message.
 func interpolate(tpl string, params map[string]any) string {
 	if len(params) == 0 || !strings.Contains(tpl, "{{") {
 		return tpl
 	}
-	pairs := make([]string, 0, 2*len(params))
-	for name, value := range params {
-		pairs = append(pairs, "{{"+name+"}}", fmt.Sprint(value))
+	names := slices.Sorted(maps.Keys(params))
+	pairs := make([]string, 0, 2*len(names))
+	for _, name := range slices.Backward(names) {
+		pairs = append(pairs, "{{"+name+"}}", fmt.Sprint(params[name]))
 	}
 	return strings.NewReplacer(pairs...).Replace(tpl)
 }

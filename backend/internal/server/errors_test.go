@@ -113,3 +113,28 @@ func TestNoHandBuiltErrorDetails(t *testing.T) {
 		t.Fatalf("walk: %v", err)
 	}
 }
+
+// Both placeholder patterns match at the same offset here — "{{key}}" is a
+// prefix of "{{key}}tail}}" — and strings.Replacer resolves that by registration
+// order. A map-order loop would render this at random; the longer name's value
+// must win every time.
+func TestInterpolatePrefersLongerParameterNames(t *testing.T) {
+	const tpl = "{{key}}tail}}"
+	const want = "long"
+	for i := 0; i < 100; i++ {
+		if got := interpolate(tpl, map[string]any{"key": "short", "key}}tail": "long"}); got != want {
+			t.Fatalf("run %d: interpolate = %q, want %q", i, got, want)
+		}
+	}
+}
+
+// A parameter value that looks like a placeholder stays literal: expansion is
+// single-pass, so a credential key named "{{field}}" cannot borrow the label.
+func TestInterpolateDoesNotExpandValues(t *testing.T) {
+	const tpl = `credential "{{key}}" requires a value`
+	const want = `credential "{{field}}" requires a value`
+	got := interpolate(tpl, map[string]any{"key": "{{field}}", "field": "base_url"})
+	if got != want {
+		t.Fatalf("interpolate = %q, want %q", got, want)
+	}
+}

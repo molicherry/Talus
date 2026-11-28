@@ -35,18 +35,35 @@ export function translateApiError(
 }
 
 /**
- * Field-level messages from a validation error (422), keyed by field name so a
- * form can drop them straight into its per-field error state. The field name is
- * translated through `fields.<name>` when a label exists.
+ * Field-level messages from a validation error (422), grouped by field name.
+ *
+ * A field can carry several details at once: `credentials` reports one entry per
+ * empty value, so callers that render a single string must decide how to join
+ * them instead of silently keeping the last one.
  */
-export function apiFieldErrors(err: unknown, t: TranslateFn): Record<string, string> {
+export function apiFieldErrorList(err: unknown, t: TranslateFn): Record<string, string[]> {
   if (!(err instanceof ApiClientError)) return {};
-  const out: Record<string, string> = {};
+  const out: Record<string, string[]> = {};
   for (const detail of err.details ?? []) {
     const label = i18n.has(`fields.${detail.field}`) ? t(`fields.${detail.field}`) : detail.field;
     const key = reasonKey(detail.reason);
-    out[detail.field] =
+    const message =
       key && i18n.has(key) ? t(key, { ...detail.params, field: label }) : t("errors.validation_failed");
+    (out[detail.field] ??= []).push(message);
+  }
+  return out;
+}
+
+/**
+ * Field-level messages from a validation error (422), keyed by field name so a
+ * form can drop them straight into its per-field error state. The field name is
+ * translated through `fields.<name>` when a label exists. Fields with several
+ * details are joined into one string.
+ */
+export function apiFieldErrors(err: unknown, t: TranslateFn): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [field, messages] of Object.entries(apiFieldErrorList(err, t))) {
+    out[field] = messages.join(" ");
   }
   return out;
 }

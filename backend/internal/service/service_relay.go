@@ -239,6 +239,9 @@ func (s *ServiceRelayService) GetCredentials(ctx context.Context, id uint) (map[
 
 // Update fully replaces an existing service's fields and credentials with a new salt.
 func (s *ServiceRelayService) Update(ctx context.Context, id uint, input CreateServiceInput) (*model.Service, error) {
+	// Validate before reading the row: a malformed payload fails the same way
+	// for any id, so the answer does not depend on the service existing and the
+	// check stays reachable without a repository.
 	if err := input.validate(); err != nil {
 		return nil, err
 	}

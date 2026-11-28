@@ -109,12 +109,27 @@ export function ServiceForm({ service }: ServiceFormProps) {
     };
     const onError = (error: unknown) => {
       const fields = apiFieldErrors(error, t);
-      if (fields.base_url && getValues("base_url") === metadata.base_url) {
-        setError("base_url", { type: "server", message: fields.base_url }, { shouldFocus: true });
-        return;
+      // A stored base URL the user did not touch gets an inline error on its own
+      // input. Everything else goes to the banner, including a base URL the user
+      // has already edited (an inline error there would point at text they just
+      // changed), so the server's specific reason is never replaced by a generic
+      // "validation failed".
+      const inlineBaseURL =
+        fields.base_url && getValues("base_url") === metadata.base_url ? fields.base_url : null;
+      if (inlineBaseURL) {
+        setError("base_url", { type: "server", message: inlineBaseURL }, { shouldFocus: true });
       }
-      setError("root.server", { type: "server", message: translateApiError(error, t) });
-      toast.error(t(isEdit ? "service.toast.updateFailed" : "service.toast.createFailed"));
+      const banner = Object.entries(fields)
+        .filter(([field]) => !(inlineBaseURL && field === "base_url"))
+        .map(([, message]) => message);
+      if (banner.length > 0) {
+        setError("root.server", { type: "server", message: banner.join(" ") });
+      } else if (!inlineBaseURL) {
+        setError("root.server", { type: "server", message: translateApiError(error, t) });
+      }
+      if (!inlineBaseURL) {
+        toast.error(t(isEdit ? "service.toast.updateFailed" : "service.toast.createFailed"));
+      }
     };
     if (isEdit && service) {
       updateMutation.mutate(
