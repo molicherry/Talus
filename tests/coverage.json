@@ -449,7 +449,29 @@
           },
           "automation_status": "implemented",
           "required": true,
-          "verification": "Run an isolated Hub against an owned temporary database and local upstream. Verify that create and update reject malformed base URLs. Check scoped service discovery, usage guides, credential injection and Relay modes."
+          "verification": "Run an isolated Hub against an owned database and local upstream. Check field-specific 422 responses on create and update for malformed base URLs, empty credential values and unknown hint keys. Verify scoped service discovery, usage guides, credential injection and Relay modes."
+        },
+        {
+          "implementation_id": "impl-01-02-TestServiceWriteValidation",
+          "run_id": "go-unit",
+          "implementation": {
+            "path": "backend/internal/service/service_relay_test.go",
+            "symbol": "TestServiceWriteValidation"
+          },
+          "automation_status": "implemented",
+          "required": true,
+          "verification": "Verify that direct Create and Update calls report all invalid fields and credential keys together and enforce the 20,000-character usage guide limit."
+        },
+        {
+          "implementation_id": "impl-01-02-service-editor-base-url",
+          "run_id": "ui-charts",
+          "implementation": {
+            "path": "frontend/tests/ui-regressions.browser.mjs",
+            "symbol": "service editor shows the invalid base URL and saves the corrected draft"
+          },
+          "automation_status": "implemented",
+          "required": false,
+          "verification": "Edit a description on a service with an invalid stored base URL, check the localized error at its input, correct the URL and save both edits."
         },
         {
           "implementation_id": "impl-01-02-TestRelayCredentialInUpstreamRequestURI",

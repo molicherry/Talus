@@ -292,7 +292,10 @@ does not create an SSH tunnel. Stored credentials replace `{{key}}` placeholders
 in the target URL, header names/values, and body. Set authentication headers as
 the guide specifies; Talus does not infer the target's authentication scheme.
 Creating or updating a service requires an absolute HTTP or HTTPS `base_url`
-with a host.
+with a host and at least one credential. Each credential needs a non-empty
+value. Each `credential_hints` key must match a key in `credentials`. A 422
+`validation_failed` response lists the fields to correct in `error.details`.
+For an empty value or an unknown hint key, `detail.params.key` identifies the entry.
 
 - Relay joins the service base path and request path, expands their `{{key}}`
   placeholders, then normalizes dot segments and collapses consecutive slashes

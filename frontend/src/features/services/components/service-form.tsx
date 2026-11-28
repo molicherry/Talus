@@ -7,7 +7,7 @@ import { z } from "zod";
 
 import { useSecret } from "../../../lib/use-secret";
 import { SecretLoadState } from "../../../components/ui/secret-load-state";
-import { translateApiError } from "../../../lib/api-error";
+import { apiFieldErrors, translateApiError } from "../../../lib/api-error";
 import { Button } from "../../../components/ui/button";
 import { Field, Input, Label, Select, Textarea } from "../../../components/ui/field";
 import { useTranslation } from "../../../i18n";
@@ -64,6 +64,8 @@ export function ServiceForm({ service }: ServiceFormProps) {
   const {
     register,
     handleSubmit,
+    getValues,
+    setError,
     control,
     formState: { errors },
   } = useForm<MetadataValues>({
@@ -105,6 +107,15 @@ export function ServiceForm({ service }: ServiceFormProps) {
       credentials: result.credentials,
       credential_hints: result.credential_hints,
     };
+    const onError = (error: unknown) => {
+      const fields = apiFieldErrors(error, t);
+      if (fields.base_url && getValues("base_url") === metadata.base_url) {
+        setError("base_url", { type: "server", message: fields.base_url }, { shouldFocus: true });
+        return;
+      }
+      setError("root.server", { type: "server", message: translateApiError(error, t) });
+      toast.error(t(isEdit ? "service.toast.updateFailed" : "service.toast.createFailed"));
+    };
     if (isEdit && service) {
       updateMutation.mutate(
         { id: service.id, data },
@@ -113,9 +124,7 @@ export function ServiceForm({ service }: ServiceFormProps) {
             toast.success(t("service.toast.updated"));
             navigate("/services");
           },
-          onError: () => {
-            toast.error(t("service.toast.updateFailed"));
-          },
+          onError,
         },
       );
     } else {
@@ -124,22 +133,18 @@ export function ServiceForm({ service }: ServiceFormProps) {
           toast.success(t("service.toast.created"));
           navigate("/services");
         },
-        onError: () => {
-          toast.error(t("service.toast.createFailed"));
-        },
+        onError,
       });
     }
   };
-
-  const errorMessage = activeMutation.error ? translateApiError(activeMutation.error, t) : null;
 
   const isPending = activeMutation.isPending;
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="max-w-lg space-y-6">
-      {errorMessage && (
+      {errors.root?.server?.message && (
         <div className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger">
-          {errorMessage}
+          {errors.root.server.message}
         </div>
       )}
 
@@ -163,11 +168,19 @@ export function ServiceForm({ service }: ServiceFormProps) {
           />
         </Field>
 
-        <Field label={t("service.baseUrl")} htmlFor="base_url" error={errors.base_url?.message}>
+        <Field
+          label={t("service.baseUrl")}
+          htmlFor="base_url"
+          error={
+            errors.base_url && <span id="service-base-url-error">{errors.base_url.message}</span>
+          }
+        >
           <Input
             id="base_url"
             type="text"
             {...register("base_url")}
+            aria-invalid={!!errors.base_url}
+            aria-describedby={errors.base_url ? "service-base-url-error" : undefined}
             placeholder="e.g. http://localhost:3000"
           />
         </Field>

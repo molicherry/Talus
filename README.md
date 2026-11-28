@@ -119,7 +119,7 @@ proxy routes: older binaries do not understand them and would connect directly.
 ### 5. Proxy a Service
 
 1. Go to **Services** → **Add Service**
-2. Fill in the name, display name, and credential key-value pairs. Set the base URL to an absolute HTTP or HTTPS URL with a host, such as `http://localhost:3000`.
+2. Fill in the name, display name, and credential key-value pairs. Each credential needs a value. Set the base URL to an absolute HTTP or HTTPS URL with a host, such as `http://localhost:3000`. If the editor flags an older service's base URL when you save, correct it and save your edits again.
 3. Optionally assign the service to a server for management and authorization scope — the relay calls the service base URL directly from the Hub; there is **no** SSH tunnel
 4. Use the relay API to proxy requests through Talus — credentials are injected automatically, `{{key}}` placeholders are substituted. An omitted `mode` is a normal 30s request; pass `"mode": "bounded_stream"` for an explicit up-to-300s stream (30s header wait, 30s no-progress idle limit; the mode is not forwarded upstream)
 

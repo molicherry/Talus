@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vpsmanager/backend/internal/model"
 	"github.com/vpsmanager/backend/internal/pkg/crypto"
@@ -83,16 +84,16 @@ func NewServiceRelayService(repo *repository.ServiceRepo, masterKey *crypto.Mast
 	}
 }
 
-// CreateServiceInput is the validated input for creating a service.
+// CreateServiceInput holds the fields accepted when creating or updating a service.
 type CreateServiceInput struct {
-	Name            string
-	DisplayName     string
-	BaseURL         string
-	Credentials     map[string]string
-	CredentialHints map[string]string
-	Description     *string
-	UsageGuide      *string
-	ServerID        *uint
+	Name            string            `json:"name"`
+	DisplayName     string            `json:"display_name"`
+	BaseURL         string            `json:"base_url"`
+	Credentials     map[string]string `json:"credentials"`
+	CredentialHints map[string]string `json:"credential_hints"`
+	Description     *string           `json:"description,omitempty"`
+	UsageGuide      *string           `json:"usage_guide,omitempty"`
+	ServerID        *uint             `json:"server_id,omitempty"`
 }
 
 // RelayInput is the validated relay request body.
@@ -107,35 +108,45 @@ type RelayInput struct {
 // RelayModes are the accepted relay modes; the empty value means standard.
 var RelayModes = map[string]bool{"": true, "standard": true, "bounded_stream": true}
 
-// validateAndEncryptCredentials validates the input fields and encrypts the credential map
-// with a freshly generated salt. Create and Update share this helper to prevent rule drift.
-func (s *ServiceRelayService) validateAndEncryptCredentials(input CreateServiceInput) (encryptedCreds map[string]string, hints map[string]string, salt []byte, err error) {
+const maxUsageGuideRunes = 20000
+
+func (input CreateServiceInput) validate() error {
+	var details []server.ErrorDetail
 	if input.Name == "" {
-		return nil, nil, nil, fmt.Errorf("name is required")
+		details = append(details, server.NewErrorDetail("name", server.ReasonRequired, nil))
 	}
 	if input.BaseURL == "" {
-		return nil, nil, nil, fmt.Errorf("base_url is required")
-	}
-	baseURL, err := url.Parse(input.BaseURL)
-	if err != nil || (baseURL.Scheme != "http" && baseURL.Scheme != "https") || baseURL.Hostname() == "" {
-		return nil, nil, nil, server.NewValidationError([]server.ErrorDetail{
-			server.NewErrorDetail("base_url", server.ReasonInvalidBaseURL, nil),
-		})
+		details = append(details, server.NewErrorDetail("base_url", server.ReasonRequired, nil))
+	} else if u, err := url.Parse(input.BaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		details = append(details, server.NewErrorDetail("base_url", server.ReasonInvalidBaseURL, nil))
 	}
 	if len(input.Credentials) == 0 {
-		return nil, nil, nil, fmt.Errorf("at least one credential is required")
+		details = append(details, server.NewErrorDetail("credentials", server.ReasonAtLeastOne, nil))
 	}
+	for _, key := range slices.Sorted(maps.Keys(input.Credentials)) {
+		if input.Credentials[key] == "" {
+			details = append(details, server.NewErrorDetail("credentials", server.ReasonCredentialValueRequired, map[string]any{"key": key}))
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(input.CredentialHints)) {
+		if _, ok := input.Credentials[key]; !ok {
+			details = append(details, server.NewErrorDetail("credential_hints", server.ReasonCredentialHintUnknownKey, map[string]any{"key": key}))
+		}
+	}
+	if input.UsageGuide != nil && utf8.RuneCountInString(*input.UsageGuide) > maxUsageGuideRunes {
+		details = append(details, server.NewErrorDetail("usage_guide", server.ReasonMaxLength, map[string]any{"max": maxUsageGuideRunes}))
+	}
+	if len(details) > 0 {
+		return server.NewValidationError(details)
+	}
+	return nil
+}
 
+func (s *ServiceRelayService) encryptCredentials(input CreateServiceInput) (encryptedCreds map[string]string, hints map[string]string, salt []byte, err error) {
 	hints = input.CredentialHints
 	if hints == nil {
 		hints = map[string]string{}
 	}
-	for k := range hints {
-		if _, ok := input.Credentials[k]; !ok {
-			return nil, nil, nil, fmt.Errorf("credential_hints key '%s' does not match any credential", k)
-		}
-	}
-
 	salt, err = crypto.GenerateSalt()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("generate salt: %w", err)
@@ -147,9 +158,6 @@ func (s *ServiceRelayService) validateAndEncryptCredentials(input CreateServiceI
 	}
 	encryptedCreds = make(map[string]string, len(input.Credentials))
 	for k, v := range input.Credentials {
-		if v == "" {
-			return nil, nil, nil, fmt.Errorf("credential '%s' value is required", k)
-		}
 		encrypted, encErr := cipher.Encrypt(k, []byte(v))
 		if encErr != nil {
 			return nil, nil, nil, fmt.Errorf("encrypt '%s': %w", k, encErr)
@@ -162,7 +170,10 @@ func (s *ServiceRelayService) validateAndEncryptCredentials(input CreateServiceI
 
 // Create validates, encrypts, and stores a new service.
 func (s *ServiceRelayService) Create(ctx context.Context, input CreateServiceInput) (*model.Service, error) {
-	encryptedCreds, hints, salt, err := s.validateAndEncryptCredentials(input)
+	if err := input.validate(); err != nil {
+		return nil, err
+	}
+	encryptedCreds, hints, salt, err := s.encryptCredentials(input)
 	if err != nil {
 		return nil, fmt.Errorf("create service: %w", err)
 	}
@@ -228,6 +239,9 @@ func (s *ServiceRelayService) GetCredentials(ctx context.Context, id uint) (map[
 
 // Update fully replaces an existing service's fields and credentials with a new salt.
 func (s *ServiceRelayService) Update(ctx context.Context, id uint, input CreateServiceInput) (*model.Service, error) {
+	if err := input.validate(); err != nil {
+		return nil, err
+	}
 	existing, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -236,7 +250,7 @@ func (s *ServiceRelayService) Update(ctx context.Context, id uint, input CreateS
 		return nil, fmt.Errorf("update service %d: %w", id, err)
 	}
 
-	encryptedCreds, hints, salt, err := s.validateAndEncryptCredentials(input)
+	encryptedCreds, hints, salt, err := s.encryptCredentials(input)
 	if err != nil {
 		return nil, fmt.Errorf("update service %d: %w", id, err)
 	}

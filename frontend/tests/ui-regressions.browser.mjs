@@ -1114,6 +1114,55 @@ try {
     assert.equal(state.writes[0].body.description, "typed while loading");
   });
 
+  await test("service editor shows the invalid base URL and saves the corrected draft", async ({
+    page, state, goto,
+  }) => {
+    const oldURL = "https://exa mple.test";
+    state.services[0].base_url = oldURL;
+    state.custom = async ({ method, path, body, reply }) => {
+      if (method === "PUT" && path === "/api/v1/services/1" && body.base_url === oldURL) {
+        await reply({
+          error: {
+            code: 422,
+            reason: "validation_failed",
+            message: "validation failed",
+            details: [{
+              field: "base_url",
+              reason: "invalid_base_url",
+              message: "base URL must be an absolute HTTP or HTTPS URL with a host",
+            }],
+          },
+        }, 422);
+        return true;
+      }
+    };
+
+    await goto("/services/1/edit");
+    const url = page.getByLabel("Base URL", { exact: true });
+    const description = page.getByLabel("Description", { exact: true });
+    const save = page.getByRole("button", { name: "Update Service", exact: true });
+    await valueIs(url, oldURL);
+    await description.fill("updated description");
+    await save.click();
+    const invalidURL = page.getByRole("textbox", {
+      name: "Base URL",
+      description: "Enter an absolute HTTP or HTTPS URL with a host",
+      exact: true,
+    });
+    await invalidURL.waitFor();
+    assert.equal(await invalidURL.getAttribute("aria-invalid"), "true");
+    assert.equal(await invalidURL.evaluate((input) => input === document.activeElement), true);
+    await valueIs(description, "updated description");
+
+    const correctedURL = "https://fixed.example.test";
+    await url.fill(correctedURL);
+    await invalidURL.waitFor({ state: "hidden" });
+    await save.click();
+    await page.waitForURL("**/services");
+    assert.deepEqual(state.writes.map(({ body }) => body.base_url), [oldURL, correctedURL]);
+    assert.equal(state.services[0].description, "updated description");
+  });
+
   await test("new credential rows remain independent and visibility follows row identity", async ({
     page,
     goto,

@@ -92,12 +92,9 @@ func TestServerIsolatedServiceCatalogAndRelay(t *testing.T) {
 	keyHeaders := map[string]string{"X-API-Key": apiKey.Key}
 	servicePath := fmt.Sprintf("/api/v1/services/%d", service.ID)
 
-	t.Run("create and update reject malformed base URLs", func(t *testing.T) {
-		for _, baseURL := range []string{"https://exa mple.com", "https://[::1", "http://", "http://:80", "ftp://svc.example.com"} {
-			body := map[string]any{
-				"name": "invalid-base-url", "base_url": baseURL,
-				"credentials": map[string]string{"token": credential},
-			}
+	t.Run("create and update reject invalid service fields", func(t *testing.T) {
+		check := func(body map[string]any, field, reason, key string) {
+			t.Helper()
 			for _, request := range []struct{ method, path string }{
 				{http.MethodPost, "/api/v1/services"},
 				{http.MethodPut, servicePath},
@@ -111,11 +108,32 @@ func TestServerIsolatedServiceCatalogAndRelay(t *testing.T) {
 				}
 				details := response.Error.Details
 				if response.Error.Reason != server.ReasonValidationFailed || len(details) != 1 ||
-					details[0].Field != "base_url" || details[0].Reason != server.ReasonInvalidBaseURL {
-					t.Fatalf("%s with base_url %q returned unexpected validation error: %s", request.method, baseURL, result)
+					details[0].Field != field || details[0].Reason != reason {
+					t.Fatalf("%s: want %s/%s for key %q, got %s", request.method, field, reason, key, result)
+				}
+				if key != "" && (details[0].Params["key"] != key || !strings.Contains(details[0].Message, key)) {
+					t.Fatalf("%s: validation detail must identify the literal key %q: %+v", request.method, key, details[0])
+				}
+				if bytes.Contains(result, []byte(credential)) {
+					t.Fatalf("%s validation response exposed a submitted value", request.method)
 				}
 			}
 		}
+		for _, baseURL := range []string{"https://exa mple.com", "https://[::1", "http://", "http://:80", "ftp://svc.example.com"} {
+			check(map[string]any{
+				"name": "invalid-base-url", "base_url": baseURL,
+				"credentials": map[string]string{"token": credential},
+			}, "base_url", server.ReasonInvalidBaseURL, "")
+		}
+		check(map[string]any{
+			"name": "empty-value", "base_url": upstream.URL,
+			"credentials": map[string]string{"token": "", "other": credential},
+		}, "credentials", server.ReasonCredentialValueRequired, "token")
+		check(map[string]any{
+			"name": "unknown-hint", "base_url": upstream.URL,
+			"credentials":      map[string]string{"token": credential},
+			"credential_hints": map[string]string{"{{field}}": credential},
+		}, "credential_hints", server.ReasonCredentialHintUnknownKey, "{{field}}")
 	})
 
 	t.Run("scoped key discovers safe catalog and full guide", func(t *testing.T) {

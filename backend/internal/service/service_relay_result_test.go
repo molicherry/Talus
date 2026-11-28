@@ -26,7 +26,7 @@ func TestRelayCredentialInUpstreamRequestURI(t *testing.T) {
 		BaseURL:     upstream.URL + "/api",
 		Credentials: map[string]string{"BACKEND_PATH": "v1/private jobs", "TOKEN": "abc"},
 	}
-	encrypted, _, salt, err := svc.validateAndEncryptCredentials(config)
+	encrypted, _, salt, err := svc.encryptCredentials(config)
 	if err != nil {
 		t.Fatal(err)
 	}

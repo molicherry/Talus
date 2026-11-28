@@ -1,9 +1,74 @@
 package service
 
 import (
+	"errors"
+	"net/http"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/vpsmanager/backend/internal/server"
 )
+
+func TestServiceWriteValidation(t *testing.T) {
+	svc := NewServiceRelayService(nil, nil)
+	for _, tc := range []struct {
+		name  string
+		input CreateServiceInput
+		want  []server.ErrorDetail
+	}{
+		{
+			name: "missing fields",
+			want: []server.ErrorDetail{
+				server.NewErrorDetail("name", server.ReasonRequired, nil),
+				server.NewErrorDetail("base_url", server.ReasonRequired, nil),
+				server.NewErrorDetail("credentials", server.ReasonAtLeastOne, nil),
+			},
+		},
+		{
+			name: "invalid fields",
+			input: CreateServiceInput{
+				Name:            "test",
+				BaseURL:         "http://:80",
+				UsageGuide:      strPtr(strings.Repeat("界", 20001)),
+				Credentials:     map[string]string{"b": "", "a": "", "valid": "example"},
+				CredentialHints: map[string]string{"valid": "", "unknown.key": "example hint"},
+			},
+			want: []server.ErrorDetail{
+				server.NewErrorDetail("base_url", server.ReasonInvalidBaseURL, nil),
+				server.NewErrorDetail("credentials", server.ReasonCredentialValueRequired, map[string]any{"key": "a"}),
+				server.NewErrorDetail("credentials", server.ReasonCredentialValueRequired, map[string]any{"key": "b"}),
+				server.NewErrorDetail("credential_hints", server.ReasonCredentialHintUnknownKey, map[string]any{"key": "unknown.key"}),
+				server.NewErrorDetail("usage_guide", server.ReasonMaxLength, map[string]any{"max": 20000}),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, createErr := svc.Create(t.Context(), tc.input)
+			_, updateErr := svc.Update(t.Context(), 1, tc.input)
+			for method, err := range map[string]error{"Create": createErr, "Update": updateErr} {
+				var validation *server.ValidationError
+				if server.StatusCode(err) != http.StatusUnprocessableEntity || !errors.As(err, &validation) {
+					t.Fatalf("%s returned %v, want a 422 validation error", method, err)
+				}
+				if !reflect.DeepEqual(validation.Details, tc.want) {
+					t.Errorf("%s details = %+v, want %+v", method, validation.Details, tc.want)
+				}
+			}
+		})
+	}
+	t.Run("guide at the Unicode character limit", func(t *testing.T) {
+		input := CreateServiceInput{
+			Name:        "test",
+			BaseURL:     "HTTPS://X.EXAMPLE.COM",
+			Credentials: map[string]string{"token": "example"},
+			UsageGuide:  strPtr(strings.Repeat("界", 20000)),
+		}
+		if err := input.validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
 
 func TestExcerpt(t *testing.T) {
 	cases := []struct {

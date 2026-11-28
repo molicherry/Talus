@@ -16,39 +16,6 @@ import (
 	"github.com/vpsmanager/backend/internal/usage"
 )
 
-// maxUsageGuideRunes caps the length of a service usage guide (rune count).
-const maxUsageGuideRunes = 20000
-
-// validateServiceRequest checks create/update input and returns any error details.
-// Create and Update share this helper so the rules cannot drift.
-func validateServiceRequest(req createServiceRequest) []server.ErrorDetail {
-	var details []server.ErrorDetail
-	if req.Name == "" {
-		details = append(details, server.NewErrorDetail("name", server.ReasonRequired, nil))
-	}
-	if req.BaseURL == "" {
-		details = append(details, server.NewErrorDetail("base_url", server.ReasonRequired, nil))
-	}
-	if len(req.Credentials) == 0 {
-		details = append(details, server.NewErrorDetail("credentials", server.ReasonAtLeastOne, nil))
-	}
-	if req.UsageGuide != nil && len([]rune(*req.UsageGuide)) > maxUsageGuideRunes {
-		details = append(details, server.NewErrorDetail("usage_guide", server.ReasonMaxLength, map[string]any{"max": 20000}))
-	}
-	return details
-}
-
-type createServiceRequest struct {
-	Name            string            `json:"name"`
-	DisplayName     string            `json:"display_name"`
-	BaseURL         string            `json:"base_url"`
-	Credentials     map[string]string `json:"credentials"`
-	CredentialHints map[string]string `json:"credential_hints"`
-	Description     *string           `json:"description,omitempty"`
-	UsageGuide      *string           `json:"usage_guide,omitempty"`
-	ServerID        *uint             `json:"server_id,omitempty"`
-}
-
 type relayRequest struct {
 	Method  string            `json:"method"`
 	Path    string            `json:"path"`
@@ -70,26 +37,10 @@ func NewServiceHandler(svc *service.ServiceRelayService, auditRepo *repository.A
 
 // Create handles POST /api/v1/services.
 func (h *ServiceHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req createServiceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var input service.CreateServiceInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
-	}
-
-	if details := validateServiceRequest(req); len(details) > 0 {
-		server.WriteError(w, r, server.NewValidationError(details))
-		return
-	}
-
-	input := service.CreateServiceInput{
-		Name:            req.Name,
-		DisplayName:     req.DisplayName,
-		BaseURL:         req.BaseURL,
-		Credentials:     req.Credentials,
-		CredentialHints: req.CredentialHints,
-		Description:     req.Description,
-		UsageGuide:      req.UsageGuide,
-		ServerID:        req.ServerID,
 	}
 
 	svc, err := h.svc.Create(r.Context(), input)
@@ -269,26 +220,10 @@ func (h *ServiceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req createServiceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var input service.CreateServiceInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		server.WriteError(w, r, server.NewAppError(http.StatusBadRequest, server.ReasonInvalidRequest))
 		return
-	}
-
-	if details := validateServiceRequest(req); len(details) > 0 {
-		server.WriteError(w, r, server.NewValidationError(details))
-		return
-	}
-
-	input := service.CreateServiceInput{
-		Name:            req.Name,
-		DisplayName:     req.DisplayName,
-		BaseURL:         req.BaseURL,
-		Credentials:     req.Credentials,
-		CredentialHints: req.CredentialHints,
-		Description:     req.Description,
-		UsageGuide:      req.UsageGuide,
-		ServerID:        req.ServerID,
 	}
 
 	updated, err := h.svc.Update(r.Context(), id, input)

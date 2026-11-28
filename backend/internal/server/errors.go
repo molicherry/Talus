@@ -96,13 +96,15 @@ const (
 
 	// Field-level validation reasons. These render through {{params}} on both
 	// sides so the numbers live in one place.
-	ReasonRequired       = "required"
-	ReasonLength         = "length"
-	ReasonMaxLength      = "max_length"
-	ReasonAtLeastOne     = "at_least_one_required"
-	ReasonInvalidBaseURL = "invalid_base_url"
-	ReasonPasswordAuth   = "password_required_for_auth_type"
-	ReasonPrivateKeyAuth = "private_key_required_for_auth_type"
+	ReasonRequired                 = "required"
+	ReasonLength                   = "length"
+	ReasonMaxLength                = "max_length"
+	ReasonAtLeastOne               = "at_least_one_required"
+	ReasonInvalidBaseURL           = "invalid_base_url"
+	ReasonCredentialValueRequired  = "credential_value_required"
+	ReasonCredentialHintUnknownKey = "credential_hint_unknown_key"
+	ReasonPasswordAuth             = "password_required_for_auth_type"
+	ReasonPrivateKeyAuth           = "private_key_required_for_auth_type"
 )
 
 // reasonMessages holds the English text for every reason — the single place the
@@ -188,24 +190,28 @@ var reasonMessages = map[string]string{
 	ReasonProxyConnectRejected:    "proxy refused the target connection",
 	ReasonJumpForwardFailed:       "SSH jump host could not forward to the target",
 
-	ReasonRequired:       "{{field}} is required",
-	ReasonLength:         "must be between {{min}} and {{max}} characters",
-	ReasonMaxLength:      "must be at most {{max}} characters",
-	ReasonAtLeastOne:     "at least one {{field}} is required",
-	ReasonInvalidBaseURL: "base URL must be an absolute HTTP or HTTPS URL with a host",
-	ReasonPasswordAuth:   "password is required for auth_type 'password'",
-	ReasonPrivateKeyAuth: "private_key is required for auth_type 'private_key'",
+	ReasonRequired:                 "{{field}} is required",
+	ReasonLength:                   "must be between {{min}} and {{max}} characters",
+	ReasonMaxLength:                "must be at most {{max}} characters",
+	ReasonAtLeastOne:               "at least one {{field}} is required",
+	ReasonInvalidBaseURL:           "base URL must be an absolute HTTP or HTTPS URL with a host",
+	ReasonCredentialValueRequired:  "credential \"{{key}}\" requires a value",
+	ReasonCredentialHintUnknownKey: "credential hint \"{{key}}\" must match an existing credential key",
+	ReasonPasswordAuth:             "password is required for auth_type 'password'",
+	ReasonPrivateKeyAuth:           "private_key is required for auth_type 'private_key'",
 }
 
-// interpolate fills {{name}} placeholders; unknown names are left untouched.
+// interpolate expands placeholders in the message template once so parameter
+// values such as a credential key named "{{field}}" remain literal.
 func interpolate(tpl string, params map[string]any) string {
 	if len(params) == 0 || !strings.Contains(tpl, "{{") {
 		return tpl
 	}
+	pairs := make([]string, 0, 2*len(params))
 	for name, value := range params {
-		tpl = strings.ReplaceAll(tpl, "{{"+name+"}}", fmt.Sprint(value))
+		pairs = append(pairs, "{{"+name+"}}", fmt.Sprint(value))
 	}
-	return tpl
+	return strings.NewReplacer(pairs...).Replace(tpl)
 }
 
 // textFor renders the English message for a reason, falling back to the reason

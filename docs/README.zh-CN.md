@@ -108,7 +108,7 @@ docker compose up -d --build
 ### 5. 代理外部服务
 
 1. 进入 **Services**（服务）→ **Add Service**（添加服务）
-2. 填写名称、显示名称和凭据键值对。基础 URL 须为带主机的绝对 HTTP 或 HTTPS URL，例如 `http://localhost:3000`。
+2. 填写名称、显示名称和凭据键值对。每条凭据都需要填写值。基础 URL 须为带主机的绝对 HTTP 或 HTTPS URL，例如 `http://localhost:3000`。编辑旧服务时，如果保存后基础 URL 旁出现错误提示，请修正地址并重新保存。
 3. 可选：将服务关联到某台服务器，用于管理和授权范围；Hub 直接请求服务的基础 URL，不使用 SSH 隧道
 4. 使用 relay API 通过 Talus 代理请求——凭据自动注入，`{{key}}` 占位符自动替换。不传 `mode` 时总预算为 30 秒；显式传入 `"mode": "bounded_stream"` 可启用最长 300 秒的流式请求，响应头等待和无进展空闲上限均为 30 秒，`mode` 不转发给上游
 
